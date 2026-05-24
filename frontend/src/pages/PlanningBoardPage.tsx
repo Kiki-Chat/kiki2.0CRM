@@ -187,11 +187,23 @@ export function PlanningBoardPage() {
   const assignAsset = useMutation({
     mutationFn: ({ kind, id, employeeId }: { kind: 'vehicles' | 'tools'; id: string; employeeId: string | null }) =>
       apiFetch(`/api/${kind}/${id}`, { method: 'PATCH', body: JSON.stringify({ assigned_employee_id: employeeId }) }),
-    onSuccess: (_d, v) => {
-      qc.invalidateQueries({ queryKey: [v.kind] })
-      flash('Mitarbeiter zugewiesen.')
+    onMutate: async ({ kind, id, employeeId }) => {
+      await qc.cancelQueries({ queryKey: [kind] })
+      const prev = qc.getQueryData<(Vehicle | Tool)[]>([kind])
+      if (prev) {
+        qc.setQueryData<(Vehicle | Tool)[]>(
+          [kind],
+          prev.map((a) => (a.id === id ? { ...a, assigned_employee_id: employeeId } : a)),
+        )
+      }
+      return { prev, kind }
     },
-    onError: () => flash('Zuweisung fehlgeschlagen.'),
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData([ctx.kind], ctx.prev)
+      flash('Zuweisung fehlgeschlagen.')
+    },
+    onSuccess: () => flash('Mitarbeiter zugewiesen.'),
+    onSettled: (_d, _e, v) => qc.invalidateQueries({ queryKey: [v.kind] }),
   })
   const deactivate = useMutation({
     mutationFn: ({ kind, id }: { kind: 'vehicles' | 'tools'; id: string }) =>
@@ -373,9 +385,10 @@ export function PlanningBoardPage() {
                 capacity={`— / ${v.capacity_hours ?? 8}h`}
                 count={appts.filter((a) => a.vehicle_id === v.id).length}
                 color={v.color}
+                assignee={employees.find((e) => e.id === v.assigned_employee_id)?.display_name}
                 menu={
                   <ColumnMenu
-                    assignedTo={employees.find((e) => e.id === v.assigned_employee_id)?.display_name}
+                    assignedId={v.assigned_employee_id}
                     employees={employees}
                     onEdit={() => setEditVehicle(v)}
                     onAssign={(eid) => assignAsset.mutate({ kind: 'vehicles', id: v.id, employeeId: eid })}
@@ -400,9 +413,10 @@ export function PlanningBoardPage() {
                 title={t.name}
                 subtitle={t.category ?? ''}
                 count={appts.filter((a) => a.tool_id === t.id).length}
+                assignee={employees.find((e) => e.id === t.assigned_employee_id)?.display_name}
                 menu={
                   <ColumnMenu
-                    assignedTo={employees.find((e) => e.id === t.assigned_employee_id)?.display_name}
+                    assignedId={t.assigned_employee_id}
                     employees={employees}
                     onEdit={() => setEditTool(t)}
                     onAssign={(eid) => assignAsset.mutate({ kind: 'tools', id: t.id, employeeId: eid })}
@@ -448,14 +462,14 @@ function FilterRow({ label, active, onClick }: { label: string; active: boolean;
 
 // ─── Column menu ─────────────────────────────────────────────────────────────
 function ColumnMenu({
-  assignedTo,
+  assignedId,
   employees,
   onEdit,
   onAssign,
   onShowCalendar,
   onDeactivate,
 }: {
-  assignedTo?: string
+  assignedId?: string | null
   employees: Employee[]
   onEdit: () => void
   onAssign: (employeeId: string | null) => void
@@ -479,11 +493,14 @@ function ColumnMenu({
             </DropdownMenu.SubTrigger>
             <DropdownMenu.Portal>
               <DropdownMenu.SubContent className="z-50 min-w-48 rounded-lg border border-border bg-surface p-1 shadow-e2">
-                <DropdownMenu.Item onSelect={() => onAssign(null)} className={itemCls}>— Niemand —</DropdownMenu.Item>
+                <DropdownMenu.Item onSelect={() => onAssign(null)} className={itemCls}>
+                  — Niemand —
+                  {!assignedId && <span className="ml-auto h-2 w-2 rounded-full bg-green-primary" />}
+                </DropdownMenu.Item>
                 {employees.map((e) => (
                   <DropdownMenu.Item key={e.id} onSelect={() => onAssign(e.id)} className={itemCls}>
                     {e.display_name}
-                    {assignedTo === e.display_name && <span className="ml-auto h-2 w-2 rounded-full bg-green-primary" />}
+                    {assignedId === e.id && <span className="ml-auto h-2 w-2 rounded-full bg-green-primary" />}
                   </DropdownMenu.Item>
                 ))}
               </DropdownMenu.SubContent>
@@ -519,7 +536,7 @@ function Section({ icon, title, hint, addLabel, onAdd, children }: { icon: React
 }
 
 // ─── Column (droppable) ──────────────────────────────────────────────────────
-function Column({ id, title, subtitle, count, capacity, color, menu, children }: { id: string; title: string; subtitle?: string; count: number; capacity?: string; color?: string | null; menu?: React.ReactNode; children: React.ReactNode }) {
+function Column({ id, title, subtitle, count, capacity, color, assignee, menu, children }: { id: string; title: string; subtitle?: string; count: number; capacity?: string; color?: string | null; assignee?: string; menu?: React.ReactNode; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id })
   const hasItems = Array.isArray(children) ? children.length > 0 : !!children
   return (
@@ -532,6 +549,11 @@ function Column({ id, title, subtitle, count, capacity, color, menu, children }:
           </div>
           {subtitle && <div className="truncate text-xs text-muted">{subtitle}</div>}
           {capacity && <div className="mt-0.5 text-xs text-muted">{capacity}</div>}
+          {assignee && (
+            <div className="mt-1 flex items-center gap-1 text-xs font-medium text-green-deep">
+              <User size={11} /> {assignee}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <span className="rounded-full bg-alt px-2 py-0.5 text-xs font-semibold text-muted">{count}</span>
