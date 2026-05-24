@@ -1,0 +1,110 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Brand greens */
+  --green-brand: #81c264;
+  --green-primary: #4a9b3f;
+  --green-deep: #2d6b3d;
+  --green-tint-50: #f2f9ee;
+  --green-tint-100: #e3f1da;
+  --green-tint-200: #c8e3b8;
+
+  /* Surfaces & neutrals (light) */
+  --bg: #fafaf9;
+  --sidebar: #ffffff;
+  --surface: #ffffff;
+  --surface-alt: #f4f4f2;
+  --border: #e7e6e2;
+  --border-faint: #ecebe6;
+  --text: #1a1917;
+  --body: #3f3d38;
+  --muted: #78756f;
+  --faint: #b8b4ac;
+
+  /* Functional semantic */
+  --success: #2d9d5c;
+  --success-bg: rgba(45, 157, 92, 0.1);
+  --warning: #d97706;
+  --warning-bg: rgba(217, 119, 6, 0.1);
+  --error: #dc2626;
+  --error-bg: rgba(220, 38, 38, 0.1);
+  --info: #2563eb;
+  --info-bg: rgba(37, 99, 235, 0.1);
+  --ai: #7c3aed;
+  --ai-bg: rgba(124, 58, 237, 0.1);
+
+  /* Elevation */
+  --elevation-1: 0 1px 2px rgba(26, 25, 23, 0.04), 0 1px 3px rgba(26, 25, 23, 0.06);
+  --elevation-2: 0 4px 6px rgba(26, 25, 23, 0.05), 0 10px 15px rgba(26, 25, 23, 0.08);
+  --elevation-3: 0 20px 25px rgba(26, 25, 23, 0.1), 0 10px 10px rgba(26, 25, 23, 0.04);
+}
+
+[data-theme='dark'] {
+  --green-brand: #81c264;
+  --green-primary: #5ead52;
+  --green-deep: #9ed88a;
+  --green-tint-50: rgba(94, 173, 82, 0.07);
+  --green-tint-100: rgba(94, 173, 82, 0.12);
+  --green-tint-200: rgba(94, 173, 82, 0.22);
+
+  --bg: #0c0c0a;
+  --sidebar: #101010;
+  --surface: #161512;
+  --surface-alt: #1c1b18;
+  --border: #282622;
+  --border-faint: #201f1c;
+  --text: #f2f0ec;
+  --body: #c4c0b8;
+  --muted: #787470;
+  --faint: #464340;
+
+  --success: #3ec870;
+  --success-bg: rgba(62, 200, 112, 0.12);
+  --warning: #e89c1a;
+  --warning-bg: rgba(232, 156, 26, 0.12);
+  --error: #e05555;
+  --error-bg: rgba(224, 85, 85, 0.12);
+  --info: #4d8ef0;
+  --info-bg: rgba(77, 142, 240, 0.12);
+  --ai: #9b6ae8;
+  --ai-bg: rgba(155, 106, 232, 0.12);
+
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 4px rgba(0, 0, 0, 0.22);
+  --elevation-2: 0 4px 14px rgba(0, 0, 0, 0.42), 0 2px 4px rgba(0, 0, 0, 0.22);
+  --elevation-3: 0 20px 44px rgba(0, 0, 0, 0.56);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--body);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

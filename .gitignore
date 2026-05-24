@@ -1,0 +1,24 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+frontend/dist/
+*.log
+
+# Audio recordings (call audio is large — never commit)
+*.mp3
+*.wav
+*.m4a
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,153 @@
+from dataclasses import dataclass
+
+from fastapi import Depends, Header, HTTPException, Request, status
+from starlette.concurrency import run_in_threadpool
+
+from app.core.security import JWTError, decode_supabase_jwt
+from app.db.supabase_client import get_service_client
+
+
+@dataclass
+class CurrentUser:
+    id: str
+    email: str | None
+    org_id: str | None
+    role: str | None
+    full_name: str | None
+
+
+async def get_current_user(
+    authorization: str | None = Header(default=None),
+) -> CurrentUser:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing bearer token",
+        )
+    token = authorization.split(" ", 1)[1]
+    try:
+        claims = decode_supabase_jwt(token)
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    user_id = claims.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing subject",
+        )
+
+    client = get_service_client()
+    res = (
+        client.table("users")
+        .select("id, email, org_id, role, full_name")
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+    )
+    row = res.data[0] if res.data else {}
+    return CurrentUser(
+        id=user_id,
+        email=row.get("email") or claims.get("email"),
+        org_id=row.get("org_id"),
+        role=row.get("role"),
+        full_name=row.get("full_name"),
+    )
+
+
+def require_org(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not user.org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not attached to an organization",
+        )
+    return user
+
+
+def verify_post_call_secret(
+    x_heykiki_secret: str | None = Header(default=None, alias="X-HeyKiki-Secret"),
+) -> None:
+    """Shared-secret gate for the N8N → backend post-call hop."""
+    from app.core.config import settings
+
+    allowed = {settings.post_call_webhook_secret, settings.master_webhook_secret}
+    allowed.discard("")
+    if not x_heykiki_secret or x_heykiki_secret not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid HeyKiki secret",
+        )
+
+
+def verify_master_secret(x_heykiki_secret: str | None = Header(default=None)) -> None:
+    from app.core.config import settings
+
+    if not x_heykiki_secret or x_heykiki_secret != settings.master_webhook_secret:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid HeyKiki secret",
+        )
+
+
+# ─── ElevenLabs tool webhooks ────────────────────────────────────────────────
+@dataclass
+class ToolOrg:
+    org_id: str
+
+
+def _lookup_org_id(secret: str | None, agent_id: str | None) -> str | None:
+    """Resolve org_id from the per-org secret header or the agent id (sync DB)."""
+    client = get_service_client()
+    if secret:
+        res = (
+            client.table("org_secrets")
+            .select("org_id")
+            .eq("secret", secret)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]["org_id"]
+    if agent_id:
+        res = (
+            client.table("organizations")
+            .select("id")
+            .eq("elevenlabs_agent_id", agent_id)
+            .limit(1)
+            .execute()
+        )
+        if res.data:
+            return res.data[0]["id"]
+    return None
+
+
+async def resolve_tool_org(
+    request: Request,
+    x_heykiki_secret: str | None = Header(default=None, alias="X-HeyKiki-Secret"),
+) -> ToolOrg:
+    """Resolve the calling organization for an ElevenLabs tool webhook.
+
+    Tries the X-HeyKiki-Secret header first, then falls back to the ``_agentId``
+    in the request body (ElevenLabs sends agent id as a dynamic variable but no
+    secret header). Reading the JSON body here is safe — Starlette caches it, so
+    the route's Pydantic model still parses normally.
+    """
+    agent_id: str | None = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            # Tool webhooks send `_agentId`; the conversation-init webhook sends `agent_id`.
+            agent_id = body.get("_agentId") or body.get("agent_id")
+    except Exception:
+        pass
+
+    org_id = await run_in_threadpool(_lookup_org_id, x_heykiki_secret, agent_id)
+    if org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not resolve organization from secret or agent id",
+        )
+    return ToolOrg(org_id=org_id)
