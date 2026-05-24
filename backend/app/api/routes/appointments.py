@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
-from app.schemas.admin import AppointmentCreate
+from app.schemas.admin import AppointmentCreate, AppointmentPatch
 from app.services.appointments import import_ics
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
@@ -15,7 +15,8 @@ def _list(org_id: str, frm: str | None, to: str | None) -> list[dict]:
         client.table("appointments")
         .select(
             "id, title, scheduled_at, duration_minutes, status, category, color, "
-            "location, notes, customer_id, inquiry_id, assigned_employee_id"
+            "location, notes, customer_id, inquiry_id, assigned_employee_id, "
+            "vehicle_id, tool_id"
         )
         .eq("org_id", org_id)
     )
@@ -100,3 +101,31 @@ async def import_appointments_ics(
 ) -> dict:
     content = await file.read()
     return await run_in_threadpool(import_ics, user.org_id, content)
+
+
+def _patch(org_id: str, appointment_id: str, payload: AppointmentPatch) -> dict | None:
+    client = get_service_client()
+    fields = payload.model_dump(exclude_unset=True)
+    if "location" in fields and isinstance(fields["location"], str):
+        fields["location"] = {"raw": fields["location"]}
+    if not fields:
+        rows = (
+            client.table("appointments").select("*").eq("org_id", org_id)
+            .eq("id", appointment_id).limit(1).execute().data
+        )
+        return rows[0] if rows else None
+    res = (
+        client.table("appointments").update(fields).eq("org_id", org_id)
+        .eq("id", appointment_id).execute()
+    )
+    return res.data[0] if res.data else None
+
+
+@router.patch("/{appointment_id}")
+async def update_appointment(
+    appointment_id: str, payload: AppointmentPatch, user: CurrentUser = Depends(require_org)
+) -> dict:
+    appt = await run_in_threadpool(_patch, user.org_id, appointment_id, payload)
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return appt

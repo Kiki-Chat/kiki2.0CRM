@@ -13,8 +13,11 @@ from app.api.routes import (
     health,
     inquiries,
     me,
+    planning_board,
     post_call,
     provision,
+    tool_assets,
+    vehicles,
 )
 from app.api.routes.tools import (
     book_appointment,
@@ -50,6 +53,9 @@ app.include_router(employees.router)
 app.include_router(inquiries.router)
 app.include_router(appointments.router)
 app.include_router(calendar_settings.router)
+app.include_router(vehicles.router)
+app.include_router(tool_assets.router)
+app.include_router(planning_board.router)
 app.include_router(documents.router)
 
 # ElevenLabs tool webhooks (Phase 2 — handlers stubbed, return 501 for now).

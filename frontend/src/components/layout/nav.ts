@@ -40,7 +40,7 @@ export const NAV: NavEntry[] = [
     label: { de: 'Aufträge', en: 'Work Orders' },
     children: [
       { to: '/projects', label: { de: 'Projekte', en: 'Projects' } },
-      { to: '/planning', label: { de: 'Planungstafel', en: 'Planning Board' } },
+      { to: '/planning-board', label: { de: 'Planungstafel', en: 'Planning Board' } },
     ],
   },
   {
