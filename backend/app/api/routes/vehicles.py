@@ -9,7 +9,8 @@ router = APIRouter(prefix="/api/vehicles", tags=["vehicles"])
 
 _COLS = (
     "id, name, model, license_plate, capacity_hours, assigned_employee_id, "
-    "color, notes, is_active, created_at"
+    "color, notes, is_active, created_at, vehicle_type, brand, tuev_until, "
+    "insurance_until, next_maintenance, max_weight_kg, cargo_space_m3, status"
 )
 
 
@@ -52,17 +53,11 @@ async def list_vehicles(user: CurrentUser = Depends(require_org)) -> list[dict]:
 
 def _create(org_id: str, payload: VehicleUpsert) -> dict:
     client = get_service_client()
-    row = {
-        "org_id": org_id,
-        "name": payload.name or "Fahrzeug",
-        "model": payload.model,
-        "license_plate": payload.license_plate,
-        "capacity_hours": payload.capacity_hours or 8,
-        "assigned_employee_id": payload.assigned_employee_id,
-        "color": payload.color,
-        "notes": payload.notes,
-        "is_active": payload.is_active if payload.is_active is not None else True,
-    }
+    row = payload.model_dump(exclude_unset=True)
+    row["org_id"] = org_id
+    row.setdefault("name", "Fahrzeug")
+    row.setdefault("capacity_hours", 8)
+    row.setdefault("is_active", True)
     return client.table("vehicles").insert(row).execute().data[0]
 
 

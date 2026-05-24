@@ -5,6 +5,7 @@ import { AppLayout } from './components/layout/AppLayout'
 import { BusinessHoursPage } from './pages/BusinessHoursPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { CallLogsPage } from './pages/CallLogsPage'
+import { CatalogPage } from './pages/CatalogPage'
 import { CostEstimateFormPage } from './pages/CostEstimateFormPage'
 import { CostEstimatesPage } from './pages/CostEstimatesPage'
 import { CustomerDetailPage } from './pages/CustomerDetailPage'
@@ -33,7 +34,7 @@ export default function App() {
           <Route path="cost-estimates/new" element={<CostEstimateFormPage />} />
           <Route path="cost-estimates/:id" element={<CostEstimateFormPage />} />
           <Route path="invoices" element={<Placeholder title="Rechnungen" />} />
-          <Route path="catalog" element={<Placeholder title="Katalog" />} />
+          <Route path="catalog" element={<CatalogPage />} />
           <Route path="employees" element={<EmployeesPage />} />
           <Route path="kiki" element={<Placeholder title="Kiki-Zentrale" />} />
           <Route path="settings/personal" element={<Placeholder title="Personal Settings" />} />

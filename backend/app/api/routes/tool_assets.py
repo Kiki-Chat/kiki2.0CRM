@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/tools", tags=["tools"])
 
 _COLS = (
     "id, name, category, serial_number, assigned_employee_id, storage_location, "
-    "notes, is_active, created_at"
+    "notes, is_active, created_at, condition, next_maintenance, purchase_date, purchase_price"
 )
 
 
@@ -52,16 +52,10 @@ async def list_tools(user: CurrentUser = Depends(require_org)) -> list[dict]:
 
 def _create(org_id: str, payload: ToolUpsert) -> dict:
     client = get_service_client()
-    row = {
-        "org_id": org_id,
-        "name": payload.name or "Werkzeug",
-        "category": payload.category,
-        "serial_number": payload.serial_number,
-        "assigned_employee_id": payload.assigned_employee_id,
-        "storage_location": payload.storage_location,
-        "notes": payload.notes,
-        "is_active": payload.is_active if payload.is_active is not None else True,
-    }
+    row = payload.model_dump(exclude_unset=True)
+    row["org_id"] = org_id
+    row.setdefault("name", "Werkzeug")
+    row.setdefault("is_active", True)
     return client.table("tools").insert(row).execute().data[0]
 
 

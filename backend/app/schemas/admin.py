@@ -65,6 +65,14 @@ class VehicleUpsert(BaseModel):
     color: str | None = None
     notes: str | None = None
     is_active: bool | None = None
+    vehicle_type: str | None = None
+    brand: str | None = None
+    tuev_until: str | None = None
+    insurance_until: str | None = None
+    next_maintenance: str | None = None
+    max_weight_kg: float | None = None
+    cargo_space_m3: float | None = None
+    status: str | None = None
 
 
 class ToolUpsert(BaseModel):
@@ -75,6 +83,32 @@ class ToolUpsert(BaseModel):
     storage_location: str | None = None
     notes: str | None = None
     is_active: bool | None = None
+    condition: str | None = None
+    next_maintenance: str | None = None
+    purchase_date: str | None = None
+    purchase_price: float | None = None
+
+
+class CatalogItemUpsert(BaseModel):
+    article_number: str | None = None
+    name: str | None = None
+    description: str | None = None
+    category: str | None = None
+    unit: str | None = None
+    vat_rate: float | None = None
+    is_wage: bool | None = None
+    unit_price: float | None = None  # selling price (net)
+    purchase_price: float | None = None
+    supplier_id: str | None = None
+    is_active: bool | None = None
+
+
+class TextModuleUpsert(BaseModel):
+    name: str | None = None
+    category: str | None = None
+    content: str | None = None
+    sort_order: int | None = None
+    is_default: bool | None = None
 
 
 class AppointmentPatch(BaseModel):

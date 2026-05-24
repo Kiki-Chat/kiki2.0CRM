@@ -18,6 +18,7 @@ from app.api.routes import (
     planning_board,
     post_call,
     provision,
+    text_modules,
     tool_assets,
     vehicles,
 )
@@ -60,6 +61,8 @@ app.include_router(tool_assets.router)
 app.include_router(planning_board.router)
 app.include_router(cost_estimates.router)
 app.include_router(catalog.router)
+app.include_router(catalog.items_router)
+app.include_router(text_modules.router)
 app.include_router(documents.router)
 
 # ElevenLabs tool webhooks (Phase 2 — handlers stubbed, return 501 for now).
