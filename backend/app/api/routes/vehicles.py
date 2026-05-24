@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 
@@ -27,22 +29,34 @@ def _list(org_id: str) -> list[dict]:
         or []
     )
     ids = [r["id"] for r in rows]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    today = now_iso[:10]
     last_seen: dict[str, str] = {}
+    next_appt: dict[str, str] = {}
+    in_use_today: set[str] = set()
     if ids:
         for a in (
             client.table("appointments")
-            .select("vehicle_id, scheduled_at")
+            .select("vehicle_id, scheduled_at, status")
             .eq("org_id", org_id)
             .in_("vehicle_id", ids)
             .execute()
             .data
             or []
         ):
-            vid, when = a.get("vehicle_id"), a.get("scheduled_at")
-            if vid and when and when > last_seen.get(vid, ""):
+            vid, when, st = a.get("vehicle_id"), a.get("scheduled_at"), a.get("status")
+            if not vid or not when or st == "cancelled":
+                continue
+            if when > last_seen.get(vid, ""):
                 last_seen[vid] = when
+            if when >= now_iso and (vid not in next_appt or when < next_appt[vid]):
+                next_appt[vid] = when
+            if when[:10] == today:
+                in_use_today.add(vid)
     for r in rows:
         r["last_seen"] = last_seen.get(r["id"])
+        r["next_appointment"] = next_appt.get(r["id"])
+        r["in_use_today"] = r["id"] in in_use_today
     return rows
 
 

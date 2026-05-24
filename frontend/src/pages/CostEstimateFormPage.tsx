@@ -98,7 +98,8 @@ export function CostEstimateFormPage() {
     queryFn: () => apiFetch<{ customers: CustomerOption[] }>('/api/customers?limit=500'),
   })
   const customers = customerData?.customers ?? []
-  const { data: catalog = [] } = useQuery({ queryKey: ['catalog'], queryFn: () => apiFetch<CatalogItem[]>('/api/catalog-items') })
+  const { data: catalog = [] } = useQuery({ queryKey: ['catalog-active'], queryFn: () => apiFetch<CatalogItem[]>('/api/catalog?status=active') })
+  const { data: textDefaults } = useQuery({ queryKey: ['text-defaults'], queryFn: () => apiFetch<Record<string, string>>('/api/text-modules/defaults') })
 
   // Selected customer's inquiries (for the Anfrage dropdown).
   const { data: customerDetail } = useQuery({
@@ -148,6 +149,17 @@ export function CostEstimateFormPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inquiryId, inquiries, isEdit])
+
+  // Pre-fill default text modules (Einleitung/Schluss/Zahlungsbedingungen) for new docs.
+  const textDefaultsApplied = useRef(false)
+  useEffect(() => {
+    if (isEdit || textDefaultsApplied.current || !textDefaults) return
+    textDefaultsApplied.current = true
+    if (textDefaults.einleitung) setIntroText((v) => v || textDefaults.einleitung)
+    if (textDefaults.schlusstext) setClosingText((v) => v || textDefaults.schlusstext)
+    if (textDefaults.zahlungsbedingungen) setPaymentTerms((v) => v || textDefaults.zahlungsbedingungen)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textDefaults, isEdit])
 
   const totals = useMemo(() => calcTotals(positions, surcharge, discountPct), [positions, surcharge, discountPct])
 
