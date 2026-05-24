@@ -91,6 +91,46 @@ class AppointmentPatch(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class CostEstimatePosition(BaseModel):
+    kind: str = "item"  # item | optional | subtotal | text
+    description: str | None = None
+    quantity: float = 1
+    unit: str | None = "Stk"
+    price: float = 0
+    vat: float = 19
+    discount_pct: float = 0
+    is_labor: bool = False
+
+
+class CostEstimateUpsert(BaseModel):
+    customer_id: str | None = None
+    inquiry_id: str | None = None
+    type: str = "kva"  # kva | offer | invoice
+    subject: str | None = None
+    reference_number: str | None = None
+    is_binding: bool = False
+    tolerance_pct: int = 20
+    validity_days: int = 30
+    positions: list[CostEstimatePosition] = []
+    intro_text: str | None = None
+    closing_text: str | None = None
+    payment_terms: str | None = None
+    surcharge: float = 0
+    surcharge_description: str | None = None
+    total_discount_pct: float = 0
+
+
+class CostEstimateStatus(BaseModel):
+    status: str  # accepted | rejected | invoiced | draft | sent
+
+
+class CostEstimateSend(BaseModel):
+    to: str | None = None
+    subject: str | None = None
+    message: str | None = None
+    copy_to_me: bool = False
+
+
 class AppointmentCreate(BaseModel):
     customer_id: str | None = None
     title: str | None = None
