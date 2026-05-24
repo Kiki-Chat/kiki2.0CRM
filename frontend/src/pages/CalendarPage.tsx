@@ -1,0 +1,536 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import deLocale from '@fullcalendar/core/locales/de'
+import dayGridPlugin from '@fullcalendar/daygrid'
+import interactionPlugin from '@fullcalendar/interaction'
+import listPlugin from '@fullcalendar/list'
+import FullCalendar from '@fullcalendar/react'
+import timeGridPlugin from '@fullcalendar/timegrid'
+import { Check, ChevronDown, Clock, Plus, Upload } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+
+import { Modal } from '../components/ui/Modal'
+import { apiFetch, apiUpload } from '../lib/api'
+import { useLang } from '../lib/i18n'
+import { cn } from '../lib/utils'
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+interface Appointment {
+  id: string
+  title: string | null
+  scheduled_at: string | null
+  duration_minutes: number | null
+  status: string
+  category: string | null
+  color: string | null
+  location: { raw?: string } | string | null
+  notes: string | null
+  customer_id: string | null
+  assigned_employee_id: string | null
+  customer_name: string | null
+  employee_name: string | null
+}
+interface Employee {
+  id: string
+  display_name: string
+}
+interface CustomerOption {
+  id: string
+  full_name: string | null
+}
+interface Me {
+  full_name: string | null
+  email: string | null
+}
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+const EMP_COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#0891B2', '#65A30D']
+const UNASSIGNED_COLOR = '#78756F'
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Offen',
+  confirmed: 'Bestätigt',
+  cancelled: 'Storniert',
+  completed: 'Erledigt',
+}
+
+const pad = (n: number) => String(n).padStart(2, '0')
+const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const hm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`
+
+function useEmployeeColors(employees: Employee[]): (empId: string | null) => string {
+  return useMemo(() => {
+    const map = new Map<string, string>()
+    employees.forEach((e, i) => map.set(e.id, EMP_COLORS[i % EMP_COLORS.length]))
+    return (empId: string | null) => (empId && map.get(empId)) || UNASSIGNED_COLOR
+  }, [employees])
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
+type Filter = 'all' | 'mine' | 'unassigned' | string
+
+export function CalendarPage() {
+  const { lang } = useLang()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null)
+  const [filter, setFilter] = useState<Filter>('all')
+  const [detail, setDetail] = useState<Appointment | null>(null)
+  const [createAt, setCreateAt] = useState<Date | null>(null)
+  const [importMsg, setImportMsg] = useState<string | null>(null)
+
+  const { data: employees = [] } = useQuery({
+    queryKey: ['employees'],
+    queryFn: () => apiFetch<Employee[]>('/api/employees'),
+  })
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => apiFetch<Me>('/api/me') })
+  const colorFor = useEmployeeColors(employees)
+
+  const myEmployeeId = useMemo(() => {
+    if (!me?.full_name) return null
+    const match = employees.find(
+      (e) => e.display_name.trim().toLowerCase() === me.full_name!.trim().toLowerCase(),
+    )
+    return match?.id ?? null
+  }, [me, employees])
+
+  const { data: appointments = [] } = useQuery({
+    queryKey: ['appointments', range?.from, range?.to],
+    queryFn: () => apiFetch<Appointment[]>(`/api/appointments?from=${range!.from}&to=${range!.to}`),
+    enabled: !!range,
+  })
+
+  const events = useMemo(
+    () =>
+      appointments
+        .filter((a) => {
+          if (!a.scheduled_at || a.status === 'cancelled') return false
+          if (filter === 'all') return true
+          if (filter === 'mine') return a.assigned_employee_id === myEmployeeId
+          if (filter === 'unassigned') return !a.assigned_employee_id
+          return a.assigned_employee_id === filter
+        })
+        .map((a) => {
+          const start = new Date(a.scheduled_at!)
+          const end = new Date(start.getTime() + (a.duration_minutes ?? 60) * 60000)
+          const color = colorFor(a.assigned_employee_id)
+          const title = a.customer_name ? `${a.title ?? 'Termin'} · ${a.customer_name}` : a.title ?? 'Termin'
+          return {
+            id: a.id,
+            title,
+            start: start.toISOString(),
+            end: end.toISOString(),
+            backgroundColor: color,
+            borderColor: color,
+            extendedProps: { appt: a },
+          }
+        }),
+    [appointments, filter, myEmployeeId, colorFor],
+  )
+
+  const filterLabel =
+    filter === 'all'
+      ? 'Alle Termine'
+      : filter === 'mine'
+        ? 'Nur meine'
+        : filter === 'unassigned'
+          ? 'Nicht zugewiesen'
+          : employees.find((e) => e.id === filter)?.display_name ?? 'Filter'
+
+  const importIcs = useMutation({
+    mutationFn: (file: File) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return apiUpload<{ created: number; skipped: number; total: number }>(
+        '/api/appointments/import-ics',
+        fd,
+      )
+    },
+    onSuccess: (r) => {
+      setImportMsg(`${r.created} Termine importiert${r.skipped ? `, ${r.skipped} übersprungen` : ''}.`)
+      qc.invalidateQueries({ queryKey: ['appointments'] })
+      setTimeout(() => setImportMsg(null), 5000)
+    },
+    onError: () => {
+      setImportMsg('Import fehlgeschlagen.')
+      setTimeout(() => setImportMsg(null), 5000)
+    },
+  })
+
+  return (
+    <div className="flex h-full flex-col p-8">
+      {/* Header */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-text">Kalender</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Filter dropdown */}
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt">
+                {filter !== 'all' && filter !== 'mine' && filter !== 'unassigned' && (
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: colorFor(filter) }} />
+                )}
+                {filterLabel}
+                <ChevronDown size={15} className="text-muted" />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                align="start"
+                sideOffset={6}
+                className="z-50 min-w-52 rounded-lg border border-border bg-surface p-1 shadow-e2"
+              >
+                <FilterItem label="Alle Termine" active={filter === 'all'} onSelect={() => setFilter('all')} />
+                {myEmployeeId && (
+                  <FilterItem label="Nur meine" active={filter === 'mine'} onSelect={() => setFilter('mine')} />
+                )}
+                <FilterItem
+                  label="Nicht zugewiesen"
+                  active={filter === 'unassigned'}
+                  onSelect={() => setFilter('unassigned')}
+                />
+                {employees.length > 0 && (
+                  <>
+                    <div className="px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                      Mitarbeiter
+                    </div>
+                    {employees.map((e) => (
+                      <FilterItem
+                        key={e.id}
+                        label={e.display_name}
+                        color={colorFor(e.id)}
+                        active={filter === e.id}
+                        onSelect={() => setFilter(e.id)}
+                      />
+                    ))}
+                  </>
+                )}
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+
+          <button
+            onClick={() => {
+              const d = new Date()
+              d.setHours(9, 0, 0, 0)
+              setCreateAt(d)
+            }}
+            className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+          >
+            <Plus size={16} /> Neuer Termin
+          </button>
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"
+          >
+            <Upload size={15} /> ICS-Import
+          </button>
+          <button
+            onClick={() => navigate('/calendar/business-hours')}
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"
+          >
+            <Clock size={15} /> Geschäftszeiten
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".ics,text/calendar"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) importIcs.mutate(f)
+              e.target.value = ''
+            }}
+          />
+        </div>
+      </div>
+
+      {importMsg && (
+        <div className="mb-3 rounded-md bg-green-tint-50 px-3 py-2 text-sm font-medium text-green-deep">
+          {importMsg}
+        </div>
+      )}
+
+      {/* Calendar */}
+      <div className="min-h-0 flex-1 rounded-xl border border-border bg-surface p-4">
+        <FullCalendar
+          plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
+          initialView="dayGridMonth"
+          locale={lang === 'de' ? deLocale : undefined}
+          firstDay={1}
+          height="100%"
+          headerToolbar={{
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
+          }}
+          buttonText={
+            lang === 'de'
+              ? undefined
+              : { today: 'Today', month: 'Month', week: 'Week', day: 'Day', list: 'List' }
+          }
+          slotMinTime="06:00:00"
+          slotMaxTime="21:00:00"
+          nowIndicator
+          dayMaxEvents={3}
+          eventDisplay="block"
+          eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+          events={events}
+          datesSet={(info) =>
+            setRange({ from: info.start.toISOString(), to: info.end.toISOString() })
+          }
+          dateClick={(info) => {
+            const d = info.date
+            if (info.allDay) d.setHours(9, 0, 0, 0)
+            setCreateAt(d)
+          }}
+          eventClick={(info) => {
+            const appt = info.event.extendedProps.appt as Appointment
+            if (appt) setDetail(appt)
+          }}
+        />
+      </div>
+
+      {detail && (
+        <AppointmentDetailModal
+          appt={detail}
+          color={colorFor(detail.assigned_employee_id)}
+          onClose={() => setDetail(null)}
+        />
+      )}
+      {createAt && (
+        <CreateAppointmentModal
+          at={createAt}
+          employees={employees}
+          colorFor={colorFor}
+          onClose={() => setCreateAt(null)}
+          onCreated={() => {
+            setCreateAt(null)
+            qc.invalidateQueries({ queryKey: ['appointments'] })
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function FilterItem({
+  label,
+  active,
+  color,
+  onSelect,
+}: {
+  label: string
+  active: boolean
+  color?: string
+  onSelect: () => void
+}) {
+  return (
+    <DropdownMenu.Item
+      onSelect={onSelect}
+      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-body outline-none data-[highlighted]:bg-alt"
+    >
+      {color ? (
+        <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
+      ) : (
+        <span className="w-2.5" />
+      )}
+      <span className="flex-1">{label}</span>
+      {active && <Check size={14} className="text-green-primary" />}
+    </DropdownMenu.Item>
+  )
+}
+
+// ─── Detail modal ────────────────────────────────────────────────────────────
+function locStr(l: Appointment['location']): string | null {
+  if (!l) return null
+  return typeof l === 'string' ? l : l.raw ?? null
+}
+
+function AppointmentDetailModal({
+  appt,
+  color,
+  onClose,
+}: {
+  appt: Appointment
+  color: string
+  onClose: () => void
+}) {
+  const start = appt.scheduled_at ? new Date(appt.scheduled_at) : null
+  const loc = locStr(appt.location)
+  return (
+    <Modal open onOpenChange={(o) => !o && onClose()} title={appt.title ?? 'Termin'}>
+      <div className="space-y-3 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="h-3 w-3 rounded-full" style={{ background: color }} />
+          <span className="font-medium text-text">{appt.employee_name ?? 'Nicht zugewiesen'}</span>
+          <span className="ml-auto rounded-full bg-alt px-2 py-0.5 text-xs font-medium text-muted">
+            {STATUS_LABEL[appt.status] ?? appt.status}
+          </span>
+        </div>
+        {start && (
+          <DetailRow label="Zeit">
+            {start.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })} ·{' '}
+            {hm(start)} Uhr ({appt.duration_minutes ?? 60} Min)
+          </DetailRow>
+        )}
+        {appt.customer_name && <DetailRow label="Kunde">{appt.customer_name}</DetailRow>}
+        {loc && <DetailRow label="Ort">{loc}</DetailRow>}
+        {appt.notes && <DetailRow label="Notizen">{appt.notes}</DetailRow>}
+      </div>
+    </Modal>
+  )
+}
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</div>
+      <div className="mt-0.5 text-text">{children}</div>
+    </div>
+  )
+}
+
+// ─── Create modal ────────────────────────────────────────────────────────────
+const inputCls =
+  'w-full rounded-md border border-border bg-alt px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary'
+
+function CreateAppointmentModal({
+  at,
+  employees,
+  colorFor,
+  onClose,
+  onCreated,
+}: {
+  at: Date
+  employees: Employee[]
+  colorFor: (id: string | null) => string
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const [customerId, setCustomerId] = useState('')
+  const [title, setTitle] = useState('')
+  const [date, setDate] = useState(ymd(at))
+  const [time, setTime] = useState(hm(at))
+  const [duration, setDuration] = useState(60)
+  const [assigned, setAssigned] = useState('')
+  const [location, setLocation] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const { data: customerData } = useQuery({
+    queryKey: ['customers-options'],
+    queryFn: () => apiFetch<{ customers: CustomerOption[] }>('/api/customers?limit=500'),
+  })
+  const customers = customerData?.customers ?? []
+
+  const create = useMutation({
+    mutationFn: () =>
+      apiFetch('/api/appointments', {
+        method: 'POST',
+        body: JSON.stringify({
+          customer_id: customerId || null,
+          title: title || 'Termin',
+          scheduled_at: new Date(`${date}T${time}`).toISOString(),
+          duration_minutes: duration,
+          location: location || null,
+          color: colorFor(assigned || null),
+          assigned_employee_id: assigned || null,
+        }),
+      }),
+    onSuccess: onCreated,
+    onError: () => setError('Termin konnte nicht erstellt werden.'),
+  })
+
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title="Neuer Termin"
+      widthClass="max-w-xl"
+      footer={
+        <div className="flex gap-3">
+          <button
+            disabled={!date || create.isPending}
+            onClick={() => create.mutate()}
+            className="flex-1 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+          >
+            {create.isPending ? 'Speichert…' : 'Termin speichern'}
+          </button>
+          <button
+            onClick={onClose}
+            className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body"
+          >
+            Abbrechen
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
+        <div>
+          <div className="mb-1.5 text-xs font-semibold text-body">Kunde</div>
+          <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={inputCls}>
+            <option value="">— Privat (kein Kunde) —</option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.full_name ?? 'Unbenannt'}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <div className="mb-1.5 text-xs font-semibold text-body">Titel</div>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="z. B. Vor-Ort-Termin"
+            className={inputCls}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-body">Datum *</div>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-body">Uhrzeit *</div>
+            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className={inputCls} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-body">Dauer</div>
+            <select value={duration} onChange={(e) => setDuration(Number(e.target.value))} className={inputCls}>
+              {[30, 60, 90, 120, 180].map((m) => (
+                <option key={m} value={m}>
+                  {m} Min
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div className="mb-1.5 text-xs font-semibold text-body">Mitarbeiter</div>
+            <select value={assigned} onChange={(e) => setAssigned(e.target.value)} className={inputCls}>
+              <option value="">Nicht zugewiesen</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.display_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <div className="mb-1.5 text-xs font-semibold text-body">Ort</div>
+          <input
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Adresse"
+            className={inputCls}
+          />
+        </div>
+      </div>
+    </Modal>
+  )
+}

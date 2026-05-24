@@ -1,7 +1,7 @@
 """Appointment tools: get_available_slots, book, cancel, change."""
 
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.db.supabase_client import get_service_client
 from app.schemas.tools import (
@@ -20,10 +20,16 @@ from app.services.common import (
     slot_key,
 )
 from app.services.customers import get_or_create_customer
+from app.services.scheduling import WEEKDAY_KEYS, normalize_business_hours
 
-BUSINESS_START_HOUR = 8
-BUSINESS_END_HOUR = 17
 MAX_SLOTS = 6
+
+
+def _hour(value: str, fallback: int) -> int:
+    try:
+        return int(str(value).split(":", 1)[0])
+    except (ValueError, AttributeError):
+        return fallback
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -114,13 +120,21 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
         if dt:
             busy[slot_key(dt)] += 1
 
+    business_hours = normalize_business_hours(sched.get("business_hours"))
     emp = _first_employee(client, org_id)
     slots: list[dict] = []
     for offset in range(days):
         day = start_date + timedelta(days=offset)
-        if day.weekday() >= 5:  # skip Sat/Sun
+        bh = business_hours[WEEKDAY_KEYS[day.weekday()]]
+        if not bh.get("open"):  # closed day (weekend / holiday config)
             continue
-        for hour in range(BUSINESS_START_HOUR, BUSINESS_END_HOUR, step):
+        open_hour = _hour(bh["start"], 8)
+        close_hour = _hour(bh["end"], 17)
+        brk_start = _hour(bh["break_start"], -1) if bh.get("break_start") else -1
+        brk_end = _hour(bh["break_end"], -1) if bh.get("break_end") else -1
+        for hour in range(open_hour, close_hour, step):
+            if brk_start <= hour < brk_end:  # lunch break
+                continue
             dt = datetime(day.year, day.month, day.day, hour, 0, tzinfo=BERLIN)
             if dt <= now or busy.get(slot_key(dt), 0) >= parallel:
                 continue
@@ -459,3 +473,107 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
         f"{fmt_time(new_dt)} Uhr wurde aufgenommen. Sie werden zur Bestätigung "
         "kontaktiert.",
     }
+
+
+# ─── ICS import ──────────────────────────────────────────────────────────────
+def _unfold_ics(text: str) -> list[str]:
+    """RFC 5545 line unfolding: a leading space/tab continues the previous line."""
+    out: list[str] = []
+    for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if raw[:1] in (" ", "\t") and out:
+            out[-1] += raw[1:]
+        else:
+            out.append(raw)
+    return out
+
+
+def _unescape_text(value: str) -> str:
+    return (
+        value.replace("\\n", "\n")
+        .replace("\\N", "\n")
+        .replace("\\,", ",")
+        .replace("\\;", ";")
+        .replace("\\\\", "\\")
+    )
+
+
+def _parse_ics_dt(value: str, params: str) -> datetime | None:
+    """Parse a DTSTART/DTEND value to a timezone-aware datetime."""
+    value = value.strip()
+    is_utc = value.endswith("Z")
+    val = value[:-1] if is_utc else value
+    try:
+        if "T" in val:
+            dt = datetime.strptime(val, "%Y%m%dT%H%M%S")
+        else:  # VALUE=DATE (all-day) → 08:00 local
+            dt = datetime.strptime(val, "%Y%m%d").replace(hour=8)
+    except ValueError:
+        return None
+    if is_utc:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.replace(tzinfo=BERLIN)  # naive / TZID → treat as Berlin
+
+
+def _parse_vevents(text: str) -> list[dict]:
+    events: list[dict] = []
+    cur: dict | None = None
+    for line in _unfold_ics(text):
+        if line == "BEGIN:VEVENT":
+            cur = {}
+            continue
+        if line == "END:VEVENT":
+            if cur is not None:
+                events.append(cur)
+            cur = None
+            continue
+        if cur is None or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        name, _, params = key.partition(";")
+        name = name.upper()
+        if name == "DTSTART":
+            cur["start"] = _parse_ics_dt(value, params)
+        elif name == "DTEND":
+            cur["end"] = _parse_ics_dt(value, params)
+        elif name == "SUMMARY":
+            cur["summary"] = _unescape_text(value)
+        elif name == "LOCATION":
+            cur["location"] = _unescape_text(value)
+        elif name == "DESCRIPTION":
+            cur["description"] = _unescape_text(value)
+    return events
+
+
+def import_ics(org_id: str, content: bytes) -> dict:
+    client = get_service_client()
+    text = content.decode("utf-8", errors="ignore")
+    events = _parse_vevents(text)
+
+    rows: list[dict] = []
+    skipped = 0
+    for ev in events:
+        start = ev.get("start")
+        if not start:
+            skipped += 1
+            continue
+        end = ev.get("end")
+        duration = 60
+        if end and end > start:
+            duration = max(15, int((end - start).total_seconds() // 60))
+        rows.append(
+            {
+                "org_id": org_id,
+                "title": ev.get("summary") or "Termin (Import)",
+                "scheduled_at": start.astimezone(timezone.utc).isoformat(),
+                "duration_minutes": duration,
+                "location": {"raw": ev["location"]} if ev.get("location") else None,
+                "notes": ev.get("description"),
+                "status": "confirmed",
+                "category": "import",
+            }
+        )
+
+    created = 0
+    if rows:
+        created = len(client.table("appointments").insert(rows).execute().data or [])
+    return {"created": created, "skipped": skipped, "total": len(events)}

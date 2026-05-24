@@ -108,3 +108,92 @@ body {
     transform: none;
   }
 }
+
+/* ─── FullCalendar theming (mapped to app design tokens) ───────────────────── */
+.fc {
+  --fc-border-color: var(--border-faint);
+  --fc-page-bg-color: var(--surface);
+  --fc-neutral-bg-color: var(--surface-alt);
+  --fc-today-bg-color: var(--green-tint-50);
+  --fc-now-indicator-color: var(--error);
+  --fc-event-border-color: transparent;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.fc .fc-toolbar.fc-header-toolbar {
+  margin-bottom: 1rem;
+}
+.fc .fc-toolbar-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.fc .fc-col-header-cell-cushion,
+.fc .fc-daygrid-day-number,
+.fc .fc-list-day-text,
+.fc .fc-list-day-side-text {
+  color: var(--body);
+  text-decoration: none;
+}
+.fc .fc-col-header-cell-cushion {
+  font-weight: 600;
+  font-size: 0.8rem;
+  padding: 0.5rem;
+}
+/* Buttons → app secondary / primary-active style */
+.fc .fc-button-primary {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--body);
+  font-weight: 500;
+  font-size: 0.8rem;
+  text-transform: capitalize;
+  box-shadow: none;
+}
+.fc .fc-button-primary:not(:disabled):hover {
+  background: var(--surface-alt);
+  border-color: var(--border);
+  color: var(--text);
+}
+.fc .fc-button-primary:not(:disabled):active,
+.fc .fc-button-primary:not(:disabled).fc-button-active {
+  background: var(--green-primary);
+  border-color: var(--green-primary);
+  color: #fff;
+}
+.fc .fc-button-primary:focus,
+.fc .fc-button-primary:not(:disabled):active:focus,
+.fc .fc-button-primary:not(:disabled).fc-button-active:focus {
+  box-shadow: none;
+}
+.fc .fc-button-primary:disabled {
+  background: var(--surface-alt);
+  border-color: var(--border);
+  color: var(--muted);
+}
+.fc .fc-event {
+  cursor: pointer;
+  font-weight: 500;
+  padding: 1px 2px;
+}
+.fc .fc-daygrid-event {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fc-theme-standard td,
+.fc-theme-standard th,
+.fc-theme-standard .fc-scrollgrid {
+  border-color: var(--border-faint);
+}
+.fc .fc-list,
+.fc .fc-list-event:hover td {
+  background: var(--surface);
+}
+.fc .fc-list-event:hover td {
+  background: var(--surface-alt);
+}
+.fc .fc-timegrid-slot,
+.fc .fc-timegrid-axis-cushion,
+.fc .fc-timegrid-slot-label-cushion {
+  color: var(--muted);
+}

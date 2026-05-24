@@ -2,6 +2,8 @@ import { Route, Routes } from 'react-router-dom'
 
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppLayout } from './components/layout/AppLayout'
+import { BusinessHoursPage } from './pages/BusinessHoursPage'
+import { CalendarPage } from './pages/CalendarPage'
 import { CallLogsPage } from './pages/CallLogsPage'
 import { CustomerDetailPage } from './pages/CustomerDetailPage'
 import { CustomersPage } from './pages/CustomersPage'
@@ -19,7 +21,8 @@ export default function App() {
           <Route path="calls" element={<CallLogsPage />} />
           <Route path="customers" element={<CustomersPage />} />
           <Route path="customers/:id" element={<CustomerDetailPage />} />
-          <Route path="calendar" element={<Placeholder title="Kalender (Calendar)" />} />
+          <Route path="calendar" element={<CalendarPage />} />
+          <Route path="calendar/business-hours" element={<BusinessHoursPage />} />
           <Route path="projects" element={<Placeholder title="Projekte" />} />
           <Route path="planning" element={<Placeholder title="Planungstafel" />} />
           <Route path="cost-estimates" element={<Placeholder title="Kostenvoranschläge" />} />

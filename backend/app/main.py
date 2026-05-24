@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
     appointments,
+    calendar_settings,
     calls,
     conversation_init,
     customers,
@@ -48,6 +49,7 @@ app.include_router(customers.router)
 app.include_router(employees.router)
 app.include_router(inquiries.router)
 app.include_router(appointments.router)
+app.include_router(calendar_settings.router)
 app.include_router(documents.router)
 
 # ElevenLabs tool webhooks (Phase 2 — handlers stubbed, return 501 for now).
