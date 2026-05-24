@@ -15,7 +15,7 @@ _COLS = (
 
 def _list(org_id: str) -> list[dict]:
     client = get_service_client()
-    return (
+    rows = (
         client.table("vehicles")
         .select(_COLS)
         .eq("org_id", org_id)
@@ -25,6 +25,24 @@ def _list(org_id: str) -> list[dict]:
         .data
         or []
     )
+    ids = [r["id"] for r in rows]
+    last_seen: dict[str, str] = {}
+    if ids:
+        for a in (
+            client.table("appointments")
+            .select("vehicle_id, scheduled_at")
+            .eq("org_id", org_id)
+            .in_("vehicle_id", ids)
+            .execute()
+            .data
+            or []
+        ):
+            vid, when = a.get("vehicle_id"), a.get("scheduled_at")
+            if vid and when and when > last_seen.get(vid, ""):
+                last_seen[vid] = when
+    for r in rows:
+        r["last_seen"] = last_seen.get(r["id"])
+    return rows
 
 
 @router.get("")

@@ -8,7 +8,7 @@ import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import { Check, ChevronDown, Clock, Plus, Upload } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
 import { apiFetch, apiUpload } from '../lib/api'
@@ -72,10 +72,11 @@ type Filter = 'all' | 'mine' | 'unassigned' | string
 export function CalendarPage() {
   const { lang } = useLang()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const [range, setRange] = useState<{ from: string; to: string } | null>(null)
-  const [filter, setFilter] = useState<Filter>('all')
+  const [filter, setFilter] = useState<Filter>(() => searchParams.get('employee') || 'all')
   const [detail, setDetail] = useState<Appointment | null>(null)
   const [createAt, setCreateAt] = useState<Date | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
