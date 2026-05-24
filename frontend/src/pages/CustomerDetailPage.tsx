@@ -151,10 +151,12 @@ export function CustomerDetailPage() {
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <span className="flex cursor-not-allowed items-center gap-1.5 text-sm font-medium text-faint">
+            <button
+              onClick={() => navigate(`/cost-estimates/new?customer_id=${customer.id}`)}
+              className="flex items-center gap-1.5 text-sm font-medium text-green-deep hover:underline"
+            >
               <FileText size={15} /> Kostenvoranschlag erstellen
-              <span className="text-[10px] font-semibold">bald</span>
-            </span>
+            </button>
             <button
               onClick={() => setEditOpen(true)}
               className="flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"

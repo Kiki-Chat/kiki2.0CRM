@@ -5,6 +5,7 @@ from app.api.routes import (
     appointments,
     calendar_settings,
     calls,
+    catalog,
     conversation_init,
     cost_estimates,
     customers,
@@ -58,6 +59,7 @@ app.include_router(vehicles.router)
 app.include_router(tool_assets.router)
 app.include_router(planning_board.router)
 app.include_router(cost_estimates.router)
+app.include_router(catalog.router)
 app.include_router(documents.router)
 
 # ElevenLabs tool webhooks (Phase 2 — handlers stubbed, return 501 for now).

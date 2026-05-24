@@ -14,6 +14,7 @@ import {
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import { Modal } from '../components/ui/Modal'
 import { apiBlobUrl, apiFetch } from '../lib/api'
 import { cn } from '../lib/utils'
 
@@ -25,6 +26,7 @@ interface Estimate {
   subject: string | null
   customer_id: string | null
   customer_name: string | null
+  customer_email: string | null
   inquiry_title: string | null
   is_binding: boolean
   valid_until: string | null
@@ -44,7 +46,7 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   rejected: { label: 'Abgelehnt', cls: 'bg-error-bg text-error' },
   invoiced: { label: 'Abgerechnet', cls: 'bg-ai-bg text-ai' },
 }
-const TYPE_LABEL: Record<string, string> = { kva: 'KVA', offer: 'Angebot', invoice: 'Rechnung' }
+const TYPE_LABEL: Record<string, string> = { kva: 'KVA', offer: 'Angebot', order_confirmation: 'Auftragsbest.', invoice: 'Rechnung' }
 
 const money = (n: number | null) =>
   '€' + (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -58,6 +60,7 @@ export function CostEstimatesPage() {
   const [customer, setCustomer] = useState('')
   const [status, setStatus] = useState('all')
   const [type, setType] = useState('all')
+  const [sendFor, setSendFor] = useState<Estimate | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const flash = (m: string) => {
     setToast(m)
@@ -245,7 +248,7 @@ export function CostEstimatesPage() {
                       <Icon title="Vorschau" onClick={() => openPdf(e.id, false)}><Eye size={15} /></Icon>
                       <Icon title="PDF herunterladen" onClick={() => openPdf(e.id, true)}><Download size={15} /></Icon>
                       {isDraft && <Icon title="Bearbeiten" cls="text-warning" onClick={() => navigate(`/cost-estimates/${e.id}`)}><Pencil size={15} /></Icon>}
-                      <Icon title="Per E-Mail senden" cls="text-info" onClick={() => flash('Senden-Dialog folgt im nächsten Schritt.')}><Mail size={15} /></Icon>
+                      <Icon title="Per E-Mail senden" cls="text-info" onClick={() => setSendFor(e)}><Mail size={15} /></Icon>
                       <Icon title="Duplizieren" cls="text-ai" onClick={() => act.mutate({ id: e.id, action: 'duplicate' })}><Copy size={15} /></Icon>
                       {e.status !== 'accepted' && <Icon title="Als akzeptiert markieren" cls="text-success" onClick={() => act.mutate({ id: e.id, action: 'accepted' })}><CheckCircle2 size={15} /></Icon>}
                       <Icon title="In Rechnung umwandeln" cls="text-green-deep" onClick={() => act.mutate({ id: e.id, action: 'invoiced' })}><FileText size={15} /></Icon>
@@ -261,7 +264,69 @@ export function CostEstimatesPage() {
           </tbody>
         </table>
       </div>
+
+      {sendFor && (
+        <SendModal
+          estimate={sendFor}
+          onClose={() => setSendFor(null)}
+          onSent={() => {
+            qc.invalidateQueries({ queryKey: ['cost-estimates'] })
+            flash(`${sendFor.number} als gesendet markiert.`)
+            setSendFor(null)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose: () => void; onSent: () => void }) {
+  const [to, setTo] = useState(estimate.customer_email ?? '')
+  const [subject, setSubject] = useState(`Ihr Kostenvoranschlag ${estimate.number ?? ''}`)
+  const [message, setMessage] = useState(
+    `Sehr geehrte Damen und Herren,\n\nanbei erhalten Sie unseren Kostenvoranschlag ${estimate.number ?? ''}. ` +
+      `Bei Fragen stehen wir Ihnen gerne zur Verfügung.\n\nMit freundlichen Grüßen`,
+  )
+  const [copyToMe, setCopyToMe] = useState(false)
+  const [attachPdf, setAttachPdf] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const send = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/cost-estimates/${estimate.id}/send`, {
+        method: 'POST',
+        body: JSON.stringify({ to, subject, message, copy_to_me: copyToMe }),
+      }),
+    onSuccess: onSent,
+    onError: () => setError('Senden fehlgeschlagen.'),
+  })
+
+  const ta = 'w-full rounded-md border border-border bg-alt px-3 py-2 text-sm text-text outline-none focus:border-green-primary'
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title="KVA senden"
+      widthClass="max-w-lg"
+      footer={
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body">Abbrechen</button>
+          <button disabled={!to || send.isPending} onClick={() => send.mutate()} className="flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+            <Mail size={15} /> {send.isPending ? 'Sendet…' : 'Senden'}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
+        <div><div className="mb-1 text-xs font-semibold text-body">An</div><input value={to} onChange={(e) => setTo(e.target.value)} placeholder="kunde@example.de" className={ta} /></div>
+        <div><div className="mb-1 text-xs font-semibold text-body">Betreff</div><input value={subject} onChange={(e) => setSubject(e.target.value)} className={ta} /></div>
+        <div><div className="mb-1 text-xs font-semibold text-body">Nachricht</div><textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} className={ta} /></div>
+        <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={attachPdf} onChange={(e) => setAttachPdf(e.target.checked)} className="h-4 w-4 accent-green-primary" /> PDF anhängen</label>
+        <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={copyToMe} onChange={(e) => setCopyToMe(e.target.checked)} className="h-4 w-4 accent-green-primary" /> Kopie an mich senden</label>
+        <p className="rounded-md bg-info-bg px-3 py-2 text-xs text-info">Hinweis: E-Mail-Versand (SMTP) ist noch nicht konfiguriert — der KVA wird als „Gesendet" markiert.</p>
+      </div>
+    </Modal>
   )
 }
 

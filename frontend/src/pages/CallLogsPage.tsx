@@ -297,6 +297,15 @@ function CallDetail({ callId }: { callId: string }) {
               onStatus={(s) => patchInquiry.mutate({ status: s })}
               onEdit={() => setModal('process')}
               onAppointment={() => setModal('appointment')}
+              onKva={
+                call.customer_id
+                  ? () =>
+                      navigate(
+                        `/cost-estimates/new?customer_id=${call.customer_id}` +
+                          (inquiry?.id ? `&inquiry_id=${inquiry.id}` : ''),
+                      )
+                  : undefined
+              }
             />
           )}
           {tab === 'details' && (
@@ -429,6 +438,7 @@ function ActionsTab({
   onStatus,
   onEdit,
   onAppointment,
+  onKva,
 }: {
   inquiry: Inquiry | undefined
   employees: Employee[]
@@ -437,6 +447,7 @@ function ActionsTab({
   onStatus: (s: string) => void
   onEdit: () => void
   onAppointment: () => void
+  onKva?: () => void
 }) {
   return (
     <div className="space-y-6">
@@ -485,7 +496,7 @@ function ActionsTab({
             disabled={busy}
           />
           <ActionRow icon={Edit3} label="Bearbeiten" onClick={onEdit} disabled={!inquiry} />
-          <ActionRow icon={FileText} label="Kostenvoranschlag erstellen" disabled comingSoon />
+          <ActionRow icon={FileText} label="Kostenvoranschlag erstellen" onClick={onKva} disabled={!onKva} />
           <ActionRow icon={CalIcon} label="Termin erstellen" onClick={onAppointment} />
         </div>
       </div>

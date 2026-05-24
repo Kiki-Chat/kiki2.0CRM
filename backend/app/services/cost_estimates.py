@@ -10,12 +10,19 @@ from app.services.common import format_address, now_berlin
 
 _FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
-DOC_TITLES = {"kva": "KOSTENVORANSCHLAG", "offer": "ANGEBOT", "invoice": "RECHNUNG"}
+DOC_TITLES = {
+    "kva": "KOSTENVORANSCHLAG",
+    "offer": "ANGEBOT",
+    "order_confirmation": "AUFTRAGSBESTÄTIGUNG",
+    "invoice": "RECHNUNG",
+}
 
 
 def gen_number(client, org_id: str, doc_type: str = "kva") -> str:
     year = now_berlin().year
-    prefix = {"kva": "KVA", "offer": "ANG", "invoice": "RE"}.get(doc_type, "KVA")
+    prefix = {"kva": "KVA", "offer": "ANG", "order_confirmation": "AB", "invoice": "RE"}.get(
+        doc_type, "KVA"
+    )
     res = (
         client.table("cost_estimates")
         .select("id", count="exact")

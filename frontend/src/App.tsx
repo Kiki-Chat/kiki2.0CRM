@@ -5,6 +5,7 @@ import { AppLayout } from './components/layout/AppLayout'
 import { BusinessHoursPage } from './pages/BusinessHoursPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { CallLogsPage } from './pages/CallLogsPage'
+import { CostEstimateFormPage } from './pages/CostEstimateFormPage'
 import { CostEstimatesPage } from './pages/CostEstimatesPage'
 import { CustomerDetailPage } from './pages/CustomerDetailPage'
 import { CustomersPage } from './pages/CustomersPage'
@@ -29,8 +30,8 @@ export default function App() {
           <Route path="projects" element={<Placeholder title="Projekte" />} />
           <Route path="planning-board" element={<PlanningBoardPage />} />
           <Route path="cost-estimates" element={<CostEstimatesPage />} />
-          <Route path="cost-estimates/new" element={<Placeholder title="Neuer Kostenvoranschlag (Formular folgt)" />} />
-          <Route path="cost-estimates/:id" element={<Placeholder title="KVA bearbeiten (Formular folgt)" />} />
+          <Route path="cost-estimates/new" element={<CostEstimateFormPage />} />
+          <Route path="cost-estimates/:id" element={<CostEstimateFormPage />} />
           <Route path="invoices" element={<Placeholder title="Rechnungen" />} />
           <Route path="catalog" element={<Placeholder title="Katalog" />} />
           <Route path="employees" element={<EmployeesPage />} />

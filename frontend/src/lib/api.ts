@@ -17,6 +17,20 @@ export async function apiBlobUrl(path: string): Promise<string> {
   return URL.createObjectURL(await res.blob())
 }
 
+/** POST a JSON body and return the response as an object URL (e.g. a generated PDF). */
+export async function apiPostBlob(path: string, body: unknown): Promise<string> {
+  const headers = new Headers({ 'Content-Type': 'application/json' })
+  const token = await authToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const res = await fetch(`${env.apiUrl}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`Request failed (${res.status})`)
+  return URL.createObjectURL(await res.blob())
+}
+
 /** Multipart upload with auth (browser sets the multipart boundary). */
 export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
   const headers = new Headers()

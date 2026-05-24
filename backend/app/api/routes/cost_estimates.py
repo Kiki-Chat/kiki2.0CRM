@@ -63,13 +63,13 @@ def _list(org_id: str) -> list[dict]:
     )
     cust_ids = {r["customer_id"] for r in rows if r.get("customer_id")}
     inq_ids = {r["inquiry_id"] for r in rows if r.get("inquiry_id")}
-    customers: dict[str, str] = {}
+    customers: dict[str, dict] = {}
     if cust_ids:
         for c in (
-            client.table("customers").select("id, full_name").eq("org_id", org_id)
+            client.table("customers").select("id, full_name, email").eq("org_id", org_id)
             .in_("id", list(cust_ids)).execute().data or []
         ):
-            customers[c["id"]] = c.get("full_name")
+            customers[c["id"]] = c
     inquiries: dict[str, str] = {}
     if inq_ids:
         for i in (
@@ -78,7 +78,9 @@ def _list(org_id: str) -> list[dict]:
         ):
             inquiries[i["id"]] = i.get("title")
     for r in rows:
-        r["customer_name"] = customers.get(r.get("customer_id"))
+        c = customers.get(r.get("customer_id")) or {}
+        r["customer_name"] = c.get("full_name")
+        r["customer_email"] = c.get("email")
         r["inquiry_title"] = inquiries.get(r.get("inquiry_id"))
     return rows
 
