@@ -22,8 +22,10 @@ from app.api.routes import (
     provision,
     text_modules,
     tool_assets,
+    users,
     vehicles,
 )
+from app.api.routes import settings as settings_routes
 from app.api.routes.tools import (
     book_appointment,
     cancel_appointment,
@@ -68,6 +70,8 @@ app.include_router(catalog.router)
 app.include_router(catalog.items_router)
 app.include_router(text_modules.router)
 app.include_router(documents.router)
+app.include_router(settings_routes.router)
+app.include_router(users.router)
 
 # ElevenLabs tool webhooks (Phase 2 — handlers stubbed, return 501 for now).
 app.include_router(identify_customer.router)

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
 
     elevenlabs_api_key: str = ""
 
+    # Symmetric key (Fernet) for encrypting stored third-party credentials.
+    settings_enc_key: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

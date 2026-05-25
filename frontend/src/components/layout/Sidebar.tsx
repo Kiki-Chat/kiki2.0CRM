@@ -13,6 +13,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthProvider'
 import { useLang } from '../../lib/i18n'
 import { cn, initials } from '../../lib/utils'
+import { PersonalSettingsModal } from '../PersonalSettingsModal'
 import { isGroup, NAV, type NavLeaf } from './nav'
 
 const leafClass = ({ isActive }: { isActive: boolean }) =>
@@ -58,6 +59,7 @@ export function Sidebar({
   const { lang } = useLang()
   const { session, signOut } = useAuth()
   const navigate = useNavigate()
+  const [personalOpen, setPersonalOpen] = useState(false)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
 
   const email = session?.user.email ?? 'Setup pending'
@@ -158,14 +160,14 @@ export function Sidebar({
               className="z-50 w-56 overflow-hidden rounded-lg border border-border bg-surface p-1 shadow-e3"
             >
               <DropdownMenu.Item
-                onSelect={() => navigate('/settings/personal')}
+                onSelect={() => setPersonalOpen(true)}
                 className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body outline-none data-[highlighted]:bg-alt"
               >
                 <Settings size={14} />
                 {lang === 'de' ? 'Persönliche Einstellungen' : 'Personal Settings'}
               </DropdownMenu.Item>
               <DropdownMenu.Item
-                onSelect={() => navigate('/settings/company')}
+                onSelect={() => navigate('/settings')}
                 className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body outline-none data-[highlighted]:bg-alt"
               >
                 <Building2 size={14} />
@@ -183,6 +185,7 @@ export function Sidebar({
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       </div>
+      <PersonalSettingsModal open={personalOpen} onClose={() => setPersonalOpen(false)} />
     </aside>
   )
 }

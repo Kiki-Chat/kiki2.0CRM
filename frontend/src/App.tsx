@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppLayout } from './components/layout/AppLayout'
@@ -20,6 +20,7 @@ import { Placeholder } from './pages/Placeholder'
 import { ProjectFormPage } from './pages/ProjectFormPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectWorkspacePage } from './pages/ProjectWorkspacePage'
+import { SettingsPage } from './pages/SettingsPage'
 
 export default function App() {
   return (
@@ -47,8 +48,9 @@ export default function App() {
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="employees" element={<EmployeesPage />} />
           <Route path="kiki" element={<Placeholder title="Kiki-Zentrale" />} />
+          <Route path="settings" element={<Navigate to="/settings/stammdaten" replace />} />
+          <Route path="settings/:section" element={<SettingsPage />} />
           <Route path="settings/personal" element={<Placeholder title="Personal Settings" />} />
-          <Route path="settings/company" element={<Placeholder title="Company Settings" />} />
         </Route>
       </Route>
       <Route path="*" element={<Placeholder title="Not found" />} />
