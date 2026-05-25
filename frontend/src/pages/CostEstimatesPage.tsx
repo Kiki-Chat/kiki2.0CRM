@@ -251,7 +251,7 @@ export function CostEstimatesPage() {
                       <Icon title="Per E-Mail senden" cls="text-info" onClick={() => setSendFor(e)}><Mail size={15} /></Icon>
                       <Icon title="Duplizieren" cls="text-ai" onClick={() => act.mutate({ id: e.id, action: 'duplicate' })}><Copy size={15} /></Icon>
                       {e.status !== 'accepted' && <Icon title="Als akzeptiert markieren" cls="text-success" onClick={() => act.mutate({ id: e.id, action: 'accepted' })}><CheckCircle2 size={15} /></Icon>}
-                      <Icon title="In Rechnung umwandeln" cls="text-green-deep" onClick={() => act.mutate({ id: e.id, action: 'invoiced' })}><FileText size={15} /></Icon>
+                      <Icon title="In Rechnung umwandeln" cls="text-green-deep" onClick={() => navigate(`/invoices/new?kva_id=${e.id}`)}><FileText size={15} /></Icon>
                       {isDraft && <Icon title="Löschen" cls="text-error" onClick={() => confirm(`${e.number} löschen?`) && act.mutate({ id: e.id, action: 'delete' })}><Trash2 size={15} /></Icon>}
                     </div>
                   </td>

@@ -14,6 +14,7 @@ from app.api.routes import (
     employees,
     health,
     inquiries,
+    invoices,
     me,
     planning_board,
     post_call,
@@ -60,6 +61,7 @@ app.include_router(vehicles.router)
 app.include_router(tool_assets.router)
 app.include_router(planning_board.router)
 app.include_router(cost_estimates.router)
+app.include_router(invoices.router)
 app.include_router(catalog.router)
 app.include_router(catalog.items_router)
 app.include_router(text_modules.router)

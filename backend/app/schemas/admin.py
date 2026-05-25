@@ -165,6 +165,36 @@ class CostEstimateSend(BaseModel):
     copy_to_me: bool = False
 
 
+class InvoiceUpsert(BaseModel):
+    customer_id: str | None = None
+    kva_id: str | None = None  # source cost estimate (stored in cost_estimate_id)
+    subject: str | None = None
+    reference_number: str | None = None
+    invoice_date: str | None = None  # ISO date; defaults to today
+    performance_date: str | None = None  # Leistungsdatum
+    payment_terms_days: int = 14
+    discount_pct: float | None = None  # Skonto %
+    discount_days: int | None = None  # Skonto Tage
+    positions: list[CostEstimatePosition] = []
+    intro_text: str | None = None
+    closing_text: str | None = None
+    payment_terms_text: str | None = None
+    surcharge: float = 0
+    surcharge_description: str | None = None
+    total_discount_pct: float = 0
+
+
+class InvoiceStatus(BaseModel):
+    status: str  # draft | sent | paid | cancelled
+
+
+class InvoiceSend(BaseModel):
+    to: str | None = None
+    subject: str | None = None
+    message: str | None = None
+    copy_to_me: bool = False
+
+
 class AppointmentCreate(BaseModel):
     customer_id: str | None = None
     title: str | None = None

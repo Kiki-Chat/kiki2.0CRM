@@ -12,6 +12,8 @@ import { CustomerDetailPage } from './pages/CustomerDetailPage'
 import { CustomersPage } from './pages/CustomersPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { EmployeesPage } from './pages/EmployeesPage'
+import { InvoiceFormPage } from './pages/InvoiceFormPage'
+import { InvoicesPage } from './pages/InvoicesPage'
 import { LoginPage } from './pages/LoginPage'
 import { PlanningBoardPage } from './pages/PlanningBoardPage'
 import { Placeholder } from './pages/Placeholder'
@@ -33,7 +35,9 @@ export default function App() {
           <Route path="cost-estimates" element={<CostEstimatesPage />} />
           <Route path="cost-estimates/new" element={<CostEstimateFormPage />} />
           <Route path="cost-estimates/:id" element={<CostEstimateFormPage />} />
-          <Route path="invoices" element={<Placeholder title="Rechnungen" />} />
+          <Route path="invoices" element={<InvoicesPage />} />
+          <Route path="invoices/new" element={<InvoiceFormPage />} />
+          <Route path="invoices/:id" element={<InvoiceFormPage />} />
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="employees" element={<EmployeesPage />} />
           <Route path="kiki" element={<Placeholder title="Kiki-Zentrale" />} />

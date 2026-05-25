@@ -82,15 +82,62 @@ def _fmt_de_date(value) -> str:
 
 class _KvaPDF(FPDF):
     legal = ""
+    bank_footer: list | None = None  # invoices: [(heading, [lines]), ...]
 
     def footer(self) -> None:
-        self.set_y(-22)
+        if self.bank_footer:
+            top = self.h - 32
+            col_w = 60
+            for i, (head, lines) in enumerate(self.bank_footer):
+                x = 15 + i * col_w
+                self.set_xy(x, top)
+                self.set_font("DejaVu", "B", 6.5)
+                self.set_text_color(70)
+                self.cell(col_w - 4, 3, head[:40])
+                yy = top + 3.6
+                self.set_font("DejaVu", size=6.5)
+                self.set_text_color(110)
+                for ln in lines:
+                    self.set_xy(x, yy)
+                    self.cell(col_w - 4, 3, ln[:42])
+                    yy += 3
+        else:
+            self.set_y(-22)
+            self.set_font("DejaVu", size=7)
+            self.set_text_color(110)
+            self.multi_cell(0, 3, self.legal, align="L")
+        self.set_y(-9)
         self.set_font("DejaVu", size=7)
         self.set_text_color(110)
-        self.multi_cell(0, 3, self.legal, align="L")
-        self.set_y(-9)
         self.cell(0, 4, f"Seite {self.page_no()} von {{nb}}", align="C")
         self.set_text_color(0)
+
+
+def _invoice_bank_footer(org: dict) -> list[tuple[str, list[str]]]:
+    bd = org.get("bank_details") or {}
+    if not isinstance(bd, dict):
+        bd = {}
+    ti = org.get("tax_info") or {}
+    if isinstance(ti, str):
+        ti = {"vat_id": ti}
+    bank_lines = [bd.get("account_holder") or org.get("name") or ""]
+    if bd.get("iban"):
+        bank_lines.append(f"IBAN: {bd['iban']}")
+    if bd.get("bic"):
+        bank_lines.append(f"BIC: {bd['bic']}")
+    if bd.get("bank_name"):
+        bank_lines.append(bd["bank_name"])
+    mgmt_lines = [bd.get("managing_director") or ""]
+    tax_lines = []
+    if ti.get("vat_id"):
+        tax_lines.append(f"USt-IdNr: {ti['vat_id']}")
+    if ti.get("tax_number"):
+        tax_lines.append(f"Steuernr.: {ti['tax_number']}")
+    return [
+        ("Bankverbindung", [ln for ln in bank_lines if ln]),
+        ("Geschäftsführung", [ln for ln in mgmt_lines if ln]),
+        ("Steuernummer", tax_lines),
+    ]
 
 
 def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes:
@@ -119,7 +166,9 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
     pdf.add_font("DejaVu", "", str(_FONT_DIR / "DejaVuSans.ttf"))
     pdf.add_font("DejaVu", "B", str(_FONT_DIR / "DejaVuSans-Bold.ttf"))
     pdf.legal = legal
-    pdf.set_auto_page_break(auto=True, margin=28)
+    if doc_type == "invoice":
+        pdf.bank_footer = _invoice_bank_footer(org)
+    pdf.set_auto_page_break(auto=True, margin=34 if doc_type == "invoice" else 28)
     pdf.set_margins(15, 15, 15)
     pdf.add_page()
 
@@ -128,10 +177,14 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
     pdf.set_xy(110, 15)
     pdf.set_font("DejaVu", "B", 11)
     pdf.cell(85, 5, (org.get("name") or "")[:48], align="L", new_x="LMARGIN", new_y="NEXT")
+    tax_info = org.get("tax_info") or {}
+    if isinstance(tax_info, str):
+        tax_info = {"vat_id": tax_info}
+    vat_id = tax_info.get("vat_id")
     pdf.set_font("DejaVu", size=8)
     pdf.set_text_color(90)
     for line in [org_addr, f"Tel: {org.get('phone_number') or ''}", org.get("email") or "",
-                 f"USt-IdNr: {org.get('tax_info')}" if org.get("tax_info") else ""]:
+                 f"USt-IdNr: {vat_id}" if vat_id else ""]:
         if line.strip().rstrip(":"):
             pdf.set_x(110)
             pdf.cell(85, 4, line[:60], new_x="LMARGIN", new_y="NEXT")
@@ -155,16 +208,23 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
         pdf.multi_cell(110, 4, cust_addr[:120])
 
     # ── Meta block (right) ──
-    nr_label = {"kva": "KVA-Nr.:", "offer": "Angebot-Nr.:", "invoice": "Rechnung-Nr.:"}.get(
-        doc_type, "KVA-Nr.:"
-    )
     pdf.set_xy(128, 56)
-    rows = [
-        (nr_label, ce.get("number") or "VORSCHAU"),
-        ("Datum:", _fmt_de_date(ce.get("date") or now_berlin())),
-        ("Gültig bis:", _fmt_de_date(ce.get("valid_until"))),
-        ("Kundennummer:", (customer or {}).get("customer_number") or "-"),
-    ]
+    if doc_type == "invoice":
+        rows = [
+            ("Rechnungsnr.:", ce.get("number") or "VORSCHAU"),
+            ("Rechnungsdatum:", _fmt_de_date(ce.get("invoice_date") or ce.get("date") or now_berlin())),
+            ("Leistungsdatum:", _fmt_de_date(ce.get("performance_date"))),
+            ("Fällig am:", _fmt_de_date(ce.get("due_date"))),
+            ("Kundennummer:", (customer or {}).get("customer_number") or "-"),
+        ]
+    else:
+        nr_label = {"kva": "KVA-Nr.:", "offer": "Angebot-Nr.:"}.get(doc_type, "KVA-Nr.:")
+        rows = [
+            (nr_label, ce.get("number") or "VORSCHAU"),
+            ("Datum:", _fmt_de_date(ce.get("date") or now_berlin())),
+            ("Gültig bis:", _fmt_de_date(ce.get("valid_until"))),
+            ("Kundennummer:", (customer or {}).get("customer_number") or "-"),
+        ]
     for label, val in rows:
         pdf.set_x(128)
         pdf.set_font("DejaVu", "B", 8.5)
@@ -186,9 +246,11 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
         pdf.set_font("DejaVu", "B", 9)
         pdf.cell(0, 6, f"Zu Ihrer Anfrage: {subject[:70]}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(1)
-    intro = ce.get("intro_text") or (
-        f'Für Ihre Anfrage erstellen wir Ihnen folgenden {title.title()}:'
-    )
+    if doc_type == "invoice":
+        default_intro = "Vielen Dank für Ihren Auftrag. Wir berechnen Ihnen wie folgt:"
+    else:
+        default_intro = f'Für Ihre Anfrage erstellen wir Ihnen folgenden {title.title()}:'
+    intro = ce.get("intro_text") or default_intro
     pdf.set_font("DejaVu", size=9)
     pdf.multi_cell(0, 5, intro)
     pdf.ln(2)
@@ -258,7 +320,7 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
 def fetch_org(client, org_id: str) -> dict:
     rows = (
         client.table("organizations")
-        .select("name, address, phone_number, email, tax_info, logo_url")
+        .select("name, address, phone_number, email, tax_info, bank_details, logo_url")
         .eq("id", org_id)
         .limit(1)
         .execute()
