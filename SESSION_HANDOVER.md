@@ -5,7 +5,22 @@
 ## Recent changes
 _Append one dated bullet per shipped, UI-visible change. Newest first._
 
+- **2026-05-26:** Deployed the full app on Railway (project `kikijarvis-backend`): new **frontend** service (Dockerfile → `serve` static SPA) at https://frontend-production-4bdf.up.railway.app, **backend** redeployed with the dashboard endpoints, `CORS_ORIGINS` updated to allow the frontend origin. See **Deployment (Railway)** below. ⚠ frontend build root must be `/frontend` (`railway up frontend --path-as-root`, or set Root Directory in the dashboard).
 - **2026-05-26:** Dashboard tabs built — **Anrufe**, **Finanzen**, **KI-Nutzung**, **KI-Insights** (real aggregation endpoints in `dashboard.py`, recharts charts/sparklines). KI-Nutzung shows AI-minute-quota transparency (not timesheets). KI-Insights snooze/erledigt tracking via `ai_suggestion_actions` (migration 0016). **EN/DE language toggle removed everywhere** (`i18n.tsx`/`useLang`/`LangProvider` deleted; `language_preference` no longer read by the frontend, column kept in DB); the **frontend is now German-only**. Commits `ade6d3d`, `952eeba`.
+
+## Deployment (Railway)
+Both services live in the `kikijarvis-backend` project (env `production`):
+- **Frontend** — service `frontend` → **https://frontend-production-4bdf.up.railway.app** (multi-stage `frontend/Dockerfile` → `serve -s dist` on `$PORT`). `VITE_API_URL` is baked at **build time** (Dockerfile ARG default) to the backend URL. Build root must be `/frontend`: deploy with `railway up frontend --path-as-root --service frontend`, or set the service's Root Directory to `/frontend` in the dashboard so plain `railway up` works.
+- **Backend** — service `backend` → **https://backend-production-3f88a.up.railway.app** (`backend/Dockerfile`, gunicorn+uvicorn, Root Directory `/backend`). `CORS_ORIGINS` env must include the frontend origin.
+
+**⚠ If the BACKEND URL changes, update every place that hardcodes it:**
+1. ElevenLabs `hk_*` tool webhook URLs — re-run `scripts/create_hk_tools_safe.py <NEW_BASE_URL>`.
+2. n8n → backend **post-call webhook** target.
+3. ElevenLabs **Conversation Initiation Data Webhook Override** URL.
+4. Frontend `VITE_API_URL` (Dockerfile ARG default) — rebuild + redeploy the frontend.
+5. Backend `CORS_ORIGINS` (only if the frontend domain also changed).
+
+**Changing the FRONTEND URL is easy** — nothing external points at it; just update the backend's `CORS_ORIGINS` to the new origin. To give it a friendlier name: either a custom Railway subdomain (e.g. `heykiki-crm.up.railway.app` — free, via the dashboard if the name is available) or a real custom domain like `app.heykiki.de` (own the domain + add the DNS CNAME Railway provides).
 
 ## 1. Current state
 - **HEAD (main):** Kiki-Zentrale complete (this commit) — `feat: Kiki-Zentrale — full agent control with safety layer, snapshots, rollback, and audit`. Prior: `eb972ae` (docs: session handover).
