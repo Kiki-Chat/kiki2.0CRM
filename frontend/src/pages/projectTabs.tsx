@@ -4,7 +4,6 @@ import FullCalendar from '@fullcalendar/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CheckCircle2,
-  Copy,
   Download,
   Eye,
   FileText,
@@ -12,8 +11,6 @@ import {
   PhoneIncoming,
   PhoneOutgoing,
   Plus,
-  Receipt,
-  Trash2,
   Upload,
   X,
 } from 'lucide-react'

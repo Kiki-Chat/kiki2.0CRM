@@ -913,7 +913,7 @@ function AbsenceModal({ employee, onClose }: { employee: Employee; onClose: () =
 // ─── Overview tab ────────────────────────────────────────────────────────────
 const DAY_MS = 86400000
 const pad2 = (n: number) => String(n).padStart(2, '0')
-const ymdLocal = (iso: string) => {
+const ymdLocal = (iso: string | Date) => {
   const d = new Date(iso)
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }

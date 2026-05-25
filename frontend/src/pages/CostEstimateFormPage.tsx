@@ -5,6 +5,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DraggableSyntheticListeners,
 } from '@dnd-kit/core'
 import {
   SortableContext,
@@ -13,7 +14,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Copy, GripVertical, Loader2, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Copy, GripVertical, Loader2, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
@@ -421,7 +422,7 @@ function PositionCard({ pos, index, onChange, onRemove, onDuplicate }: { pos: Po
   )
 }
 
-function Head({ index, label, listeners, attributes, onRemove, onDuplicate }: { index: number; label: string; listeners: object; attributes: object; onRemove: () => void; onDuplicate: () => void }) {
+function Head({ index, label, listeners, attributes, onRemove, onDuplicate }: { index: number; label: string; listeners: DraggableSyntheticListeners; attributes: object; onRemove: () => void; onDuplicate: () => void }) {
   void index
   return (
     <div className="mb-2 flex items-center justify-between">

@@ -63,6 +63,7 @@ interface Project {
   open_amount: number
   progress: number
   internal_notes: string | null
+  notes_updated_at: string | null
   stats: ProjectStats
   employees: Employee[]
 }

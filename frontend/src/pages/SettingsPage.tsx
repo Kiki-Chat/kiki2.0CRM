@@ -18,7 +18,6 @@ import {
   Plug,
   Receipt,
   Star,
-  Trash2,
   Upload,
   UploadCloud,
   Users,
@@ -281,7 +280,7 @@ function StammdatenSection({ org }: { org: Org }) {
 
   const save = useMutation({
     mutationFn: () => {
-      const bank_details = { ...(org.bank_details || {}), bank_name: f.bankName, iban: f.iban, bic: f.bic }
+      const bank_details: Record<string, string> = { ...(org.bank_details || {}), bank_name: f.bankName, iban: f.iban, bic: f.bic }
       if (f.mgmtName) { bank_details.account_holder = f.mgmtName; bank_details.managing_director = f.mgmtName }
       return apiFetch('/api/settings/general', {
         method: 'PATCH',

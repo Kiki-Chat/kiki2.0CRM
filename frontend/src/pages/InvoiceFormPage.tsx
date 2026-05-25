@@ -5,6 +5,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DraggableSyntheticListeners,
 } from '@dnd-kit/core'
 import {
   SortableContext,
@@ -439,7 +440,7 @@ function PositionCard({ pos, index, onChange, onRemove, onDuplicate }: { pos: Po
   )
 }
 
-function Head({ label, listeners, attributes, onRemove, onDuplicate }: { label: string; listeners: object; attributes: object; onRemove: () => void; onDuplicate: () => void }) {
+function Head({ label, listeners, attributes, onRemove, onDuplicate }: { label: string; listeners: DraggableSyntheticListeners; attributes: object; onRemove: () => void; onDuplicate: () => void }) {
   return (
     <div className="mb-2 flex items-center justify-between">
       <div className="flex items-center gap-2">
