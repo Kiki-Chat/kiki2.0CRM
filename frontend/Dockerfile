@@ -2,7 +2,8 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# npm install (not ci) — the committed lockfile is out of sync with package.json
+RUN npm install --no-audit --no-fund
 COPY . .
 # Public build-time config — Vite inlines VITE_* at build time. Defaults target prod;
 # Railway can override via service build args. (Anon key is the publishable key.)
