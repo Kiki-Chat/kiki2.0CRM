@@ -2,6 +2,11 @@
 
 > Paste this as starting context. Read `HANDOVER.md` for full detail. Scannable summary below.
 
+## Recent changes
+_Append one dated bullet per shipped, UI-visible change. Newest first._
+
+- **2026-05-26:** Dashboard tabs built — **Anrufe**, **Finanzen**, **KI-Nutzung**, **KI-Insights** (real aggregation endpoints in `dashboard.py`, recharts charts/sparklines). KI-Nutzung shows AI-minute-quota transparency (not timesheets). KI-Insights snooze/erledigt tracking via `ai_suggestion_actions` (migration 0016). **EN/DE language toggle removed everywhere** (`i18n.tsx`/`useLang`/`LangProvider` deleted; `language_preference` no longer read by the frontend, column kept in DB); the **frontend is now German-only**. Commits `ade6d3d`, `952eeba`.
+
 ## 1. Current state
 - **HEAD (main):** Kiki-Zentrale complete (this commit) — `feat: Kiki-Zentrale — full agent control with safety layer, snapshots, rollback, and audit`. Prior: `eb972ae` (docs: session handover).
 - **Working tree:** clean, pushed to `origin/main`.
