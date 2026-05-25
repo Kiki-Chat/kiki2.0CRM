@@ -9,18 +9,16 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
-import type { Lang } from '../../lib/i18n'
-
 export interface NavLeaf {
   to: string
   icon?: LucideIcon
-  label: Record<Lang, string>
+  label: string
   badgeKey?: 'calls'
 }
 
 export interface NavGroupDef {
   icon: LucideIcon
-  label: Record<Lang, string>
+  label: string
   children: NavLeaf[]
 }
 
@@ -31,26 +29,26 @@ export function isGroup(e: NavEntry): e is NavGroupDef {
 }
 
 export const NAV: NavEntry[] = [
-  { to: '/', icon: LayoutDashboard, label: { de: 'Dashboard', en: 'Dashboard' } },
-  { to: '/calls', icon: Phone, label: { de: 'Anrufe', en: 'Calls' }, badgeKey: 'calls' },
-  { to: '/customers', icon: Users, label: { de: 'Kunden', en: 'Customers' } },
-  { to: '/calendar', icon: Calendar, label: { de: 'Kalender', en: 'Calendar' } },
+  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/calls', icon: Phone, label: 'Anrufe', badgeKey: 'calls' },
+  { to: '/customers', icon: Users, label: 'Kunden' },
+  { to: '/calendar', icon: Calendar, label: 'Kalender' },
   {
     icon: Briefcase,
-    label: { de: 'Aufträge', en: 'Work Orders' },
+    label: 'Aufträge',
     children: [
-      { to: '/projects', label: { de: 'Projekte', en: 'Projects' } },
-      { to: '/planning-board', label: { de: 'Planungstafel', en: 'Planning Board' } },
+      { to: '/projects', label: 'Projekte' },
+      { to: '/planning-board', label: 'Planungstafel' },
     ],
   },
   {
     icon: Wallet,
-    label: { de: 'Finanzen', en: 'Finance' },
+    label: 'Finanzen',
     children: [
-      { to: '/cost-estimates', label: { de: 'Kostenvoranschläge', en: 'Cost Estimates' } },
-      { to: '/invoices', label: { de: 'Rechnungen', en: 'Invoices' } },
-      { to: '/catalog', label: { de: 'Katalog', en: 'Catalog' } },
+      { to: '/cost-estimates', label: 'Kostenvoranschläge' },
+      { to: '/invoices', label: 'Rechnungen' },
+      { to: '/catalog', label: 'Katalog' },
     ],
   },
-  { to: '/employees', icon: HardHat, label: { de: 'Mitarbeiter', en: 'Employees' } },
+  { to: '/employees', icon: HardHat, label: 'Mitarbeiter' },
 ]

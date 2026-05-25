@@ -25,7 +25,6 @@ import { useMemo, useState } from 'react'
 
 import { Modal } from '../components/ui/Modal'
 import { apiFetch } from '../lib/api'
-import { useLang } from '../lib/i18n'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -1053,7 +1052,6 @@ function AntraegeTab() {
 
 // ─── Absence calendar tab ────────────────────────────────────────────────────
 function AbsenceCalendarTab() {
-  const { lang } = useLang()
   const [range, setRange] = useState<{ from: string; to: string } | null>(null)
 
   const { data: absences = [] } = useQuery({
@@ -1086,7 +1084,7 @@ function AbsenceCalendarTab() {
         <FullCalendar
           plugins={[dayGridPlugin, listPlugin, interactionPlugin]}
           initialView="dayGridMonth"
-          locale={lang === 'de' ? deLocale : undefined}
+          locale={deLocale}
           firstDay={1}
           height="100%"
           headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,listMonth' }}

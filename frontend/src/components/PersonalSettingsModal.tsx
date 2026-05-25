@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 
 import { useAuth } from '../auth/AuthProvider'
 import { apiFetch } from '../lib/api'
-import { useLang } from '../lib/i18n'
 import { useTheme } from '../lib/theme'
 import { cn, initials } from '../lib/utils'
 import { Modal } from './ui/Modal'
@@ -14,7 +13,6 @@ interface Me {
   email: string | null
   role: string | null
   avatar_url: string | null
-  language_preference: string | null
 }
 
 const inputCls = 'w-full rounded-md border border-border bg-alt px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary'
@@ -23,7 +21,6 @@ export function PersonalSettingsModal({ open, onClose }: { open: boolean; onClos
   const qc = useQueryClient()
   const { signOut } = useAuth()
   const { theme, toggle } = useTheme()
-  const { setLang } = useLang()
 
   const [name, setName] = useState('')
   const [pwOpen, setPwOpen] = useState(false)
@@ -44,15 +41,9 @@ export function PersonalSettingsModal({ open, onClose }: { open: boolean; onClos
   })
   useEffect(() => { if (me) setName(me.full_name ?? '') }, [me])
 
-  const selectedLang = me?.language_preference === 'en' ? 'en' : 'de'
-
   const saveProfile = useMutation({
     mutationFn: () => apiFetch('/api/users/me', { method: 'PATCH', body: JSON.stringify({ full_name: name }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users-me'] }); onClose() },
-  })
-  const saveLang = useMutation({
-    mutationFn: (l: 'de' | 'en') => apiFetch('/api/users/me', { method: 'PATCH', body: JSON.stringify({ language_preference: l }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users-me'] }); flash('Einstellung gespeichert.') },
   })
   const changePw = useMutation({
     mutationFn: () => apiFetch('/api/users/me/change-password', { method: 'POST', body: JSON.stringify({ current_password: cur, new_password: nw }) }),
@@ -60,7 +51,6 @@ export function PersonalSettingsModal({ open, onClose }: { open: boolean; onClos
     onError: (e: Error) => setPwError(e.message || 'Passwort konnte nicht geändert werden.'),
   })
 
-  const pickLang = (l: 'de' | 'en') => { setLang(l); saveLang.mutate(l) }
   const submitPw = () => {
     setPwError(null)
     if (nw.length < 8) { setPwError('Neues Passwort muss mindestens 8 Zeichen haben.'); return }
@@ -109,16 +99,6 @@ export function PersonalSettingsModal({ open, onClose }: { open: boolean; onClos
               </div>
               <p className="mt-1 text-xs text-muted">E-Mail kann nicht geändert werden.</p>
             </div>
-          </div>
-        </section>
-
-        {/* Sprache */}
-        <section>
-          <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Sprache</h3>
-          <div className="inline-flex rounded-md border border-border bg-alt p-1">
-            {(['de', 'en'] as const).map((l) => (
-              <button key={l} onClick={() => pickLang(l)} className={cn('rounded px-5 py-1.5 text-sm font-medium transition', selectedLang === l ? 'bg-surface text-text shadow-e1' : 'text-muted')}>{l.toUpperCase()}</button>
-            ))}
           </div>
         </section>
 

@@ -11,7 +11,6 @@ import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../../auth/AuthProvider'
-import { useLang } from '../../lib/i18n'
 import { cn, initials } from '../../lib/utils'
 import { PersonalSettingsModal } from '../PersonalSettingsModal'
 import { isGroup, NAV, type NavLeaf } from './nav'
@@ -33,13 +32,12 @@ function Leaf({
   collapsed: boolean
   badges: Record<string, number>
 }) {
-  const { lang } = useLang()
   const Icon = leaf.icon
   const badge = leaf.badgeKey ? badges[leaf.badgeKey] : undefined
   return (
-    <NavLink to={leaf.to} end={leaf.to === '/'} className={leafClass} title={leaf.label[lang]}>
+    <NavLink to={leaf.to} end={leaf.to === '/'} className={leafClass} title={leaf.label}>
       {Icon && <Icon size={16} className="flex-shrink-0" />}
-      {!collapsed && <span className="flex-1 truncate">{leaf.label[lang]}</span>}
+      {!collapsed && <span className="flex-1 truncate">{leaf.label}</span>}
       {!collapsed && badge ? (
         <span className="rounded-full bg-error-bg px-1.5 text-xs font-bold text-error">
           {badge}
@@ -56,7 +54,6 @@ export function Sidebar({
   collapsed: boolean
   badges?: Record<string, number>
 }) {
-  const { lang } = useLang()
   const { session, signOut } = useAuth()
   const navigate = useNavigate()
   const [personalOpen, setPersonalOpen] = useState(false)
@@ -90,19 +87,19 @@ export function Sidebar({
             return <Leaf key={entry.to} leaf={entry} collapsed={collapsed} badges={badges} />
           }
           const Icon = entry.icon
-          const key = entry.label.en
+          const key = entry.label
           const open = openGroups[key]
           return (
             <div key={key}>
               <button
                 onClick={() => setOpenGroups((g) => ({ ...g, [key]: !g[key] }))}
                 className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body transition-colors hover:bg-alt"
-                title={entry.label[lang]}
+                title={entry.label}
               >
                 <Icon size={16} className="flex-shrink-0" />
                 {!collapsed && (
                   <>
-                    <span className="flex-1 text-left">{entry.label[lang]}</span>
+                    <span className="flex-1 text-left">{entry.label}</span>
                     <ChevronRight
                       size={12}
                       className={cn('text-faint transition-transform', open && 'rotate-90')}
@@ -125,7 +122,7 @@ export function Sidebar({
         <div className="my-3 h-px bg-border" />
         {!collapsed && (
           <div className="px-2 pb-2 text-xs font-bold uppercase tracking-wide text-faint">
-            {lang === 'de' ? 'KI-Konfiguration' : 'AI Configuration'}
+            KI-Konfiguration
           </div>
         )}
         <NavLink to="/kiki-zentrale" className={leafClass} title="Kiki-Zentrale">
@@ -163,23 +160,20 @@ export function Sidebar({
                 onSelect={() => setPersonalOpen(true)}
                 className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body outline-none data-[highlighted]:bg-alt"
               >
-                <Settings size={14} />
-                {lang === 'de' ? 'Persönliche Einstellungen' : 'Personal Settings'}
+                <Settings size={14} /> Persönliche Einstellungen
               </DropdownMenu.Item>
               <DropdownMenu.Item
                 onSelect={() => navigate('/settings')}
                 className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body outline-none data-[highlighted]:bg-alt"
               >
-                <Building2 size={14} />
-                {lang === 'de' ? 'Firmeneinstellungen' : 'Company Settings'}
+                <Building2 size={14} /> Firmeneinstellungen
               </DropdownMenu.Item>
               <DropdownMenu.Separator className="my-1 h-px bg-border" />
               <DropdownMenu.Item
                 onSelect={() => signOut()}
                 className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-error outline-none data-[highlighted]:bg-error-bg"
               >
-                <LogOut size={14} />
-                {lang === 'de' ? 'Abmelden' : 'Log out'}
+                <LogOut size={14} /> Abmelden
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>

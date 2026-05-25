@@ -5,7 +5,6 @@ import { BrowserRouter } from 'react-router-dom'
 
 import App from './App.tsx'
 import { AuthProvider } from './auth/AuthProvider'
-import { LangProvider } from './lib/i18n'
 import { ThemeProvider } from './lib/theme'
 import './index.css'
 
@@ -17,13 +16,11 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <LangProvider>
-          <AuthProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </AuthProvider>
-        </LangProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,

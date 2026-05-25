@@ -12,7 +12,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
 import { apiFetch, apiUpload } from '../lib/api'
-import { useLang } from '../lib/i18n'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -84,7 +83,6 @@ function useEmployeeColors(employees: Employee[]): (empId: string | null) => str
 type Filter = 'all' | 'mine' | 'unassigned' | string
 
 export function CalendarPage() {
-  const { lang } = useLang()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const qc = useQueryClient()
@@ -313,7 +311,7 @@ export function CalendarPage() {
         <FullCalendar
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
           initialView="dayGridMonth"
-          locale={lang === 'de' ? deLocale : undefined}
+          locale={deLocale}
           firstDay={1}
           height="100%"
           headerToolbar={{
@@ -321,11 +319,6 @@ export function CalendarPage() {
             center: 'title',
             right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
           }}
-          buttonText={
-            lang === 'de'
-              ? undefined
-              : { today: 'Today', month: 'Month', week: 'Week', day: 'Day', list: 'List' }
-          }
           slotMinTime="06:00:00"
           slotMaxTime="21:00:00"
           nowIndicator

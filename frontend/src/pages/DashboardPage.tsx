@@ -10,6 +10,10 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
+import { AnrufeTab } from '../components/dashboard/AnrufeTab'
+import { FinanzenTab } from '../components/dashboard/FinanzenTab'
+import { KiInsightsTab } from '../components/dashboard/KiInsightsTab'
+import { KiNutzungTab } from '../components/dashboard/KiNutzungTab'
 import { Card } from '../components/ui/Card'
 import { KpiCard } from '../components/ui/KpiCard'
 import { Tag } from '../components/ui/Tag'
@@ -29,11 +33,11 @@ interface OverviewData {
 }
 
 const TABS = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'calls', label: 'Calls', icon: Phone },
-  { id: 'finance', label: 'Finance', icon: Euro },
-  { id: 'time', label: 'Time Tracking', icon: Clock },
-  { id: 'ai', label: 'AI Insights', icon: Sparkles },
+  { id: 'overview', label: 'Übersicht', icon: LayoutDashboard },
+  { id: 'anrufe', label: 'Anrufe', icon: Phone },
+  { id: 'finanzen', label: 'Finanzen', icon: Euro },
+  { id: 'ki-nutzung', label: 'KI-Nutzung', icon: Clock },
+  { id: 'ki-insights', label: 'KI-Insights', icon: Sparkles },
 ] as const
 
 export function DashboardPage() {
@@ -44,7 +48,7 @@ export function DashboardPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-text">Dashboard</h1>
         <p className="mt-1 text-sm text-muted">
-          {new Date().toLocaleDateString('en-GB', {
+          {new Date().toLocaleDateString('de-DE', {
             weekday: 'long',
             day: 'numeric',
             month: 'long',
@@ -75,11 +79,11 @@ export function DashboardPage() {
       </div>
 
       <div key={tab} style={{ animation: 'fadeUp 220ms ease' }}>
-        {tab === 'overview' ? (
-          <OverviewTab />
-        ) : (
-          <Card className="text-sm text-muted">This tab ships in a later phase.</Card>
-        )}
+        {tab === 'overview' && <OverviewTab />}
+        {tab === 'anrufe' && <AnrufeTab />}
+        {tab === 'finanzen' && <FinanzenTab />}
+        {tab === 'ki-nutzung' && <KiNutzungTab />}
+        {tab === 'ki-insights' && <KiInsightsTab />}
       </div>
     </div>
   )
@@ -95,16 +99,16 @@ function OverviewTab() {
   if (!isSupabaseConfigured) {
     return (
       <Card className="text-sm text-muted">
-        Connect Supabase and the backend API to load live dashboard data.
+        Verbinden Sie Supabase und die Backend-API, um Live-Daten zu laden.
       </Card>
     )
   }
 
-  if (isLoading) return <Card className="text-sm text-muted">Loading overview…</Card>
+  if (isLoading) return <Card className="text-sm text-muted">Übersicht wird geladen…</Card>
   if (error)
     return (
       <Card className="text-sm text-error">
-        Could not load overview: {(error as Error).message}
+        Übersicht konnte nicht geladen werden: {(error as Error).message}
       </Card>
     )
 
@@ -112,58 +116,39 @@ function OverviewTab() {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <KpiCard
-          label="Open Inquiries"
-          value={kpis?.open_inquiries ?? 0}
-          icon={Sparkles}
-          sub="awaiting action"
-        />
-        <KpiCard
-          label="Total Customers"
-          value={kpis?.total_customers ?? 0}
-          icon={Users2}
-          sub="in this organization"
-        />
-        <KpiCard
-          label="Upcoming Appointments"
-          value={kpis?.upcoming_appointments ?? 0}
-          icon={Calendar}
-          sub="next 5 scheduled"
-        />
+        <KpiCard label="Offene Anfragen" value={kpis?.open_inquiries ?? 0} icon={Sparkles} sub="warten auf Bearbeitung" />
+        <KpiCard label="Kunden gesamt" value={kpis?.total_customers ?? 0} icon={Users2} sub="in dieser Organisation" />
+        <KpiCard label="Anstehende Termine" value={kpis?.upcoming_appointments ?? 0} icon={Calendar} sub="nächste 5 geplant" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
-          <h2 className="mb-3 text-sm font-bold text-text">Open Tasks</h2>
+          <h2 className="mb-3 text-sm font-bold text-text">Offene Aufgaben</h2>
           {data?.open_tasks.length ? (
             <ul className="space-y-2">
               {data.open_tasks.map((t) => (
                 <li key={t.id} className="flex items-center gap-2.5 rounded-md p-2 hover:bg-alt">
                   <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-green-primary" />
-                  <span className="flex-1 truncate text-sm text-text">
-                    {t.title ?? 'Untitled'}
-                  </span>
+                  <span className="flex-1 truncate text-sm text-text">{t.title ?? 'Ohne Titel'}</span>
                   {t.type && <Tag variant="info">{t.type}</Tag>}
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted">No open tasks.</p>
+            <p className="text-sm text-muted">Keine offenen Aufgaben.</p>
           )}
         </Card>
 
         <Card>
-          <h2 className="mb-3 text-sm font-bold text-text">Upcoming Appointments</h2>
+          <h2 className="mb-3 text-sm font-bold text-text">Anstehende Termine</h2>
           {data?.upcoming_appointments.length ? (
             <ul className="space-y-2">
               {data.upcoming_appointments.map((a) => (
                 <li key={a.id} className="flex items-center gap-2.5 rounded-md p-2 hover:bg-alt">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm text-text">{a.title ?? 'Appointment'}</div>
+                    <div className="truncate text-sm text-text">{a.title ?? 'Termin'}</div>
                     <div className="text-xs text-muted">
-                      {a.scheduled_at
-                        ? new Date(a.scheduled_at).toLocaleString('en-GB')
-                        : '—'}
+                      {a.scheduled_at ? new Date(a.scheduled_at).toLocaleString('de-DE') : '—'}
                     </div>
                   </div>
                   <Tag variant="green">{a.status}</Tag>
@@ -171,7 +156,7 @@ function OverviewTab() {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted">No upcoming appointments.</p>
+            <p className="text-sm text-muted">Keine anstehenden Termine.</p>
           )}
         </Card>
       </div>
