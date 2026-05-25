@@ -14,6 +14,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { EmployeesPage } from './pages/EmployeesPage'
 import { InvoiceFormPage } from './pages/InvoiceFormPage'
 import { InvoicesPage } from './pages/InvoicesPage'
+import { KikiZentralePage } from './pages/KikiZentralePage'
 import { LoginPage } from './pages/LoginPage'
 import { PlanningBoardPage } from './pages/PlanningBoardPage'
 import { Placeholder } from './pages/Placeholder'
@@ -47,7 +48,9 @@ export default function App() {
           <Route path="invoices/:id" element={<InvoiceFormPage />} />
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="employees" element={<EmployeesPage />} />
-          <Route path="kiki" element={<Placeholder title="Kiki-Zentrale" />} />
+          <Route path="kiki" element={<Navigate to="/kiki-zentrale/verhalten" replace />} />
+          <Route path="kiki-zentrale" element={<Navigate to="/kiki-zentrale/verhalten" replace />} />
+          <Route path="kiki-zentrale/:section" element={<KikiZentralePage />} />
           <Route path="settings" element={<Navigate to="/settings/stammdaten" replace />} />
           <Route path="settings/:section" element={<SettingsPage />} />
           <Route path="settings/personal" element={<Placeholder title="Personal Settings" />} />

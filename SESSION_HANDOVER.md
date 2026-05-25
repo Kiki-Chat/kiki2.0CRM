@@ -3,7 +3,7 @@
 > Paste this as starting context. Read `HANDOVER.md` for full detail. Scannable summary below.
 
 ## 1. Current state
-- **HEAD (main):** `49353ed` — `feat: Einstellungen — migration 0014, settings/users API + Fernet, /settings sections + personal modal`
+- **HEAD (main):** Kiki-Zentrale complete (this commit) — `feat: Kiki-Zentrale — full agent control with safety layer, snapshots, rollback, and audit`. Prior: `eb972ae` (docs: session handover).
 - **Working tree:** clean, pushed to `origin/main`.
 - **Modules complete:**
   - Shell + Auth (Supabase email/pw + magic link, protected routes)
@@ -18,7 +18,8 @@
   - **Rechnungen / Invoices** (migration 0012) — list/form/PDF, KVA→invoice
   - **Projekte** (migration 0013) — list/form/workspace (9 tabs) + Calendar timeline
   - **Einstellungen / Settings** (migration 0014) — `/settings/:section` + personal modal
-- **Remaining: Kiki-Zentrale only** (`/kiki`) — agent_configs editor → pushes to ElevenLabs. Nothing else.
+  - **Kiki-Zentrale** (migration 0015) — `/kiki-zentrale/:section`, 13 sections (Verhalten, Prompt-Editor, Pflichtfelder, Branche & Kontext, Terminregeln, Terminkategorien, KVA-Automatisierung, Preisauskunft, Leistungsangebot, Notdienst, Telefon, Ausgehende Anrufe, Verlauf & Rückgängig). Safety layer `services/elevenlabs_agent.py`: cross-org guard → pre-write snapshot → additive array merge → **audio assertion** → surgical PATCH → post-write verify → **auto-rollback** → per-field audit. 35 endpoints; 8 unit + 6 live tests green; E2E 15/15.
+- **Remaining: none — all CRM modules complete.**
 
 ## 2. Tech stack
 - **Frontend:** React + TS + Vite, Tailwind (CSS-var design tokens), TanStack Query, React Router, Radix UI, FullCalendar, @dnd-kit. **Local-only** (`localhost:5173`, not on Vercel yet).

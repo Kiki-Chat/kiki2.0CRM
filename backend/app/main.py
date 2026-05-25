@@ -15,6 +15,7 @@ from app.api.routes import (
     health,
     inquiries,
     invoices,
+    kiki_zentrale,
     me,
     planning_board,
     post_call,
@@ -66,6 +67,7 @@ app.include_router(planning_board.router)
 app.include_router(projects.router)
 app.include_router(cost_estimates.router)
 app.include_router(invoices.router)
+app.include_router(kiki_zentrale.router)
 app.include_router(catalog.router)
 app.include_router(catalog.items_router)
 app.include_router(text_modules.router)

@@ -128,7 +128,7 @@ export function Sidebar({
             {lang === 'de' ? 'KI-Konfiguration' : 'AI Configuration'}
           </div>
         )}
-        <NavLink to="/kiki" className={leafClass} title="Kiki-Zentrale">
+        <NavLink to="/kiki-zentrale" className={leafClass} title="Kiki-Zentrale">
           <Bot size={16} className="flex-shrink-0 text-ai" />
           {!collapsed && <span className="flex-1">Kiki-Zentrale</span>}
         </NavLink>
