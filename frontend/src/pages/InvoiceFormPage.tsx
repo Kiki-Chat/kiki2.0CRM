@@ -74,6 +74,7 @@ export function InvoiceFormPage() {
 
   const [customerId, setCustomerId] = useState(params.get('customer_id') || '')
   const [kvaId, setKvaId] = useState('')
+  const [projectId, setProjectId] = useState(params.get('project_id') || '')
   const [subject, setSubject] = useState('')
   const [reference, setReference] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(todayIso())
@@ -135,6 +136,7 @@ export function InvoiceFormPage() {
     if (!existing) return
     setCustomerId((existing.customer_id as string) || '')
     setKvaId((existing.kva_id as string) || (existing.cost_estimate_id as string) || '')
+    setProjectId((existing.project_id as string) || '')
     setSubject((existing.subject as string) || '')
     setReference((existing.reference_number as string) || '')
     setInvoiceDate(((existing.invoice_date as string) || '').slice(0, 10) || todayIso())
@@ -158,6 +160,7 @@ export function InvoiceFormPage() {
   const payload = useMemo(() => ({
     customer_id: customerId || null,
     kva_id: kvaId || null,
+    project_id: projectId || null,
     subject, reference_number: reference,
     invoice_date: invoiceDate, performance_date: performanceDate || null,
     payment_terms_days: paymentTermsDays,
@@ -165,7 +168,7 @@ export function InvoiceFormPage() {
     positions: positions.map(({ _id, ...p }) => p),
     intro_text: introText, closing_text: closingText, payment_terms_text: paymentTermsText,
     surcharge, surcharge_description: surchargeDesc, total_discount_pct: discountPct,
-  }), [customerId, kvaId, subject, reference, invoiceDate, performanceDate, paymentTermsDays, skontoPct, skontoDays, positions, introText, closingText, paymentTermsText, surcharge, surchargeDesc, discountPct])
+  }), [customerId, kvaId, projectId, subject, reference, invoiceDate, performanceDate, paymentTermsDays, skontoPct, skontoDays, positions, introText, closingText, paymentTermsText, surcharge, surchargeDesc, discountPct])
 
   // ── Live PDF preview (debounced) ──
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)

@@ -75,6 +75,7 @@ def _create(org_id: str, payload: AppointmentCreate) -> dict:
         "org_id": org_id,
         "customer_id": payload.customer_id,
         "inquiry_id": payload.inquiry_id,
+        "project_id": payload.project_id,
         "title": payload.title or "Termin",
         "scheduled_at": payload.scheduled_at,
         "duration_minutes": payload.duration_minutes,

@@ -18,6 +18,7 @@ from app.api.routes import (
     me,
     planning_board,
     post_call,
+    projects,
     provision,
     text_modules,
     tool_assets,
@@ -60,6 +61,7 @@ app.include_router(calendar_settings.router)
 app.include_router(vehicles.router)
 app.include_router(tool_assets.router)
 app.include_router(planning_board.router)
+app.include_router(projects.router)
 app.include_router(cost_estimates.router)
 app.include_router(invoices.router)
 app.include_router(catalog.router)

@@ -17,6 +17,9 @@ import { InvoicesPage } from './pages/InvoicesPage'
 import { LoginPage } from './pages/LoginPage'
 import { PlanningBoardPage } from './pages/PlanningBoardPage'
 import { Placeholder } from './pages/Placeholder'
+import { ProjectFormPage } from './pages/ProjectFormPage'
+import { ProjectsPage } from './pages/ProjectsPage'
+import { ProjectWorkspacePage } from './pages/ProjectWorkspacePage'
 
 export default function App() {
   return (
@@ -30,7 +33,10 @@ export default function App() {
           <Route path="customers/:id" element={<CustomerDetailPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="calendar/business-hours" element={<BusinessHoursPage />} />
-          <Route path="projects" element={<Placeholder title="Projekte" />} />
+          <Route path="projects" element={<ProjectsPage />} />
+          <Route path="projects/new" element={<ProjectFormPage />} />
+          <Route path="projects/:id" element={<ProjectWorkspacePage />} />
+          <Route path="projects/:id/edit" element={<ProjectFormPage />} />
           <Route path="planning-board" element={<PlanningBoardPage />} />
           <Route path="cost-estimates" element={<CostEstimatesPage />} />
           <Route path="cost-estimates/new" element={<CostEstimateFormPage />} />

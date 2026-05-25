@@ -76,6 +76,7 @@ export function CostEstimateFormPage() {
 
   const [customerId, setCustomerId] = useState(params.get('customer_id') || '')
   const [inquiryId, setInquiryId] = useState(params.get('inquiry_id') || '')
+  const [projectId, setProjectId] = useState(params.get('project_id') || '')
   const [type, setType] = useState('kva')
   const [subject, setSubject] = useState('')
   const [reference, setReference] = useState('')
@@ -119,6 +120,7 @@ export function CostEstimateFormPage() {
     if (!existing) return
     setCustomerId((existing.customer_id as string) || '')
     setInquiryId((existing.inquiry_id as string) || '')
+    setProjectId((existing.project_id as string) || '')
     setType((existing.type as string) || 'kva')
     setSubject((existing.subject as string) || '')
     setReference((existing.reference_number as string) || '')
@@ -169,12 +171,13 @@ export function CostEstimateFormPage() {
   const payload = useMemo(() => ({
     customer_id: customerId || null,
     inquiry_id: inquiryId || null,
+    project_id: projectId || null,
     type, subject, reference_number: reference, is_binding: isBinding,
     tolerance_pct: tolerance, validity_days: validity,
     positions: positions.map(({ _id, ...p }) => p),
     intro_text: introText, closing_text: closingText, payment_terms: paymentTerms,
     surcharge, surcharge_description: surchargeDesc, total_discount_pct: discountPct,
-  }), [customerId, inquiryId, type, subject, reference, isBinding, tolerance, validity, positions, introText, closingText, paymentTerms, surcharge, surchargeDesc, discountPct])
+  }), [customerId, inquiryId, projectId, type, subject, reference, isBinding, tolerance, validity, positions, introText, closingText, paymentTerms, surcharge, surchargeDesc, discountPct])
 
   useEffect(() => {
     let cancelled = false

@@ -47,6 +47,20 @@ interface Me {
 // ─── Constants ───────────────────────────────────────────────────────────────
 const EMP_COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#0891B2', '#65A30D']
 const UNASSIGNED_COLOR = '#78756F'
+const PROJECT_STATUS_COLOR: Record<string, string> = {
+  planning: '#9CA3AF',
+  active: '#2D6B3D',
+  completed: '#2563EB',
+  archived: '#B0A59A',
+}
+
+interface ProjectRow {
+  id: string
+  title: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+}
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Offen',
   confirmed: 'Bestätigt',
@@ -80,6 +94,7 @@ export function CalendarPage() {
   const [detail, setDetail] = useState<Appointment | null>(null)
   const [createAt, setCreateAt] = useState<Date | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
+  const [mode, setMode] = useState<'appointments' | 'projects'>('appointments')
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -130,6 +145,36 @@ export function CalendarPage() {
     [appointments, filter, myEmployeeId, colorFor],
   )
 
+  // Project timeline: each project rendered as a bar spanning start_date → end_date.
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => apiFetch<ProjectRow[]>('/api/projects'),
+    enabled: mode === 'projects',
+    staleTime: 5 * 60 * 1000,
+  })
+  const projectEvents = useMemo(
+    () =>
+      projects
+        .filter((p) => p.start_date)
+        .map((p) => {
+          const end = p.end_date
+            ? new Date(new Date(p.end_date).getTime() + 86400000).toISOString().slice(0, 10)
+            : undefined
+          const color = PROJECT_STATUS_COLOR[p.status] ?? UNASSIGNED_COLOR
+          return {
+            id: p.id,
+            title: p.title,
+            start: p.start_date!,
+            end,
+            allDay: true,
+            backgroundColor: color,
+            borderColor: color,
+            extendedProps: { projectId: p.id },
+          }
+        }),
+    [projects],
+  )
+
   const filterLabel =
     filter === 'all'
       ? 'Alle Termine'
@@ -163,8 +208,16 @@ export function CalendarPage() {
     <div className="flex h-full flex-col p-8">
       {/* Header */}
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-text">Kalender</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-text">Kalender</h1>
+          <div className="flex gap-1 rounded-md border border-border bg-alt p-1">
+            <button onClick={() => setMode('appointments')} className={cn('rounded px-3 py-1 text-sm', mode === 'appointments' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Termine</button>
+            <button onClick={() => setMode('projects')} className={cn('rounded px-3 py-1 text-sm', mode === 'projects' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Projekt-Timeline</button>
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
+          {mode === 'appointments' && (
+          <>
           {/* Filter dropdown */}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
@@ -244,6 +297,8 @@ export function CalendarPage() {
               e.target.value = ''
             }}
           />
+          </>
+          )}
         </div>
       </div>
 
@@ -277,16 +332,21 @@ export function CalendarPage() {
           dayMaxEvents={3}
           eventDisplay="block"
           eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
-          events={events}
+          events={mode === 'projects' ? projectEvents : events}
           datesSet={(info) =>
             setRange({ from: info.start.toISOString(), to: info.end.toISOString() })
           }
           dateClick={(info) => {
+            if (mode === 'projects') return
             const d = info.date
             if (info.allDay) d.setHours(9, 0, 0, 0)
             setCreateAt(d)
           }}
           eventClick={(info) => {
+            if (mode === 'projects') {
+              navigate(`/projects/${info.event.extendedProps.projectId}`)
+              return
+            }
             const appt = info.event.extendedProps.appt as Appointment
             if (appt) setDetail(appt)
           }}

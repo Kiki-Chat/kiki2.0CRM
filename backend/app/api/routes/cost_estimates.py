@@ -98,6 +98,7 @@ def _build_row(org_id: str, payload: CostEstimateUpsert, user_id: str | None) ->
         "org_id": org_id,
         "customer_id": payload.customer_id,
         "inquiry_id": payload.inquiry_id,
+        "project_id": payload.project_id,
         "type": payload.type,
         "subject": payload.subject,
         "reference_number": payload.reference_number,

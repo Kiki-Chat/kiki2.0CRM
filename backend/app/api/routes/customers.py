@@ -107,7 +107,7 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     customer = rows[0]
     customer["inquiries"] = (
         client.table("inquiries")
-        .select("id, number, title, type, status, created_at")
+        .select("id, number, title, type, status, created_at, project_id")
         .eq("org_id", org_id)
         .eq("customer_id", customer_id)
         .neq("status", "deleted")

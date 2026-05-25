@@ -9,6 +9,7 @@ class InquiryUpdate(BaseModel):
     title: str | None = None
     type: str | None = None  # appointment | offer | info | recall
     notes: str | None = None
+    project_id: str | None = None
 
     # Distinguish "set to null" from "not provided" for assignment.
     model_config = {"extra": "ignore"}
@@ -139,6 +140,7 @@ class CostEstimatePosition(BaseModel):
 class CostEstimateUpsert(BaseModel):
     customer_id: str | None = None
     inquiry_id: str | None = None
+    project_id: str | None = None
     type: str = "kva"  # kva | offer | invoice
     subject: str | None = None
     reference_number: str | None = None
@@ -168,6 +170,7 @@ class CostEstimateSend(BaseModel):
 class InvoiceUpsert(BaseModel):
     customer_id: str | None = None
     kva_id: str | None = None  # source cost estimate (stored in cost_estimate_id)
+    project_id: str | None = None
     subject: str | None = None
     reference_number: str | None = None
     invoice_date: str | None = None  # ISO date; defaults to today
@@ -206,3 +209,34 @@ class AppointmentCreate(BaseModel):
     assigned_employee_id: str | None = None
     notes: str | None = None
     inquiry_id: str | None = None
+    project_id: str | None = None
+
+
+class ProjectUpsert(BaseModel):
+    customer_id: str | None = None
+    title: str
+    description: str | None = None
+    status: str | None = None  # planning | active | completed | archived
+    start_date: str | None = None
+    end_date: str | None = None
+    planned_budget: float | None = None
+    project_address: dict | None = None  # {street, postcode, city}
+    internal_notes: str | None = None
+
+
+class ProjectPatch(BaseModel):
+    customer_id: str | None = None
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    planned_budget: float | None = None
+    project_address: dict | None = None
+    internal_notes: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+
+class ProjectEmployeeAdd(BaseModel):
+    employee_id: str

@@ -47,6 +47,7 @@ def _build_row(org_id: str, payload: InvoiceUpsert, user_id: str | None) -> dict
         "org_id": org_id,
         "customer_id": payload.customer_id,
         "cost_estimate_id": payload.kva_id,
+        "project_id": payload.project_id,
         "subject": payload.subject,
         "reference_number": payload.reference_number,
         "invoice_date": inv_date,

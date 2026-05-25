@@ -18,6 +18,7 @@ class InquiryCreate(BaseModel):
     title: str | None = None
     type: str | None = None
     notes: str | None = None
+    project_id: str | None = None
 
 
 def _create(org_id: str, payload: InquiryCreate) -> dict:
@@ -25,6 +26,7 @@ def _create(org_id: str, payload: InquiryCreate) -> dict:
     row = {
         "org_id": org_id,
         "customer_id": payload.customer_id,
+        "project_id": payload.project_id,
         "title": payload.title or "Neue Anfrage",
         "type": payload.type or "info",
         "status": "open",
@@ -56,6 +58,8 @@ def _update(org_id: str, inquiry_id: str, payload: InquiryUpdate) -> dict | None
         fields["notes"] = payload.notes
     if payload.assigned_employee_id is not None:
         fields["assigned_employee_id"] = payload.assigned_employee_id or None
+    if payload.project_id is not None:
+        fields["project_id"] = payload.project_id or None
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
     fields["updated_at"] = "now()"
