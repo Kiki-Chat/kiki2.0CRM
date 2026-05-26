@@ -64,6 +64,35 @@ def require_org(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is not attached to an organization",
         )
+    # P0.6 — block login when org is disabled. Super-admins bypass so they
+    # can still re-enable orgs from the super-admin panel.
+    if user.role != "super_admin":
+        client = get_service_client()
+        org_rows = (
+            client.table("organizations")
+            .select("disabled_at")
+            .eq("id", user.org_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if org_rows and org_rows[0].get("disabled_at"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Diese Organisation ist deaktiviert.",
+            )
+    return user
+
+
+def require_super_admin(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Gate for /api/super-admin/* endpoints. Allows any user whose
+    public.users.role = 'super_admin' (regardless of org_id binding)."""
+    if user.role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Nur Super-Admins dürfen diesen Bereich nutzen.",
+        )
     return user
 
 
