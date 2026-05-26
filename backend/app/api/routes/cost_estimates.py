@@ -21,6 +21,13 @@ from app.services.cost_estimates import (
 
 router = APIRouter(prefix="/api/cost-estimates", tags=["cost-estimates"])
 
+# Status → timestamp column for the generic PATCH /status endpoint. Mirrors
+# invoices._STAMP. The dedicated POST /send route stamps sent_at directly, but
+# a status-transition to "sent" through this endpoint must also fill it, or
+# the AI Insights `kva_followup` suggestion (dashboard._ai_insights) silently
+# never fires for that KVA because it gates on a non-NULL sent_at.
+_STAMP = {"sent": "sent_at", "accepted": "accepted_at", "rejected": "rejected_at"}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -312,8 +319,8 @@ async def duplicate_estimate(ce_id: str, user: CurrentUser = Depends(require_org
 async def set_status(
     ce_id: str, payload: CostEstimateStatus, user: CurrentUser = Depends(require_org)
 ) -> dict:
-    stamp = {"accepted": "accepted_at", "rejected": "rejected_at"}.get(payload.status)
     fields = {"status": payload.status}
+    stamp = _STAMP.get(payload.status)
     if stamp:
         fields[stamp] = _now()
 
