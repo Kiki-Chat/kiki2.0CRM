@@ -107,8 +107,12 @@ export function CallLogsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
-  const me = useQuery({ queryKey: ['me'], queryFn: () => apiFetch<{ org_id: string }>('/api/me') })
+  const me = useQuery({
+    queryKey: ['me'],
+    queryFn: () => apiFetch<{ org_id: string; role?: string | null }>('/api/me'),
+  })
   const orgId = me.data?.org_id
+  const isSuperAdmin = me.data?.role === 'super_admin'
 
   const callsQuery = useQuery({
     queryKey: ['calls'],
@@ -202,7 +206,7 @@ export function CallLogsPage() {
       </aside>
 
       {selectedId ? (
-        <CallDetail callId={selectedId} />
+        <CallDetail callId={selectedId} isSuperAdmin={isSuperAdmin} />
       ) : (
         <div className="flex flex-1 items-center justify-center text-muted">
           <div className="flex flex-col items-center gap-2">
@@ -215,7 +219,7 @@ export function CallLogsPage() {
   )
 }
 
-function CallDetail({ callId }: { callId: string }) {
+function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: boolean }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [tab, setTab] = useState<'actions' | 'details' | 'course'>('actions')
@@ -249,7 +253,7 @@ function CallDetail({ callId }: { callId: string }) {
 
   return (
     <>
-      <Transcript call={call} />
+      <Transcript call={call} isSuperAdmin={isSuperAdmin} />
 
       {/* RIGHT PANEL */}
       <aside className="flex w-96 flex-shrink-0 flex-col border-l border-border bg-surface">
@@ -344,7 +348,7 @@ function CallDetail({ callId }: { callId: string }) {
   )
 }
 
-function Transcript({ call }: { call: CallDetail }) {
+function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: boolean }) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [audioState, setAudioState] = useState<'idle' | 'loading' | 'error'>('idle')
 
@@ -412,14 +416,17 @@ function Transcript({ call }: { call: CallDetail }) {
                     {turn.message}
                   </div>
                 )}
-                {turn.tool_calls.filter(Boolean).map((t, j) => (
-                  <span
-                    key={j}
-                    className="mt-1 inline-block rounded-full bg-ai-bg px-2 py-0.5 text-[11px] font-semibold text-ai"
-                  >
-                    ⚙ {t}
-                  </span>
-                ))}
+                {/* Tool-call ⚙ chips: internal debugging only, never shown to customers.
+                    Stored on the call so super-admins can still inspect them. */}
+                {isSuperAdmin &&
+                  turn.tool_calls.filter(Boolean).map((t, j) => (
+                    <span
+                      key={j}
+                      className="mt-1 inline-block rounded-full bg-ai-bg px-2 py-0.5 text-[11px] font-semibold text-ai"
+                    >
+                      ⚙ {t}
+                    </span>
+                  ))}
               </div>
             </div>
           )
