@@ -17,6 +17,7 @@ from app.api.routes import (
     invoices,
     kiki_zentrale,
     me,
+    oauth,
     planning_board,
     post_call,
     projects,
@@ -76,6 +77,7 @@ app.include_router(documents.router)
 app.include_router(settings_routes.router)
 app.include_router(users.router)
 app.include_router(super_admin.router)
+app.include_router(oauth.router)
 
 # ElevenLabs tool webhooks (Phase 2 — handlers stubbed, return 501 for now).
 app.include_router(identify_customer.router)
