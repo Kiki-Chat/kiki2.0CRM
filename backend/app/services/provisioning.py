@@ -24,6 +24,17 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
     """Create org + admin user + default agent_config + org secret.
 
     Rejects duplicates on heykiki_org_id OR login_email (no silent overwrite).
+
+    P0.9 — Fresh-tenant audit (2026-05-26): this function inserts ONLY the
+    four rows listed below. NO customers / calls / inquiries / appointments /
+    cost_estimates / invoices / employees / vehicles / tools / catalog_items /
+    text_modules / projects / documents are seeded. Any pre-existing
+    "test data" in older orgs (e.g. c4dbf596) came from manual verification
+    testing, not from this provisioning path. New customers therefore start
+    with an empty CRM. Historical EL conversations are imported separately
+    via app.services.history_import.import_agent_history scheduled by the
+    /api/heykiki/provision route as a BackgroundTask after this function
+    returns.
     """
     client = get_service_client()
 

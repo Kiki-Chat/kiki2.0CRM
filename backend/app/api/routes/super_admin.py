@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_super_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.provision import ProvisionRequest, ProvisionResponse
+from app.services.history_import import import_agent_history
 from app.services.provisioning import provision_org
 
 router = APIRouter(prefix="/api/super-admin", tags=["super-admin"])
@@ -215,6 +216,28 @@ async def create_org(
 # ─── Convenience: promote/demote (for the one-shot super-admin user flow) ────
 class RoleChange(BaseModel):
     role: str  # 'super_admin' | 'org_admin' | 'employee'
+
+
+# ─── Manual re-trigger for the post-provision history import (P0.9) ─────────
+@router.post("/orgs/{org_id}/import-history")
+async def import_history(
+    org_id: str,
+    _user: CurrentUser = Depends(require_super_admin),
+) -> dict:
+    """Re-trigger the historical EL-conversation import for an existing org.
+    Idempotent via the P0.2 SELECT-first dedup, so re-runs only process
+    newly-appeared conversations."""
+    org = await run_in_threadpool(_get_org, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation nicht gefunden.")
+    agent_id = org.get("elevenlabs_agent_id")
+    if not agent_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Diese Organisation hat keine ElevenLabs Agent ID hinterlegt.",
+        )
+    counters = await run_in_threadpool(import_agent_history, org_id, agent_id)
+    return {"success": True, "org_id": org_id, **counters}
 
 
 @router.patch("/users/{user_id}/role")
