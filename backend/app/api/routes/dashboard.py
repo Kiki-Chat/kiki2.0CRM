@@ -101,6 +101,17 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
 
     open_inquiries = _count(client, "inquiries", org_id, status="open")
     total_customers = _count(client, "customers", org_id)
+    # P0.4 — unread calls (sidebar badge source). Direct query because `_count`
+    # only filters with `.eq()`; we need `read_at is null`.
+    unread_calls = (
+        client.table("calls")
+        .select("id", count="exact")
+        .eq("org_id", org_id)
+        .is_("read_at", "null")
+        .execute()
+        .count
+        or 0
+    )
 
     appts_res = (
         client.table("appointments")
@@ -129,6 +140,7 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
             "open_inquiries": open_inquiries,
             "total_customers": total_customers,
             "upcoming_appointments": len(upcoming),
+            "unread_calls": unread_calls,
         },
         "open_tasks": open_tasks,
         "upcoming_appointments": upcoming,

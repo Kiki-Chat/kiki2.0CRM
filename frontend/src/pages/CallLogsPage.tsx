@@ -45,6 +45,7 @@ interface CallListItem {
   started_at: string | null
   data_collection: Record<string, string> | null
   customer_id: string | null
+  read_at: string | null  // P0.4 — null = unread; non-null = first opened at
   customers: { full_name: string | null } | null
 }
 interface CallDetail extends CallListItem {
@@ -120,6 +121,27 @@ export function CallLogsPage() {
   })
   const calls = callsQuery.data?.calls ?? []
 
+  // P0.4 — Gmail-style mark-read on open. Idempotent backend; only fire when
+  // the selected call is currently unread to avoid wasted requests on reopens.
+  const markRead = useMutation({
+    mutationFn: (callId: string) =>
+      apiFetch(`/api/calls/${callId}/mark-read`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['calls'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
+    },
+  })
+  useEffect(() => {
+    if (!selectedId) return
+    const selected = calls.find((c) => c.id === selectedId)
+    if (selected && selected.read_at === null) {
+      markRead.mutate(selectedId)
+    }
+    // markRead intentionally excluded from deps — mutation identity is stable
+    // and we only want to fire when selectedId / calls change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, calls])
+
   useEffect(() => {
     const sb = supabase
     if (!orgId || !sb) return
@@ -169,6 +191,7 @@ export function CallLogsPage() {
         <div className="flex-1 space-y-1 overflow-y-auto p-2">
           {filtered.map((c) => {
             const active = c.id === selectedId
+            const isUnread = c.read_at === null  // P0.4 — Gmail-style read/unread
             const Icon = c.direction === 'outbound' ? PhoneOutgoing : PhoneIncoming
             return (
               <button
@@ -186,10 +209,24 @@ export function CallLogsPage() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-semibold text-text">{displayName(c)}</span>
+                    <span
+                      className={cn(
+                        'truncate text-sm',
+                        isUnread ? 'font-semibold text-text' : 'font-medium text-muted',
+                      )}
+                    >
+                      {displayName(c)}
+                    </span>
                     <Icon size={13} className="flex-shrink-0 text-muted" />
                   </div>
-                  <div className="truncate text-xs text-muted">{c.summary_title ?? 'Anruf'}</div>
+                  <div
+                    className={cn(
+                      'truncate text-xs',
+                      isUnread ? 'text-body' : 'text-muted',
+                    )}
+                  >
+                    {c.summary_title ?? 'Anruf'}
+                  </div>
                   <div className="mt-1 flex items-center gap-2 text-[11px] text-faint">
                     <span>{fmtTime(c.started_at)}</span>
                     <span>·</span>

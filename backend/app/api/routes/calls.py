@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
 from starlette.concurrency import run_in_threadpool
@@ -10,7 +12,7 @@ router = APIRouter(prefix="/api/calls", tags=["calls"])
 
 _LIST_SELECT = (
     "id, elevenlabs_conversation_id, caller_number, summary_title, direction, "
-    "duration_seconds, started_at, status, data_collection, customer_id, "
+    "duration_seconds, started_at, status, data_collection, customer_id, read_at, "
     "customers(full_name)"
 )
 
@@ -81,6 +83,50 @@ async def ensure_call_inquiry_route(
     if inquiry is None:
         raise HTTPException(status_code=404, detail="Call not found")
     return inquiry
+
+
+# ─── Gmail-style read/unread (P0.4) ─────────────────────────────────────────
+def _mark_read(org_id: str, call_id: str) -> dict | None:
+    """Idempotent mark-read: sets read_at = now() ONLY if currently NULL,
+    so the original 'first opened at' timestamp is preserved on reopens."""
+    client = get_service_client()
+    rows = (
+        client.table("calls")
+        .select("id, read_at")
+        .eq("org_id", org_id)
+        .eq("id", call_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not rows:
+        return None
+    if rows[0]["read_at"] is None:
+        client.table("calls").update(
+            {"read_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("org_id", org_id).eq("id", call_id).execute()
+    # Always re-read so the response reflects the persisted timestamp,
+    # whether we just wrote it or it was already there.
+    updated = (
+        client.table("calls")
+        .select("id, read_at")
+        .eq("org_id", org_id)
+        .eq("id", call_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    return updated[0] if updated else None
+
+
+@router.post("/{call_id}/mark-read")
+async def mark_call_read(call_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+    """Mark a call as read by the current user's org. Idempotent — opening
+    the same call twice keeps the original read_at timestamp."""
+    result = await run_in_threadpool(_mark_read, user.org_id, call_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return {"id": result["id"], "read_at": result["read_at"]}
 
 
 @router.get("/{call_id}/audio")
