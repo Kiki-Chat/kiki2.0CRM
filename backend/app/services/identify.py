@@ -15,7 +15,35 @@ _SELECT = "id, full_name, phone, email, customer_number, address"
 
 
 def _norm_phone(value: str | None) -> str:
+    """Strip non-digits. Used for forwarded-call detection where both sides
+    come from the same EL/Telnyx phone system in the same format."""
     return re.sub(r"\D", "", value or "")
+
+
+def _to_e164(value: str | None, default_country: str = "49") -> str | None:
+    """Best-effort E.164 normalization. German default (since the customer base
+    is DE tradespeople). Handles:
+      - already E.164: '+4915734432281' → '+4915734432281'
+      - local German: '0157 344 322 81' → '+49157344322 81' (joins to '+49157344322281')
+      - international 00-prefix: '00 49 170 111 222' → '+49170111222'
+      - international without +: '918920100973' → '+918920100973'
+    Returns None for empty/whitespace input. Used on every customer-table read
+    and write so different-format renderings of the same number collapse to a
+    single canonical phone column value.
+    """
+    if not value:
+        return None
+    digits = re.sub(r"\D", "", value)
+    if not digits:
+        return None
+    if digits.startswith("00"):
+        # International prefix "00" — strip and turn into "+".
+        return "+" + digits[2:]
+    if digits.startswith("0"):
+        # Local format (German default) — drop the trunk-0, prepend country code.
+        return f"+{default_country}{digits[1:]}"
+    # Already in international form without "+" (e.g. "918920100973").
+    return "+" + digits
 
 
 def _format_address(addr) -> str | None:
@@ -120,11 +148,16 @@ def identify_customer(org_id: str, payload: IdentifyCustomerRequest) -> dict:
             "message": "Kein bestehender Eintrag gefunden.",
         }
 
+    # P0.8 — normalize the caller to E.164 so different formats of the same
+    # number match the canonical stored value. New customers (post-P0.8) have
+    # phone stored in E.164 by get_or_create_customer; legacy rows may not match
+    # until they're backfilled separately.
+    caller_norm = _to_e164(caller)
     rows = (
         client.table("customers")
         .select(_SELECT)
         .eq("org_id", org_id)
-        .eq("phone", caller)
+        .eq("phone", caller_norm or caller)
         .limit(10)
         .execute()
         .data

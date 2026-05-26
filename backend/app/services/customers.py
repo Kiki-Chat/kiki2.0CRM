@@ -3,6 +3,7 @@
 from app.db.supabase_client import get_service_client
 from app.schemas.tools import UpdateCustomerDataRequest
 from app.services.common import gen_customer_number
+from app.services.identify import _to_e164
 
 _SELECT = "id, full_name, phone, email, customer_number, address, identified_by"
 
@@ -15,14 +16,21 @@ def get_or_create_customer(
     email: str | None = None,
     address: str | None = None,
 ) -> dict:
-    """Find a customer by phone within the org, or create a new one."""
+    """Find a customer by phone within the org, or create a new one.
+
+    P0.8 — normalize phone to E.164 on BOTH the lookup and the insert, so
+    different-format renderings of the same number collapse to a single
+    customer row. Without this, '+4915734432281' and '0157 344 322 81'
+    create two rows; with this, the second call finds the first.
+    """
     client = get_service_client()
-    if phone:
+    phone_norm = _to_e164(phone)
+    if phone_norm:
         found = (
             client.table("customers")
             .select(_SELECT)
             .eq("org_id", org_id)
-            .eq("phone", phone)
+            .eq("phone", phone_norm)
             .limit(1)
             .execute()
             .data
@@ -46,10 +54,10 @@ def get_or_create_customer(
     payload = {
         "org_id": org_id,
         "full_name": name,
-        "phone": phone,
+        "phone": phone_norm,  # always store the canonical E.164 form
         "email": email,
         "customer_number": gen_customer_number(client, org_id),
-        "identified_by": "phone" if phone else "manual",
+        "identified_by": "phone" if phone_norm else "manual",
     }
     if address:
         payload["address"] = {"raw": address}
