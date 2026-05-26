@@ -60,9 +60,16 @@ export function KiInsightsTab() {
 
       <Panel title="Aktionsempfehlungen">
         {data.suggestions.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-12 text-center">
-            <CheckCircle2 size={28} className="text-success" />
-            <p className="text-sm font-medium text-body">Keine offenen Vorschläge — gut gemacht!</p>
+          <div className="flex flex-col items-center gap-3 py-14 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-success-bg">
+              <CheckCircle2 size={28} className="text-success" />
+            </div>
+            <div className="max-w-md space-y-1">
+              <p className="text-base font-semibold text-text">Sie sind auf dem Laufenden!</p>
+              <p className="text-sm text-muted">
+                Keine offenen Vorschläge. Kiki prüft regelmäßig auf KVAs, die ein Nachfassen brauchen, überfällige Rechnungen und seit langem inaktive Kunden — sobald etwas zu tun ist, erscheint es hier.
+              </p>
+            </div>
           </div>
         ) : (
           <div className="space-y-2.5">
