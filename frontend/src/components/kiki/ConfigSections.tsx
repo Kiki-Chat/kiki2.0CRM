@@ -495,17 +495,18 @@ export function TelefonSection({ data, flash }: Props) {
   return (
     <Card>
       <GroupLabel>Telefonie</GroupLabel>
-      <Field label="Telefonnummer (von HeyKiki bereitgestellt)">
-        <div className="flex items-center gap-2 rounded-md border border-border bg-alt px-3 py-2 text-sm text-muted">
+      <Field label="HeyKiki-Telefonnummer">
+        <div className="flex items-center gap-2 rounded-md border border-border bg-alt px-3 py-2 text-sm text-muted" title="Diese Nummer wird von HeyKiki bereitgestellt und kann nicht geändert werden.">
           <Lock size={14} className="text-faint" /><Phone size={14} className="text-faint" />
           <span className="text-text">{data.phone_number || 'Nicht zugewiesen'}</span>
         </div>
       </Field>
-      <p className="mt-1 text-xs text-muted">Zur Änderung der Rufnummer wenden Sie sich an support@heykiki.de.</p>
+      <p className="mt-1 text-xs text-muted">Diese Nummer wird von HeyKiki bereitgestellt und kann nicht geändert werden. Für eine andere Rufnummer wenden Sie sich an support@heykiki.de.</p>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Weiterleitungsnummer (Notdienst/Staff)"><input value={fwd} onChange={(e) => setFwd(e.target.value)} className={inputCls} /></Field>
-        <Field label="Eingehende Weiterleitungsnummer"><input value={inc} onChange={(e) => setInc(e.target.value)} className={inputCls} /></Field>
+        <Field label="Eingehende Weiterleitung"><input value={inc} onChange={(e) => setInc(e.target.value)} placeholder="+49 …" className={inputCls} /></Field>
+        <Field label="Notdienst-Weiterleitung"><input value={fwd} onChange={(e) => setFwd(e.target.value)} placeholder="+49 …" className={inputCls} /></Field>
       </div>
+      <p className="mt-1 text-xs text-muted">"Eingehende Weiterleitung" ist die bestehende Geschäftsnummer, an die Kiki Anrufer weiterleitet, die sie nicht selbst übernehmen kann. "Notdienst-Weiterleitung" ist die Nummer, an die akute Notfälle außerhalb der Geschäftszeiten weitergegeben werden.</p>
       <SaveBar onReset={() => { setFwd(c.forwarding_number ?? ''); setInc(c.incoming_forwarding_number ?? '') }} onSave={() => patch.mutate({ forwarding_number: fwd || null, incoming_forwarding_number: inc || null })} saving={patch.isPending} />
     </Card>
   )
