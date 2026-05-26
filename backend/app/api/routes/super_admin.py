@@ -246,12 +246,36 @@ async def set_user_role(
     payload: RoleChange,
     _user: CurrentUser = Depends(require_super_admin),
 ) -> dict:
-    """Promote/demote a user's role. Allowed roles match the existing schema."""
+    """Promote/demote a user's role. Allowed roles match the existing schema.
+
+    Enforces Amber's 'only one super_admin' constraint: rejects any attempt
+    to promote a second user to super_admin. The DB-level partial unique
+    index `uniq_one_super_admin` (migration 0020) is the backstop.
+    """
     if payload.role not in ("super_admin", "org_admin", "employee"):
         raise HTTPException(status_code=400, detail="Unbekannte Rolle.")
 
     def _do() -> dict | None:
         client = get_service_client()
+        if payload.role == "super_admin":
+            existing = (
+                client.table("users")
+                .select("id")
+                .eq("role", "super_admin")
+                .neq("id", str(user_id))
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Es kann nur einen Super-Admin geben. Bitte zuerst den "
+                        "bestehenden Super-Admin demoten."
+                    ),
+                )
         rows = (
             client.table("users")
             .update({"role": payload.role})
