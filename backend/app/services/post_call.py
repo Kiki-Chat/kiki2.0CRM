@@ -169,12 +169,28 @@ def _process_one(data: dict | None, fmt: str) -> dict:
     direction = phone_call.get("direction")
     caller_number = phone_call.get("external_number")
 
-    start_unix = metadata.get("start_time_unix_secs")
-    started_at = (
-        datetime.fromtimestamp(start_unix, tz=timezone.utc).isoformat()
-        if start_unix
-        else None
+    # ─── started_at fallback cascade (P0.3) ───────────────────────────────
+    # ElevenLabs/N8N payloads vary: usually metadata.start_time_unix_secs is
+    # populated, but linktest / minimal-metadata payloads can lack it. Without
+    # this cascade the row gets started_at=NULL and the Call Logs list renders
+    # the timestamp as "—" (e.g. "Eingehend · — · 1:00" for Petra Linktest).
+    # Cascade: metadata.start_time_unix_secs → metadata.start_time →
+    # phone_call.start_time_unix_secs → now() as last resort.
+    start_value = (
+        metadata.get("start_time_unix_secs")
+        or metadata.get("start_time")
+        or phone_call.get("start_time_unix_secs")
     )
+    started_at: str | None = None
+    if start_value is not None:
+        try:
+            started_at = datetime.fromtimestamp(float(start_value), tz=timezone.utc).isoformat()
+        except (TypeError, ValueError):
+            started_at = None
+    if started_at is None:
+        # Better than NULL for list ordering / display — webhook received time
+        # is at most a few seconds after the call actually started.
+        started_at = datetime.now(tz=timezone.utc).isoformat()
 
     # Link a customer: Caller-ID first, then the AI-extracted phone/name.
     # Creates the customer when no match exists so no-Caller-ID calls (Viber,
