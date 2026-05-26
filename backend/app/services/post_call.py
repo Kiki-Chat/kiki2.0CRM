@@ -128,6 +128,41 @@ def _process_one(data: dict | None, fmt: str) -> dict:
         )
     org_id = org[0]["id"]
 
+    # ─── Dedup early (P0.2) ──────────────────────────────────────────────────
+    # Defense against N8N / ElevenLabs retries on the same conversation_id within
+    # milliseconds. The DB-level `elevenlabs_conversation_id text unique` constraint
+    # (0001_init_schema.sql) prevents the row from duplicating, but without this
+    # short-circuit each retry would still run get_or_create_customer, broadcast,
+    # and ensure_call_inquiry — wasted work and unnecessary realtime noise.
+    #
+    # A row counts as "fully processed" when status=completed AND it has either
+    # a summary or a transcript. A partial row (e.g. the first webhook crashed
+    # mid-processing before analysis was filled) is NOT skipped — we want the
+    # retry to complete the work.
+    if conversation_id:
+        prior = (
+            client.table("calls")
+            .select("id, status, summary, transcript")
+            .eq("org_id", org_id)
+            .eq("elevenlabs_conversation_id", conversation_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if prior:
+            row = prior[0]
+            already_done = (
+                row.get("status") == "completed"
+                and (row.get("summary") or (row.get("transcript") or []))
+            )
+            if already_done:
+                return _result(
+                    "skipped", conversation_id, agent_id, fmt, started,
+                    call_log_id=row["id"], org_id=org_id,
+                    skip_reason="already_processed",
+                    transcript_received=transcript_received,
+                )
+
     metadata = data.get("metadata") or {}
     phone_call = metadata.get("phone_call") or {}
     analysis = data.get("analysis") or {}
