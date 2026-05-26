@@ -140,6 +140,35 @@ def _invoice_bank_footer(org: dict) -> list[tuple[str, list[str]]]:
     ]
 
 
+def _render_org_logo(pdf, logo_url: str | None) -> None:
+    """Top-left org-logo render for KVA / Invoice / Angebot / AB PDFs (P1.3).
+    Best-effort: any fetch failure is swallowed so the PDF still generates."""
+    if not logo_url:
+        return
+    import os
+    import tempfile
+    import urllib.request
+    try:
+        with urllib.request.urlopen(logo_url, timeout=5) as resp:  # noqa: S310
+            data = resp.read()
+        # Suffix doesn't matter to fpdf2 (it sniffs the bytes), but use .png
+        # as a safe default for tooling that inspects the file extension.
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(data)
+            logo_path = tmp.name
+        try:
+            # w=40mm wide; height auto-scales by aspect. Fits cleanly above
+            # the sender line (y=48) for typical landscape logos.
+            pdf.image(logo_path, x=15, y=12, w=40)
+        finally:
+            try:
+                os.unlink(logo_path)
+            except OSError:
+                pass
+    except Exception:  # noqa: BLE001
+        pass  # PDF still generates without the logo
+
+
 def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes:
     doc_type = ce.get("type") or "kva"
     title = DOC_TITLES.get(doc_type, "KOSTENVORANSCHLAG")
@@ -171,6 +200,12 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
     pdf.set_auto_page_break(auto=True, margin=34 if doc_type == "invoice" else 28)
     pdf.set_margins(15, 15, 15)
     pdf.add_page()
+
+    # ── Org logo (top-left, optional) — P1.3 ──
+    # fpdf2 needs a local file path or file-like object; Supabase Storage URLs
+    # are remote, so we fetch into a tempfile, render, then delete. PDF still
+    # generates without the logo if the fetch fails (timeout, 404, etc.).
+    _render_org_logo(pdf, org.get("logo_url"))
 
     org_addr = format_address(org.get("address")) or ""
     # ── Company header (right aligned) ──
