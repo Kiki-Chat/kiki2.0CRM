@@ -389,7 +389,10 @@ export function LeistungsangebotSection({ flash }: Props) {
   const services = data?.services ?? []
   const [name, setName] = useState('')
   const inv = () => qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'services'] })
-  const add = useMutation({ mutationFn: () => apiFetch(`${KZ}/services`, { method: 'POST', body: JSON.stringify({ name, is_offered: true }) }), onSuccess: () => { setName(''); inv() }, onError: (e: Error) => flash(e.message || 'Hinzufügen fehlgeschlagen.') })
+  // P1.6 — single field + two buttons. `is_offered` is supplied by the
+  // caller so the new entry lands in the correct column without forcing the
+  // user to add-then-toggle.
+  const add = useMutation({ mutationFn: (is_offered: boolean) => apiFetch(`${KZ}/services`, { method: 'POST', body: JSON.stringify({ name, is_offered }) }), onSuccess: () => { setName(''); inv() }, onError: (e: Error) => flash(e.message || 'Hinzufügen fehlgeschlagen.') })
   const toggle = useMutation({ mutationFn: (s: KzService) => apiFetch(`${KZ}/services/${s.id}`, { method: 'PATCH', body: JSON.stringify({ is_offered: !s.is_offered }) }), onSuccess: inv })
   const del = useMutation({ mutationFn: (id: string) => apiFetch(`${KZ}/services/${id}`, { method: 'DELETE' }), onSuccess: inv })
   const offered = services.filter((s) => s.is_offered)
@@ -412,14 +415,15 @@ export function LeistungsangebotSection({ flash }: Props) {
   return (
     <Card>
       <GroupLabel>Leistungsangebot</GroupLabel>
-      <p className="mb-4 text-sm text-muted">Klicken Sie einen Eintrag an, um ihn zwischen angeboten und nicht angeboten zu verschieben.</p>
+      <p className="mb-4 text-sm text-muted">Klicken Sie einen bestehenden Eintrag an, um ihn zwischen angeboten und nicht angeboten zu verschieben. Mit den Buttons unten neue Einträge in die jeweilige Liste aufnehmen.</p>
       <div className="flex flex-col gap-6 sm:flex-row">
         <Col title="Angebotene Leistungen" items={offered} green />
         <Col title="Nicht angebotene Leistungen" items={notOffered} />
       </div>
-      <div className="mt-5 flex items-end gap-2 border-t border-border pt-4">
-        <div className="flex-1"><Field label="Leistung hinzufügen"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. Badsanierung" className={inputCls} /></Field></div>
-        <button onClick={() => name.trim() && add.mutate()} disabled={!name.trim() || add.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">Hinzufügen</button>
+      <div className="mt-5 flex flex-wrap items-end gap-2 border-t border-border pt-4">
+        <div className="flex-1 min-w-[240px]"><Field label="Leistung hinzufügen"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. Badsanierung" className={inputCls} /></Field></div>
+        <button onClick={() => name.trim() && add.mutate(true)} disabled={!name.trim() || add.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">+ Zu Angebot hinzufügen</button>
+        <button onClick={() => name.trim() && add.mutate(false)} disabled={!name.trim() || add.isPending} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">+ Zu Nicht-Angebot hinzufügen</button>
       </div>
     </Card>
   )
