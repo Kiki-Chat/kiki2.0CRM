@@ -17,4 +17,9 @@ class ProvisionResponse(BaseModel):
     org_id: str
     user_id: str
     heykiki_org_id: str
-    org_secret: str
+    # Step B.6 (2026-05-27) — provision_org no longer generates an org_secret
+    # (per-org secret was misleading; identification is now agent_id + caller
+    # phone_number via _lookup_org_id). Field kept Optional so existing
+    # callers / response shapes don't break, and so the legacy
+    # /api/heykiki/provision route still type-checks.
+    org_secret: str | None = None

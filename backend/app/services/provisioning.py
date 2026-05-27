@@ -1,9 +1,8 @@
-import secrets
-
 from fastapi import HTTPException, status
 
 from app.db.supabase_client import get_service_client
 from app.schemas.provision import ProvisionRequest, ProvisionResponse
+from app.services.agent_config import configure_agent
 
 DEFAULT_AGENT_CONFIG = {
     "autonomy_level": 1,
@@ -21,20 +20,33 @@ DEFAULT_AGENT_CONFIG = {
 
 
 def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
-    """Create org + admin user + default agent_config + org secret.
+    """Create org + admin user + default agent_config, then wire the
+    ElevenLabs agent (phone fetch, hk_* tool merge, master prompt write,
+    conversation-initiation webhook enable, audio assertion).
 
     Rejects duplicates on heykiki_org_id OR login_email (no silent overwrite).
 
-    P0.9 — Fresh-tenant audit (2026-05-26): this function inserts ONLY the
-    four rows listed below. NO customers / calls / inquiries / appointments /
-    cost_estimates / invoices / employees / vehicles / tools / catalog_items /
-    text_modules / projects / documents are seeded. Any pre-existing
-    "test data" in older orgs (e.g. c4dbf596) came from manual verification
-    testing, not from this provisioning path. New customers therefore start
-    with an empty CRM. Historical EL conversations are imported separately
-    via app.services.history_import.import_agent_history scheduled by the
-    /api/heykiki/provision route as a BackgroundTask after this function
-    returns.
+    Step B (2026-05-27): the function now finalizes the ElevenLabs agent
+    via ``agent_config.configure_agent`` after the DB rows are in place.
+    Failures in that step trigger a compensating rollback of all four
+    Supabase rows + the auth user, so a retry can succeed cleanly.
+
+    Step B.6 (2026-05-27): no longer generates / persists an org_secret.
+    The per-org secret was misleading (used for the post-call webhook hop,
+    not per-customer auth). Lookup is via agent_id + caller phone_number.
+    The ``org_secrets`` table is intentionally left in place (Agent 3's
+    frontend-cleanup surface); this function simply stops writing to it.
+
+    P0.9 — Fresh-tenant audit (2026-05-26): this function inserts the
+    three DB rows listed below and configures the EL agent. NO customers /
+    calls / inquiries / appointments / cost_estimates / invoices / employees
+    / vehicles / tools / catalog_items / text_modules / projects / documents
+    are seeded. Any pre-existing "test data" in older orgs (e.g. c4dbf596)
+    came from manual verification testing, not from this provisioning path.
+    Historical EL conversations are imported separately via
+    ``app.services.history_import.import_agent_history``, scheduled by the
+    /api/heykiki/provision and /api/super-admin/orgs routes as a
+    BackgroundTask after this function returns.
     """
     client = get_service_client()
 
@@ -82,8 +94,8 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
         )
     user_id = auth_user.id
 
-    org_secret = secrets.token_urlsafe(32)
-
+    # Inserts that may need to be undone on a later failure.
+    org_id: str | None = None
     try:
         org_res = (
             client.table("organizations")
@@ -114,11 +126,25 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
             {"org_id": org_id, **DEFAULT_AGENT_CONFIG}
         ).execute()
 
-        client.table("org_secrets").insert(
-            {"org_id": org_id, "secret": org_secret}
-        ).execute()
+        # ─── Step B — finalize the ElevenLabs agent ──────────────────────────
+        # Runs synchronously inside provision_org so a hard failure (e.g.
+        # zero phones bound) rolls back the org as part of the same HTTP
+        # request, instead of leaving a half-provisioned org behind.
+        configure_agent(
+            org_id=org_id,
+            agent_id=payload.elevenlabs_agent_id,
+            org_name=payload.org_name,
+        )
     except Exception:
-        # Best-effort rollback of the auth user so a retry can succeed cleanly.
+        # Compensating rollback: undo DB rows so a retry can succeed.
+        if org_id:
+            try:
+                # organizations CASCADEs to users + agent_configs + org_secrets
+                # via ON DELETE CASCADE in 0001_init_schema.sql.
+                client.table("organizations").delete().eq("id", org_id).execute()
+            except Exception:
+                pass
+        # And the auth user, since users.id has no FK back to auth.users.
         try:
             client.auth.admin.delete_user(user_id)
         except Exception:
@@ -129,5 +155,5 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
         org_id=org_id,
         user_id=user_id,
         heykiki_org_id=payload.heykiki_org_id,
-        org_secret=org_secret,
+        org_secret=None,  # B.6 — no longer generated
     )

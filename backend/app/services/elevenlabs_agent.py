@@ -36,12 +36,26 @@ _TIMEOUT = 30.0
 
 REQUIRED_AUDIO_EVENT = "audio"
 CLIENT_EVENTS_PATH = "conversation_config.conversation.client_events"
+# The deprecated inline-tool form lives here (objects with id/name).
 TOOLS_PATH = "conversation_config.agent.prompt.tools"
+# The CURRENT tool-binding form (list of tool_id strings). Step B (2026-05-27)
+# uses this path to merge the 10 hk_* tool ids onto a provisioned agent —
+# the inline `tools` array is legacy data left over from older agent builds.
+TOOL_IDS_PATH = "conversation_config.agent.prompt.tool_ids"
 KB_PATH = "conversation_config.agent.prompt.knowledge_base"
 PROMPT_PATH = "conversation_config.agent.prompt.prompt"
 FIRST_MESSAGE_PATH = "conversation_config.agent.first_message"
 LANGUAGE_PATH = "conversation_config.agent.language"
 VOICE_PATH = "conversation_config.tts.voice_id"
+# Webhook (conversation initiation client data) lives outside conversation_config.
+WEBHOOK_URL_PATH = (
+    "platform_settings.workspace_overrides."
+    "conversation_initiation_client_data_webhook.url"
+)
+WEBHOOK_ENABLED_PATH = (
+    "platform_settings.overrides."
+    "enable_conversation_initiation_client_data_from_webhook"
+)
 
 
 # ─── Exceptions ──────────────────────────────────────────────────────────────
