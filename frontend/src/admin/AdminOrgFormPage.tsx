@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -16,18 +16,22 @@ interface OrgDetail {
   created_at: string
 }
 
-interface ProvisionResponse {
+interface CreateOrgResponse {
   org_id: string
-  user_id: string
+  admin_user_id: string
   heykiki_org_id: string
-  org_secret: string
 }
 
 /**
  * Create-or-edit screen for an organization. Routes:
  *  - /admin/orgs/new  → create form → POST /api/super-admin/orgs (wraps provision_org)
- *                        → success panel exposes org_secret ONCE.
+ *                        → neutral success card with the new identifiers.
  *  - /admin/orgs/:id  → edit form (4 master-data fields) → PATCH /orgs/{id}.
+ *
+ * B.6 (2026-05-27): the per-org `org_secret` panel was removed. That secret is
+ * system-level (used by the ElevenLabs post-call webhook handler), NOT
+ * per-customer — identification happens via agent_id + caller phone_number.
+ * The previous "save this now / nur einmal sichtbar" panel was misleading.
  */
 export function AdminOrgFormPage() {
   const qc = useQueryClient()
@@ -50,7 +54,7 @@ export function AdminOrgFormPage() {
   const [editPhone, setEditPhone] = useState('')
   const [editAgentId, setEditAgentId] = useState('')
 
-  const [secretResult, setSecretResult] = useState<ProvisionResponse | null>(null)
+  const [createResult, setCreateResult] = useState<CreateOrgResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const detailQuery = useQuery({
@@ -68,9 +72,21 @@ export function AdminOrgFormPage() {
     }
   }, [detailQuery.data])
 
+  const resetCreateForm = () => {
+    setHeykikiOrgId('')
+    setOrgName('')
+    setLoginEmail('')
+    setLoginPassword('')
+    setElevenlabsAgentId('')
+    setAdminName('')
+    setContactEmail('')
+    setCreateResult(null)
+    setError(null)
+  }
+
   const createMut = useMutation({
     mutationFn: () =>
-      apiFetch<ProvisionResponse>('/api/super-admin/orgs', {
+      apiFetch<CreateOrgResponse>('/api/super-admin/orgs', {
         method: 'POST',
         body: JSON.stringify({
           heykikiOrgId,
@@ -85,7 +101,7 @@ export function AdminOrgFormPage() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['admin', 'orgs'] })
       qc.invalidateQueries({ queryKey: ['admin', 'orgs-stats'] })
-      setSecretResult(data)
+      setCreateResult(data)
       setError(null)
     },
     onError: (e: Error) => setError(e.message),
@@ -117,43 +133,40 @@ export function AdminOrgFormPage() {
     else editMut.mutate()
   }
 
-  if (isNew && secretResult) {
+  if (isNew && createResult) {
     return (
       <div className="mx-auto max-w-2xl space-y-5">
         <header>
           <h1 className="text-2xl font-bold text-slate-100">Organisation angelegt</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Speichern Sie das untenstehende Secret JETZT. Es wird nicht erneut angezeigt.
+            Die neue Organisation wurde erstellt und ist sofort einsatzbereit.
           </p>
         </header>
-        <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-5">
-          <div className="flex items-center gap-2 text-sm font-bold text-amber-300">
-            <AlertTriangle size={15} /> org_secret nur einmal sichtbar
+        <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
+            <CheckCircle2 size={16} /> Anlage erfolgreich
           </div>
-          <p className="text-xs text-slate-300">
-            Wird für den N8N → Backend Post-Call-Webhook benötigt. Nach dem Schließen dieser
-            Seite ist das Secret nicht mehr auslesbar.
-          </p>
-          <div className="break-all rounded-md border border-amber-500/40 bg-slate-950 p-3 font-mono text-xs text-amber-200">
-            {secretResult.org_secret}
-          </div>
-        </div>
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-sm">
-          <div className="grid grid-cols-[160px,1fr] gap-y-2">
+          <div className="grid grid-cols-[160px,1fr] gap-y-2 text-sm">
             <div className="text-slate-500">org_id:</div>
-            <div className="font-mono text-xs text-slate-200">{secretResult.org_id}</div>
+            <div className="font-mono text-xs text-slate-200">{createResult.org_id}</div>
             <div className="text-slate-500">heykiki_org_id:</div>
-            <div className="font-mono text-xs text-slate-200">{secretResult.heykiki_org_id}</div>
-            <div className="text-slate-500">admin user_id:</div>
-            <div className="font-mono text-xs text-slate-200">{secretResult.user_id}</div>
+            <div className="font-mono text-xs text-slate-200">{createResult.heykiki_org_id}</div>
+            <div className="text-slate-500">admin_user_id:</div>
+            <div className="font-mono text-xs text-slate-200">{createResult.admin_user_id}</div>
           </div>
         </div>
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={resetCreateForm}
+            className="rounded-md border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700"
+          >
+            Weitere Org anlegen
+          </button>
           <button
             onClick={() => navigate('/admin/orgs')}
             className="rounded-md bg-amber-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400"
           >
-            Zur Liste
+            Zur Org-Liste
           </button>
         </div>
       </div>

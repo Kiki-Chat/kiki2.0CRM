@@ -17,7 +17,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_super_admin
 from app.db.supabase_client import get_service_client
-from app.schemas.provision import ProvisionRequest, ProvisionResponse
+from app.schemas.provision import ProvisionRequest
 from app.services.history_import import import_agent_history
 from app.services.provisioning import provision_org
 
@@ -35,6 +35,22 @@ class OrgPatch(BaseModel):
     phone_number: str | None = None
     elevenlabs_agent_id: str | None = None
     model_config = {"extra": "ignore"}
+
+
+class CreateOrgResponse(BaseModel):
+    """Response shape for POST /api/super-admin/orgs.
+
+    Deliberately omits `org_secret` — that value is system-level (used by the
+    ElevenLabs post-call webhook handler) and NOT per-customer, so exposing it
+    in this UI was misleading. Identification of the right org for an incoming
+    payload happens via `agent_id` + caller `phone_number` lookup, not via a
+    per-org secret. The provisioning service-layer may still generate / persist
+    a value into `org_secrets`; we just don't echo it back here.
+    """
+
+    org_id: str
+    admin_user_id: str
+    heykiki_org_id: str
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -280,16 +296,23 @@ async def delete_org(
 
 
 # ─── Create org (thin wrapper around provisioning) ──────────────────────────
-@router.post("/orgs", response_model=ProvisionResponse)
+@router.post("/orgs", response_model=CreateOrgResponse)
 async def create_org(
     payload: ProvisionRequest,
     background_tasks: BackgroundTasks,
     _user: CurrentUser = Depends(require_super_admin),
-) -> ProvisionResponse:
+) -> CreateOrgResponse:
     """Create a new org. Reuses app.services.provisioning.provision_org —
     the same code path as POST /api/heykiki/provision. Super-admin auth
     replaces the master-secret check here, since the caller is already a
     trusted super-admin (no shared-secret round-trip needed).
+
+    Response shape deliberately omits `org_secret` (B.6, 2026-05-27): that
+    value is system-level (used by the ElevenLabs post-call webhook handler)
+    and NOT per-customer. The "show secret once" panel was misleading —
+    payload-to-org identification happens via `agent_id` + caller `phone_number`
+    lookup, not via per-org secret matching. provision_org may still return /
+    persist a secret-shaped value; we ignore it at this layer.
 
     P0.9 parity (2026-05-27 fix): mirrors /api/heykiki/provision by
     scheduling import_agent_history as a BackgroundTask so historical
@@ -304,7 +327,11 @@ async def create_org(
         org_id=response.org_id,
         agent_id=payload.elevenlabs_agent_id,
     )
-    return response
+    return CreateOrgResponse(
+        org_id=response.org_id,
+        admin_user_id=response.user_id,
+        heykiki_org_id=response.heykiki_org_id,
+    )
 
 
 # ─── Convenience: promote/demote (for the one-shot super-admin user flow) ────

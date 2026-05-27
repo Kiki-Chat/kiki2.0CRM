@@ -139,3 +139,51 @@ def test_require_super_admin_rejects_org_admin():
     with pytest.raises(HTTPException) as exc:
         deps.require_super_admin(u)
     assert exc.value.status_code == 403
+
+
+# ─── create_org response shape — no org_secret leak (B.6) ───────────────────
+def test_create_org_response_omits_org_secret(monkeypatch):
+    """B.6 (2026-05-27): the per-org `org_secret` was misleading in the UI
+    (it's a system-level webhook secret, not a per-customer credential).
+    The route must echo back ONLY org_id / admin_user_id / heykiki_org_id,
+    even if the underlying provision_org service still returns a secret.
+    """
+    import asyncio
+    from app.schemas.provision import ProvisionRequest
+
+    # Stub provision_org to return a ProvisionResponse-shaped object that
+    # still includes a secret — verifies the route layer drops it.
+    class _StubProvisionResponse:
+        org_id = "00000000-0000-0000-0000-000000000aaa"
+        user_id = "00000000-0000-0000-0000-000000000bbb"
+        heykiki_org_id = "kiki-customer-test"
+        org_secret = "should-NOT-appear-in-response"
+
+    monkeypatch.setattr(sa, "provision_org", lambda payload: _StubProvisionResponse())
+    monkeypatch.setattr(sa, "import_agent_history", lambda **_kw: None)
+
+    payload = ProvisionRequest(
+        heykikiOrgId="kiki-customer-test",
+        orgName="Kiki Customer Test",
+        loginEmail="admin@example.com",
+        loginPassword="password-1234",
+        elevenlabsAgentId="agent_test",
+    )
+
+    # FastAPI normally injects BackgroundTasks; pass a real one for the unit test.
+    from starlette.background import BackgroundTasks
+
+    bg = BackgroundTasks()
+    user = deps.CurrentUser(id="u", email="a@b", org_id=None, role="super_admin", full_name=None)
+    result = asyncio.run(sa.create_org(payload=payload, background_tasks=bg, _user=user))
+
+    # Returned object is the new CreateOrgResponse — no `org_secret` attribute.
+    assert isinstance(result, sa.CreateOrgResponse)
+    assert result.org_id == "00000000-0000-0000-0000-000000000aaa"
+    assert result.admin_user_id == "00000000-0000-0000-0000-000000000bbb"
+    assert result.heykiki_org_id == "kiki-customer-test"
+
+    # JSON serialization (what FastAPI sends over the wire) must not contain the secret.
+    dumped = result.model_dump()
+    assert "org_secret" not in dumped
+    assert set(dumped.keys()) == {"org_id", "admin_user_id", "heykiki_org_id"}
