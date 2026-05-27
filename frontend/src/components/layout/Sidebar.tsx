@@ -1,5 +1,4 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { useQuery } from '@tanstack/react-query'
 import {
   Bot,
   Building2,
@@ -7,13 +6,11 @@ import {
   ChevronRight,
   LogOut,
   Settings,
-  ShieldAlert,
 } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../../auth/AuthProvider'
-import { apiFetch } from '../../lib/api'
 import { cn, initials } from '../../lib/utils'
 import { PersonalSettingsModal } from '../PersonalSettingsModal'
 import { isGroup, NAV, type NavLeaf } from './nav'
@@ -64,16 +61,8 @@ export function Sidebar({
 
   const email = session?.user.email ?? 'Setup pending'
   const userName = (session?.user.user_metadata?.full_name as string) ?? 'HeyKiki User'
-
-  // P0.6 — Super-admin profile-menu entry: shown ONLY when role='super_admin'.
-  // Reuses the shared ['me'] query cache.
-  const me = useQuery({
-    queryKey: ['me'],
-    queryFn: () => apiFetch<{ role: string | null }>('/api/me'),
-    staleTime: 5 * 60 * 1000,
-    enabled: !!session,
-  })
-  const isSuperAdmin = me.data?.role === 'super_admin'
+  // NOTE: Super-admin no longer enters via the customer-facing sidebar. The
+  // admin surface lives at /admin/* (standalone tree, own login, own layout).
 
   return (
     <aside
@@ -181,17 +170,6 @@ export function Sidebar({
               >
                 <Building2 size={14} /> Firmeneinstellungen
               </DropdownMenu.Item>
-              {isSuperAdmin && (
-                <>
-                  <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                  <DropdownMenu.Item
-                    onSelect={() => navigate('/super-admin/orgs')}
-                    className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-ai outline-none data-[highlighted]:bg-alt"
-                  >
-                    <ShieldAlert size={14} /> Super-Admin
-                  </DropdownMenu.Item>
-                </>
-              )}
               <DropdownMenu.Separator className="my-1 h-px bg-border" />
               <DropdownMenu.Item
                 onSelect={() => signOut()}

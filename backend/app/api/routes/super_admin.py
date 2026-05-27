@@ -118,11 +118,90 @@ def _delete_org(org_id: str) -> bool:
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
+def _org_stats(org_ids: list[str]) -> dict[str, dict]:
+    """Per-org usage counts + last activity for the standalone admin list.
+
+    Cheap aggregate over the major tables. Each query is org_id-filtered and
+    returns only the counts; no row data is read. ``last_activity`` = max of
+    calls.created_at / appointments.created_at / cost_estimates.created_at
+    / invoices.created_at, or None if all tables are empty for the org.
+    """
+    if not org_ids:
+        return {}
+    client = get_service_client()
+    stats: dict[str, dict] = {
+        oid: {
+            "calls": 0,
+            "kvas_sent": 0,
+            "employees": 0,
+            "appointments": 0,
+            "last_activity": None,
+        }
+        for oid in org_ids
+    }
+
+    def _count_by_org(table: str, key: str, extra_eq: tuple[str, str] | None = None) -> None:
+        for oid in org_ids:
+            q = client.table(table).select("id", count="exact", head=True).eq("org_id", oid)
+            if extra_eq:
+                q = q.eq(extra_eq[0], extra_eq[1])
+            try:
+                res = q.execute()
+                stats[oid][key] = int(getattr(res, "count", 0) or 0)
+            except Exception:
+                stats[oid][key] = 0
+
+    _count_by_org("calls", "calls")
+    _count_by_org("cost_estimates", "kvas_sent", extra_eq=("status", "sent"))
+    _count_by_org("employees", "employees")
+    _count_by_org("appointments", "appointments")
+
+    # Last activity: max(created_at) across calls / appointments / cost_estimates / invoices.
+    for oid in org_ids:
+        latest: str | None = None
+        for table in ("calls", "appointments", "cost_estimates", "invoices"):
+            try:
+                rows = (
+                    client.table(table)
+                    .select("created_at")
+                    .eq("org_id", oid)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                if rows and rows[0].get("created_at"):
+                    ts = rows[0]["created_at"]
+                    if latest is None or ts > latest:
+                        latest = ts
+            except Exception:
+                continue
+        stats[oid]["last_activity"] = latest
+
+    return stats
+
+
 @router.get("/orgs")
 async def list_orgs(_user: CurrentUser = Depends(require_super_admin)) -> dict:
     """List all organizations (super-admin only)."""
     rows = await run_in_threadpool(_list_orgs)
     return {"orgs": rows}
+
+
+@router.get("/orgs-stats")
+async def list_orgs_stats(_user: CurrentUser = Depends(require_super_admin)) -> dict:
+    """Usage counters per org for the standalone admin org list.
+
+    Returns ``{org_id: {calls, kvas_sent, employees, appointments, last_activity}}``.
+    Separate from ``GET /orgs`` so the master-data list stays cheap and the
+    counter query (which fans out across 4 tables × N orgs) can be loaded
+    lazily / cached independently on the frontend.
+    """
+    orgs = await run_in_threadpool(_list_orgs)
+    org_ids = [o["id"] for o in orgs]
+    stats = await run_in_threadpool(_org_stats, org_ids)
+    return {"stats": stats}
 
 
 @router.get("/orgs/{org_id}")

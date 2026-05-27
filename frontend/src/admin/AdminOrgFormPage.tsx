@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, AlertTriangle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -23,14 +23,19 @@ interface ProvisionResponse {
   org_secret: string
 }
 
-export function SuperAdminOrgFormPage() {
+/**
+ * Create-or-edit screen for an organization. Routes:
+ *  - /admin/orgs/new  → create form → POST /api/super-admin/orgs (wraps provision_org)
+ *                        → success panel exposes org_secret ONCE.
+ *  - /admin/orgs/:id  → edit form (4 master-data fields) → PATCH /orgs/{id}.
+ */
+export function AdminOrgFormPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const isNew = !id
 
-  // Form state — different fields for create vs edit.
-  // CREATE fields (camelCase, matching ProvisionRequest aliases):
+  // CREATE fields
   const [heykikiOrgId, setHeykikiOrgId] = useState('')
   const [orgName, setOrgName] = useState('')
   const [loginEmail, setLoginEmail] = useState('')
@@ -39,7 +44,7 @@ export function SuperAdminOrgFormPage() {
   const [adminName, setAdminName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
 
-  // EDIT fields:
+  // EDIT fields
   const [editName, setEditName] = useState('')
   const [editEmail, setEditEmail] = useState('')
   const [editPhone, setEditPhone] = useState('')
@@ -49,7 +54,7 @@ export function SuperAdminOrgFormPage() {
   const [error, setError] = useState<string | null>(null)
 
   const detailQuery = useQuery({
-    queryKey: ['super-admin', 'org', id],
+    queryKey: ['admin', 'org', id],
     queryFn: () => apiFetch<OrgDetail>(`/api/super-admin/orgs/${id}`),
     enabled: !isNew,
   })
@@ -78,7 +83,8 @@ export function SuperAdminOrgFormPage() {
         }),
       }),
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: ['super-admin', 'orgs'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'orgs'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'orgs-stats'] })
       setSecretResult(data)
       setError(null)
     },
@@ -97,9 +103,9 @@ export function SuperAdminOrgFormPage() {
         }),
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['super-admin', 'orgs'] })
-      qc.invalidateQueries({ queryKey: ['super-admin', 'org', id] })
-      navigate('/super-admin/orgs')
+      qc.invalidateQueries({ queryKey: ['admin', 'orgs'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'org', id] })
+      navigate('/admin/orgs')
     },
     onError: (e: Error) => setError(e.message),
   })
@@ -111,37 +117,41 @@ export function SuperAdminOrgFormPage() {
     else editMut.mutate()
   }
 
-  // Render the success panel after a successful create — surfaces the
-  // org_secret exactly once for super-admin to capture.
   if (isNew && secretResult) {
     return (
-      <div className="mx-auto max-w-2xl space-y-5 p-6">
+      <div className="mx-auto max-w-2xl space-y-5">
         <header>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-ai">
-            <ShieldAlert size={13} /> Super-Admin
-          </div>
-          <h1 className="mt-1 text-xl font-bold text-text">Organisation angelegt</h1>
-        </header>
-        <div className="rounded-xl border border-warning/30 bg-warning-bg/40 p-4 text-sm">
-          <div className="font-bold text-warning">⚠ org_secret nur einmal sichtbar</div>
-          <p className="mt-1 text-body">
-            Notieren Sie das folgende Secret jetzt — es wird nicht erneut angezeigt. Es wird für N8N → Backend Post-Call-Webhooks benötigt.
+          <h1 className="text-2xl font-bold text-slate-100">Organisation angelegt</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Speichern Sie das untenstehende Secret JETZT. Es wird nicht erneut angezeigt.
           </p>
-          <div className="mt-3 break-all rounded-md bg-surface p-3 font-mono text-xs">
+        </header>
+        <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-5">
+          <div className="flex items-center gap-2 text-sm font-bold text-amber-300">
+            <AlertTriangle size={15} /> org_secret nur einmal sichtbar
+          </div>
+          <p className="text-xs text-slate-300">
+            Wird für den N8N → Backend Post-Call-Webhook benötigt. Nach dem Schließen dieser
+            Seite ist das Secret nicht mehr auslesbar.
+          </p>
+          <div className="break-all rounded-md border border-amber-500/40 bg-slate-950 p-3 font-mono text-xs text-amber-200">
             {secretResult.org_secret}
           </div>
         </div>
-        <div className="rounded-xl border border-border bg-surface p-4 text-sm">
-          <div className="grid grid-cols-[140px,1fr] gap-y-2">
-            <div className="text-muted">org_id:</div><div className="font-mono text-xs">{secretResult.org_id}</div>
-            <div className="text-muted">heykiki_org_id:</div><div className="font-mono text-xs">{secretResult.heykiki_org_id}</div>
-            <div className="text-muted">admin user_id:</div><div className="font-mono text-xs">{secretResult.user_id}</div>
+        <div className="rounded-xl border border-slate-800 bg-slate-900 p-5 text-sm">
+          <div className="grid grid-cols-[160px,1fr] gap-y-2">
+            <div className="text-slate-500">org_id:</div>
+            <div className="font-mono text-xs text-slate-200">{secretResult.org_id}</div>
+            <div className="text-slate-500">heykiki_org_id:</div>
+            <div className="font-mono text-xs text-slate-200">{secretResult.heykiki_org_id}</div>
+            <div className="text-slate-500">admin user_id:</div>
+            <div className="font-mono text-xs text-slate-200">{secretResult.user_id}</div>
           </div>
         </div>
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end">
           <button
-            onClick={() => navigate('/super-admin/orgs')}
-            className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+            onClick={() => navigate('/admin/orgs')}
+            className="rounded-md bg-amber-500 px-5 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400"
           >
             Zur Liste
           </button>
@@ -151,29 +161,29 @@ export function SuperAdminOrgFormPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 p-6">
+    <div className="mx-auto max-w-2xl space-y-5">
       <header>
         <button
-          onClick={() => navigate('/super-admin/orgs')}
-          className="mb-2 flex items-center gap-1 text-xs font-medium text-muted hover:text-body"
+          onClick={() => navigate('/admin/orgs')}
+          className="mb-2 flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-slate-200"
         >
           <ArrowLeft size={13} /> Zurück zur Liste
         </button>
-        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-ai">
-          <ShieldAlert size={13} /> Super-Admin
-        </div>
-        <h1 className="mt-1 text-xl font-bold text-text">
+        <h1 className="text-2xl font-bold text-slate-100">
           {isNew ? 'Neue Organisation' : `Bearbeiten: ${detailQuery.data?.name ?? '…'}`}
         </h1>
       </header>
 
       {error && (
-        <div className="rounded-md border border-error/30 bg-error-bg/40 px-3 py-2 text-sm text-error">
+        <div className="rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300">
           {error}
         </div>
       )}
 
-      <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-border bg-surface p-6">
+      <form
+        onSubmit={onSubmit}
+        className="space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-6"
+      >
         {isNew ? (
           <>
             <Field label="Organisationsname *" value={orgName} onChange={setOrgName} required placeholder="Murdock Law GmbH" />
@@ -193,13 +203,13 @@ export function SuperAdminOrgFormPage() {
               required
               placeholder="agent_…"
               mono
-              help="Der vorab in ElevenLabs angelegte Agent dieser Organisation. NICHT agent_7201… (Produktion)."
+              help="NICHT agent_7201… (Produktion)."
             />
-            <div className="my-2 h-px bg-border" />
+            <div className="my-2 h-px bg-slate-800" />
             <Field label="Admin Login-E-Mail *" value={loginEmail} onChange={setLoginEmail} required type="email" placeholder="admin@firma.de" />
             <Field label="Admin Login-Passwort *" value={loginPassword} onChange={setLoginPassword} required type="password" placeholder="mind. 8 Zeichen" help="Mindestens 8 Zeichen. Wird per E-Mail an den Admin mitgeteilt." />
             <Field label="Admin-Name" value={adminName} onChange={setAdminName} placeholder="Max Mustermann" />
-            <Field label="Kontakt-E-Mail (optional)" value={contactEmail} onChange={setContactEmail} type="email" placeholder="kontakt@firma.de" help="Wird verwendet für Rechnungen / Erinnerungen. Falls leer: Login-E-Mail." />
+            <Field label="Kontakt-E-Mail (optional)" value={contactEmail} onChange={setContactEmail} type="email" placeholder="kontakt@firma.de" help="Falls leer: Login-E-Mail." />
           </>
         ) : (
           <>
@@ -213,15 +223,15 @@ export function SuperAdminOrgFormPage() {
         <div className="flex justify-end gap-2 pt-2">
           <button
             type="button"
-            onClick={() => navigate('/super-admin/orgs')}
-            className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt"
+            onClick={() => navigate('/admin/orgs')}
+            className="rounded-md border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700"
           >
             Abbrechen
           </button>
           <button
             type="submit"
             disabled={createMut.isPending || editMut.isPending}
-            className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+            className="rounded-md bg-amber-500 px-6 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-50"
           >
             {createMut.isPending || editMut.isPending ? 'Speichert…' : isNew ? 'Organisation anlegen' : 'Speichern'}
           </button>
@@ -252,18 +262,18 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-sm font-medium text-body">{label}</span>
+      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">{label}</span>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
         placeholder={placeholder}
-        className={`w-full rounded-md border border-border bg-alt px-3 py-2 text-sm outline-none focus:border-green-primary ${
+        className={`w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500 ${
           mono ? 'font-mono text-xs' : ''
         }`}
       />
-      {help && <p className="mt-1 text-xs text-muted">{help}</p>}
+      {help && <p className="mt-1 text-xs text-slate-500">{help}</p>}
     </label>
   )
 }

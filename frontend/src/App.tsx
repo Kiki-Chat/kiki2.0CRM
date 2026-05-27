@@ -1,9 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
-import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
+import { AdminApp } from './admin/AdminApp'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppLayout } from './components/layout/AppLayout'
-import { apiFetch } from './lib/api'
 import { BusinessHoursPage } from './pages/BusinessHoursPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { CallLogsPage } from './pages/CallLogsPage'
@@ -24,25 +23,14 @@ import { ProjectFormPage } from './pages/ProjectFormPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectWorkspacePage } from './pages/ProjectWorkspacePage'
 import { SettingsPage } from './pages/SettingsPage'
-import { SuperAdminOrgFormPage } from './pages/SuperAdminOrgFormPage'
-import { SuperAdminOrgsPage } from './pages/SuperAdminOrgsPage'
-
-// Route gate for /super-admin/* — renders the placeholder ("Not found") for
-// anyone whose role !== 'super_admin'. Reuses the shared ['me'] query cache.
-function SuperAdminRoute() {
-  const me = useQuery({
-    queryKey: ['me'],
-    queryFn: () => apiFetch<{ role: string | null }>('/api/me'),
-    staleTime: 5 * 60 * 1000,
-  })
-  if (me.isLoading) return <div className="p-12 text-center text-muted">Lädt…</div>
-  if (me.data?.role !== 'super_admin') return <Placeholder title="Not found" />
-  return <Outlet />
-}
 
 export default function App() {
   return (
     <Routes>
+      {/* Super-admin: completely separate React tree (own layout, own login,
+          own auth gate). Rendered before /login so /admin/login resolves first. */}
+      <Route path="/admin/*" element={<AdminApp />} />
+
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
@@ -71,12 +59,6 @@ export default function App() {
           <Route path="settings" element={<Navigate to="/settings/stammdaten" replace />} />
           <Route path="settings/:section" element={<SettingsPage />} />
           <Route path="settings/personal" element={<Placeholder title="Personal Settings" />} />
-          <Route element={<SuperAdminRoute />}>
-            <Route path="super-admin" element={<Navigate to="/super-admin/orgs" replace />} />
-            <Route path="super-admin/orgs" element={<SuperAdminOrgsPage />} />
-            <Route path="super-admin/orgs/new" element={<SuperAdminOrgFormPage />} />
-            <Route path="super-admin/orgs/:id" element={<SuperAdminOrgFormPage />} />
-          </Route>
         </Route>
       </Route>
       <Route path="*" element={<Placeholder title="Not found" />} />
