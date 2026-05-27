@@ -170,7 +170,40 @@ class OutboundUpdate(BaseModel):
 class PhoneUpdate(BaseModel):
     forwarding_number: str | None = None
     incoming_forwarding_number: str | None = None
+    existing_business_number: str | None = None
     model_config = {"extra": "ignore"}
+
+    @classmethod
+    def _looks_like_phone(cls, v: str) -> bool:
+        # Lenient: trim, strip common separators, then require + and digits-only,
+        # 8–15 digits after the country code (E.164 max). Empty/None handled by caller.
+        s = v.strip()
+        if not s:
+            return False
+        stripped = (
+            s.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+            .replace(" ", "")
+        )
+        if not stripped.startswith("+"):
+            return False
+        rest = stripped[1:]
+        return rest.isdigit() and 8 <= len(rest) <= 15
+
+    def cleaned_existing_business_number(self) -> str | None:
+        """Returns the trimmed value if it looks like an E.164 number,
+        None if blank/whitespace, or raises HTTPException(422) if non-empty
+        but malformed."""
+        if self.existing_business_number is None:
+            return None
+        s = self.existing_business_number.strip()
+        if not s:
+            return None
+        if not self._looks_like_phone(s):
+            raise HTTPException(
+                status_code=422,
+                detail="Bitte geben Sie eine gültige Telefonnummer im Format +49 ... ein.",
+            )
+        return s
 
 
 class TogglePayload(BaseModel):
@@ -224,7 +257,10 @@ def _get_overview(org_id: str) -> dict:
     client = get_service_client()
     org = (
         client.table("organizations")
-        .select("phone_number, elevenlabs_agent_id, name, ai_minutes_quota")
+        .select(
+            "phone_number, existing_business_number, elevenlabs_agent_id, "
+            "name, ai_minutes_quota"
+        )
         .eq("id", org_id).limit(1).execute().data or [{}]
     )[0]
     cfg = (
@@ -240,6 +276,7 @@ def _get_overview(org_id: str) -> dict:
     return {
         "config": cfg,
         "phone_number": org.get("phone_number"),
+        "existing_business_number": org.get("existing_business_number"),
         "ai_minutes_quota": org.get("ai_minutes_quota"),
         "agent": _el_read_state(agent_id) if agent_id else {"reachable": False},
         "recent_snapshots": recent,
@@ -766,8 +803,49 @@ async def update_emergency(payload: EmergencyUpdate, user: CurrentUser = Depends
 # ─── Telefon ─────────────────────────────────────────────────────────────────
 @router.patch("/phone")
 async def update_phone(payload: PhoneUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+    """Update the org's Telefon section.
+
+    - `forwarding_number` / `incoming_forwarding_number` → `agent_configs`
+      (these drive the transferCall tool at runtime).
+    - `existing_business_number` → `organizations` (tradesperson's own
+      number; HeyKiki never dials it — the tradesperson sets up telco-level
+      forwarding from this number to their HeyKiki number).
+    """
     _require_admin(user)
-    return await run_in_threadpool(_upsert_config, user.org_id, payload.model_dump(exclude_unset=True))
+    # Validate + normalise the new business-number field BEFORE any write.
+    cleaned_existing = payload.cleaned_existing_business_number()
+    set_existing = "existing_business_number" in payload.model_fields_set
+
+    def _do() -> dict:
+        client = get_service_client()
+
+        # agent_configs write (forwarding pair).
+        cfg_fields = payload.model_dump(
+            exclude_unset=True,
+            exclude={"existing_business_number"},
+        )
+        if cfg_fields:
+            _upsert_config(user.org_id, cfg_fields)
+
+        # organizations write (existing_business_number).
+        if set_existing:
+            client.table("organizations").update(
+                {"existing_business_number": cleaned_existing, "updated_at": _now()}
+            ).eq("id", user.org_id).execute()
+
+        # Return the combined view (same shape as agent_configs select + the
+        # one extra field so the frontend doesn't need a second fetch).
+        cfg = (
+            client.table("agent_configs").select(_CONFIG_COLS).eq("org_id", user.org_id)
+            .limit(1).execute().data or [{}]
+        )[0]
+        org = (
+            client.table("organizations").select("existing_business_number")
+            .eq("id", user.org_id).limit(1).execute().data or [{}]
+        )[0]
+        return {**cfg, "existing_business_number": org.get("existing_business_number")}
+
+    return await run_in_threadpool(_do)
 
 
 # ─── Ausgehende Anrufe ───────────────────────────────────────────────────────

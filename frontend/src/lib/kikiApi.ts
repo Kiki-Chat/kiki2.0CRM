@@ -55,6 +55,7 @@ export interface KzSnapshot {
 export interface KzOverview {
   config: KzConfig
   phone_number: string | null
+  existing_business_number: string | null
   ai_minutes_quota: number | null
   agent: KzAgentState
   recent_snapshots: KzSnapshot[]

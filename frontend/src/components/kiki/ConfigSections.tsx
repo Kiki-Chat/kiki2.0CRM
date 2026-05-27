@@ -492,6 +492,7 @@ export function TelefonSection({ data, flash }: Props) {
   const patch = useConfigPatch('/phone', flash)
   const [fwd, setFwd] = useState(c.forwarding_number ?? '')
   const [inc, setInc] = useState(c.incoming_forwarding_number ?? '')
+  const [biz, setBiz] = useState(data.existing_business_number ?? '')
   return (
     <Card>
       <GroupLabel>Telefonie</GroupLabel>
@@ -502,12 +503,46 @@ export function TelefonSection({ data, flash }: Props) {
         </div>
       </Field>
       <p className="mt-1 text-xs text-muted">Diese Nummer wird von HeyKiki bereitgestellt und kann nicht geändert werden. Für eine andere Rufnummer wenden Sie sich an support@heykiki.de.</p>
+      <div className="mt-4">
+        <Field label="Ihre bestehende Geschäftsnummer">
+          <input
+            type="tel"
+            value={biz}
+            onChange={(e) => setBiz(e.target.value)}
+            placeholder="+49 …"
+            className={inputCls}
+          />
+        </Field>
+        <p className="mt-1 text-xs text-muted">
+          Stellen Sie die Rufweiterleitung Ihres Telefonanbieters auf Ihre HeyKiki-Nummer ein, um Kiki Ihre Anrufe entgegennehmen zu lassen.{' '}
+          <a
+            href="/docs/call-forwarding-setup"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-green-primary underline hover:opacity-80"
+          >
+            Anleitung
+          </a>
+        </p>
+      </div>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Eingehende Weiterleitung"><input value={inc} onChange={(e) => setInc(e.target.value)} placeholder="+49 …" className={inputCls} /></Field>
         <Field label="Notdienst-Weiterleitung"><input value={fwd} onChange={(e) => setFwd(e.target.value)} placeholder="+49 …" className={inputCls} /></Field>
       </div>
       <p className="mt-1 text-xs text-muted">"Eingehende Weiterleitung" ist die bestehende Geschäftsnummer, an die Kiki Anrufer weiterleitet, die sie nicht selbst übernehmen kann. "Notdienst-Weiterleitung" ist die Nummer, an die akute Notfälle außerhalb der Geschäftszeiten weitergegeben werden.</p>
-      <SaveBar onReset={() => { setFwd(c.forwarding_number ?? ''); setInc(c.incoming_forwarding_number ?? '') }} onSave={() => patch.mutate({ forwarding_number: fwd || null, incoming_forwarding_number: inc || null })} saving={patch.isPending} />
+      <SaveBar
+        onReset={() => {
+          setFwd(c.forwarding_number ?? '')
+          setInc(c.incoming_forwarding_number ?? '')
+          setBiz(data.existing_business_number ?? '')
+        }}
+        onSave={() => patch.mutate({
+          forwarding_number: fwd || null,
+          incoming_forwarding_number: inc || null,
+          existing_business_number: biz || null,
+        })}
+        saving={patch.isPending}
+      />
     </Card>
   )
 }
