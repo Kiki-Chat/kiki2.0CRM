@@ -29,6 +29,8 @@ import { Tag } from '../components/ui/Tag'
 import { apiBlobUrl, apiFetch } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import { cn, initials } from '../lib/utils'
+// Wave 2 / Agent 2.4 — inline OFFENE AKTIONEN card at the top of the right panel.
+import { AppointmentCard, usePendingAppointment } from './calls/AppointmentCard'
 
 interface TranscriptTurn {
   role: string
@@ -284,6 +286,19 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
     onSuccess: () => qc.invalidateQueries({ queryKey: ['callInquiry', callId] }),
   })
 
+  // Wave 2 / Agent 2.4 — inline OFFENE AKTIONEN appointment card. The query
+  // returns `{appointment: null}` when this call has no pending appointment;
+  // the card only renders when there's one to act on.
+  const pendingAppt = usePendingAppointment(callId)
+  // Per-call client-side dismiss: clicking "Ausblenden" hides the card for
+  // the rest of this session without changing the appointment status. Keyed
+  // by appointment id (not call id) so a re-proposed appointment with a new
+  // id still appears.
+  const [dismissedApptIds, setDismissedApptIds] = useState<Set<string>>(new Set())
+  const pendingAppointment = pendingAppt.data?.appointment ?? null
+  const showAppointmentCard =
+    !!pendingAppointment && !dismissedApptIds.has(pendingAppointment.id)
+
   if (!call) {
     return <div className="flex flex-1 items-center justify-center text-muted">Lädt…</div>
   }
@@ -294,6 +309,25 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
 
       {/* RIGHT PANEL */}
       <aside className="flex w-96 flex-shrink-0 flex-col border-l border-border bg-surface">
+        {/* Wave 2 / Agent 2.4 — OFFENE AKTIONEN appointment card. Renders at
+            the TOP of the right panel above the title block; only present
+            when the call has a pending appointment that needs a decision and
+            the user hasn't dismissed it client-side this session. The card
+            owns its own border-bottom — visually separates from the title
+            block below without an extra wrapper. */}
+        {showAppointmentCard && pendingAppointment && (
+          <AppointmentCard
+            appointment={pendingAppointment}
+            callId={callId}
+            onDismiss={() =>
+              setDismissedApptIds((prev) => {
+                const next = new Set(prev)
+                next.add(pendingAppointment.id)
+                return next
+              })
+            }
+          />
+        )}
         <div className="border-b border-border p-4">
           <div className="mb-2 flex items-start justify-between gap-2">
             <h2 className="text-sm font-bold leading-snug text-text">
