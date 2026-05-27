@@ -10,7 +10,6 @@ import {
   ChevronDown,
   Clock,
   Edit3,
-  Euro,
   ExternalLink,
   FileText,
   MapPin,
@@ -809,7 +808,7 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
               onOpenCustomer={() => call.customer_id && navigate(`/customers/${call.customer_id}`)}
             />
           )}
-          {tab === 'course' && <VerlaufTab customerId={call.customer_id} />}
+          {tab === 'course' && <VerlaufTab callId={call.id} />}
         </div>
       </aside>
 
@@ -1348,80 +1347,147 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-interface CustomerDetail {
-  inquiries: { id: string; number: string | null; title: string | null; status: string; created_at: string }[]
-  appointments: { id: string; title: string | null; scheduled_at: string | null; status: string; category: string | null }[]
-  cost_estimates: { id: string; number: string | null; status: string; total: number | null; created_at: string }[]
+// Wave 3 / Agent 3.2 — unified timeline event shape returned by
+// GET /api/calls/{id}/timeline. See backend/app/api/routes/calls.py.
+type TimelineEventKind =
+  | 'call_created'
+  | 'inquiry_status_changed'
+  | 'appointment_confirmed'
+  | 'appointment_rejected'
+  | 'alternative_proposed'
+  | 'kva_sent'
+  | 'kva_accepted'
+  | 'kva_rejected'
+  | 'assignment_changed'
+
+interface TimelineEvent {
+  id: string
+  kind: TimelineEventKind
+  timestamp: string
+  actor_kind: 'kiki' | 'employee' | 'system'
+  actor_name: string
+  description: string
+  entity_id: string | null
+  extras: Record<string, unknown>
 }
 
-function statusDot(status: string): string {
-  return status === 'confirmed' || status === 'completed'
-    ? 'bg-success'
-    : status === 'cancelled' || status === 'rejected'
-      ? 'bg-error'
-      : 'bg-warning'
+// Color-coded dot per event kind. Each tuple is (dot bg, dot ring) so the
+// dot reads above the timeline rail. Picked to map cleanly to the same
+// semantic colors used in the Aktionen-tab status chips and the list-card
+// status pills (green = confirmed/positive, red = reject, amber = alt,
+// purple = KVA money flow, cyan = assignment).
+const TIMELINE_KIND_DOT: Record<TimelineEventKind, string> = {
+  call_created: 'bg-blue-500',
+  inquiry_status_changed: 'bg-muted',
+  appointment_confirmed: 'bg-green-primary',
+  appointment_rejected: 'bg-red-500',
+  alternative_proposed: 'bg-amber-500',
+  kva_sent: 'bg-purple-500',
+  kva_accepted: 'bg-purple-600',
+  kva_rejected: 'bg-purple-400',
+  assignment_changed: 'bg-cyan-500',
 }
 
-function VerlaufTab({ customerId }: { customerId: string | null }) {
-  const { data } = useQuery({
-    queryKey: ['customerDetail', customerId],
-    queryFn: () => apiFetch<CustomerDetail>(`/api/customers/${customerId}`),
-    enabled: !!customerId,
+// Actor-chip styling — distinct visual lane per source so a scan over the
+// timeline groups "Kiki did X" rows visually apart from "employee did X".
+const ACTOR_CHIP: Record<TimelineEvent['actor_kind'], string> = {
+  kiki: 'bg-green-tint-50 text-green-deep',
+  employee: 'bg-blue-100 text-blue-800',
+  system: 'bg-alt text-faint',
+}
+
+// Tight German relative-time formatter. Falls back to absolute date for
+// anything older than a week so the scan stays readable across long histories.
+function relativeTimeDe(iso: string): string {
+  const now = Date.now()
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return '—'
+  const diffSec = Math.max(0, Math.round((now - then) / 1000))
+  if (diffSec < 60) return 'gerade eben'
+  const min = Math.round(diffSec / 60)
+  if (min < 60) return `vor ${min} Min`
+  const hours = Math.round(min / 60)
+  if (hours < 24) return `vor ${hours} Std`
+  const days = Math.round(hours / 24)
+  if (days < 7) return `vor ${days} ${days === 1 ? 'Tag' : 'Tagen'}`
+  // Older than a week — show absolute short date.
+  return new Date(iso).toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
   })
-  if (!customerId) return <p className="text-sm text-muted">Kein Kunde verknüpft.</p>
-  const inquiries = data?.inquiries ?? []
-  const appts = data?.appointments ?? []
-  const kvas = data?.cost_estimates ?? []
-  return (
-    <div className="space-y-4">
-      <Section title="Durchgeführte Aktionen">
-        <div className="space-y-2">
-          {inquiries.map((i) => (
-            <div key={i.id} className="rounded-lg border border-border p-3">
-              <div className="flex items-start justify-between gap-2">
-                <span className="text-sm font-medium text-text">{i.title ?? 'Anfrage'}</span>
-                <Tag variant={STATUS_TAG[i.status]?.variant ?? 'neutral'}>
-                  {STATUS_TAG[i.status]?.label ?? i.status}
-                </Tag>
-              </div>
-              <div className="mt-1 text-xs text-muted">{fmtTime(i.created_at)}</div>
-            </div>
-          ))}
-          {!inquiries.length && <p className="text-sm text-muted">Noch keine Aktionen.</p>}
-        </div>
-      </Section>
+}
 
-      <Section title={`Termine (${appts.length})`}>
-        <div className="space-y-2">
-          {appts.map((a) => (
-            <div key={a.id} className="rounded-lg border border-border p-3">
+// Absolute timestamp for the tooltip on hover — full precision.
+function absoluteTimeDe(iso: string): string {
+  return new Date(iso).toLocaleString('de-DE', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function VerlaufTab({ callId }: { callId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['callTimeline', callId],
+    queryFn: () => apiFetch<TimelineEvent[]>(`/api/calls/${callId}/timeline`),
+    enabled: !!callId,
+  })
+  const events = data ?? []
+
+  if (isLoading) {
+    return <p className="text-sm text-muted">Lade Verlauf …</p>
+  }
+
+  if (!events.length) {
+    return <p className="text-sm text-muted">Keine Verlaufs-Einträge.</p>
+  }
+
+  return (
+    <div className="relative pl-5">
+      {/* Vertical rail behind every event row. */}
+      <div className="absolute left-[7px] top-1 bottom-1 w-px bg-border" aria-hidden="true" />
+      <ol className="space-y-3.5">
+        {events.map((ev) => (
+          <li key={ev.id} className="relative">
+            {/* Dot on the rail — sits 5px to the LEFT of the row content
+                (the parent has pl-5 = 20px, dot is 10px wide centered at
+                the 7px rail → leaves 8px to the row text). */}
+            <span
+              className={cn(
+                'absolute -left-[18px] top-[5px] h-2.5 w-2.5 rounded-full ring-2 ring-surface',
+                TIMELINE_KIND_DOT[ev.kind] ?? 'bg-muted',
+              )}
+              aria-hidden="true"
+            />
+
+            <div className="flex flex-col gap-0.5">
+              {/* Meta row: relative time + actor chip. */}
               <div className="flex items-center gap-2">
-                <span className={cn('h-2 w-2 flex-shrink-0 rounded-full', statusDot(a.status))} />
-                <span className="flex-1 truncate text-sm font-medium text-text">
-                  {a.title ?? 'Termin'}
+                <time
+                  className="text-xs text-muted"
+                  dateTime={ev.timestamp}
+                  title={absoluteTimeDe(ev.timestamp)}
+                >
+                  {relativeTimeDe(ev.timestamp)}
+                </time>
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                    ACTOR_CHIP[ev.actor_kind] ?? 'bg-alt text-faint',
+                  )}
+                >
+                  {ev.actor_name}
                 </span>
               </div>
-              <div className="mt-1 text-xs text-muted">{fmtTime(a.scheduled_at)}</div>
+              {/* Description row. */}
+              <p className="text-sm text-text">{ev.description}</p>
             </div>
-          ))}
-          {!appts.length && <p className="text-sm text-muted">Keine Termine.</p>}
-        </div>
-      </Section>
-
-      <Section title={`Kostenvoranschläge (${kvas.length})`}>
-        <div className="space-y-2">
-          {kvas.map((k) => (
-            <div key={k.id} className="flex items-center gap-2 rounded-lg border border-border p-3">
-              <Euro size={14} className="text-green-deep" />
-              <span className="flex-1 truncate text-sm font-medium text-text">
-                {k.number ?? 'KVA'}
-              </span>
-              <span className="text-xs text-muted">{fmtTime(k.created_at)}</span>
-            </div>
-          ))}
-          {!kvas.length && <p className="text-sm text-muted">Keine Kostenvoranschläge.</p>}
-        </div>
-      </Section>
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }

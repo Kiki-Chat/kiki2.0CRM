@@ -261,3 +261,255 @@ async def get_call_audio(call_id: str, user: CurrentUser = Depends(require_org))
             status_code=502, detail=f"Audio unavailable ({resp.status_code})"
         )
     return Response(content=resp.content, media_type="audio/mpeg")
+
+
+# ─── Wave 3 / Agent 3.2 — unified timeline for the Verlauf tab ───────────────
+@router.get("/{call_id}/timeline")
+async def get_call_timeline(
+    call_id: str, user: CurrentUser = Depends(require_org)
+) -> list[dict]:
+    """Aggregated, newest-first list of timeline events for one call.
+
+    Pulls from existing columns — no dedicated `events` table. Sources:
+
+    * `call_created`              — the call row itself (created_at)
+    * `inquiry_status_changed`    — `inquiries.updated_at` when status moved
+                                    out of 'open' (open→in_progress→completed)
+    * `appointment_confirmed`     — `appointments.confirmed_at` (Wave 2 col)
+    * `appointment_rejected`      — `appointments.rejected_at`  (Wave 2 col)
+    * `alternative_proposed`      — `appointments.alternative_proposed_at`
+    * `kva_sent`                  — `cost_estimates.sent_at`
+    * `kva_accepted`              — `cost_estimates.accepted_at`
+    * `kva_rejected`              — `cost_estimates.rejected_at`
+    * `assignment_changed`        — **NOT TRACKED** — `inquiries.assigned_to`
+                                    is overwritten in place with no audit
+                                    history. Flagged as a follow-up; not
+                                    surfaced in v1.
+
+    Org-scoping is enforced at every SELECT via `eq("org_id", ...)`. Cross-org
+    call_ids return 404 before any aggregation runs.
+    """
+    timeline = await run_in_threadpool(_build_timeline, user.org_id, call_id)
+    if timeline is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return timeline
+
+
+def _actor_for_status(status: str | None) -> tuple[str, str]:
+    """Map an inquiry status to (actor_kind, actor_name).
+
+    Without a per-row "who flipped it" audit column we can't pin every status
+    change to a specific employee, so we use the system-vs-Kiki heuristic:
+    'open' is what Kiki creates; transitions out of 'open' are employee work.
+    """
+    if status in ("in_progress", "completed"):
+        return ("employee", "Mitarbeiter")
+    return ("system", "System")
+
+
+_STATUS_LABEL = {
+    "open": "Offen",
+    "in_progress": "In Bearbeitung",
+    "completed": "Erledigt",
+    "deleted": "Gelöscht",
+}
+
+
+def _build_timeline(org_id: str, call_id: str) -> list[dict] | None:
+    """Single-pass aggregator. Returns None if the call doesn't belong to org.
+
+    Each event is a dict matching the TimelineEvent shape in the brief:
+      {id, kind, timestamp, actor_kind, actor_name, description, entity_id, extras}
+    """
+    client = get_service_client()
+
+    # Tenant guard: 404 if the call isn't in this org.
+    call_rows = (
+        client.table("calls")
+        .select("id, created_at, started_at, customer_id")
+        .eq("org_id", org_id)
+        .eq("id", call_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not call_rows:
+        return None
+    call = call_rows[0]
+
+    events: list[dict] = []
+
+    # 1. call_created — the call itself.
+    call_ts = call.get("started_at") or call.get("created_at")
+    if call_ts:
+        events.append(
+            {
+                "id": f"call:{call_id}:created",
+                "kind": "call_created",
+                "timestamp": call_ts,
+                "actor_kind": "kiki",
+                "actor_name": "Kiki",
+                "description": "Anruf entgegengenommen",
+                "entity_id": call_id,
+                "extras": {},
+            }
+        )
+
+    # 2. inquiries — for each inquiry linked to this call, emit a
+    # status-changed event when status has moved out of 'open' (updated_at
+    # tracks the latest write). We don't have a per-change audit, so this
+    # represents "current state reached at <updated_at>".
+    inquiries = (
+        client.table("inquiries")
+        .select("id, status, title, type, created_at, updated_at")
+        .eq("org_id", org_id)
+        .eq("call_id", call_id)
+        .execute()
+        .data
+        or []
+    )
+    inquiry_ids = [i["id"] for i in inquiries]
+    for inq in inquiries:
+        status = inq.get("status")
+        if status and status != "open":
+            ts = inq.get("updated_at") or inq.get("created_at")
+            if ts:
+                actor_kind, actor_name = _actor_for_status(status)
+                label = _STATUS_LABEL.get(status, status)
+                events.append(
+                    {
+                        "id": f"inquiry:{inq['id']}:status:{status}",
+                        "kind": "inquiry_status_changed",
+                        "timestamp": ts,
+                        "actor_kind": actor_kind,
+                        "actor_name": actor_name,
+                        "description": f"Anfrage-Status: {label}",
+                        "entity_id": inq["id"],
+                        "extras": {"status": status, "title": inq.get("title")},
+                    }
+                )
+
+    # 3. appointments for these inquiries — confirm / reject / alt-proposed.
+    appointments: list[dict] = []
+    if inquiry_ids:
+        appointments = (
+            client.table("appointments")
+            .select(
+                "id, inquiry_id, title, scheduled_at, created_at, status, "
+                "confirmed_at, rejected_at, rejection_reason, "
+                "alternative_start_time, alternative_proposed_at"
+            )
+            .eq("org_id", org_id)
+            .in_("inquiry_id", inquiry_ids)
+            .execute()
+            .data
+            or []
+        )
+    for appt in appointments:
+        title = appt.get("title") or "Termin"
+        if appt.get("confirmed_at"):
+            events.append(
+                {
+                    "id": f"appointment:{appt['id']}:confirmed",
+                    "kind": "appointment_confirmed",
+                    "timestamp": appt["confirmed_at"],
+                    "actor_kind": "employee",
+                    "actor_name": "Mitarbeiter",
+                    "description": f"Termin bestätigt: {title}",
+                    "entity_id": appt["id"],
+                    "extras": {"scheduled_at": appt.get("scheduled_at")},
+                }
+            )
+        if appt.get("rejected_at"):
+            extras: dict = {"scheduled_at": appt.get("scheduled_at")}
+            reason = appt.get("rejection_reason")
+            if reason:
+                extras["reason"] = reason
+            events.append(
+                {
+                    "id": f"appointment:{appt['id']}:rejected",
+                    "kind": "appointment_rejected",
+                    "timestamp": appt["rejected_at"],
+                    "actor_kind": "employee",
+                    "actor_name": "Mitarbeiter",
+                    "description": f"Termin abgelehnt: {title}",
+                    "entity_id": appt["id"],
+                    "extras": extras,
+                }
+            )
+        if appt.get("alternative_proposed_at"):
+            events.append(
+                {
+                    "id": f"appointment:{appt['id']}:alt",
+                    "kind": "alternative_proposed",
+                    "timestamp": appt["alternative_proposed_at"],
+                    "actor_kind": "employee",
+                    "actor_name": "Mitarbeiter",
+                    "description": f"Alternativtermin vorgeschlagen: {title}",
+                    "entity_id": appt["id"],
+                    "extras": {
+                        "alternative_start_time": appt.get("alternative_start_time")
+                    },
+                }
+            )
+
+    # 4. cost_estimates (KVA) — sent / accepted / rejected.
+    cost_estimates: list[dict] = []
+    if inquiry_ids:
+        cost_estimates = (
+            client.table("cost_estimates")
+            .select(
+                "id, inquiry_id, number, total, created_at, "
+                "sent_at, accepted_at, rejected_at, status"
+            )
+            .eq("org_id", org_id)
+            .in_("inquiry_id", inquiry_ids)
+            .execute()
+            .data
+            or []
+        )
+    for kva in cost_estimates:
+        num = kva.get("number") or "KVA"
+        if kva.get("sent_at"):
+            events.append(
+                {
+                    "id": f"kva:{kva['id']}:sent",
+                    "kind": "kva_sent",
+                    "timestamp": kva["sent_at"],
+                    "actor_kind": "employee",
+                    "actor_name": "Mitarbeiter",
+                    "description": f"{num} versendet",
+                    "entity_id": kva["id"],
+                    "extras": {"number": kva.get("number"), "total": kva.get("total")},
+                }
+            )
+        if kva.get("accepted_at"):
+            events.append(
+                {
+                    "id": f"kva:{kva['id']}:accepted",
+                    "kind": "kva_accepted",
+                    "timestamp": kva["accepted_at"],
+                    "actor_kind": "system",
+                    "actor_name": "Kunde",
+                    "description": f"{num} angenommen",
+                    "entity_id": kva["id"],
+                    "extras": {"number": kva.get("number"), "total": kva.get("total")},
+                }
+            )
+        if kva.get("rejected_at"):
+            events.append(
+                {
+                    "id": f"kva:{kva['id']}:rejected",
+                    "kind": "kva_rejected",
+                    "timestamp": kva["rejected_at"],
+                    "actor_kind": "system",
+                    "actor_name": "Kunde",
+                    "description": f"{num} abgelehnt",
+                    "entity_id": kva["id"],
+                    "extras": {"number": kva.get("number")},
+                }
+            )
+
+    # Sort newest-first by timestamp (ISO strings sort correctly).
+    events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)
+    return events
