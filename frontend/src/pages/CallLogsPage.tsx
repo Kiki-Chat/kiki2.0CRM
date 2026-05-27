@@ -202,8 +202,13 @@ function isRecentUnread(c: CallListItem): boolean {
 
 export function CallLogsPage() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  // Wave 2 / Agent 2.2 — LEFT sidebar tab switcher: Anfragen | Aktionen.
+  // Simple local state (not a router query param) keeps this self-contained;
+  // deep-linking to the Aktionen tab is a follow-up if the team wants it.
+  const [tab, setTab] = useState<'anfragen' | 'aktionen'>('anfragen')
 
   const me = useQuery({
     queryKey: ['me'],
@@ -217,6 +222,20 @@ export function CallLogsPage() {
     queryFn: () => apiFetch<{ calls: CallListItem[] }>('/api/calls?limit=100'),
   })
   const calls = callsQuery.data?.calls ?? []
+
+  // Wave 2 / Agent 2.2 — Aktionen tab data + badge count source. Auto-refetch
+  // every 30s so the badge stays roughly fresh without needing a websocket
+  // (the underlying tables — appointments/cost_estimates — don't have a
+  // realtime channel today). Stale-while-revalidate keeps the badge visible
+  // across tab flips so it doesn't flicker.
+  const actionsQuery = useQuery({
+    queryKey: ['actions', 'pending'],
+    queryFn: () => apiFetch<ActionItem[]>('/api/actions/pending'),
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  })
+  const actions = actionsQuery.data ?? []
+  const actionsCount = actions.length
 
   // Wave 2 / Agent 2.1 — shared employees list for the inline assign-
   // employee dropdown on every list-card. Same queryKey as CallDetail
@@ -296,40 +315,96 @@ export function CallLogsPage() {
   return (
     <div className="flex h-full min-h-0">
       <aside className="flex w-80 flex-shrink-0 flex-col border-r border-border bg-surface">
+        {/* Wave 2 / Agent 2.2 — tab switcher above the existing search bar.
+            Anfragen (default, current list) | Aktionen (new pending-decisions
+            list). Search bar is intentionally hidden on the Aktionen tab —
+            searching aktionen wasn't in scope for v1 (the spec allows the
+            simpler path); flagged as a follow-up. */}
         <div className="border-b border-border p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h1 className="text-base font-bold text-text">Anrufe</h1>
-            <span className="text-xs text-muted">{calls.length} gesamt</span>
+          <div className="mb-3 flex rounded-md bg-alt p-1">
+            {(['anfragen', 'aktionen'] as const).map((t) => {
+              const isActive = tab === t
+              const isAktionen = t === 'aktionen'
+              return (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={cn(
+                    'flex flex-1 items-center justify-center gap-1.5 rounded py-1.5 text-sm font-semibold transition-colors',
+                    isActive ? 'bg-surface text-text shadow-sm' : 'text-muted hover:text-body',
+                  )}
+                >
+                  <span>{isAktionen ? 'Aktionen' : 'Anfragen'}</span>
+                  {!isAktionen && (
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 text-[10px] font-bold',
+                        isActive ? 'bg-alt text-muted' : 'bg-surface text-muted',
+                      )}
+                    >
+                      {calls.length}
+                    </span>
+                  )}
+                  {isAktionen && actionsCount > 0 && (
+                    <span className="rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                      {actionsCount}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Suchen…"
-              className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
-            />
-          </div>
-        </div>
-        <div className="flex-1 space-y-1 overflow-y-auto p-2">
-          {filtered.map((c) => (
-            <CallListCard
-              key={c.id}
-              call={c}
-              active={c.id === selectedId}
-              employees={employees}
-              onSelect={() => setSelectedId(c.id)}
-              onAssign={(employeeId) => {
-                if (!c.inquiry_id) return
-                assignInquiry.mutate({ inquiryId: c.inquiry_id, employeeId })
-              }}
-              assigning={assignInquiry.isPending}
-            />
-          ))}
-          {!callsQuery.isLoading && !filtered.length && (
-            <p className="p-3 text-sm text-muted">Keine Anrufe.</p>
+          {tab === 'anfragen' && (
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Suchen…"
+                className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
+              />
+            </div>
           )}
         </div>
+
+        {/* Body — switches between the existing Anfragen list (untouched —
+            Agent 2.1's surface) and the new Aktionen list. */}
+        {tab === 'anfragen' ? (
+          <div className="flex-1 space-y-1 overflow-y-auto p-2">
+            {filtered.map((c) => (
+              <CallListCard
+                key={c.id}
+                call={c}
+                active={c.id === selectedId}
+                employees={employees}
+                onSelect={() => setSelectedId(c.id)}
+                onAssign={(employeeId) => {
+                  if (!c.inquiry_id) return
+                  assignInquiry.mutate({ inquiryId: c.inquiry_id, employeeId })
+                }}
+                assigning={assignInquiry.isPending}
+              />
+            ))}
+            {!callsQuery.isLoading && !filtered.length && (
+              <p className="p-3 text-sm text-muted">Keine Anrufe.</p>
+            )}
+          </div>
+        ) : (
+          <AktionenList
+            items={actions}
+            isLoading={actionsQuery.isLoading}
+            onClickItem={(item) => {
+              // v1 navigation: customer profile when we have a customer link;
+              // otherwise no-op. Deep-linking to the originating call would
+              // require an extra fetch (action items don't carry call_id
+              // directly because cost_estimates/appointments don't FK to
+              // calls in the schema). Flagged as a follow-up.
+              if (item.customer_id) {
+                navigate(`/customers/${item.customer_id}`)
+              }
+            }}
+          />
+        )}
       </aside>
 
       {selectedId ? (
@@ -514,6 +589,82 @@ function CallListCard({
         </div>
       </div>
     </div>
+  )
+}
+
+// Wave 2 / Agent 2.2 — Aktionen list (renders inside the LEFT sidebar when
+// the Aktionen tab is active). Pure presentational: parent owns data
+// fetching + onClick navigation logic.
+function AktionenList({
+  items,
+  isLoading,
+  onClickItem,
+}: {
+  items: ActionItem[]
+  isLoading: boolean
+  onClickItem: (item: ActionItem) => void
+}) {
+  if (isLoading) {
+    return <p className="p-3 text-sm text-muted">Lädt…</p>
+  }
+  if (!items.length) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 text-center">
+        <p className="text-sm text-muted">
+          Keine offenen Aktionen.<br />
+          <span className="text-xs text-faint">Kiki hat alles im Griff.</span>
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="flex-1 space-y-1 overflow-y-auto p-2">
+      {items.map((item) => (
+        <ActionListCard key={`${item.kind}:${item.id}`} item={item} onClick={() => onClickItem(item)} />
+      ))}
+    </div>
+  )
+}
+
+function ActionListCard({ item, onClick }: { item: ActionItem; onClick: () => void }) {
+  const label = ACTION_KIND_LABEL[item.kind]
+  const isHigh = item.priority === 'high'
+  const customerName = item.customer_name || 'Unbekannter Kunde'
+  // Prefer due_at (next user-visible date — e.g. appointment time), otherwise
+  // show the created_at timestamp so the operator has something to anchor on.
+  const displayTime = item.due_at || item.created_at
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+        'border-border bg-surface hover:bg-alt',
+      )}
+    >
+      {/* Left rail: small priority dot. High = red, normal = green. */}
+      <span
+        className={cn(
+          'mt-1.5 h-2 w-2 flex-shrink-0 rounded-full',
+          isHigh ? 'bg-red-500' : 'bg-green-primary',
+        )}
+        aria-hidden
+      />
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2">
+          <span
+            className={cn(
+              'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+              'bg-info-bg text-info',
+            )}
+          >
+            {label}
+          </span>
+          <span className="truncate text-[11px] text-faint">{fmtTime(displayTime)}</span>
+        </div>
+        <div className="truncate text-sm font-semibold text-text">{item.summary}</div>
+        <div className="truncate text-xs text-muted">{customerName}</div>
+      </div>
+    </button>
   )
 }
 

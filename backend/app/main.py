@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
+    actions,
     appointments,
     calendar_settings,
     calls,
@@ -78,6 +79,7 @@ app.include_router(settings_routes.router)
 app.include_router(users.router)
 app.include_router(super_admin.router)
 app.include_router(oauth.router)
+app.include_router(actions.router)
 
 # ElevenLabs tool webhooks (Phase 2 — handlers stubbed, return 501 for now).
 app.include_router(identify_customer.router)
