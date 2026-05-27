@@ -11,7 +11,7 @@ master secret. Super-admin auth replaces the master-secret check.
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -283,13 +283,28 @@ async def delete_org(
 @router.post("/orgs", response_model=ProvisionResponse)
 async def create_org(
     payload: ProvisionRequest,
+    background_tasks: BackgroundTasks,
     _user: CurrentUser = Depends(require_super_admin),
 ) -> ProvisionResponse:
     """Create a new org. Reuses app.services.provisioning.provision_org —
     the same code path as POST /api/heykiki/provision. Super-admin auth
     replaces the master-secret check here, since the caller is already a
-    trusted super-admin (no shared-secret round-trip needed)."""
-    return await run_in_threadpool(provision_org, payload)
+    trusted super-admin (no shared-secret round-trip needed).
+
+    P0.9 parity (2026-05-27 fix): mirrors /api/heykiki/provision by
+    scheduling import_agent_history as a BackgroundTask so historical
+    ElevenLabs conversations get backfilled into the new org's calls
+    table. Without this, orgs created via the super-admin surface would
+    start with empty Call Logs even when the bound agent had prior
+    conversations. Idempotent via the P0.2 SELECT-first dedup.
+    """
+    response = await run_in_threadpool(provision_org, payload)
+    background_tasks.add_task(
+        import_agent_history,
+        org_id=response.org_id,
+        agent_id=payload.elevenlabs_agent_id,
+    )
+    return response
 
 
 # ─── Convenience: promote/demote (for the one-shot super-admin user flow) ────
