@@ -313,3 +313,114 @@ def test_pending_for_call_404_when_call_missing(monkeypatch):
             )
         )
     assert exc.value.status_code == 404
+
+
+# ─── Wave 3 / Agent 3.1 — mini-calendar busy-slot lookup ────────────────────
+def test_calendar_busy_slots_returns_lightweight_shape(monkeypatch):
+    """Happy path: pending + confirmed appointments in the range are returned
+    with the {id, start_time, end_time, status, is_self} shape. end_time is
+    derived from scheduled_at + duration_minutes."""
+    rows = [
+        {
+            "id": "a-confirmed",
+            "scheduled_at": "2026-05-29T09:00:00+00:00",
+            "duration_minutes": 60,
+            "status": "confirmed",
+        },
+        {
+            "id": "a-pending",
+            "scheduled_at": "2026-05-29T14:00:00+00:00",
+            "duration_minutes": 90,
+            "status": "pending",
+        },
+    ]
+    monkeypatch.setattr(
+        appt_routes, "get_service_client", lambda: _FakeClient([rows])
+    )
+    result = asyncio.run(
+        appt_routes.list_calendar_busy_slots(
+            frm="2026-05-28",
+            to="2026-06-04",
+            self_id=None,
+            user=_org_admin_user("org-1"),
+        )
+    )
+    assert len(result) == 2
+    # First row: 09:00 + 60min → 10:00.
+    assert result[0]["id"] == "a-confirmed"
+    assert result[0]["status"] == "confirmed"
+    assert result[0]["start_time"].startswith("2026-05-29T09:00")
+    assert result[0]["end_time"].startswith("2026-05-29T10:00")
+    assert result[0]["is_self"] is False
+    # Second row: 14:00 + 90min → 15:30.
+    assert result[1]["end_time"].startswith("2026-05-29T15:30")
+
+
+def test_calendar_marks_self_id_correctly(monkeypatch):
+    """When self_id matches a row, is_self=True; other rows stay False. The
+    frontend uses this to render the proposed slot as the green block instead
+    of treating it as a conflict."""
+    rows = [
+        {
+            "id": "appt-self",
+            "scheduled_at": "2026-05-30T11:00:00+00:00",
+            "duration_minutes": 60,
+            "status": "pending",
+        },
+        {
+            "id": "appt-other",
+            "scheduled_at": "2026-05-30T15:00:00+00:00",
+            "duration_minutes": 30,
+            "status": "confirmed",
+        },
+    ]
+    monkeypatch.setattr(
+        appt_routes, "get_service_client", lambda: _FakeClient([rows])
+    )
+    result = asyncio.run(
+        appt_routes.list_calendar_busy_slots(
+            frm="2026-05-28",
+            to="2026-06-04",
+            self_id="appt-self",
+            user=_org_admin_user("org-1"),
+        )
+    )
+    by_id = {r["id"]: r for r in result}
+    assert by_id["appt-self"]["is_self"] is True
+    assert by_id["appt-other"]["is_self"] is False
+
+
+def test_calendar_is_org_scoped(monkeypatch):
+    """Verify the SELECT chain applies an .eq('org_id', …) filter so a
+    different org's appointments can't leak into the response."""
+    captured: dict = {"eq_calls": []}
+
+    class _RecordingClient:
+        def table(self, name: str) -> MagicMock:
+            chain = MagicMock()
+            chain.select.return_value = chain
+            for method in ("neq", "in_", "gte", "lt", "order", "limit"):
+                getattr(chain, method).return_value = chain
+
+            def _record_eq(col, val):
+                captured["eq_calls"].append((col, val))
+                return chain
+
+            chain.eq.side_effect = _record_eq
+            execute_result = MagicMock()
+            execute_result.data = []
+            chain.execute.return_value = execute_result
+            return chain
+
+    monkeypatch.setattr(
+        appt_routes, "get_service_client", lambda: _RecordingClient()
+    )
+    asyncio.run(
+        appt_routes.list_calendar_busy_slots(
+            frm="2026-05-28",
+            to="2026-06-04",
+            self_id=None,
+            user=_org_admin_user("org-tenant-A"),
+        )
+    )
+    assert ("org_id", "org-tenant-A") in captured["eq_calls"]

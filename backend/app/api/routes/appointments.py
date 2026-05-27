@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
@@ -90,6 +90,88 @@ async def list_appointments(
     user: CurrentUser = Depends(require_org),
 ) -> list[dict]:
     return await run_in_threadpool(_list, user.org_id, frm, to)
+
+
+# ─── Wave 3 / Agent 3.1 — compact mini-calendar busy-slot lookup ─────────────
+# Powers the 7-day mini-calendar inside the OFFENE AKTIONEN appointment card
+# (frontend/src/pages/calls/MiniCalendar.tsx). The mini-calendar only needs a
+# light wire shape — start/end/status — so it can paint busy blocks over its
+# hour grid; the full appointment object returned by `_list` is heavier than
+# needed and surfaces fields (title/notes/customer_name/...) we don't want to
+# ship to the right-panel for every cell render.
+#
+# The `self_id` query param marks the appointment currently being viewed in
+# the card; the response sets `is_self=true` on that row so the UI can render
+# the proposed slot as the highlighted green block instead of a conflict.
+#
+# Cancelled/deleted appointments are excluded from the response — they're not
+# conflicts. Pending and confirmed both render as blocks; the frontend picks
+# the color (red for confirmed, amber for pending).
+#
+# TODO: external calendar sync — once the Google/Microsoft OAuth bundle ships
+# (deferred to a future session), fan out to the user's connected calendar
+# and merge external busy slots into this response. For now, internal-only.
+
+
+def _calendar_busy_slots(
+    org_id: str,
+    frm: str,
+    to: str,
+    self_id: str | None,
+) -> list[dict]:
+    client = get_service_client()
+    rows = (
+        client.table("appointments")
+        .select("id, scheduled_at, duration_minutes, status")
+        .eq("org_id", org_id)
+        .gte("scheduled_at", frm)
+        .lt("scheduled_at", to)
+        .in_("status", ["pending", "confirmed"])
+        .order("scheduled_at")
+        .execute()
+        .data
+        or []
+    )
+    out: list[dict] = []
+    for r in rows:
+        start = r.get("scheduled_at")
+        if not start:
+            continue
+        dur = r.get("duration_minutes") or 60
+        try:
+            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        end_dt = start_dt + timedelta(minutes=int(dur))
+        out.append(
+            {
+                "id": r["id"],
+                "start_time": start_dt.isoformat(),
+                "end_time": end_dt.isoformat(),
+                "status": r.get("status"),
+                "is_self": self_id is not None and r["id"] == self_id,
+            }
+        )
+    return out
+
+
+@router.get("/calendar")
+async def list_calendar_busy_slots(
+    frm: str = Query(alias="from"),
+    to: str = Query(),
+    self_id: str | None = Query(default=None),
+    user: CurrentUser = Depends(require_org),
+) -> list[dict]:
+    """Compact appointment range for the mini-calendar inside AppointmentCard.
+
+    Returns `[{id, start_time, end_time, status, is_self}, ...]` — only
+    pending/confirmed appointments in `[from, to)`, scoped to the caller's
+    org. `self_id` marks which row is the currently-viewed appointment so the
+    UI can render it as the highlighted proposed slot rather than a conflict.
+    """
+    return await run_in_threadpool(
+        _calendar_busy_slots, user.org_id, frm, to, self_id
+    )
 
 
 def _create(org_id: str, payload: AppointmentCreate) -> dict:

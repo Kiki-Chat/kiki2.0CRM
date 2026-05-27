@@ -32,6 +32,7 @@ import { useMemo, useState } from 'react'
 
 import { apiFetch } from '../../lib/api'
 import { cn } from '../../lib/utils'
+import { MiniCalendar } from './MiniCalendar'
 
 // ─── shapes ──────────────────────────────────────────────────────────────────
 export interface PendingAppointment {
@@ -85,6 +86,13 @@ const fmtFullDate = (iso: string | null): string => {
 // string. Local-tz aware — datetime-local has no timezone, so we strip the offset.
 const isoToDtLocal = (iso: string | null, plusHours = 1): string => {
   const d = iso ? new Date(iso) : new Date(Date.now() + plusHours * 3_600_000)
+  return dateToDtLocal(d)
+}
+
+// Same as above but takes a Date directly — used by the MiniCalendar callback
+// when the user clicks an empty cell and we need to populate the alt-start /
+// alt-end inputs.
+const dateToDtLocal = (d: Date): string => {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
@@ -210,6 +218,24 @@ export function AppointmentCard({
   const location = appointment.location?.raw ?? null
   const effectiveDuration = customDuration ?? duration
 
+  // Wave 3 / Agent 3.1 — mini-calendar. Proposed end derived from
+  // scheduled_at + duration_minutes (fallback 60min); when the user clicks
+  // an empty cell on the grid we populate the alt-start / alt-end inputs
+  // and pop the picker so they can review/edit before sending.
+  const proposedEndIso = useMemo(() => {
+    if (!appointment.scheduled_at) return null
+    const start = new Date(appointment.scheduled_at)
+    const mins = appointment.duration_minutes ?? 60
+    return new Date(start.getTime() + mins * 60_000).toISOString()
+  }, [appointment.scheduled_at, appointment.duration_minutes])
+
+  const handleMiniCalendarPick = (start: Date, end: Date) => {
+    setAltStart(dateToDtLocal(start))
+    setAltEnd(dateToDtLocal(end))
+    setAltPickerOpen(true)
+    setActionError(null)
+  }
+
   return (
     <div className="border-b border-border bg-gradient-to-b from-green-tint-50/60 to-surface p-4">
       {/* Section label — matches "OFFENE AKTIONEN" caps in the reference. */}
@@ -217,9 +243,6 @@ export function AppointmentCard({
         <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
           Offene Aktionen
         </span>
-        {/* {/* TODO: Agent 3.1 mini-calendar — render <MiniCalendarSlot /> here
-            once it's built. Keep it on this header row so the card body stays
-            visually focused on the Bestätigung action. */}
       </div>
 
       <div className="rounded-xl border border-green-tint-200 bg-surface p-4 shadow-sm ring-1 ring-green-tint-100">
@@ -449,6 +472,20 @@ export function AppointmentCard({
           <div className="mt-3 rounded-md bg-error-bg px-3 py-2 text-xs text-error">
             {actionError}
           </div>
+        )}
+
+        {/* Wave 3 / Agent 3.1 — 7-day mini-calendar with proposed slot + conflicts.
+            Clicking an empty cell populates the alt-time inputs above and
+            opens the picker so the user can review/edit before sending. Only
+            rendered while the card is actionable (hidden after Alternative
+            gesendet, since the appointment is locked then). */}
+        {!altAlreadySent && (
+          <MiniCalendar
+            proposedStart={appointment.scheduled_at}
+            proposedEnd={proposedEndIso}
+            selfId={appointment.id}
+            onProposeSlot={handleMiniCalendarPick}
+          />
         )}
 
         {/* Action buttons row — hidden once an alternative has been sent
