@@ -84,3 +84,80 @@ async def update_inquiry(
     if not row:
         raise HTTPException(status_code=404, detail="Inquiry not found")
     return row
+
+
+# Wave 2 / Agent 2.1 — inline assign-employee dropdown on the call/inquiry
+# list-card. Distinct route from the generic PATCH so the frontend can fire
+# a focused mutation (and so test coverage doesn't conflate concerns).
+class InquiryAssignPayload(BaseModel):
+    employee_id: str | None = None
+
+
+def _assign(org_id: str, inquiry_id: str, employee_id: str | None) -> dict | None:
+    """Assign (or unassign) an employee to an inquiry, validating that the
+    employee belongs to the caller's org. Returns the updated row or None
+    when the inquiry doesn't exist in this org."""
+    client = get_service_client()
+
+    # Verify the inquiry belongs to the caller's org BEFORE writing — otherwise
+    # the org_id filter on the UPDATE silently makes a wrong inquiry_id a no-op
+    # and the frontend can't tell apart "permission denied" from "you assigned
+    # nobody". 404 is more honest.
+    existing = (
+        client.table("inquiries")
+        .select("id")
+        .eq("org_id", org_id)
+        .eq("id", inquiry_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not existing:
+        return None
+
+    if employee_id:
+        # Same-org check: a malicious org_admin can't reassign an inquiry to an
+        # employee in another tenant.
+        emp_rows = (
+            client.table("employees")
+            .select("id")
+            .eq("org_id", org_id)
+            .eq("id", employee_id)
+            .eq("deleted", False)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if not emp_rows:
+            raise HTTPException(
+                status_code=422,
+                detail="Mitarbeiter gehört nicht zu dieser Organisation.",
+            )
+
+    res = (
+        client.table("inquiries")
+        .update(
+            {
+                "assigned_employee_id": employee_id,
+                "updated_at": "now()",
+            }
+        )
+        .eq("org_id", org_id)
+        .eq("id", inquiry_id)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+@router.patch("/{inquiry_id}/assign")
+async def assign_inquiry(
+    inquiry_id: str,
+    payload: InquiryAssignPayload,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    """Assign / unassign an employee on an inquiry. POST `{employee_id: null}`
+    to clear the assignment. Validates same-org employee ownership."""
+    row = await run_in_threadpool(_assign, user.org_id, inquiry_id, payload.employee_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Inquiry not found")
+    return row
