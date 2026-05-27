@@ -98,12 +98,24 @@ _HK_TOOL_ID_CACHE: dict[str, str] = {}
 # provisioning is self-contained — not loaded from Amber's Downloads dir).
 _PROMPT_TEMPLATE_PATH = Path(__file__).parent / "agent_prompt_template.txt"
 
-# Strings in the template that are replaced per-org at runtime. The two
-# corporate variants of "Husmann & Dreier" are the parameterized hooks; the
-# "Herr Husmann"/"Herr Dreier" director-name lines are deliberately NOT
-# substituted here — they're bespoke template content that would need its
-# own per-org field. Flagged as a deferred follow-up (see report).
-_TEMPLATE_COMPANY_NAMES = ["Husmann & Dreier GmbH", "Husmann und Dreier"]
+# Strings in the template that are replaced per-org at runtime. Order matters:
+# the GmbH-suffixed form must come BEFORE the bare "Husmann & Dreier" so the
+# longer match wins and the GmbH suffix doesn't survive as orphaned text after
+# the bare match swallows everything to its left. The "Husmann und Dreier"
+# variant is its own separate string (different connector — no shadowing risk).
+# The "Herr Husmann"/"Herr Dreier" director-name lines (lines 919-920 of the
+# template) are deliberately NOT substituted here — they're bespoke template
+# content that would need its own per-org field. Flagged as a deferred follow-up.
+#
+# 2026-05-27 fix (Wave 3 V.2 finding): the bare "Husmann & Dreier" form was
+# initially omitted from this list, leaving 4 unsubstituted company-name
+# references in the rendered prompt for kiki-customer-009 (lines 93, 161, 164,
+# 214 of the template — parenthetical headings + prose). Added below.
+_TEMPLATE_COMPANY_NAMES = [
+    "Husmann & Dreier GmbH",
+    "Husmann und Dreier",
+    "Husmann & Dreier",
+]
 
 
 # ─── Tool lookup ─────────────────────────────────────────────────────────────

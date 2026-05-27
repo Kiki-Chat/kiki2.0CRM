@@ -122,6 +122,11 @@ def test_render_prompt_substitutes_company_name():
     # Husmann & Dreier GmbH gone (replaced)
     assert "Husmann & Dreier GmbH" not in out
     assert "Husmann und Dreier" not in out
+    # 2026-05-27 Wave 3 V.2 regression: the bare "Husmann & Dreier" form (no
+    # GmbH suffix, no "und" variant) was initially omitted from substitution —
+    # 4 instances in headings/prose on lines 93, 161, 164, 214 leaked through.
+    # This assertion locks the fix.
+    assert "Husmann & Dreier" not in out
     # Org name appears
     assert "Test Org GmbH" in out
     # NO wkp_shared_ tokens remain
@@ -129,6 +134,9 @@ def test_render_prompt_substitutes_company_name():
     # The hk_* tool names are present (sanity: the mapping landed in the template)
     assert "hk_identifyCustomer" in out
     assert "hk_bookAppointment" in out
+    # The director-name lines (lines 919-920) are intentionally NOT substituted —
+    # those are bespoke per-org content that needs its own future field.
+    assert "Herr Husmann und Herr Dreier" in out
 
 
 def test_render_prompt_strips_sendkva_parenthetical():
