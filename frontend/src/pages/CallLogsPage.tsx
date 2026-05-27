@@ -1,8 +1,11 @@
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertTriangle,
   AtSign,
   Bot,
   Calendar as CalIcon,
+  Check,
   CheckCircle,
   ChevronDown,
   Clock,
@@ -52,7 +55,15 @@ interface CallListItem {
   data_collection: Record<string, string> | null
   customer_id: string | null
   read_at: string | null  // P0.4 — null = unread; non-null = first opened at
+  created_at: string | null  // Wave 2.1 — drives the recent-unread glow window
   customers: { full_name: string | null } | null
+  // Wave 2 / Agent 2.1 — list-card enrichment fields populated by
+  // backend/app/api/routes/calls.py::_enrich_calls_with_inquiries.
+  inquiry_id: string | null
+  inquiry_status: 'open' | 'in_progress' | 'completed' | null
+  emergency_flag: boolean
+  assigned_employee_id: string | null
+  assigned_employee_initials: string | null
 }
 interface CallDetail extends CallListItem {
   summary: string | null
@@ -76,6 +87,35 @@ interface Inquiry {
 interface Employee {
   id: string
   display_name: string | null
+}
+// Wave 2 / Agent 2.2 — shape of /api/actions/pending list items. Backend
+// aggregates open decisions across appointments/KVAs/inquiries. See
+// backend/app/api/routes/actions.py for kind semantics.
+interface ActionItem {
+  kind:
+    | 'termin_anfrage'
+    | 'kva_to_send'
+    | 'kva_pending_acceptance'
+    | 'callback_owed'
+    | 'alt_time_proposal'
+  id: string
+  inquiry_id: string | null
+  call_id: string | null
+  customer_name: string | null
+  customer_id: string | null
+  summary: string
+  created_at: string | null
+  due_at: string | null
+  priority: 'normal' | 'high'
+}
+// German chip labels per kind. Lives on the client so the wire format stays
+// language-neutral.
+const ACTION_KIND_LABEL: Record<ActionItem['kind'], string> = {
+  termin_anfrage: 'Terminbestätigung',
+  kva_to_send: 'KVA senden',
+  kva_pending_acceptance: 'KVA-Antwort offen',
+  callback_owed: 'Rückruf',
+  alt_time_proposal: 'Alternativtermin',
 }
 
 const STATUS_TAG: Record<string, { label: string; variant: 'info' | 'warning' | 'success' | 'neutral' }> = {
@@ -109,6 +149,57 @@ function displayName(c: CallListItem): string {
   )
 }
 
+// Wave 2 / Agent 2.1 — list-card enrichment helpers.
+
+// Six pastel-saturated employee avatar colors. Keep this list stable —
+// reordering would visually reassign every existing employee. Chosen to
+// stay readable against the dark text and to be distinguishable from the
+// green-tint family used for the customer avatar in the detail panel so
+// the two avatars don't get visually confused.
+const EMPLOYEE_AVATAR_PALETTE: { bg: string; text: string }[] = [
+  { bg: 'bg-blue-100', text: 'text-blue-800' },
+  { bg: 'bg-amber-100', text: 'text-amber-800' },
+  { bg: 'bg-purple-100', text: 'text-purple-800' },
+  { bg: 'bg-pink-100', text: 'text-pink-800' },
+  { bg: 'bg-cyan-100', text: 'text-cyan-800' },
+  { bg: 'bg-teal-100', text: 'text-teal-800' },
+]
+
+// Stable string hash → palette index. Same employee_id always renders in
+// the same color across the list and across page reloads. djb2-ish hash:
+// cheap, deterministic, good spread across 6 buckets.
+function avatarColorForEmployee(employeeId: string | null): { bg: string; text: string } {
+  if (!employeeId) {
+    return { bg: 'bg-alt', text: 'text-faint' }  // neutral "?" circle
+  }
+  let hash = 0
+  for (let i = 0; i < employeeId.length; i++) {
+    hash = (hash * 33 + employeeId.charCodeAt(i)) >>> 0
+  }
+  return EMPLOYEE_AVATAR_PALETTE[hash % EMPLOYEE_AVATAR_PALETTE.length]
+}
+
+// Map inquiry_status → small chip on the list-card. 'deleted' / null
+// inquiries render nothing (no pill at all on the card).
+const STATUS_PILL: Record<string, { label: string; cls: string }> = {
+  open: { label: 'Offen', cls: 'bg-blue-100 text-blue-800' },
+  in_progress: { label: 'In Bearbeitung', cls: 'bg-amber-100 text-amber-800' },
+  completed: { label: 'Erledigt', cls: 'bg-green-100 text-green-800' },
+}
+
+// Glow window for recent-unread cards. 1 hour matches the brief and keeps
+// the visual pulse from accumulating across days of unread calls.
+const GLOW_WINDOW_MS = 60 * 60 * 1000
+function isRecentUnread(c: CallListItem): boolean {
+  if (c.read_at !== null) return false
+  const ts = c.created_at ?? c.started_at
+  if (!ts) return false
+  const created = new Date(ts).getTime()
+  if (Number.isNaN(created)) return false
+  return Date.now() - created < GLOW_WINDOW_MS
+}
+
+
 export function CallLogsPage() {
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -127,7 +218,33 @@ export function CallLogsPage() {
   })
   const calls = callsQuery.data?.calls ?? []
 
-  // P0.4 — Gmail-style mark-read on open. Idempotent backend; only fire when
+  // Wave 2 / Agent 2.1 — shared employees list for the inline assign-
+  // employee dropdown on every list-card. Same queryKey as CallDetail
+  // uses inside its own useQuery so React Query dedupes / shares cache.
+  const employeesQuery = useQuery({
+    queryKey: ['employees'],
+    queryFn: () => apiFetch<Employee[]>('/api/employees'),
+  })
+  const employees = employeesQuery.data ?? []
+
+  // Wave 2 / Agent 2.1 — inline assign mutation hits the focused
+  // /api/inquiries/{id}/assign route (NOT the generic PATCH, so test
+  // coverage and intent stay clear). On success we invalidate both
+  // ['calls'] (refreshes the avatar) and ['callInquiry'] (keeps the
+  // right-panel Aktionen <select> in sync).
+  const assignInquiry = useMutation({
+    mutationFn: ({ inquiryId, employeeId }: { inquiryId: string; employeeId: string | null }) =>
+      apiFetch(`/api/inquiries/${inquiryId}/assign`, {
+        method: 'PATCH',
+        body: JSON.stringify({ employee_id: employeeId }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['calls'] })
+      queryClient.invalidateQueries({ queryKey: ['callInquiry'] })
+    },
+  })
+
+    // P0.4 — Gmail-style mark-read on open. Idempotent backend; only fire when
   // the selected call is currently unread to avoid wasted requests on reopens.
   const markRead = useMutation({
     mutationFn: (callId: string) =>
@@ -195,53 +312,20 @@ export function CallLogsPage() {
           </div>
         </div>
         <div className="flex-1 space-y-1 overflow-y-auto p-2">
-          {filtered.map((c) => {
-            const active = c.id === selectedId
-            const isUnread = c.read_at === null  // P0.4 — Gmail-style read/unread
-            const Icon = c.direction === 'outbound' ? PhoneOutgoing : PhoneIncoming
-            return (
-              <button
-                key={c.id}
-                onClick={() => setSelectedId(c.id)}
-                className={cn(
-                  'flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors',
-                  active
-                    ? 'border-green-primary/40 bg-green-tint-50'
-                    : 'border-border bg-surface hover:bg-alt',
-                )}
-              >
-                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-green-tint-100 text-xs font-bold text-green-deep">
-                  {initials(displayName(c))}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={cn(
-                        'truncate text-sm',
-                        isUnread ? 'font-semibold text-text' : 'font-medium text-muted',
-                      )}
-                    >
-                      {displayName(c)}
-                    </span>
-                    <Icon size={13} className="flex-shrink-0 text-muted" />
-                  </div>
-                  <div
-                    className={cn(
-                      'truncate text-xs',
-                      isUnread ? 'text-body' : 'text-muted',
-                    )}
-                  >
-                    {c.summary_title ?? 'Anruf'}
-                  </div>
-                  <div className="mt-1 flex items-center gap-2 text-[11px] text-faint">
-                    <span>{fmtTime(c.started_at)}</span>
-                    <span>·</span>
-                    <span>{fmtDuration(c.duration_seconds)}</span>
-                  </div>
-                </div>
-              </button>
-            )
-          })}
+          {filtered.map((c) => (
+            <CallListCard
+              key={c.id}
+              call={c}
+              active={c.id === selectedId}
+              employees={employees}
+              onSelect={() => setSelectedId(c.id)}
+              onAssign={(employeeId) => {
+                if (!c.inquiry_id) return
+                assignInquiry.mutate({ inquiryId: c.inquiry_id, employeeId })
+              }}
+              assigning={assignInquiry.isPending}
+            />
+          ))}
           {!callsQuery.isLoading && !filtered.length && (
             <p className="p-3 text-sm text-muted">Keine Anrufe.</p>
           )}
@@ -258,6 +342,177 @@ export function CallLogsPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Wave 2 / Agent 2.1 — list-item card with employee-initial avatar (color-
+// hashed by employee_id), status pill, NOTDIENST badge, recent-unread glow,
+// and inline assign-employee dropdown.
+//
+// The wrapping element is a <div role="button"> (not a real <button>) so
+// the avatar can be a nested DropdownMenu.Trigger <button> — nested buttons
+// are invalid HTML. Avatar click stops propagation so it doesn't ALSO fire
+// the card's onSelect.
+function CallListCard({
+  call,
+  active,
+  employees,
+  onSelect,
+  onAssign,
+  assigning,
+}: {
+  call: CallListItem
+  active: boolean
+  employees: Employee[]
+  onSelect: () => void
+  onAssign: (employeeId: string | null) => void
+  assigning: boolean
+}) {
+  const isUnread = call.read_at === null
+  const recent = isRecentUnread(call)
+  const Icon = call.direction === 'outbound' ? PhoneOutgoing : PhoneIncoming
+  const palette = avatarColorForEmployee(call.assigned_employee_id)
+  const pill = call.inquiry_status ? STATUS_PILL[call.inquiry_status] : null
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      className={cn(
+        'relative flex w-full cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+        active
+          ? 'border-green-primary/40 bg-green-tint-50'
+          : 'border-border bg-surface hover:bg-alt',
+        // Recent-unread glow: subtle ring + slow pulse animation. Sits
+        // under the active-state border so the selected-card highlight is
+        // still visible if a card is BOTH recent-unread AND selected.
+        recent && 'ring-2 ring-green-primary/40 animate-pulse',
+      )}
+    >
+      {/* NOTDIENST badge — top-right corner, only shown when emergency_flag
+          is true. Absolute-positioned so it doesn't compete with the right-
+          aligned phone icon for inline space. */}
+      {call.emergency_flag && (
+        <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-sm bg-error px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
+          <AlertTriangle size={9} /> Notdienst
+        </span>
+      )}
+
+      {/* Employee initials avatar (24px) — opens the assign dropdown. */}
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            disabled={!call.inquiry_id || assigning}
+            title={
+              call.inquiry_id
+                ? 'Mitarbeiter zuweisen'
+                : 'Noch keine Anfrage — kann nicht zugewiesen werden'
+            }
+            className={cn(
+              'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold transition-transform hover:scale-110 disabled:cursor-not-allowed disabled:opacity-60',
+              palette.bg,
+              palette.text,
+            )}
+          >
+            {call.assigned_employee_initials ?? '?'}
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            align="start"
+            sideOffset={4}
+            onClick={(e) => e.stopPropagation()}
+            className="z-50 max-h-64 w-56 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-e3"
+          >
+            <DropdownMenu.Item
+              onSelect={() => onAssign(null)}
+              className="flex cursor-pointer items-center justify-between gap-2 rounded-md px-3 py-2 text-sm text-muted outline-none data-[highlighted]:bg-alt"
+            >
+              <span>— Niemand —</span>
+              {!call.assigned_employee_id && <Check size={13} className="text-green-deep" />}
+            </DropdownMenu.Item>
+            {employees.length > 0 && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
+            {employees.map((e) => {
+              const ePalette = avatarColorForEmployee(e.id)
+              const eInitials = (e.display_name ?? '?')
+                .split(' ')
+                .filter(Boolean)
+                .map((w) => w[0])
+                .slice(0, 2)
+                .join('')
+                .toUpperCase()
+              return (
+                <DropdownMenu.Item
+                  key={e.id}
+                  onSelect={() => onAssign(e.id)}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm text-body outline-none data-[highlighted]:bg-alt"
+                >
+                  <span
+                    className={cn(
+                      'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold',
+                      ePalette.bg,
+                      ePalette.text,
+                    )}
+                  >
+                    {eInitials || '?'}
+                  </span>
+                  <span className="flex-1 truncate">{e.display_name ?? '—'}</span>
+                  {e.id === call.assigned_employee_id && (
+                    <Check size={13} className="text-green-deep" />
+                  )}
+                </DropdownMenu.Item>
+              )
+            })}
+            {!employees.length && (
+              <div className="px-3 py-2 text-xs text-muted">Keine Mitarbeiter.</div>
+            )}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <span
+            className={cn(
+              'truncate text-sm',
+              isUnread ? 'font-semibold text-text' : 'font-medium text-muted',
+            )}
+          >
+            {displayName(call)}
+          </span>
+          <Icon size={13} className="flex-shrink-0 text-muted" />
+        </div>
+        <div
+          className={cn(
+            'truncate text-xs',
+            isUnread ? 'text-body' : 'text-muted',
+          )}
+        >
+          {call.summary_title ?? 'Anruf'}
+        </div>
+        {/* Status pill + meta row. Pill sits on the left so the eye
+            naturally scans status → time → duration. */}
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-faint">
+          {pill && (
+            <span className={cn('rounded-sm px-1.5 py-0.5 font-semibold', pill.cls)}>
+              {pill.label}
+            </span>
+          )}
+          <span>{fmtTime(call.started_at)}</span>
+          <span>·</span>
+          <span>{fmtDuration(call.duration_seconds)}</span>
+        </div>
+      </div>
     </div>
   )
 }
