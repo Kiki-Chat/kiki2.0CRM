@@ -3,7 +3,7 @@ import { ArrowLeft, AlertTriangle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
-import { apiFetch } from '../lib/api'
+import { apiFetch } from '../lib/adminApi'
 
 interface OrgDetail {
   id: string

@@ -3,8 +3,8 @@ import { ShieldAlert } from 'lucide-react'
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 
-import { useAuth } from '../auth/AuthProvider'
-import { apiFetch } from '../lib/api'
+import { useAdminAuth } from './AdminAuthProvider'
+import { apiFetch } from '../lib/adminApi'
 
 /**
  * /admin/login — plain email/password gate. No magic link, no signup.
@@ -12,15 +12,17 @@ import { apiFetch } from '../lib/api'
  * (and is signed out so they can't accidentally hold an admin-level session).
  */
 export function AdminLoginPage() {
-  const { session, signInWithPassword, signOut } = useAuth()
+  const { session, signInWithPassword, signOut } = useAdminAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   // If already signed in, verify role and either redirect or reject.
+  // Distinct queryKey from the customer-surface ['me'] so the two surfaces
+  // don't share a cached identity across QueryClient.
   const me = useQuery({
-    queryKey: ['me'],
+    queryKey: ['admin-me'],
     queryFn: () => apiFetch<{ id: string; email: string; role: string | null }>('/api/me'),
     enabled: !!session,
     retry: false,

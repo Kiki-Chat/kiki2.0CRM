@@ -6,9 +6,9 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { Session } from '@supabase/supabase-js'
+import type { Session, SupabaseClient } from '@supabase/supabase-js'
 
-import { supabase } from '../lib/supabase'
+import { customerSupabase } from '../lib/supabase'
 import { isSupabaseConfigured } from '../lib/env'
 
 interface AuthContextValue {
@@ -22,48 +22,57 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+/**
+ * Internal hook — sets up a session + auth-state subscription against a
+ * single Supabase client. Used by both `AuthProvider` (customer surface,
+ * bound to `customerSupabase`) and the admin surface's provider (bound to
+ * `adminSupabase`, distinct storageKey).
+ */
+export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthContextValue {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!supabase) {
+    if (!client) {
       setLoading(false)
       return
     }
-    supabase.auth.getSession().then(({ data }) => {
+    client.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setLoading(false)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: sub } = client.auth.onAuthStateChange((_event, s) => {
       setSession(s)
     })
     return () => sub.subscription.unsubscribe()
-  }, [])
+  }, [client])
 
-  const value = useMemo<AuthContextValue>(
+  return useMemo<AuthContextValue>(
     () => ({
       session,
       loading,
       configured: isSupabaseConfigured,
       async signInWithPassword(email, password) {
-        if (!supabase) throw new Error('Supabase not configured')
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        if (!client) throw new Error('Supabase not configured')
+        const { error } = await client.auth.signInWithPassword({ email, password })
         if (error) throw error
       },
       async signInWithMagicLink(email) {
-        if (!supabase) throw new Error('Supabase not configured')
-        const { error } = await supabase.auth.signInWithOtp({ email })
+        if (!client) throw new Error('Supabase not configured')
+        const { error } = await client.auth.signInWithOtp({ email })
         if (error) throw error
       },
       async signOut() {
-        if (!supabase) return
-        await supabase.auth.signOut()
+        if (!client) return
+        await client.auth.signOut()
       },
     }),
-    [session, loading],
+    [client, session, loading],
   )
+}
 
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const value = useSupabaseAuthBinding(customerSupabase)
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

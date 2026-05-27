@@ -3,7 +3,7 @@ import { CheckCircle2, MinusCircle, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { apiFetch } from '../lib/api'
+import { apiFetch } from '../lib/adminApi'
 import { cn } from '../lib/utils'
 
 interface OrgRow {

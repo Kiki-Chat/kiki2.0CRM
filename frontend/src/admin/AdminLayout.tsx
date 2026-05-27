@@ -2,7 +2,7 @@ import { ShieldAlert, LogOut } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { useAuth } from '../auth/AuthProvider'
+import { useAdminAuth } from './AdminAuthProvider'
 
 /**
  * Standalone admin shell. Slate/dark palette + amber accent — deliberately
@@ -10,7 +10,7 @@ import { useAuth } from '../auth/AuthProvider'
  * affordances; just a top bar with the role badge + sign-out.
  */
 export function AdminLayout({ children }: { children: ReactNode }) {
-  const { session, signOut } = useAuth()
+  const { session, signOut } = useAdminAuth()
   const navigate = useNavigate()
   const email = session?.user.email ?? ''
 

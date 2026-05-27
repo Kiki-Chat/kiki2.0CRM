@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { Navigate, Outlet } from 'react-router-dom'
 
-import { useAuth } from '../auth/AuthProvider'
-import { apiFetch } from '../lib/api'
+import { apiFetch } from '../lib/adminApi'
 import { AdminLayout } from './AdminLayout'
 import { AdminNotFound } from './AdminNotFound'
+import { useAdminAuth } from './AdminAuthProvider'
 
 /**
  * Gate for /admin/* (except /admin/login). Three outcomes:
@@ -14,10 +14,12 @@ import { AdminNotFound } from './AdminNotFound'
  *  3. Role === 'super_admin' → render the admin layout + nested routes.
  */
 export function AdminProtectedRoute() {
-  const { session, loading } = useAuth()
+  const { session, loading } = useAdminAuth()
 
+  // Distinct queryKey from the customer ['me'] — different surface, different
+  // user identity, different cache slot.
   const me = useQuery({
-    queryKey: ['me'],
+    queryKey: ['admin-me'],
     queryFn: () => apiFetch<{ id: string; email: string; role: string | null }>('/api/me'),
     enabled: !!session,
     retry: false,
