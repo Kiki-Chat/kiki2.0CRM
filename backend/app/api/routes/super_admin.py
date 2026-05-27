@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_super_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.provision import ProvisionRequest
+from app.services.agent_config import configure_agent
 from app.services.history_import import import_agent_history
 from app.services.provisioning import provision_org
 
@@ -359,6 +360,123 @@ async def import_history(
         )
     counters = await run_in_threadpool(import_agent_history, org_id, agent_id)
     return {"success": True, "org_id": org_id, **counters}
+
+
+# ─── B.7: manual agent-config sync (backfill for pre-Wave-1 orgs) ───────────
+class SyncAgentConfigRequest(BaseModel):
+    """Body for POST /api/super-admin/orgs/{id}/sync-agent-config.
+
+    ``force=False`` (default) is the safe behavior: ``configure_agent`` skips
+    the prompt step on orgs whose ``agent_provisioned_at`` is already set, so
+    customer-edited prompts are never overwritten.
+
+    ``force=True`` clears ``agent_provisioned_at`` before the run so the prompt
+    step is re-applied from the master template. **Destructive** — any local
+    edits to the agent's prompt in ElevenLabs will be replaced. Reserved for
+    deliberate template re-rollouts. The safety layer's pre-write snapshot
+    still allows manual rollback if needed.
+    """
+
+    force: bool = False
+    model_config = {"extra": "ignore"}
+
+
+class SyncAgentConfigResponse(BaseModel):
+    """Response shape mirrors the summary dict returned by ``configure_agent``."""
+
+    org_id: str
+    agent_id: str
+    phone_number: str | None
+    tools_attached: list[str]
+    prompt_applied: bool
+    prompt_skipped_reason: str | None
+    webhook_enabled: bool
+    audio_ok: bool
+
+
+@router.post("/orgs/{org_id}/sync-agent-config", response_model=SyncAgentConfigResponse)
+async def sync_agent_config(
+    org_id: str,
+    payload: SyncAgentConfigRequest | None = None,
+    _user: CurrentUser = Depends(require_super_admin),
+) -> SyncAgentConfigResponse:
+    """Backfill / re-apply the ElevenLabs agent configuration for an existing org.
+
+    Calls the same ``configure_agent`` helper that ``provision_org`` invokes
+    on first-create (B.1 phone fetch → B.2 hk_* tools merge → B.3 master prompt
+    (skipped on re-runs unless ``force=True``) → B.4 conversation-init webhook →
+    B.5 audio assertion). All ElevenLabs writes route through ``patch_agent_safely``
+    (snapshot + verify + auto-rollback + audit) so a failure mid-run leaves
+    an audit trail and a snapshot for manual recovery.
+
+    Use case: orgs created before Wave 1 (commit ``9c3aaf1``) had no automatic
+    agent configuration on provision — they need this one-shot backfill so the
+    agent gets phone/tools/webhook wired without a full re-provision.
+
+    Errors raised by ``configure_agent`` (missing phone, missing workspace tool,
+    EL HTTP error, verify failure) surface as HTTP 400 with the error message —
+    these are operator-actionable, not 500s.
+    """
+    org = await run_in_threadpool(_get_org, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation nicht gefunden.")
+    agent_id = org.get("elevenlabs_agent_id")
+    if not agent_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Diese Organisation hat keine ElevenLabs Agent ID hinterlegt.",
+        )
+    org_name = (org.get("name") or "").strip()
+    if not org_name:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Diese Organisation hat keinen Namen — der Prompt-Substitution "
+                "fehlt damit der Wert für die Firmennamen-Platzhalter."
+            ),
+        )
+
+    body = payload or SyncAgentConfigRequest()
+    if body.force:
+        # Clear the provisioned-at stamp so configure_agent re-applies the prompt.
+        # The configure_agent call below will re-stamp on success.
+        def _clear_stamp() -> None:
+            client = get_service_client()
+            client.table("organizations").update(
+                {"agent_provisioned_at": None}
+            ).eq("id", org_id).execute()
+
+        await run_in_threadpool(_clear_stamp)
+
+    try:
+        summary = await run_in_threadpool(
+            configure_agent,
+            org_id=org_id,
+            agent_id=agent_id,
+            org_name=org_name,
+            actor_id=_user.id,
+        )
+    except HTTPException:
+        # configure_agent raises HTTPException(400) for user-actionable failures
+        # (missing phone, missing workspace tool). Let those propagate as-is.
+        raise
+    except Exception as e:
+        # ElevenLabsWriteError / SilentAgentRiskError / VerificationFailedError
+        # and any other service-layer failure: surface as 400 with the message
+        # so the operator can act on it. Snapshot + audit row already exist
+        # via patch_agent_safely; manual rollback is possible.
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return SyncAgentConfigResponse(
+        org_id=org_id,
+        agent_id=agent_id,
+        phone_number=summary.get("phone_number"),
+        tools_attached=list(summary.get("tools_attached") or []),
+        prompt_applied=bool(summary.get("prompt_applied")),
+        prompt_skipped_reason=summary.get("prompt_skipped_reason"),
+        webhook_enabled=bool(summary.get("webhook_enabled")),
+        audio_ok=bool(summary.get("audio_ok")),
+    )
 
 
 @router.patch("/users/{user_id}/role")

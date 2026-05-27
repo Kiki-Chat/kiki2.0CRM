@@ -187,3 +187,263 @@ def test_create_org_response_omits_org_secret(monkeypatch):
     dumped = result.model_dump()
     assert "org_secret" not in dumped
     assert set(dumped.keys()) == {"org_id", "admin_user_id", "heykiki_org_id"}
+
+
+# ─── B.7 sync-agent-config route ─────────────────────────────────────────────
+def _super_admin_user() -> deps.CurrentUser:
+    return deps.CurrentUser(
+        id="00000000-0000-0000-0000-000000000001",
+        email="amber@gmail.com",
+        org_id=None,
+        role="super_admin",
+        full_name="Amber",
+    )
+
+
+def _org_admin_user() -> deps.CurrentUser:
+    return deps.CurrentUser(
+        id="user-1",
+        email="admin@example.com",
+        org_id="org-1",
+        role="org_admin",
+        full_name=None,
+    )
+
+
+def test_sync_agent_config_rejects_non_super_admin():
+    """Auth gate: org_admin / employee MUST NOT be able to hit this route.
+    require_super_admin raises 403 — the route never executes."""
+    with pytest.raises(HTTPException) as exc:
+        deps.require_super_admin(_org_admin_user())
+    assert exc.value.status_code == 403
+
+
+def test_sync_agent_config_returns_404_when_org_missing(monkeypatch):
+    """404 when org_id has no matching row."""
+    import asyncio
+
+    monkeypatch.setattr(sa, "_get_org", lambda _oid: None)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            sa.sync_agent_config(
+                org_id="missing-org",
+                payload=None,
+                _user=_super_admin_user(),
+            )
+        )
+    assert exc.value.status_code == 404
+    assert "nicht gefunden" in exc.value.detail
+
+
+def test_sync_agent_config_400_when_org_has_no_agent_id(monkeypatch):
+    """400 when the org row exists but has no elevenlabs_agent_id."""
+    import asyncio
+
+    monkeypatch.setattr(
+        sa,
+        "_get_org",
+        lambda _oid: {"id": _oid, "name": "Acme", "elevenlabs_agent_id": None},
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            sa.sync_agent_config(
+                org_id="org-no-agent",
+                payload=None,
+                _user=_super_admin_user(),
+            )
+        )
+    assert exc.value.status_code == 400
+    assert "Agent ID" in exc.value.detail
+
+
+def test_sync_agent_config_happy_path_returns_summary(monkeypatch):
+    """Happy path: ``configure_agent`` returns a known summary; the route
+    echoes it back as a ``SyncAgentConfigResponse``."""
+    import asyncio
+
+    org_id = "00000000-0000-0000-0000-000000000aaa"
+    agent_id = "agent_test_001"
+    monkeypatch.setattr(
+        sa,
+        "_get_org",
+        lambda _oid: {
+            "id": _oid,
+            "name": "Acme GmbH",
+            "elevenlabs_agent_id": agent_id,
+        },
+    )
+
+    expected_summary = {
+        "phone_number": "+4925197593899",
+        "tools_attached": ["tool_aaa", "tool_bbb"],
+        "prompt_applied": True,
+        "prompt_skipped_reason": None,
+        "webhook_enabled": True,
+        "audio_ok": True,
+    }
+    captured: dict = {}
+
+    def _fake_configure(*, org_id, agent_id, org_name, actor_id=None):
+        captured["org_id"] = org_id
+        captured["agent_id"] = agent_id
+        captured["org_name"] = org_name
+        captured["actor_id"] = actor_id
+        return expected_summary
+
+    monkeypatch.setattr(sa, "configure_agent", _fake_configure)
+
+    result = asyncio.run(
+        sa.sync_agent_config(
+            org_id=org_id,
+            payload=None,
+            _user=_super_admin_user(),
+        )
+    )
+
+    assert isinstance(result, sa.SyncAgentConfigResponse)
+    assert result.org_id == org_id
+    assert result.agent_id == agent_id
+    assert result.phone_number == "+4925197593899"
+    assert result.tools_attached == ["tool_aaa", "tool_bbb"]
+    assert result.prompt_applied is True
+    assert result.prompt_skipped_reason is None
+    assert result.webhook_enabled is True
+    assert result.audio_ok is True
+
+    # configure_agent received the right args from the route.
+    assert captured["org_id"] == org_id
+    assert captured["agent_id"] == agent_id
+    assert captured["org_name"] == "Acme GmbH"
+    assert captured["actor_id"] == "00000000-0000-0000-0000-000000000001"
+
+
+def test_sync_agent_config_propagates_400_from_configure_agent(monkeypatch):
+    """HTTPException raised by configure_agent (missing phone / missing tool)
+    passes through unchanged — operator-actionable 400 stays a 400."""
+    import asyncio
+
+    monkeypatch.setattr(
+        sa,
+        "_get_org",
+        lambda _oid: {
+            "id": _oid,
+            "name": "Acme GmbH",
+            "elevenlabs_agent_id": "agent_test_001",
+        },
+    )
+
+    def _raises(**_kw):
+        raise HTTPException(
+            status_code=400, detail="Agent has no phone number assigned in ElevenLabs."
+        )
+
+    monkeypatch.setattr(sa, "configure_agent", _raises)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            sa.sync_agent_config(
+                org_id="org-1",
+                payload=None,
+                _user=_super_admin_user(),
+            )
+        )
+    assert exc.value.status_code == 400
+    assert "phone number" in exc.value.detail
+
+
+def test_sync_agent_config_wraps_unexpected_error_as_400(monkeypatch):
+    """ElevenLabsWriteError / VerificationFailedError / generic exceptions
+    are wrapped as HTTP 400 (not 500) so the operator sees the actual message."""
+    import asyncio
+
+    monkeypatch.setattr(
+        sa,
+        "_get_org",
+        lambda _oid: {
+            "id": _oid,
+            "name": "Acme GmbH",
+            "elevenlabs_agent_id": "agent_test_001",
+        },
+    )
+
+    def _raises(**_kw):
+        raise RuntimeError("EL verify failed: tools array shrank after write.")
+
+    monkeypatch.setattr(sa, "configure_agent", _raises)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            sa.sync_agent_config(
+                org_id="org-1",
+                payload=None,
+                _user=_super_admin_user(),
+            )
+        )
+    assert exc.value.status_code == 400
+    assert "tools array shrank" in exc.value.detail
+
+
+def test_sync_agent_config_force_clears_provisioned_stamp(monkeypatch):
+    """force=True must clear organizations.agent_provisioned_at BEFORE
+    configure_agent runs so the prompt step gets re-applied."""
+    import asyncio
+
+    org_id = "org-1"
+    monkeypatch.setattr(
+        sa,
+        "_get_org",
+        lambda _oid: {
+            "id": _oid,
+            "name": "Acme GmbH",
+            "elevenlabs_agent_id": "agent_test_001",
+        },
+    )
+
+    cleared = {"called": False, "value": None}
+
+    class _Chain:
+        def __init__(self, name):
+            self.name = name
+            self.payload = None
+
+        def update(self, payload):
+            self.payload = payload
+            return self
+
+        def eq(self, _col, _val):
+            return self
+
+        def execute(self):
+            if self.name == "organizations" and self.payload is not None:
+                cleared["called"] = True
+                cleared["value"] = self.payload.get("agent_provisioned_at", "MISSING")
+            return MagicMock(data=[])
+
+    client = MagicMock()
+    client.table = lambda name: _Chain(name)
+    monkeypatch.setattr(sa, "get_service_client", lambda: client)
+    monkeypatch.setattr(
+        sa,
+        "configure_agent",
+        lambda **_kw: {
+            "phone_number": "+49000",
+            "tools_attached": [],
+            "prompt_applied": True,
+            "prompt_skipped_reason": None,
+            "webhook_enabled": True,
+            "audio_ok": True,
+        },
+    )
+
+    asyncio.run(
+        sa.sync_agent_config(
+            org_id=org_id,
+            payload=sa.SyncAgentConfigRequest(force=True),
+            _user=_super_admin_user(),
+        )
+    )
+
+    assert cleared["called"] is True
+    assert cleared["value"] is None  # explicit NULL clear, not omission
