@@ -21,7 +21,7 @@ import {
   User,
   Volume2,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
@@ -35,6 +35,10 @@ import { AppointmentCard, usePendingAppointment } from './calls/AppointmentCard'
 interface TranscriptTurn {
   role: string
   message: string | null
+  // Per-turn timestamp from ElevenLabs (seconds from call start). Used to
+  // highlight the active turn during audio playback. Older imports may lack
+  // it — treat as null and fall back to "no highlight" gracefully.
+  time_in_call_secs?: number | null
   tool_calls: (string | null)[]
 }
 interface CallListItem {
@@ -305,16 +309,26 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
 
   return (
     <>
-      <Transcript call={call} isSuperAdmin={isSuperAdmin} />
+      <Transcript
+        call={call}
+        isSuperAdmin={isSuperAdmin}
+        onOpenSummary={() => setTab('details')}
+      />
 
-      {/* RIGHT PANEL */}
-      <aside className="flex w-96 flex-shrink-0 flex-col border-l border-border bg-surface">
-        {/* Wave 2 / Agent 2.4 — OFFENE AKTIONEN appointment card. Renders at
-            the TOP of the right panel above the title block; only present
-            when the call has a pending appointment that needs a decision and
-            the user hasn't dismissed it client-side this session. The card
-            owns its own border-bottom — visually separates from the title
-            block below without an extra wrapper. */}
+      {/* RIGHT PANEL — Wave 2 / Agent 2.3 polish:
+          - w-80 (was w-96, ~17% narrower) so the center transcript can
+            breathe and long German labels in compressed buttons still fit.
+          - Sticky-on-scroll by structure: it's a flex sibling of the
+            transcript column in a `flex h-full min-h-0` parent, so it owns
+            its own vertical column and stays in view while the transcript's
+            internal `overflow-y-auto` scrolls underneath. `sticky top-0` is
+            belt-and-braces for any future restructure that might wrap the
+            page in a vertical stack — harmless no-op today.
+          The Wave 2 / Agent 2.4 OFFENE AKTIONEN appointment card sits at
+          the TOP of this aside (above the title block); only present when
+          the call has a pending appointment that needs a decision. */}
+      <aside className="sticky top-0 flex h-full w-80 flex-shrink-0 flex-col border-l border-border bg-surface">
+        {/* Wave 2 / Agent 2.4 — OFFENE AKTIONEN appointment card. */}
         {showAppointmentCard && pendingAppointment && (
           <AppointmentCard
             appointment={pendingAppointment}
@@ -351,7 +365,7 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
               key={t}
               onClick={() => setTab(t)}
               className={cn(
-                'flex-1 border-b-2 px-2 py-2.5 text-sm font-medium transition-colors',
+                'flex-1 border-b-2 px-2 py-2 text-sm font-medium transition-colors',
                 tab === t
                   ? 'border-green-primary text-green-deep'
                   : 'border-transparent text-muted hover:text-body',
@@ -362,7 +376,7 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-4">
           {tab === 'actions' && (
             <ActionsTab
               inquiry={inquiry}
@@ -419,13 +433,28 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
   )
 }
 
-function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: boolean }) {
+function Transcript({
+  call,
+  isSuperAdmin,
+  onOpenSummary,
+}: {
+  call: CallDetail
+  isSuperAdmin: boolean
+  onOpenSummary: () => void
+}) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [audioState, setAudioState] = useState<'idle' | 'loading' | 'error'>('idle')
+  // Active-turn highlighting synced to audio playback. -1 = no highlight
+  // (audio paused, ended, or never started). The index here is into the
+  // FULL transcript array, not the post-skip render list.
+  const [activeIdx, setActiveIdx] = useState<number>(-1)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const turnRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
   useEffect(() => {
     setAudioUrl(null)
     setAudioState('idle')
+    setActiveIdx(-1)
   }, [call.id])
 
   async function loadAudio() {
@@ -438,7 +467,75 @@ function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: bo
     }
   }
 
-  const transcript = call.transcript ?? []
+  // Memoize so referential identity is stable when call.transcript is null —
+  // otherwise the `[] !== []` shift would invalidate every downstream useMemo
+  // on every render and re-fire the audio-listener effect for no reason.
+  const transcript = useMemo(() => call.transcript ?? [], [call.transcript])
+
+  // Pre-compute the turns that carry a usable timestamp. We need the original
+  // indices so the highlight aligns with the rendered <div key={i}>.
+  const timedTurns = useMemo(
+    () =>
+      transcript
+        .map((t, i) =>
+          typeof t.time_in_call_secs === 'number'
+            ? { idx: i, t: t.time_in_call_secs }
+            : null,
+        )
+        .filter((x): x is { idx: number; t: number } => x !== null)
+        .sort((a, b) => a.t - b.t),
+    [transcript],
+  )
+  const hasTurnTimings = timedTurns.length > 0
+
+  // Active-turn computation: find the timed turn whose t <= currentTime, but
+  // before the next timed turn's t. Linear scan is fine (call transcripts
+  // top out around 30-50 turns). Returns -1 when audio is at 0 or before
+  // the first timestamp.
+  function activeIndexForTime(time: number): number {
+    if (!timedTurns.length) return -1
+    let chosen = -1
+    for (let i = 0; i < timedTurns.length; i++) {
+      if (timedTurns[i].t <= time) {
+        chosen = timedTurns[i].idx
+      } else {
+        break
+      }
+    }
+    return chosen
+  }
+
+  // Wire audio events. Re-runs when audioUrl changes (i.e. when "Aufnahme laden"
+  // resolves). With lazy loading, the <audio> element only exists once audioUrl
+  // is set, so we attach the listener via the ref once the element is mounted.
+  useEffect(() => {
+    const el = audioRef.current
+    if (!el) return
+    const onTime = () => setActiveIdx(activeIndexForTime(el.currentTime))
+    const onClear = () => setActiveIdx(-1)
+    el.addEventListener('timeupdate', onTime)
+    el.addEventListener('pause', onClear)
+    el.addEventListener('ended', onClear)
+    return () => {
+      el.removeEventListener('timeupdate', onTime)
+      el.removeEventListener('pause', onClear)
+      el.removeEventListener('ended', onClear)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioUrl, timedTurns])
+
+  // Smooth-scroll the active turn into view if it's off-screen. Uses
+  // scrollIntoView with `block: 'nearest'` so we don't fight the user's
+  // own scroll position when the active turn is already visible.
+  useEffect(() => {
+    if (activeIdx < 0) return
+    const node = turnRefs.current.get(activeIdx)
+    if (!node) return
+    node.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [activeIdx])
+
+  const summary = call.summary?.trim() ? call.summary.trim() : null
+
   return (
     <section className="flex min-w-0 flex-1 flex-col">
       <header className="border-b border-border bg-surface px-6 py-3">
@@ -448,10 +545,37 @@ function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: bo
           {fmtDuration(call.duration_seconds)}
         </div>
       </header>
+
+      {/* Zusammenfassung preview — surfaced at the TOP of the center panel so
+          the operator sees the gist before scrolling the transcript. Compact
+          (2-3 lines, truncated via line-clamp). "Mehr anzeigen" opens the
+          Details tab on the right which holds the full version + the
+          ultimate_summary <details>. Hidden entirely when call.summary is
+          null/empty — no empty card. */}
+      {summary && (
+        <div className="border-b border-border bg-alt px-6 py-2.5">
+          <div className="flex items-start gap-2.5">
+            <Sparkles size={14} className="mt-0.5 flex-shrink-0 text-ai" />
+            <div className="min-w-0 flex-1">
+              <div className="mb-0.5 text-[10px] font-bold uppercase tracking-wide text-muted">
+                Zusammenfassung
+              </div>
+              <p className="line-clamp-2 text-xs leading-relaxed text-body">{summary}</p>
+            </div>
+            <button
+              onClick={onOpenSummary}
+              className="flex-shrink-0 text-[11px] font-semibold text-green-deep hover:underline"
+            >
+              Mehr anzeigen
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 border-b border-border bg-alt px-6 py-3">
         <Volume2 size={15} className="text-muted" />
         {audioUrl ? (
-          <audio controls src={audioUrl} className="h-9 w-full max-w-md" />
+          <audio ref={audioRef} controls src={audioUrl} className="h-9 w-full max-w-md" />
         ) : (
           <button
             onClick={loadAudio}
@@ -462,6 +586,11 @@ function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: bo
           </button>
         )}
         {audioState === 'error' && <span className="text-xs text-error">Nicht verfügbar.</span>}
+        {audioUrl && !hasTurnTimings && (
+          <span className="text-[11px] text-faint">
+            Älterer Anruf — Sprungmarken nicht verfügbar.
+          </span>
+        )}
       </div>
       <div className="flex-1 space-y-3 overflow-y-auto p-6">
         {transcript.map((turn, i) => {
@@ -471,8 +600,24 @@ function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: bo
           // P0.1 follow-up (§4): if a turn has no visible content after tool-call hiding,
           // skip the whole row — don't render a floating bot icon next to an empty bubble.
           if (!hasMessage && visibleToolCalls.length === 0) return null
+          const isActive = activeIdx === i
           return (
-            <div key={i} className={cn('flex items-end gap-2', isKiki ? 'flex-row-reverse' : 'flex-row')}>
+            <div
+              key={i}
+              ref={(node) => {
+                if (node) turnRefs.current.set(i, node)
+                else turnRefs.current.delete(i)
+              }}
+              className={cn(
+                '-mx-2 flex items-end gap-2 rounded-lg px-2 py-1 transition-colors',
+                isKiki ? 'flex-row-reverse' : 'flex-row',
+                // Subtle wash behind the whole turn while it's spoken. Soft
+                // green for Kiki, soft info-tint for the customer — chosen so
+                // the bubble (which is already green/alt) stays the focal
+                // point and the wash reads as a secondary halo.
+                isActive && (isKiki ? 'bg-green-tint-50' : 'bg-info-bg'),
+              )}
+            >
               <div
                 className={cn(
                   'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md',
@@ -485,8 +630,9 @@ function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: bo
                 {hasMessage && (
                   <div
                     className={cn(
-                      'rounded-xl px-3.5 py-2 text-sm text-text',
+                      'rounded-xl px-3.5 py-2 text-sm text-text transition-shadow',
                       isKiki ? 'rounded-br-sm bg-green-tint-100' : 'rounded-bl-sm bg-alt',
+                      isActive && 'shadow-e1',
                     )}
                   >
                     {turn.message}
@@ -532,14 +678,16 @@ function ActionsTab({
   onKva?: () => void
 }) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
-        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Zugewiesen an</div>
+        <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">
+          Zugewiesen an
+        </div>
         <select
           value={inquiry?.assigned_employee_id ?? ''}
           disabled={busy || !inquiry}
           onChange={(e) => onAssign(e.target.value)}
-          className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary"
+          className="w-full rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text outline-none focus:border-green-primary"
         >
           <option value="">— Nicht zugewiesen —</option>
           {employees.map((e) => (
@@ -551,8 +699,10 @@ function ActionsTab({
       </div>
 
       <div>
-        <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Status-Aktionen</div>
-        <div className="space-y-1.5">
+        <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">
+          Status-Aktionen
+        </div>
+        <div className="space-y-1">
           {inquiry?.status === 'completed' ? (
             <ActionRow
               icon={RotateCcw}
@@ -586,9 +736,9 @@ function ActionsTab({
       <button
         onClick={() => onStatus('deleted')}
         disabled={busy || !inquiry}
-        className="flex w-full items-center justify-center gap-2 rounded-md bg-error-bg py-2.5 text-sm font-medium text-error hover:brightness-105 disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-2 rounded-md bg-error-bg py-1.5 text-sm font-medium text-error hover:brightness-105 disabled:opacity-50"
       >
-        <Trash2 size={15} /> Anfrage löschen
+        <Trash2 size={14} /> Anfrage löschen
       </button>
     </div>
   )
@@ -622,12 +772,15 @@ function ActionRow({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-sm font-medium transition-colors hover:brightness-105 disabled:opacity-50',
+        // ~36px tall (py-1.5 = 6px + text-sm 20px line-height = 32px content +
+        // 4px border = 36px). Compressed from py-2.5 (~46px) so a denser
+        // narrower right panel still surfaces all status actions above the fold.
+        'flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm font-medium transition-colors hover:brightness-105 disabled:opacity-50',
         toneClass,
       )}
     >
-      <Icon size={15} />
-      <span className="flex-1">{label}</span>
+      <Icon size={14} />
+      <span className="flex-1 truncate">{label}</span>
       {comingSoon && <span className="text-[10px] font-semibold text-faint">bald</span>}
     </button>
   )
