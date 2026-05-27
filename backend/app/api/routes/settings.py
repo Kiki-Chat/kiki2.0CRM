@@ -1,16 +1,15 @@
-import smtplib
 import time
 from datetime import datetime, timezone
-from email.message import EmailMessage
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
-from app.core.crypto import decrypt, encrypt
+from app.core.crypto import encrypt
 from app.db.supabase_client import get_service_client
 from app.services.common import now_berlin
+from app.services.email_send import send_email
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -267,40 +266,43 @@ async def update_email_config(payload: EmailConfigUpdate, user: CurrentUser = De
 
 @router.post("/email-test")
 async def email_test(user: CurrentUser = Depends(require_org)) -> dict:
+    """Test the org's email-send chain by sending a self-addressed message.
+
+    Uses the 3-tier fallback (OAuth → customer SMTP → Brevo); the chain +
+    final provider are returned so the admin can see which tier succeeded.
+    Useful for verifying a freshly-pasted SMTP config or OAuth link.
+    """
     def _do() -> dict:
         client = get_service_client()
-        ec = (client.table("email_configs").select("*").eq("org_id", user.org_id).limit(1).execute().data or [None])[0]
-        org = (client.table("organizations").select("name, email").eq("id", user.org_id).limit(1).execute().data or [{}])[0]
+        org = (
+            client.table("organizations").select("name, email")
+            .eq("id", user.org_id).limit(1).execute().data or [{}]
+        )[0]
         to_email = org.get("email")
         if not to_email:
             return {"success": False, "message": "Keine Organisations-E-Mail hinterlegt."}
-        if not ec or not ec.get("smtp_host"):
-            return {"success": False, "message": "Kein SMTP-Server konfiguriert."}
-        port = ec.get("smtp_port") or 465
-        username = ec.get("smtp_username")
-        password = decrypt(ec.get("smtp_password_encrypted"))
-        sender = ec.get("smtp_sender_email") or username or to_email
-        sender_name = ec.get("smtp_sender_name") or org.get("name") or "HeyKiki"
-        msg = EmailMessage()
-        msg["Subject"] = "HeyKiki — Test-E-Mail"
-        msg["From"] = f"{sender_name} <{sender}>"
-        msg["To"] = to_email
-        msg.set_content("Dies ist eine Test-E-Mail von HeyKiki. Ihre E-Mail-Konfiguration funktioniert.")
         try:
-            if ec.get("use_ssl", True):
-                with smtplib.SMTP_SSL(ec["smtp_host"], port, timeout=10) as srv:
-                    if username and password:
-                        srv.login(username, password)
-                    srv.send_message(msg)
-            else:
-                with smtplib.SMTP(ec["smtp_host"], port, timeout=10) as srv:
-                    srv.starttls()
-                    if username and password:
-                        srv.login(username, password)
-                    srv.send_message(msg)
-            return {"success": True, "message": f"Test-E-Mail an {to_email} gesendet."}
+            result = send_email(
+                org_id=user.org_id,
+                to_email=to_email,
+                subject="HeyKiki — Test-E-Mail",
+                body_html=(
+                    "<p>Dies ist eine Test-E-Mail von HeyKiki.</p>"
+                    "<p>Ihre E-Mail-Konfiguration funktioniert.</p>"
+                ),
+                body_text=(
+                    "Dies ist eine Test-E-Mail von HeyKiki. "
+                    "Ihre E-Mail-Konfiguration funktioniert."
+                ),
+            )
         except Exception as exc:  # noqa: BLE001
             return {"success": False, "message": f"Senden fehlgeschlagen: {exc}"}
+        return {
+            "success": True,
+            "message": f"Test-E-Mail an {to_email} gesendet via {result.provider_used}.",
+            "provider_used": result.provider_used,
+            "fallback_chain": result.fallback_chain,
+        }
 
     return await run_in_threadpool(_do)
 

@@ -18,6 +18,7 @@ from app.services.cost_estimates import (
     gen_number,
     valid_until_for,
 )
+from app.services.email_send import Attachment, send_email
 
 router = APIRouter(prefix="/api/cost-estimates", tags=["cost-estimates"])
 
@@ -271,11 +272,129 @@ async def preview_pdf(
 
 
 # ─── Actions: send / duplicate / status ──────────────────────────────────────
+def _build_kva_email(
+    *,
+    ce_row: dict,
+    org: dict,
+    customer: dict | None,
+    email_config: dict | None,
+    payload: CostEstimateSend,
+) -> tuple[str, str]:
+    """Render subject + HTML body for the KVA / Angebot / AB email.
+
+    Customer-stored templates (``kva_email_subject`` / ``kva_email_body``)
+    win, then the request payload's ``subject`` / ``message``, then a sane
+    German default. Variables ``{number}`` / ``{customer_name}`` /
+    ``{org_name}`` are substituted in templates.
+    """
+    doc_type = ce_row.get("type") or "kva"
+    type_label = {
+        "kva": "Kostenvoranschlag",
+        "offer": "Angebot",
+        "order_confirmation": "Auftragsbestätigung",
+    }.get(doc_type, "Kostenvoranschlag")
+    number = ce_row.get("number") or "—"
+    org_name = org.get("name") or "HeyKiki"
+    cust_name = (customer or {}).get("full_name") or ""
+
+    tpl_subject = (email_config or {}).get("kva_email_subject")
+    tpl_body = (email_config or {}).get("kva_email_body")
+
+    subject = (
+        payload.subject
+        or (tpl_subject.format(
+            number=number, customer_name=cust_name, org_name=org_name,
+        ) if tpl_subject else None)
+        or f"{type_label} {number} von {org_name}"
+    )
+    if payload.message:
+        body_text = payload.message
+    elif tpl_body:
+        body_text = tpl_body.format(
+            number=number, customer_name=cust_name, org_name=org_name,
+        )
+    else:
+        greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
+        body_text = (
+            f"{greeting}\n\n"
+            f"anbei senden wir Ihnen den {type_label} {number}.\n\n"
+            f"Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.\n\n"
+            f"Mit freundlichen Grüßen\n{org_name}"
+        )
+    body_html = "<p>" + body_text.replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
+    return subject, body_html
+
+
 @router.post("/{ce_id}/send")
 async def send_estimate(
     ce_id: str, payload: CostEstimateSend, user: CurrentUser = Depends(require_org)
 ) -> dict:
-    def _send() -> dict | None:
+    def _load() -> dict | None:
+        client = get_service_client()
+        rows = (
+            client.table("cost_estimates").select("*")
+            .eq("org_id", user.org_id).eq("id", ce_id).limit(1).execute().data
+        )
+        return rows[0] if rows else None
+
+    row = await run_in_threadpool(_load)
+    if not row:
+        raise HTTPException(status_code=404, detail="Cost estimate not found")
+
+    # Determine the recipient: payload override → customer.email → 400.
+    def _resolve_to() -> tuple[str | None, dict | None, dict, dict | None]:
+        client = get_service_client()
+        org = fetch_org(client, user.org_id)
+        customer = fetch_customer(client, user.org_id, row.get("customer_id"))
+        ec = (
+            client.table("email_configs").select("*")
+            .eq("org_id", user.org_id).limit(1).execute().data or [None]
+        )[0]
+        return ((customer or {}).get("email") if not payload.to else payload.to), customer, org, ec
+
+    to_email, customer, org, email_config = await run_in_threadpool(_resolve_to)
+    if not to_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Keine Empfänger-E-Mail vorhanden — bitte beim Kunden hinterlegen oder im Sende-Dialog angeben.",
+        )
+
+    # Render the PDF, then build + send.
+    def _render_pdf() -> bytes:
+        client = get_service_client()
+        org_local = fetch_org(client, user.org_id)
+        cust_local = fetch_customer(client, user.org_id, row.get("customer_id"))
+        ce = _ce_for_pdf(row)
+        totals = compute_totals(
+            ce.get("positions") or [], ce.get("surcharge") or 0,
+            ce.get("total_discount_pct") or 0,
+        )
+        return build_pdf(org_local, cust_local, ce, totals)
+
+    pdf_bytes = await run_in_threadpool(_render_pdf)
+    subject, body_html = _build_kva_email(
+        ce_row=row, org=org, customer=customer,
+        email_config=email_config, payload=payload,
+    )
+    filename = f"{(row.get('type') or 'kva').upper()}-{row.get('number') or 'entwurf'}.pdf"
+    cc = [(org.get("email") or "").strip()] if payload.copy_to_me and org.get("email") else []
+
+    try:
+        result = await run_in_threadpool(
+            send_email,
+            org_id=user.org_id,
+            to_email=to_email,
+            subject=subject,
+            body_html=body_html,
+            attachments=[Attachment(filename=filename, content=pdf_bytes)],
+            cc=cc,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"E-Mail-Versand fehlgeschlagen: {exc}")
+
+    # Only stamp status after a successful send so failed-send retries stay
+    # in 'draft' instead of being misleadingly marked 'sent'.
+    def _stamp() -> dict | None:
         client = get_service_client()
         res = (
             client.table("cost_estimates")
@@ -284,11 +403,15 @@ async def send_estimate(
         )
         return res.data[0] if res.data else None
 
-    row = await run_in_threadpool(_send)
-    if not row:
-        raise HTTPException(status_code=404, detail="Cost estimate not found")
-    # SMTP not configured in this environment → record the send and report success.
-    return {"success": True, "status": "sent", "emailed": False, "to": payload.to}
+    await run_in_threadpool(_stamp)
+    return {
+        "success": True,
+        "status": "sent",
+        "emailed": True,
+        "to": to_email,
+        "provider_used": result.provider_used,
+        "fallback_chain": result.fallback_chain,
+    }
 
 
 @router.post("/{ce_id}/duplicate")

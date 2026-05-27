@@ -7,6 +7,7 @@ from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import InvoiceSend, InvoiceStatus, InvoiceUpsert
 from app.services.cost_estimates import build_pdf, compute_totals, fetch_customer, fetch_org
+from app.services.email_send import Attachment, send_email
 from app.services.invoices import add_days, gen_invoice_number, today_iso
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
@@ -275,11 +276,114 @@ async def preview_pdf(
 
 
 # ─── Actions: send / duplicate / status ──────────────────────────────────────
+def _build_invoice_email(
+    *, inv_row: dict, org: dict, customer: dict | None,
+    email_config: dict | None, payload: InvoiceSend,
+) -> tuple[str, str]:
+    """Render subject + HTML body for the invoice email.
+
+    Same precedence as KVA: customer template → request payload → German
+    default. Variables ``{number}`` / ``{customer_name}`` / ``{org_name}``
+    are substituted in templates.
+    """
+    number = inv_row.get("number") or "—"
+    org_name = org.get("name") or "HeyKiki"
+    cust_name = (customer or {}).get("full_name") or ""
+
+    tpl_subject = (email_config or {}).get("invoice_email_subject")
+    tpl_body = (email_config or {}).get("invoice_email_body")
+
+    subject = (
+        payload.subject
+        or (tpl_subject.format(
+            number=number, customer_name=cust_name, org_name=org_name,
+        ) if tpl_subject else None)
+        or f"Rechnung {number} von {org_name}"
+    )
+    if payload.message:
+        body_text = payload.message
+    elif tpl_body:
+        body_text = tpl_body.format(
+            number=number, customer_name=cust_name, org_name=org_name,
+        )
+    else:
+        greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
+        body_text = (
+            f"{greeting}\n\n"
+            f"anbei senden wir Ihnen die Rechnung {number}.\n\n"
+            f"Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.\n\n"
+            f"Mit freundlichen Grüßen\n{org_name}"
+        )
+    body_html = "<p>" + body_text.replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
+    return subject, body_html
+
+
 @router.post("/{inv_id}/send")
 async def send_invoice(
     inv_id: str, payload: InvoiceSend, user: CurrentUser = Depends(require_org)
 ) -> dict:
-    def _send() -> dict | None:
+    def _load() -> dict | None:
+        client = get_service_client()
+        rows = (
+            client.table("invoices").select("*").eq("org_id", user.org_id)
+            .eq("id", inv_id).limit(1).execute().data
+        )
+        return rows[0] if rows else None
+
+    row = await run_in_threadpool(_load)
+    if not row:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    def _resolve_to() -> tuple[str | None, dict | None, dict, dict | None]:
+        client = get_service_client()
+        org = fetch_org(client, user.org_id)
+        customer = fetch_customer(client, user.org_id, row.get("customer_id"))
+        ec = (
+            client.table("email_configs").select("*")
+            .eq("org_id", user.org_id).limit(1).execute().data or [None]
+        )[0]
+        return ((customer or {}).get("email") if not payload.to else payload.to), customer, org, ec
+
+    to_email, customer, org, email_config = await run_in_threadpool(_resolve_to)
+    if not to_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Keine Empfänger-E-Mail vorhanden — bitte beim Kunden hinterlegen oder im Sende-Dialog angeben.",
+        )
+
+    def _render_pdf() -> bytes:
+        client = get_service_client()
+        org_local = fetch_org(client, user.org_id)
+        cust_local = fetch_customer(client, user.org_id, row.get("customer_id"))
+        inv = _invoice_for_pdf(row)
+        totals = compute_totals(
+            inv.get("positions") or [], inv.get("surcharge") or 0,
+            inv.get("total_discount_pct") or 0,
+        )
+        return build_pdf(org_local, cust_local, inv, totals)
+
+    pdf_bytes = await run_in_threadpool(_render_pdf)
+    subject, body_html = _build_invoice_email(
+        inv_row=row, org=org, customer=customer,
+        email_config=email_config, payload=payload,
+    )
+    filename = f"RE-{row.get('number') or 'entwurf'}.pdf"
+    cc = [(org.get("email") or "").strip()] if payload.copy_to_me and org.get("email") else []
+
+    try:
+        result = await run_in_threadpool(
+            send_email,
+            org_id=user.org_id,
+            to_email=to_email,
+            subject=subject,
+            body_html=body_html,
+            attachments=[Attachment(filename=filename, content=pdf_bytes)],
+            cc=cc,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"E-Mail-Versand fehlgeschlagen: {exc}")
+
+    def _stamp() -> dict | None:
         client = get_service_client()
         res = (
             client.table("invoices")
@@ -288,11 +392,15 @@ async def send_invoice(
         )
         return res.data[0] if res.data else None
 
-    row = await run_in_threadpool(_send)
-    if not row:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    # SMTP not configured in this environment → record the send and report success.
-    return {"success": True, "status": "sent", "emailed": False, "to": payload.to}
+    await run_in_threadpool(_stamp)
+    return {
+        "success": True,
+        "status": "sent",
+        "emailed": True,
+        "to": to_email,
+        "provider_used": result.provider_used,
+        "fallback_chain": result.fallback_chain,
+    }
 
 
 @router.post("/{inv_id}/duplicate")

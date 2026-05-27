@@ -31,6 +31,19 @@ class Settings(BaseSettings):
     # registered with Google + Azure (see §1.4 / §2.1 of P1.8_OAUTH_SETUP.md).
     backend_public_url: str = "http://localhost:8000"
 
+    # ── Brevo SMTP relay (P1.8 Phase 3 / Wave 1.2) ─────────────────────────
+    # Final fallback in the email_send.py chain when an org has no OAuth and
+    # no customer SMTP configured (or both upstream tiers failed). Production
+    # values live in Railway env vars; placeholders here so the backend
+    # boots locally without them — chain raises only at send time when the
+    # fallback is actually attempted with empty creds.
+    brevo_smtp_host: str = "smtp-relay.brevo.com"
+    brevo_smtp_port: int = 587
+    brevo_smtp_username: str = ""
+    brevo_smtp_password: str = ""
+    brevo_smtp_from_address: str = "no-reply@heykiki.de"
+    brevo_smtp_from_name: str = "HeyKiki"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
