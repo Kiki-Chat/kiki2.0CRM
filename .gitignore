@@ -22,3 +22,6 @@ frontend/dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Local reference assets (screenshots, design refs) — never committed
+.local-assets/
