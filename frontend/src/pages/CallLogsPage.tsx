@@ -432,6 +432,11 @@ function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: bo
       <div className="flex-1 space-y-3 overflow-y-auto p-6">
         {transcript.map((turn, i) => {
           const isKiki = turn.role === 'agent'
+          const hasMessage = !!(turn.message && turn.message.trim())
+          const visibleToolCalls = isSuperAdmin ? turn.tool_calls.filter(Boolean) : []
+          // P0.1 follow-up (§4): if a turn has no visible content after tool-call hiding,
+          // skip the whole row — don't render a floating bot icon next to an empty bubble.
+          if (!hasMessage && visibleToolCalls.length === 0) return null
           return (
             <div key={i} className={cn('flex items-end gap-2', isKiki ? 'flex-row-reverse' : 'flex-row')}>
               <div
@@ -443,7 +448,7 @@ function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: bo
                 {isKiki ? <Bot size={13} /> : <User size={13} />}
               </div>
               <div className="max-w-[70%]">
-                {turn.message && (
+                {hasMessage && (
                   <div
                     className={cn(
                       'rounded-xl px-3.5 py-2 text-sm text-text',
@@ -455,8 +460,7 @@ function Transcript({ call, isSuperAdmin }: { call: CallDetail; isSuperAdmin: bo
                 )}
                 {/* Tool-call ⚙ chips: internal debugging only, never shown to customers.
                     Stored on the call so super-admins can still inspect them. */}
-                {isSuperAdmin &&
-                  turn.tool_calls.filter(Boolean).map((t, j) => (
+                {visibleToolCalls.map((t, j) => (
                     <span
                       key={j}
                       className="mt-1 inline-block rounded-full bg-ai-bg px-2 py-0.5 text-[11px] font-semibold text-ai"
