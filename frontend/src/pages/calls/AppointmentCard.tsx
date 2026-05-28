@@ -14,12 +14,12 @@
  * lookup. If `appointment.alternative_proposed_at` is non-null, the card
  * shows "Alternative gesendet" state (locked) instead of action buttons.
  *
- * Reserved render slot for Agent 3.1's 7-day mini-calendar — see the
- * `<MiniCalendarSlot />` comment marker below.
+ * Compact NOTIFICATION-style card (no calendar grid). The only expandable
+ * surface is "Kategorie, Dauer & Zuweisung"; Bestätigen books immediately
+ * (no popup) and Alternative vorschlagen opens the inline date/time picker.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Calendar,
   CalendarClock,
   CheckCircle2,
   ChevronDown,
@@ -32,7 +32,6 @@ import { useMemo, useState } from 'react'
 
 import { apiFetch } from '../../lib/api'
 import { cn } from '../../lib/utils'
-import { MiniCalendar } from './MiniCalendar'
 
 // ─── shapes ──────────────────────────────────────────────────────────────────
 export interface PendingAppointment {
@@ -73,7 +72,11 @@ interface Employee {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
-const DURATION_PRESETS = [30, 60, 90, 120] as const
+// Base duration pills. When a category is selected, its default duration is
+// merged in (and highlighted) so categories with non-standard defaults — e.g.
+// a 20-min Beratung — surface their default as a real pill rather than only
+// in the custom field.
+const BASE_DURATIONS = [30, 60, 90, 120]
 
 const fmtFullDate = (iso: string | null): string => {
   if (!iso) return '—'
@@ -89,9 +92,7 @@ const isoToDtLocal = (iso: string | null, plusHours = 1): string => {
   return dateToDtLocal(d)
 }
 
-// Same as above but takes a Date directly — used by the MiniCalendar callback
-// when the user clicks an empty cell and we need to populate the alt-start /
-// alt-end inputs.
+// Same as above but takes a Date directly.
 const dateToDtLocal = (d: Date): string => {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
@@ -218,23 +219,15 @@ export function AppointmentCard({
   const location = appointment.location?.raw ?? null
   const effectiveDuration = customDuration ?? duration
 
-  // Wave 3 / Agent 3.1 — mini-calendar. Proposed end derived from
-  // scheduled_at + duration_minutes (fallback 60min); when the user clicks
-  // an empty cell on the grid we populate the alt-start / alt-end inputs
-  // and pop the picker so they can review/edit before sending.
-  const proposedEndIso = useMemo(() => {
-    if (!appointment.scheduled_at) return null
-    const start = new Date(appointment.scheduled_at)
-    const mins = appointment.duration_minutes ?? 60
-    return new Date(start.getTime() + mins * 60_000).toISOString()
-  }, [appointment.scheduled_at, appointment.duration_minutes])
-
-  const handleMiniCalendarPick = (start: Date, end: Date) => {
-    setAltStart(dateToDtLocal(start))
-    setAltEnd(dateToDtLocal(end))
-    setAltPickerOpen(true)
-    setActionError(null)
-  }
+  // Category-aware duration pills: base set + the selected category's default
+  // (deduped, sorted) so a category with a non-standard default duration still
+  // surfaces it as a selectable pill rather than only via the custom field.
+  const durationOptions = useMemo(() => {
+    const set = new Set(BASE_DURATIONS)
+    const def = selectedCategory?.duration_minutes
+    if (def && def > 0) set.add(def)
+    return [...set].sort((a, b) => a - b)
+  }, [selectedCategory])
 
   return (
     <div className="border-b border-border bg-gradient-to-b from-green-tint-50/60 to-surface p-4">
@@ -330,7 +323,7 @@ export function AppointmentCard({
               <div>
                 <div className="mb-1 text-xs font-semibold text-body">Dauer</div>
                 <div className="flex flex-wrap gap-1.5">
-                  {DURATION_PRESETS.map((m) => {
+                  {durationOptions.map((m) => {
                     const active = customDuration === null && duration === m
                     return (
                       <button
@@ -474,20 +467,6 @@ export function AppointmentCard({
           </div>
         )}
 
-        {/* Wave 3 / Agent 3.1 — 7-day mini-calendar with proposed slot + conflicts.
-            Clicking an empty cell populates the alt-time inputs above and
-            opens the picker so the user can review/edit before sending. Only
-            rendered while the card is actionable (hidden after Alternative
-            gesendet, since the appointment is locked then). */}
-        {!altAlreadySent && (
-          <MiniCalendar
-            proposedStart={appointment.scheduled_at}
-            proposedEnd={proposedEndIso}
-            selfId={appointment.id}
-            onProposeSlot={handleMiniCalendarPick}
-          />
-        )}
-
         {/* Action buttons row — hidden once an alternative has been sent
             (the appointment is effectively locked pending the customer's reply). */}
         {!altAlreadySent && (
@@ -562,7 +541,3 @@ export function usePendingAppointment(callId: string | null) {
     staleTime: 60_000,
   })
 }
-
-// Calendar icon re-exported for the parent to use in the placeholder if it
-// needs to indicate that the slot above the tabs exists but has no card today.
-export const AppointmentCardCalendarIcon = Calendar
