@@ -243,10 +243,7 @@ export function AppointmentCard({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-sm font-bold leading-snug text-text">
-              Termin-Anfrage:
-            </div>
-            <div className="mt-0.5 text-sm font-bold text-text">
-              {fmtFullDate(appointment.scheduled_at)}
+              Termin-Anfrage: {fmtFullDate(appointment.scheduled_at)}
             </div>
             <div className="mt-1 text-xs text-muted">
               {appointment.title ?? 'Termin nach Telefonat'}
@@ -285,9 +282,13 @@ export function AppointmentCard({
             )}
           />
           <span className="flex-1 font-medium">Kategorie, Dauer &amp; Zuweisung</span>
-          {selectedCategory && !expanded && (
+          {!expanded && (
             <span className="text-xs text-green-deep">
-              ({selectedCategory.name}, {effectiveDuration} Min)
+              (
+              {[selectedCategory?.name ?? appointment.category, `${effectiveDuration} Min`]
+                .filter(Boolean)
+                .join(', ')}
+              )
             </span>
           )}
         </button>
@@ -467,17 +468,20 @@ export function AppointmentCard({
           </div>
         )}
 
-        {/* Action buttons row — hidden once an alternative has been sent
-            (the appointment is effectively locked pending the customer's reply). */}
+        {/* Action buttons — single row (matches the WerkPilot reference):
+            Bestätigen · Alternative vorschlagen · Ablehnen · Ausblenden.
+            `flex-wrap` lets them flow onto a second line only when the panel
+            is dragged narrower than the row needs. Hidden once an alternative
+            has been sent (the appointment is locked pending the reply). */}
         {!altAlreadySent && (
-          <div className="mt-4 space-y-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
               onClick={() => {
                 setActionError(null)
                 confirm.mutate()
               }}
               disabled={busy}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-50"
             >
               <CheckCircle2 size={15} />
               Bestätigen
@@ -488,35 +492,33 @@ export function AppointmentCard({
                 setAltPickerOpen((o) => !o)
               }}
               disabled={busy}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-green-tint-200 py-2.5 text-sm font-semibold text-green-deep transition-colors hover:brightness-105 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md bg-green-tint-200 px-3 py-2 text-sm font-semibold text-green-deep transition-colors hover:brightness-105 disabled:opacity-50"
             >
               <CalendarClock size={15} />
               Alternative vorschlagen
             </button>
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  setActionError(null)
-                  reject.mutate()
-                }}
-                disabled={busy}
-                className="flex flex-1 items-center justify-center gap-2 rounded-md bg-faint/60 py-2 text-sm font-medium text-white transition-colors hover:bg-faint disabled:opacity-50"
-              >
-                <X size={14} />
-                Ablehnen
-              </button>
-              <button
-                onClick={() => {
-                  setActionError(null)
-                  onDismiss()
-                }}
-                disabled={busy}
-                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-border bg-surface py-2 text-sm font-medium text-body transition-colors hover:bg-alt disabled:opacity-50"
-              >
-                <EyeOff size={14} />
-                Ausblenden
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                setActionError(null)
+                reject.mutate()
+              }}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md bg-faint px-3 py-2 text-sm font-medium text-white transition-colors hover:brightness-110 disabled:opacity-50"
+            >
+              <X size={14} />
+              Ablehnen
+            </button>
+            <button
+              onClick={() => {
+                setActionError(null)
+                onDismiss()
+              }}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body transition-colors hover:bg-alt disabled:opacity-50"
+            >
+              <EyeOff size={14} />
+              Ausblenden
+            </button>
           </div>
         )}
       </div>

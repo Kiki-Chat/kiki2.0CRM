@@ -23,7 +23,14 @@ import {
   User,
   Volume2,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
@@ -186,7 +193,54 @@ const STATUS_PILL: Record<string, { label: string; cls: string }> = {
   completed: { label: 'Erledigt', cls: 'bg-green-100 text-green-800' },
 }
 
+// Drag-to-resize for the list / right panels. Width persists per-key in
+// localStorage so the user's chosen layout survives reloads. `side` says which
+// edge the handle sits on: a 'left'-side panel grows when you drag right; a
+// 'right'-side panel grows when you drag left.
+function useColumnResize(
+  storageKey: string,
+  initial: number,
+  opts: { min: number; max: number; side: 'left' | 'right' },
+) {
+  const [width, setWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(storageKey))
+    return saved >= opts.min && saved <= opts.max ? saved : initial
+  })
+  useEffect(() => {
+    localStorage.setItem(storageKey, String(width))
+  }, [storageKey, width])
+  const onMouseDown = (e: ReactMouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = width
+    const onMove = (ev: MouseEvent) => {
+      const delta = opts.side === 'left' ? ev.clientX - startX : startX - ev.clientX
+      setWidth(Math.min(opts.max, Math.max(opts.min, startW + delta)))
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+  return { width, onMouseDown }
+}
 
+function ResizeHandle({ onMouseDown }: { onMouseDown: (e: ReactMouseEvent) => void }) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      onMouseDown={onMouseDown}
+      className="w-1 flex-shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-green-primary/50"
+    />
+  )
+}
 
 export function CallLogsPage() {
   const queryClient = useQueryClient()
@@ -300,9 +354,18 @@ export function CallLogsPage() {
     )
   }, [calls, search])
 
+  const listResize = useColumnResize('hk-calls-list-w', 320, {
+    min: 240,
+    max: 520,
+    side: 'left',
+  })
+
   return (
     <div className="flex h-full min-h-0">
-      <aside className="flex w-80 flex-shrink-0 flex-col border-r border-border bg-surface">
+      <aside
+        style={{ width: listResize.width }}
+        className="flex flex-shrink-0 flex-col border-r border-border bg-surface"
+      >
         {/* Wave 2 / Agent 2.2 — tab switcher above the existing search bar.
             Anfragen (default, current list) | Aktionen (new pending-decisions
             list). Search bar is intentionally hidden on the Aktionen tab —
@@ -394,6 +457,8 @@ export function CallLogsPage() {
           />
         )}
       </aside>
+
+      <ResizeHandle onMouseDown={listResize.onMouseDown} />
 
       {selectedId ? (
         <CallDetail callId={selectedId} isSuperAdmin={isSuperAdmin} />
@@ -704,6 +769,12 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
   const showAppointmentCard =
     !!pendingAppointment && !dismissedApptIds.has(pendingAppointment.id)
 
+  const rightResize = useColumnResize('hk-calls-right-w', 340, {
+    min: 300,
+    max: 600,
+    side: 'right',
+  })
+
   if (!call) {
     return <div className="flex flex-1 items-center justify-center text-muted">Lädt…</div>
   }
@@ -716,19 +787,20 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
         onOpenSummary={() => setTab('details')}
       />
 
-      {/* RIGHT PANEL — Wave 2 / Agent 2.3 polish:
-          - w-80 (was w-96, ~17% narrower) so the center transcript can
-            breathe and long German labels in compressed buttons still fit.
-          - Sticky-on-scroll by structure: it's a flex sibling of the
-            transcript column in a `flex h-full min-h-0` parent, so it owns
-            its own vertical column and stays in view while the transcript's
-            internal `overflow-y-auto` scrolls underneath. `sticky top-0` is
-            belt-and-braces for any future restructure that might wrap the
-            page in a vertical stack — harmless no-op today.
-          The Wave 2 / Agent 2.4 OFFENE AKTIONEN appointment card sits at
-          the TOP of this aside (above the title block); only present when
-          the call has a pending appointment that needs a decision. */}
-      <aside className="sticky top-0 flex h-full w-80 flex-shrink-0 flex-col border-l border-border bg-surface">
+      <ResizeHandle onMouseDown={rightResize.onMouseDown} />
+
+      {/* RIGHT PANEL — width is drag-resizable (handle on its left edge);
+          the chosen width persists in localStorage. Sticky-on-scroll by
+          structure: it's a flex sibling of the transcript column in a
+          `flex h-full min-h-0` parent, so it owns its own vertical column and
+          stays in view while the transcript's internal `overflow-y-auto`
+          scrolls underneath. The Wave 2 / Agent 2.4 OFFENE AKTIONEN
+          appointment card sits at the TOP of this aside (above the title
+          block); only present when the call has a pending appointment. */}
+      <aside
+        style={{ width: rightResize.width }}
+        className="sticky top-0 flex h-full flex-shrink-0 flex-col border-l border-border bg-surface"
+      >
         {/* Wave 2 / Agent 2.4 — OFFENE AKTIONEN appointment card. */}
         {showAppointmentCard && pendingAppointment && (
           <AppointmentCard
