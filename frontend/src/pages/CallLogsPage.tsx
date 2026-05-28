@@ -242,6 +242,22 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: ReactMouseEvent) => vo
   )
 }
 
+// Emergency tag — the ONE place pulsing/blinking is allowed (Amber's rule).
+// Rendered inline (in the list-card meta row + the right-panel header), never
+// absolute-positioned, so it can't overlap the phone icon or other chrome.
+function NotdienstBadge({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex flex-shrink-0 animate-pulse items-center gap-1 rounded-sm bg-error px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white',
+        className,
+      )}
+    >
+      <AlertTriangle size={9} /> Notdienst
+    </span>
+  )
+}
+
 export function CallLogsPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -461,7 +477,11 @@ export function CallLogsPage() {
       <ResizeHandle onMouseDown={listResize.onMouseDown} />
 
       {selectedId ? (
-        <CallDetail callId={selectedId} isSuperAdmin={isSuperAdmin} />
+        <CallDetail
+          callId={selectedId}
+          isSuperAdmin={isSuperAdmin}
+          emergency={calls.find((c) => c.id === selectedId)?.emergency_flag ?? false}
+        />
       ) : (
         <div className="flex flex-1 items-center justify-center text-muted">
           <div className="flex flex-col items-center gap-2">
@@ -525,15 +545,6 @@ function CallListCard({
         isUnread && 'border-l-4 border-l-green-primary',
       )}
     >
-      {/* NOTDIENST badge — top-right corner, only shown when emergency_flag
-          is true. Absolute-positioned so it doesn't compete with the right-
-          aligned phone icon for inline space. */}
-      {call.emergency_flag && (
-        <span className="absolute right-2 top-2 inline-flex animate-pulse items-center gap-1 rounded-sm bg-error px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
-          <AlertTriangle size={9} /> Notdienst
-        </span>
-      )}
-
       {/* Employee initials avatar (24px) — opens the assign dropdown. */}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
@@ -628,14 +639,17 @@ function CallListCard({
         >
           {call.summary_title ?? 'Anruf'}
         </div>
-        {/* Status pill + meta row. Pill sits on the left so the eye
-            naturally scans status → time → duration. */}
-        <div className="mt-1 flex items-center gap-2 text-[11px] text-faint">
+        {/* Status pill + emergency tag + meta row. The NOTDIENST badge sits
+            INLINE here (after the status pill), never absolute-positioned, so
+            it can't overlap the phone icon. `flex-wrap` keeps it tidy when the
+            list column is dragged narrow. */}
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-faint">
           {pill && (
             <span className={cn('rounded-sm px-1.5 py-0.5 font-semibold', pill.cls)}>
               {pill.label}
             </span>
           )}
+          {call.emergency_flag && <NotdienstBadge />}
           <span>{fmtTime(call.started_at)}</span>
           <span>·</span>
           <span>{fmtDuration(call.duration_seconds)}</span>
@@ -721,7 +735,15 @@ function ActionListCard({ item, onClick }: { item: ActionItem; onClick: () => vo
   )
 }
 
-function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: boolean }) {
+function CallDetail({
+  callId,
+  isSuperAdmin,
+  emergency,
+}: {
+  callId: string
+  isSuperAdmin: boolean
+  emergency: boolean
+}) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [tab, setTab] = useState<'actions' | 'details' | 'course'>('actions')
@@ -817,7 +839,10 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
         className="sticky top-0 flex h-full flex-shrink-0 flex-col border-l border-border bg-surface"
       >
         <div className="border-b border-border p-4">
-          <div className="mb-2 flex items-start justify-between gap-2">
+          {/* Emergency indication for the right panel — only for Notdienst
+              calls. Sits inline before the title, matching the reference. */}
+          <div className="mb-2 flex items-start gap-2">
+            {emergency && <NotdienstBadge className="mt-0.5" />}
             <h2 className="text-sm font-bold leading-snug text-text">
               {inquiry?.title ?? call.summary_title ?? 'Anruf'}
             </h2>
