@@ -779,6 +779,24 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
     return <div className="flex flex-1 items-center justify-center text-muted">Lädt…</div>
   }
 
+  // OFFENE AKTIONEN appointment card. Rendered INSIDE the Aktionen tab
+  // (between "Zugewiesen an" and "Status-Aktionen"), NOT above the title/tabs —
+  // so the title + the 3 tabs stay fixed at the top and don't get pushed down.
+  const appointmentSlot =
+    showAppointmentCard && pendingAppointment ? (
+      <AppointmentCard
+        appointment={pendingAppointment}
+        callId={callId}
+        onDismiss={() =>
+          setDismissedApptIds((prev) => {
+            const next = new Set(prev)
+            next.add(pendingAppointment.id)
+            return next
+          })
+        }
+      />
+    ) : null
+
   return (
     <>
       <Transcript
@@ -790,31 +808,14 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
       <ResizeHandle onMouseDown={rightResize.onMouseDown} />
 
       {/* RIGHT PANEL — width is drag-resizable (handle on its left edge);
-          the chosen width persists in localStorage. Sticky-on-scroll by
-          structure: it's a flex sibling of the transcript column in a
-          `flex h-full min-h-0` parent, so it owns its own vertical column and
-          stays in view while the transcript's internal `overflow-y-auto`
-          scrolls underneath. The Wave 2 / Agent 2.4 OFFENE AKTIONEN
-          appointment card sits at the TOP of this aside (above the title
-          block); only present when the call has a pending appointment. */}
+          the chosen width persists in localStorage. The title + the 3 tabs
+          (Aktionen/Details/Verlauf) stay fixed at the top; the OFFENE AKTIONEN
+          appointment card lives INSIDE the Aktionen tab (see appointmentSlot),
+          so it never pushes the header down. */}
       <aside
         style={{ width: rightResize.width }}
         className="sticky top-0 flex h-full flex-shrink-0 flex-col border-l border-border bg-surface"
       >
-        {/* Wave 2 / Agent 2.4 — OFFENE AKTIONEN appointment card. */}
-        {showAppointmentCard && pendingAppointment && (
-          <AppointmentCard
-            appointment={pendingAppointment}
-            callId={callId}
-            onDismiss={() =>
-              setDismissedApptIds((prev) => {
-                const next = new Set(prev)
-                next.add(pendingAppointment.id)
-                return next
-              })
-            }
-          />
-        )}
         <div className="border-b border-border p-4">
           <div className="mb-2 flex items-start justify-between gap-2">
             <h2 className="text-sm font-bold leading-snug text-text">
@@ -855,6 +856,7 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
               inquiry={inquiry}
               employees={employees}
               busy={patchInquiry.isPending}
+              appointmentSlot={appointmentSlot}
               onAssign={(id) => patchInquiry.mutate({ assigned_employee_id: id })}
               onStatus={(s) => patchInquiry.mutate({ status: s })}
               onEdit={() => setModal('process')}
@@ -1135,6 +1137,7 @@ function ActionsTab({
   inquiry,
   employees,
   busy,
+  appointmentSlot,
   onAssign,
   onStatus,
   onEdit,
@@ -1144,6 +1147,7 @@ function ActionsTab({
   inquiry: Inquiry | undefined
   employees: Employee[]
   busy: boolean
+  appointmentSlot?: ReactNode
   onAssign: (id: string) => void
   onStatus: (s: string) => void
   onEdit: () => void
@@ -1170,6 +1174,10 @@ function ActionsTab({
           ))}
         </select>
       </div>
+
+      {/* OFFENE AKTIONEN appointment card — sits between "Zugewiesen an" and
+          "Status-Aktionen", matching the reference layout. */}
+      {appointmentSlot}
 
       <div>
         <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">

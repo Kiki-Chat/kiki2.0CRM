@@ -230,15 +230,16 @@ export function AppointmentCard({
   }, [selectedCategory])
 
   return (
-    <div className="border-b border-border bg-gradient-to-b from-green-tint-50/60 to-surface p-4">
-      {/* Section label — matches "OFFENE AKTIONEN" caps in the reference. */}
-      <div className="mb-2 flex items-center justify-between">
+    <div>
+      {/* Section label — matches "OFFENE AKTIONEN" caps in the reference, and
+          aligns with the sibling "Zugewiesen an" / "Status-Aktionen" headers. */}
+      <div className="mb-1.5 flex items-center justify-between">
         <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
           Offene Aktionen
         </span>
       </div>
 
-      <div className="rounded-xl border border-green-tint-200 bg-surface p-4 shadow-sm ring-1 ring-green-tint-100">
+      <div className="rounded-xl border border-green-tint-200 bg-surface p-3.5 shadow-sm ring-1 ring-green-tint-100">
         {/* Header: date/time + "Wartet auf Bestätigung" or "Alternative gesendet" pill */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -474,16 +475,16 @@ export function AppointmentCard({
             is dragged narrower than the row needs. Hidden once an alternative
             has been sent (the appointment is locked pending the reply). */}
         {!altAlreadySent && (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => {
                 setActionError(null)
                 confirm.mutate()
               }}
               disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md bg-green-primary px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-50"
             >
-              <CheckCircle2 size={15} />
+              <CheckCircle2 size={13} />
               Bestätigen
             </button>
             <button
@@ -492,9 +493,9 @@ export function AppointmentCard({
                 setAltPickerOpen((o) => !o)
               }}
               disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-md bg-green-tint-200 px-3 py-2 text-sm font-semibold text-green-deep transition-colors hover:brightness-105 disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md bg-green-tint-200 px-2.5 py-1.5 text-xs font-semibold text-green-deep transition-colors hover:brightness-105 disabled:opacity-50"
             >
-              <CalendarClock size={15} />
+              <CalendarClock size={13} />
               Alternative vorschlagen
             </button>
             <button
@@ -503,9 +504,9 @@ export function AppointmentCard({
                 reject.mutate()
               }}
               disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-md bg-faint px-3 py-2 text-sm font-medium text-white transition-colors hover:brightness-110 disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md bg-faint px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:brightness-110 disabled:opacity-50"
             >
-              <X size={14} />
+              <X size={13} />
               Ablehnen
             </button>
             <button
@@ -514,9 +515,9 @@ export function AppointmentCard({
                 onDismiss()
               }}
               disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body transition-colors hover:bg-alt disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-body transition-colors hover:bg-alt disabled:opacity-50"
             >
-              <EyeOff size={14} />
+              <EyeOff size={13} />
               Ausblenden
             </button>
           </div>
