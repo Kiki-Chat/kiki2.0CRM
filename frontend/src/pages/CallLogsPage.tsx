@@ -186,17 +186,6 @@ const STATUS_PILL: Record<string, { label: string; cls: string }> = {
   completed: { label: 'Erledigt', cls: 'bg-green-100 text-green-800' },
 }
 
-// Glow window for recent-unread cards. 1 hour matches the brief and keeps
-// the visual pulse from accumulating across days of unread calls.
-const GLOW_WINDOW_MS = 60 * 60 * 1000
-function isRecentUnread(c: CallListItem): boolean {
-  if (c.read_at !== null) return false
-  const ts = c.created_at ?? c.started_at
-  if (!ts) return false
-  const created = new Date(ts).getTime()
-  if (Number.isNaN(created)) return false
-  return Date.now() - created < GLOW_WINDOW_MS
-}
 
 
 export function CallLogsPage() {
@@ -444,7 +433,6 @@ function CallListCard({
   assigning: boolean
 }) {
   const isUnread = call.read_at === null
-  const recent = isRecentUnread(call)
   const Icon = call.direction === 'outbound' ? PhoneOutgoing : PhoneIncoming
   const palette = avatarColorForEmployee(call.assigned_employee_id)
   const pill = call.inquiry_status ? STATUS_PILL[call.inquiry_status] : null
@@ -465,17 +453,18 @@ function CallListCard({
         active
           ? 'border-green-primary/40 bg-green-tint-50'
           : 'border-border bg-surface hover:bg-alt',
-        // Recent-unread glow: subtle ring + slow pulse animation. Sits
-        // under the active-state border so the selected-card highlight is
-        // still visible if a card is BOTH recent-unread AND selected.
-        recent && 'ring-2 ring-green-primary/40 animate-pulse',
+        // Unread marker: STATIC left-border accent (Gmail-style), no
+        // animation. Per Amber's rule, pulsing/blinking is reserved
+        // exclusively for emergency calls (the red Notdienst badge below) as
+        // an attention signal — every other card stays visually calm.
+        isUnread && 'border-l-4 border-l-green-primary',
       )}
     >
       {/* NOTDIENST badge — top-right corner, only shown when emergency_flag
           is true. Absolute-positioned so it doesn't compete with the right-
           aligned phone icon for inline space. */}
       {call.emergency_flag && (
-        <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-sm bg-error px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
+        <span className="absolute right-2 top-2 inline-flex animate-pulse items-center gap-1 rounded-sm bg-error px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
           <AlertTriangle size={9} /> Notdienst
         </span>
       )}
@@ -692,7 +681,14 @@ function CallDetail({ callId, isSuperAdmin }: { callId: string; isSuperAdmin: bo
         method: 'PATCH',
         body: JSON.stringify(body),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['callInquiry', callId] }),
+    onSuccess: () => {
+      // Refresh the right-panel inquiry AND the left list-card so status /
+      // assignment changes made here reflect on the card (pill + initials)
+      // without a manual reload. Mirrors the inline `assignInquiry` mutation.
+      qc.invalidateQueries({ queryKey: ['callInquiry', callId] })
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
+    },
   })
 
   // Wave 2 / Agent 2.4 — inline OFFENE AKTIONEN appointment card. The query
