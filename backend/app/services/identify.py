@@ -10,6 +10,7 @@ import re
 
 from app.db.supabase_client import get_service_client
 from app.schemas.tools import IdentifyCustomerRequest
+from app.services.common import format_address
 
 _SELECT = "id, full_name, phone, email, customer_number, address"
 
@@ -46,16 +47,6 @@ def _to_e164(value: str | None, default_country: str = "49") -> str | None:
     return "+" + digits
 
 
-def _format_address(addr) -> str | None:
-    if not isinstance(addr, dict):
-        return addr if isinstance(addr, str) else None
-    street = addr.get("street")
-    city = addr.get("city")
-    postal = addr.get("postal_code") or addr.get("zip")
-    parts = [p for p in [street, " ".join(x for x in [postal, city] if x)] if p]
-    return ", ".join(parts) or None
-
-
 def _existing(row: dict) -> dict:
     name = row.get("full_name")
     return {
@@ -63,7 +54,7 @@ def _existing(row: dict) -> dict:
         "customerId": row["id"],
         "customerNumber": row.get("customer_number"),
         "name": name,
-        "address": _format_address(row.get("address")),
+        "address": format_address(row.get("address")),
         "email": row.get("email"),
         "phone": row.get("phone"),
         "message": f"Willkommen zurück{', ' + name if name else ''}. "
@@ -86,7 +77,7 @@ def _resolve(rows: list[dict]) -> dict:
             {
                 "customerId": r["id"],
                 "name": r.get("full_name"),
-                "address": _format_address(r.get("address")),
+                "address": format_address(r.get("address")),
             }
             for r in rows
         ],
