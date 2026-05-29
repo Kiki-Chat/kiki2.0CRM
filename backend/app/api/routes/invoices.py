@@ -7,6 +7,7 @@ from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import InvoiceSend, InvoiceStatus, InvoiceUpsert
 from app.services.cost_estimates import build_pdf, compute_totals, fetch_customer, fetch_org
+from app.services import email_templates
 from app.services.email_send import Attachment, send_email
 from app.services.invoices import add_days, gen_invoice_number, today_iso
 
@@ -314,7 +315,7 @@ def _build_invoice_email(
             f"Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.\n\n"
             f"Mit freundlichen Grüßen\n{org_name}"
         )
-    body_html = "<p>" + body_text.replace("\n\n", "</p><p>").replace("\n", "<br>") + "</p>"
+    body_html = email_templates.render_message_email(company_name=org_name, message_text=body_text)
     return subject, body_html
 
 
@@ -379,6 +380,7 @@ async def send_invoice(
             body_html=body_html,
             attachments=[Attachment(filename=filename, content=pdf_bytes)],
             cc=cc,
+            reply_to=(org.get("email") or None),
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"E-Mail-Versand fehlgeschlagen: {exc}")

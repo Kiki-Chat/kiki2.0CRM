@@ -9,6 +9,7 @@ from app.api.deps import CurrentUser, require_org
 from app.core.crypto import encrypt
 from app.db.supabase_client import get_service_client
 from app.services.common import now_berlin
+from app.services import email_templates
 from app.services.email_send import send_email
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -286,14 +287,18 @@ async def email_test(user: CurrentUser = Depends(require_org)) -> dict:
                 org_id=user.org_id,
                 to_email=to_email,
                 subject="HeyKiki — Test-E-Mail",
-                body_html=(
-                    "<p>Dies ist eine Test-E-Mail von HeyKiki.</p>"
-                    "<p>Ihre E-Mail-Konfiguration funktioniert.</p>"
+                body_html=email_templates.render_message_email(
+                    company_name=org.get("name"),
+                    message_text=(
+                        "Dies ist eine Test-E-Mail von HeyKiki.\n\n"
+                        "Ihre E-Mail-Konfiguration funktioniert."
+                    ),
                 ),
                 body_text=(
                     "Dies ist eine Test-E-Mail von HeyKiki. "
                     "Ihre E-Mail-Konfiguration funktioniert."
                 ),
+                reply_to=org.get("email"),
             )
         except Exception as exc:  # noqa: BLE001
             return {"success": False, "message": f"Senden fehlgeschlagen: {exc}"}
