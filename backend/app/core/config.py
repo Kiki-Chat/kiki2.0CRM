@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,9 +43,11 @@ class Settings(BaseSettings):
     # fallback is actually attempted with empty creds.
     brevo_smtp_host: str = "smtp-relay.brevo.com"
     brevo_smtp_port: int = 587
-    brevo_smtp_username: str = ""
-    brevo_smtp_password: str = ""
-    brevo_smtp_from_address: str = "no-reply@heykiki.de"
+    brevo_smtp_username: str = "a232fd001@smtp-brevo.com"
+    # The SMTP key is stored in Railway as BREVO_SMTP_KEY (NOT BREVO_SMTP_PASSWORD);
+    # read it from that existing env name. The key stays in env — never hardcoded.
+    brevo_smtp_password: str = Field(default="", validation_alias="BREVO_SMTP_KEY")
+    brevo_smtp_from_address: str = "info@kiki-zusammenfassung.de"
     brevo_smtp_from_name: str = "HeyKiki"
 
     @property
