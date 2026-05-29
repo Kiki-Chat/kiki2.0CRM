@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     ms_client_id: str = ""
     ms_client_secret: str = ""
+    # Calendly (P3 calendar sync) — calendar-only OAuth provider.
+    calendly_client_id: str = ""
+    calendly_client_secret: str = ""
     # Used to build OAuth redirect URIs at runtime. Must match the value
     # registered with Google + Azure (see §1.4 / §2.1 of P1.8_OAUTH_SETUP.md).
     backend_public_url: str = "http://localhost:8000"

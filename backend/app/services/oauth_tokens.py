@@ -1,0 +1,193 @@
+"""OAuth connection storage + automatic access-token refresh (P3).
+
+Canonical store: the ``oauth_connections`` table (one row per org+provider).
+Tokens are Fernet-encrypted (SETTINGS_ENC_KEY) — the *_encrypted columns never
+hold plaintext. ``get_valid_access_token`` transparently refreshes a stale
+access token using the stored refresh token, so calendar API callers never deal
+with expiry themselves.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta, timezone
+
+import httpx
+
+from app.core.crypto import decrypt, encrypt
+from app.db.supabase_client import get_service_client
+from app.services.oauth_providers import get_credentials, get_provider
+
+logger = logging.getLogger(__name__)
+
+_TIMEOUT = 30.0
+_TABLE = "oauth_connections"
+
+
+class OAuthTokenError(Exception):
+    """No usable connection, or a refresh attempt failed."""
+
+
+def _now(now: datetime | None = None) -> datetime:
+    return now or datetime.now(timezone.utc)
+
+
+def _parse_expiry(value) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    s = str(value)
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+# ─── storage ─────────────────────────────────────────────────────────────────
+def upsert_connection(
+    *,
+    org_id: str,
+    provider: str,
+    access_token: str | None,
+    refresh_token: str | None,
+    expires_at: str | None,
+    account_email: str | None,
+    scope: str | None = None,
+) -> None:
+    """Encrypt + upsert a connection. A refresh token is only written when
+    supplied — providers may omit it on a refresh response and we must not wipe
+    the stored one. Columns omitted from the payload are preserved on update."""
+    row: dict = {
+        "org_id": org_id,
+        "provider": provider,
+        "access_token_encrypted": encrypt(access_token),
+        "token_expires_at": expires_at,
+        "account_email": account_email,
+        "updated_at": _now().isoformat(),
+    }
+    if refresh_token:
+        row["refresh_token_encrypted"] = encrypt(refresh_token)
+    if scope is not None:
+        row["scope"] = scope
+    get_service_client().table(_TABLE).upsert(
+        row, on_conflict="org_id,provider"
+    ).execute()
+
+
+def get_connection(org_id: str, provider: str) -> dict | None:
+    rows = (
+        get_service_client()
+        .table(_TABLE)
+        .select("*")
+        .eq("org_id", org_id)
+        .eq("provider", provider)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
+
+
+def list_connections(org_id: str) -> list[dict]:
+    """Connection status for the org — never returns token material."""
+    rows = (
+        get_service_client()
+        .table(_TABLE)
+        .select("provider, account_email, token_expires_at, updated_at")
+        .eq("org_id", org_id)
+        .execute()
+        .data
+        or []
+    )
+    return [
+        {
+            "provider": r["provider"],
+            "connected": True,
+            "account_email": r.get("account_email"),
+            "token_expires_at": r.get("token_expires_at"),
+        }
+        for r in rows
+    ]
+
+
+def delete_connection(org_id: str, provider: str) -> int:
+    rows = (
+        get_service_client()
+        .table(_TABLE)
+        .delete()
+        .eq("org_id", org_id)
+        .eq("provider", provider)
+        .execute()
+        .data
+        or []
+    )
+    return len(rows)
+
+
+# ─── refresh ─────────────────────────────────────────────────────────────────
+def _refresh_access_token(provider: str, refresh_token: str) -> dict:
+    cfg = get_provider(provider)
+    cid, csec = get_credentials(provider)
+    body = {
+        "client_id": cid,
+        "client_secret": csec,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    }
+    with httpx.Client(timeout=_TIMEOUT) as c:
+        r = c.post(cfg["token_url"], data=body, headers={"Accept": "application/json"})
+    if r.status_code != 200:
+        raise OAuthTokenError(
+            f"{provider} token refresh failed: {r.status_code} {r.text[:300]}"
+        )
+    return r.json()
+
+
+def get_valid_access_token(
+    org_id: str, provider: str, *, now: datetime | None = None, leeway_sec: int = 120
+) -> str:
+    """Return a non-expired access token for (org, provider), refreshing via the
+    stored refresh token when the current one is missing/expired/within
+    ``leeway_sec`` of expiry. Persists the refreshed token.
+
+    Raises ``OAuthTokenError`` when there is no connection, no refresh token, or
+    the refresh request fails.
+    """
+    conn = get_connection(org_id, provider)
+    if not conn:
+        raise OAuthTokenError(f"no {provider} connection for org {org_id}")
+
+    now_dt = _now(now)
+    access = decrypt(conn.get("access_token_encrypted"))
+    expires_at = _parse_expiry(conn.get("token_expires_at"))
+    if access and expires_at and (expires_at - timedelta(seconds=leeway_sec)) > now_dt:
+        return access  # still valid
+
+    refresh = decrypt(conn.get("refresh_token_encrypted"))
+    if not refresh:
+        raise OAuthTokenError(
+            f"{provider} connection for org {org_id} has no refresh token — reconnect"
+        )
+
+    token_data = _refresh_access_token(provider, refresh)
+    new_access = token_data.get("access_token")
+    if not new_access:
+        raise OAuthTokenError(f"{provider} refresh returned no access_token")
+
+    expires_in = int(token_data.get("expires_in") or 0)
+    new_expiry = (
+        (now_dt + timedelta(seconds=expires_in)).isoformat() if expires_in else None
+    )
+    upsert_connection(
+        org_id=org_id,
+        provider=provider,
+        access_token=new_access,
+        refresh_token=token_data.get("refresh_token"),  # None → keep stored one
+        expires_at=new_expiry,
+        account_email=conn.get("account_email"),
+    )
+    return new_access
