@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   Bell,
@@ -603,8 +603,67 @@ function BenachrichtigungenSection() {
 function Banner({ children }: { children: React.ReactNode }) {
   return <div className="rounded-md bg-info-bg/50 px-3 py-2 text-xs text-info">{children}</div>
 }
+
+// ─── OAuth connect (Google / Microsoft / Calendly) ────────────────────────────
+interface OAuthConnection {
+  provider: string
+  connected: boolean
+  account_email: string | null
+  token_expires_at: string | null
+}
+
+function useOAuthConnections() {
+  return useQuery({
+    queryKey: ['oauth-connections'],
+    queryFn: () => apiFetch<{ connections: OAuthConnection[] }>('/api/settings/oauth/connections'),
+    staleTime: STALE,
+  })
+}
+
+/** Open the provider consent in a popup and refresh connection state on success.
+ *  The popup is opened synchronously (preserves the click gesture so it isn't
+ *  blocked), then pointed at the authed authorize URL once it returns. The
+ *  callback page posts {source:'heykiki-oauth', success, message} back here. */
+function startOAuthConnect(provider: string, qc: QueryClient, flash: (m: string) => void) {
+  const popup = window.open('', 'heykiki-oauth', 'width=520,height=680')
+  if (!popup) {
+    flash('Bitte Popups für diese Seite erlauben und erneut versuchen.')
+    return
+  }
+  const onMessage = (e: MessageEvent) => {
+    if (!e.data || e.data.source !== 'heykiki-oauth') return
+    window.removeEventListener('message', onMessage)
+    flash(e.data.message || (e.data.success ? 'Verbunden.' : 'Verbindung fehlgeschlagen.'))
+    if (e.data.success) qc.invalidateQueries({ queryKey: ['oauth-connections'] })
+  }
+  window.addEventListener('message', onMessage)
+  apiFetch<{ url: string }>(`/api/settings/oauth/${provider}/authorize`)
+    .then(({ url }) => {
+      popup.location.href = url
+    })
+    .catch((err: Error) => {
+      window.removeEventListener('message', onMessage)
+      popup.close()
+      flash(err.message || 'OAuth nicht verfügbar.')
+    })
+}
+
+async function disconnectOAuth(provider: string, qc: QueryClient, flash: (m: string) => void) {
+  try {
+    await apiFetch(`/api/settings/oauth/${provider}/disconnect`, { method: 'POST' })
+    qc.invalidateQueries({ queryKey: ['oauth-connections'] })
+    flash('Verbindung getrennt.')
+  } catch (e) {
+    flash((e as Error).message)
+  }
+}
 function EmailVersandSection({ config, flash }: { config: EmailConfig | null; flash: (m: string) => void }) {
   const qc = useQueryClient()
+  const conns = useOAuthConnections()
+  const connOf = (v: string) => {
+    const prov = v === 'gmail' ? 'google' : v === 'outlook' ? 'microsoft' : null
+    return prov ? (conns.data?.connections ?? []).find((c) => c.provider === prov) : undefined
+  }
   const [provider, setProvider] = useState(config?.provider || 'smtp')
   const [host, setHost] = useState(config?.smtp_host || '')
   const [port, setPort] = useState(config?.smtp_port ?? 465)
@@ -626,7 +685,7 @@ function EmailVersandSection({ config, flash }: { config: EmailConfig | null; fl
         {providers.map(([v, l]) => (
           <button key={v} onClick={() => setProvider(v)} className={cn('rounded-lg border p-4 text-left transition', provider === v ? 'border-green-primary bg-green-tint-50' : 'border-border hover:bg-alt')}>
             <div className="flex items-center justify-between"><span className="font-semibold text-text">{l}</span>{provider === v && <Check size={16} className="text-green-deep" />}</div>
-            <div className="mt-1 text-xs text-muted">{v === 'smtp' ? 'HeyKiki Standard' : 'Nicht verbunden'}</div>
+            <div className="mt-1 text-xs text-muted">{v === 'smtp' ? 'HeyKiki Standard' : connOf(v)?.connected ? 'Verbunden' : 'Nicht verbunden'}</div>
           </button>
         ))}
       </div>
@@ -634,15 +693,27 @@ function EmailVersandSection({ config, flash }: { config: EmailConfig | null; fl
         {provider === 'gmail' && (
           <div>
             <Banner>Verbindung über Google OAuth. Höhere Zustellrate als SMTP.</Banner>
-            {/* TODO: Gmail OAuth flow out of scope this sprint. */}
-            <button onClick={() => flash('OAuth-Integration in Kürze verfügbar.')} className="mt-3 rounded-md bg-green-primary px-5 py-2 text-sm font-semibold text-white hover:brightness-110">Mit Gmail verbinden</button>
+            {connOf('gmail')?.connected ? (
+              <div className="mt-3 flex items-center gap-3">
+                <span className="text-sm font-medium text-success">✓ Verbunden{connOf('gmail')?.account_email ? ` als ${connOf('gmail')?.account_email}` : ''}</span>
+                <button onClick={() => disconnectOAuth('google', qc, flash)} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt">Trennen</button>
+              </div>
+            ) : (
+              <button onClick={() => startOAuthConnect('google', qc, flash)} className="mt-3 rounded-md bg-green-primary px-5 py-2 text-sm font-semibold text-white hover:brightness-110">Mit Gmail verbinden</button>
+            )}
           </div>
         )}
         {provider === 'outlook' && (
           <div>
             <Banner>Verbindung über Microsoft OAuth. Höhere Zustellrate als SMTP.</Banner>
-            {/* TODO: Outlook OAuth flow out of scope this sprint. */}
-            <button onClick={() => flash('OAuth-Integration in Kürze verfügbar.')} className="mt-3 rounded-md bg-green-primary px-5 py-2 text-sm font-semibold text-white hover:brightness-110">Mit Outlook verbinden</button>
+            {connOf('outlook')?.connected ? (
+              <div className="mt-3 flex items-center gap-3">
+                <span className="text-sm font-medium text-success">✓ Verbunden{connOf('outlook')?.account_email ? ` als ${connOf('outlook')?.account_email}` : ''}</span>
+                <button onClick={() => disconnectOAuth('microsoft', qc, flash)} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt">Trennen</button>
+              </div>
+            ) : (
+              <button onClick={() => startOAuthConnect('microsoft', qc, flash)} className="mt-3 rounded-md bg-green-primary px-5 py-2 text-sm font-semibold text-white hover:brightness-110">Mit Outlook verbinden</button>
+            )}
           </div>
         )}
         {provider === 'smtp' && (
@@ -735,33 +806,35 @@ function EmailVorlagenSection({ config, flash }: { config: EmailConfig | null; f
 // ─── Kalender-Sync ────────────────────────────────────────────────────────────
 function KalenderSyncSection({ flash }: { flash: (m: string) => void }) {
   const providers = [
-    { key: 'google', name: 'Google Kalender', summary: 'Termine werden automatisch zwischen CRM und Google Kalender synchronisiert.', token: false },
-    { key: 'outlook', name: 'Outlook Kalender', summary: 'Termine werden automatisch zwischen CRM und Outlook synchronisiert.', token: false },
-    { key: 'calendly', name: 'Calendly', summary: 'Eingehende Calendly-Buchungen erscheinen automatisch im CRM-Kalender.', token: true },
+    { provider: 'google', name: 'Google Kalender', summary: 'Termine werden automatisch zwischen CRM und Google Kalender synchronisiert.' },
+    { provider: 'microsoft', name: 'Outlook Kalender', summary: 'Termine werden automatisch zwischen CRM und Outlook synchronisiert.' },
+    { provider: 'calendly', name: 'Calendly', summary: 'Eingehende Calendly-Buchungen erscheinen automatisch im CRM-Kalender.' },
   ]
-  return <div className="space-y-3">{providers.map((p) => <CalendarProviderCard key={p.key} p={p} flash={flash} />)}</div>
+  return <div className="space-y-3">{providers.map((p) => <CalendarProviderCard key={p.provider} p={p} flash={flash} />)}</div>
 }
-function CalendarProviderCard({ p, flash }: { p: { name: string; summary: string; token: boolean }; flash: (m: string) => void }) {
+function CalendarProviderCard({ p, flash }: { p: { provider: string; name: string; summary: string }; flash: (m: string) => void }) {
+  const qc = useQueryClient()
+  const conns = useOAuthConnections()
+  const conn = (conns.data?.connections ?? []).find((c) => c.provider === p.provider)
   const [more, setMore] = useState(false)
-  const [showToken, setShowToken] = useState(false)
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2"><Calendar size={18} className="text-green-deep" /><span className="font-bold text-text">{p.name}</span></div>
-        <span className="rounded-full bg-alt px-2.5 py-0.5 text-xs font-medium text-muted">Nicht verbunden</span>
+        <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', conn?.connected ? 'bg-success-bg text-success' : 'bg-alt text-muted')}>{conn?.connected ? 'Verbunden' : 'Nicht verbunden'}</span>
       </div>
       <p className="mt-1 text-sm text-muted">{p.summary}</p>
       <div className="mt-3 flex items-center gap-3">
-        <button onClick={() => (p.token ? setShowToken(true) : flash('OAuth-Integration in Kürze verfügbar.'))} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110">Verbinden</button>
+        {conn?.connected ? (
+          <>
+            {conn.account_email && <span className="text-sm font-medium text-success">✓ {conn.account_email}</span>}
+            <button onClick={() => disconnectOAuth(p.provider, qc, flash)} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt">Trennen</button>
+          </>
+        ) : (
+          <button onClick={() => startOAuthConnect(p.provider, qc, flash)} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110">Verbinden</button>
+        )}
         <button onClick={() => setMore((m) => !m)} className="text-sm font-medium text-green-deep hover:underline">Mehr erfahren</button>
       </div>
-      {p.token && showToken && (
-        <div className="mt-3">
-          <Field label="Calendly API-Token"><input className={inputCls} placeholder="cal_…" /></Field>
-          {/* TODO: Calendly token integration out of scope this sprint. */}
-          <button onClick={() => flash('OAuth-Integration in Kürze verfügbar.')} className="mt-2 rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt">Token speichern</button>
-        </div>
-      )}
       {more && <ul className="mt-3 list-disc space-y-1 border-t border-border pt-3 pl-5 text-sm text-muted"><li>Zwei-Wege-Synchronisierung von Terminen</li><li>Automatische Aktualisierung bei Änderungen</li><li>Konfliktvermeidung bei Doppelbuchungen</li></ul>}
     </Card>
   )
