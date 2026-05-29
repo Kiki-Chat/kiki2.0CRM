@@ -193,11 +193,14 @@ def _list_phone_numbers() -> list[dict]:
     return data or []
 
 
-def fetch_phone_for_agent(agent_id: str) -> str:
-    """Return the E.164 phone number bound to ``agent_id`` in ElevenLabs.
+def fetch_phone_meta_for_agent(agent_id: str) -> dict:
+    """Return ``{"phone_number", "phone_number_id"}`` for the Twilio number
+    bound to ``agent_id`` in ElevenLabs.
 
-    Raises HTTPException(400) when zero phones are bound (the caller MUST
-    roll back the half-provisioned org). With multiple phones bound, picks
+    ``phone_number_id`` is the ElevenLabs resource id — the
+    ``agent_phone_number_id`` the outbound-call API requires, distinct from the
+    agent id. Raises HTTPException(400) when zero phones are bound (the caller
+    MUST roll back the half-provisioned org). With multiple phones bound, picks
     the first and logs a warning rather than failing.
     """
     phones = _list_phone_numbers()
@@ -218,14 +221,27 @@ def fetch_phone_for_agent(agent_id: str) -> str:
             "Agent %s has %d phones bound; using the first (%s).",
             agent_id, len(matches), matches[0].get("phone_number"),
         )
-    return matches[0]["phone_number"]
+    chosen = matches[0]
+    return {
+        "phone_number": chosen.get("phone_number"),
+        "phone_number_id": chosen.get("phone_number_id"),
+    }
 
 
-def _store_phone_on_org(org_id: str | UUID, phone_e164: str) -> None:
+def fetch_phone_for_agent(agent_id: str) -> str:
+    """Return just the E.164 phone number bound to ``agent_id`` (see
+    ``fetch_phone_meta_for_agent`` for the full meta incl. phone_number_id)."""
+    return fetch_phone_meta_for_agent(agent_id)["phone_number"]
+
+
+def _store_phone_on_org(
+    org_id: str | UUID, phone_e164: str, phone_number_id: str | None = None
+) -> None:
     db = get_service_client()
-    db.table("organizations").update({"phone_number": phone_e164}).eq(
-        "id", str(org_id)
-    ).execute()
+    patch: dict[str, Any] = {"phone_number": phone_e164}
+    if phone_number_id:
+        patch["elevenlabs_phone_number_id"] = phone_number_id
+    db.table("organizations").update(patch).eq("id", str(org_id)).execute()
 
 
 # ─── B.3 Prompt template ─────────────────────────────────────────────────────
@@ -314,6 +330,7 @@ def configure_agent(
     """
     summary: dict[str, Any] = {
         "phone_number": None,
+        "phone_number_id": None,
         "tools_attached": [],
         "prompt_applied": False,
         "prompt_skipped_reason": None,
@@ -322,10 +339,13 @@ def configure_agent(
     }
     is_first_run = not _is_agent_already_provisioned(org_id)
 
-    # ─── B.1 Phone ───────────────────────────────────────────────────────────
-    phone = fetch_phone_for_agent(agent_id)
-    _store_phone_on_org(org_id, phone)
-    summary["phone_number"] = phone
+    # ─── B.1 Phone (number + the ElevenLabs phone_number_id for outbound) ────
+    phone_meta = fetch_phone_meta_for_agent(agent_id)
+    _store_phone_on_org(
+        org_id, phone_meta["phone_number"], phone_meta.get("phone_number_id")
+    )
+    summary["phone_number"] = phone_meta["phone_number"]
+    summary["phone_number_id"] = phone_meta.get("phone_number_id")
 
     # ─── B.2 Tools (additive merge of tool_ids) ──────────────────────────────
     tool_map = _resolve_hk_tool_ids(HK_TOOL_NAMES)

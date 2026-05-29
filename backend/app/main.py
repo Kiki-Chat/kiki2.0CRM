@@ -19,6 +19,7 @@ from app.api.routes import (
     kiki_zentrale,
     me,
     oauth,
+    outbound,
     planning_board,
     post_call,
     projects,
@@ -79,6 +80,7 @@ app.include_router(settings_routes.router)
 app.include_router(users.router)
 app.include_router(super_admin.router)
 app.include_router(oauth.router)
+app.include_router(outbound.router)
 app.include_router(actions.router)
 
 # ElevenLabs tool webhooks (Phase 2 — handlers stubbed, return 501 for now).
