@@ -1,26 +1,22 @@
+import json
 from collections import Counter
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import CustomerUpsert
+from app.services import csv_import
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
 
 def _next_customer_number(client, org_id: str) -> str:
-    rows = (
-        client.table("customers").select("customer_number").eq("org_id", org_id).execute().data
-        or []
-    )
-    nums = [
-        int(r["customer_number"])
-        for r in rows
-        if r.get("customer_number") and str(r["customer_number"]).isdigit()
-    ]
-    return str(max(nums) + 1 if nums else 101001)
+    # Unified numeric scheme — see services.common.gen_customer_number.
+    from app.services.common import gen_customer_number
+
+    return gen_customer_number(client, org_id)
 
 
 def _addr(value: str | None):
@@ -185,6 +181,23 @@ def _create(org_id: str, payload: CustomerUpsert) -> dict:
         "customer_number": payload.customer_number or _next_customer_number(client, org_id),
     }
     return client.table("customers").insert(row).execute().data[0]
+
+
+@router.post("/import")
+async def import_customers_csv(
+    file: UploadFile = File(...),
+    mapping: str = Form("{}"),
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    """Bulk CSV import. ``mapping`` = JSON {target_field: csv_header}. Dedups on
+    email/phone (skips duplicates, never overwrites), sets customer_type='regular'
+    and keeps the CSV's customer number. Returns per-row results."""
+    content = await file.read()
+    try:
+        m = json.loads(mapping) if mapping else {}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Ungültiges Mapping (kein JSON)")
+    return await run_in_threadpool(csv_import.import_customers, user.org_id, content, m)
 
 
 def _update(org_id: str, customer_id: str, payload: CustomerUpsert) -> dict | None:

@@ -1,12 +1,14 @@
+import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import AbsenceCreate, EmployeeCreate, EmployeeUpdate
+from app.services import csv_import
 
 
 class SetPasswordRequest(BaseModel):
@@ -151,6 +153,8 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
         "access_role": payload.access_role,
         "is_active": payload.is_active,
         "calendar_color": payload.calendar_color,
+        "activity_area": payload.activity_area,
+        "auto_assign": payload.auto_assign,
     }
     created = client.table("employees").insert(row).execute().data[0]
     if warning:
@@ -163,6 +167,23 @@ async def create_employee(
     payload: EmployeeCreate, user: CurrentUser = Depends(require_org)
 ) -> dict:
     return await run_in_threadpool(_create, user.org_id, payload)
+
+
+@router.post("/import")
+async def import_employees_csv(
+    file: UploadFile = File(...),
+    mapping: str = Form("{}"),
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    """Bulk CSV import for employees. ``mapping`` = JSON {target_field: csv_header}.
+    Dedups on email/name (skips duplicates). Does NOT send login invites — rows
+    are created as records; resend invites individually afterwards."""
+    content = await file.read()
+    try:
+        m = json.loads(mapping) if mapping else {}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Ungültiges Mapping (kein JSON)")
+    return await run_in_threadpool(csv_import.import_employees, user.org_id, content, m)
 
 
 def _update(org_id: str, employee_id: str, payload: EmployeeUpdate) -> dict | None:

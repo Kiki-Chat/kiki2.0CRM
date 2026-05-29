@@ -13,6 +13,7 @@ import {
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import { CsvImportModal } from '../components/CsvImportModal'
 import { CustomerFormModal } from '../components/CustomerFormModal'
 import { apiFetch } from '../lib/api'
 import { cn } from '../lib/utils'
@@ -61,6 +62,7 @@ export function CustomersPage() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [newOpen, setNewOpen] = useState(false)
+  const [csvOpen, setCsvOpen] = useState(false)
 
   const { data } = useQuery({
     queryKey: ['customers', filter, search],
@@ -88,7 +90,7 @@ export function CustomersPage() {
             {data?.total ?? 0} von {counts.all ?? 0} Kunden
           </span>
           <HeaderBtn icon={Download} label="CSV Export" disabled />
-          <HeaderBtn icon={Upload} label="CSV Import" disabled />
+          <HeaderBtn icon={Upload} label="CSV Import" onClick={() => setCsvOpen(true)} />
           <button
             onClick={() => setNewOpen(true)}
             className="flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
@@ -186,6 +188,13 @@ export function CustomersPage() {
           if (c.id) navigate(`/customers/${c.id}`)
         }}
       />
+      {csvOpen && (
+        <CsvImportModal
+          entity="customers"
+          onClose={() => setCsvOpen(false)}
+          onDone={() => qc.invalidateQueries({ queryKey: ['customers'] })}
+        />
+      )}
     </div>
   )
 }
@@ -202,14 +211,17 @@ function HeaderBtn({
   icon: Icon,
   label,
   disabled,
+  onClick,
 }: {
   icon: typeof Download
   label: string
   disabled?: boolean
+  onClick?: () => void
 }) {
   return (
     <button
       disabled={disabled}
+      onClick={onClick}
       title={disabled ? 'Bald verfügbar' : undefined}
       className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50"
     >

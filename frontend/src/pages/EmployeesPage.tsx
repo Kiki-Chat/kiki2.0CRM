@@ -19,10 +19,12 @@ import {
   Search,
   Shield,
   Trash2,
+  Upload,
   Users,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
+import { CsvImportModal } from '../components/CsvImportModal'
 import { Modal } from '../components/ui/Modal'
 import { apiFetch } from '../lib/api'
 import { cn } from '../lib/utils'
@@ -99,6 +101,7 @@ export function EmployeesPage() {
   const qc = useQueryClient()
   const [tab, setTab] = useState<Tab>('employees')
   const [newOpen, setNewOpen] = useState(false)
+  const [csvOpen, setCsvOpen] = useState(false)
   const [newAbsenceOpen, setNewAbsenceOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const flash = (m: string) => {
@@ -144,12 +147,20 @@ export function EmployeesPage() {
               </button>
             </>
           ) : (
-            <button
-              onClick={() => setNewOpen(true)}
-              className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
-            >
-              <Plus size={16} /> Neuer Mitarbeiter
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCsvOpen(true)}
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"
+              >
+                <Upload size={15} /> CSV Import
+              </button>
+              <button
+                onClick={() => setNewOpen(true)}
+                className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+              >
+                <Plus size={16} /> Neuer Mitarbeiter
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -188,6 +199,13 @@ export function EmployeesPage() {
       {tab === 'applications' && <AntraegeTab />}
 
       {newOpen && <NewEmployeeModal flash={flash} onClose={() => setNewOpen(false)} />}
+      {csvOpen && (
+        <CsvImportModal
+          entity="employees"
+          onClose={() => setCsvOpen(false)}
+          onDone={() => qc.invalidateQueries({ queryKey: ['employees-full'] })}
+        />
+      )}
       {newAbsenceOpen && (
         <NewAbsenceModal
           flash={flash}
@@ -592,6 +610,8 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
   const [role, setRole] = useState<'employee' | 'admin'>('employee')
   const [active, setActive] = useState(true)
   const [color, setColor] = useState('')
+  const [activity, setActivity] = useState('')
+  const [autoAssign, setAutoAssign] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const create = useMutation({
@@ -605,6 +625,8 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
           access_role: role,
           is_active: active,
           calendar_color: color || null,
+          activity_area: activity || null,
+          auto_assign: autoAssign,
         }),
       }) as Promise<{ warning?: string }>,
     onSuccess: (data) => {
@@ -675,6 +697,21 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
         </div>
         <Check checked={active} onChange={setActive} label="Konto aktiv" sub="Inaktive Konten können sich nicht einloggen." />
         <ColorPicker value={color} onChange={setColor} />
+        <div className="border-t border-border pt-4">
+          <div className="mb-3 text-sm font-bold text-text">Automatische Anfragezuweisung</div>
+          <div className={labelCls}>Tätigkeitsbereich</div>
+          <textarea
+            value={activity}
+            onChange={(e) => setActivity(e.target.value)}
+            placeholder="z.B. Heizung, Sanitär, Solar"
+            rows={2}
+            className={inputCls}
+          />
+          <p className="mb-3 mt-1 text-xs text-muted">
+            Wird vom KI-Telefonassistenten nach jedem Anruf genutzt, um die passende Anfrage automatisch zuzuweisen.
+          </p>
+          <Check checked={autoAssign} onChange={setAutoAssign} label="Automatische Zuweisung aktivieren" />
+        </div>
       </div>
     </Modal>
   )

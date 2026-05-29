@@ -33,6 +33,8 @@ class EmployeeCreate(BaseModel):
     access_role: str = "employee"  # admin | employee
     is_active: bool = True
     calendar_color: str | None = None
+    activity_area: str | None = None
+    auto_assign: bool = False
 
 
 class EmployeeUpdate(BaseModel):

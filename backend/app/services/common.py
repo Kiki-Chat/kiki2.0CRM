@@ -168,10 +168,21 @@ def gen_inquiry_number(client, org_id: str) -> str:
 
 
 def gen_customer_number(client, org_id: str) -> str:
-    res = (
+    """Next customer number = max existing numeric customer_number + 1 (per org),
+    starting at 101001. Unified across the AI-tool, manual-create, and CSV-import
+    paths so call-created customers continue the same numeric sequence as the
+    imported ones (CSV rows keep their original Kundennummer)."""
+    rows = (
         client.table("customers")
-        .select("id", count="exact")
+        .select("customer_number")
         .eq("org_id", org_id)
         .execute()
+        .data
+        or []
     )
-    return f"KD-{(res.count or 0) + 1:05d}"
+    nums = [
+        int(r["customer_number"])
+        for r in rows
+        if r.get("customer_number") and str(r["customer_number"]).isdigit()
+    ]
+    return str(max(nums) + 1 if nums else 101001)
