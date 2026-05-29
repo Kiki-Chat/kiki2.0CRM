@@ -77,6 +77,7 @@ def send_email(
     attachments: list[Attachment] | None = None,
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
+    reply_to: str | None = None,
 ) -> SendResult:
     """Send an email with the 3-tier fallback chain.
 
@@ -110,6 +111,7 @@ def send_email(
                 attachments=attachments,
                 cc=cc,
                 bcc=bcc,
+                reply_to=reply_to,
             )
             chain.append(f"{_oauth_tag(oauth_provider)}_success")
             log.info(
@@ -144,6 +146,7 @@ def send_email(
                 attachments=attachments,
                 cc=cc,
                 bcc=bcc,
+                reply_to=reply_to,
             )
             chain.append("customer_smtp_success")
             log.info(
@@ -176,6 +179,7 @@ def send_email(
             attachments=attachments,
             cc=cc,
             bcc=bcc,
+            reply_to=reply_to,
         )
         chain.append("brevo_smtp_success")
         log.info(
@@ -268,6 +272,7 @@ def _send_via_oauth(
     attachments: list[Attachment],
     cc: list[str],
     bcc: list[str],
+    reply_to: str | None = None,
 ) -> str | None:
     """Refresh the OAuth access token (if needed), then dispatch to the
     Gmail or Microsoft Graph send helper."""
@@ -286,6 +291,7 @@ def _send_via_oauth(
             attachments=attachments,
             cc=cc,
             bcc=bcc,
+            reply_to=reply_to,
         )
     if provider == "microsoft":
         return _ms_graph_send(
@@ -298,6 +304,7 @@ def _send_via_oauth(
             attachments=attachments,
             cc=cc,
             bcc=bcc,
+            reply_to=reply_to,
         )
     raise RuntimeError(f"Unknown oauth_provider: {provider!r}")
 
@@ -422,6 +429,7 @@ def _gmail_api_send(
     attachments: list[Attachment],
     cc: list[str],
     bcc: list[str],
+    reply_to: str | None = None,
 ) -> str | None:
     """Send via Gmail API ``users.messages.send``.
 
@@ -431,6 +439,7 @@ def _gmail_api_send(
     """
     msg = _build_mime_message(
         sender_email=sender_email,
+        reply_to_email=reply_to,
         to_email=to_email,
         subject=subject,
         body_html=body_html,
@@ -466,6 +475,7 @@ def _ms_graph_send(
     attachments: list[Attachment],
     cc: list[str],
     bcc: list[str],
+    reply_to: str | None = None,
 ) -> str | None:
     """Send via Microsoft Graph ``/me/sendMail``.
 
@@ -489,6 +499,8 @@ def _ms_graph_send(
         body_payload["message"]["from"] = {
             "emailAddress": {"address": sender_email},
         }
+    if reply_to:
+        body_payload["message"]["replyTo"] = _addrs([reply_to])
     if attachments:
         body_payload["message"]["attachments"] = [
             {
@@ -527,6 +539,7 @@ def _send_via_customer_smtp(
     attachments: list[Attachment],
     cc: list[str],
     bcc: list[str],
+    reply_to: str | None = None,
 ) -> str | None:
     """Send via the org's stored SMTP credentials.
 
@@ -549,6 +562,7 @@ def _send_via_customer_smtp(
     msg = _build_mime_message(
         sender_email=sender,
         sender_name=sender_name,
+        reply_to_email=reply_to,
         to_email=to_email,
         subject=subject,
         body_html=body_html,
@@ -579,6 +593,7 @@ def _send_via_brevo(
     attachments: list[Attachment],
     cc: list[str],
     bcc: list[str],
+    reply_to: str | None = None,
 ) -> str | None:
     """Send via HeyKiki's central Brevo SMTP relay (no-reply@heykiki.de).
 
@@ -607,7 +622,7 @@ def _send_via_brevo(
     msg = _build_mime_message(
         sender_email=sender,
         sender_name=sender_name,
-        reply_to_email=None,  # Brevo relay; no per-org reply-to override yet
+        reply_to_email=reply_to,  # per-customer Reply-To (org email) — #21
         to_email=to_email,
         subject=subject,
         body_html=body_html,
