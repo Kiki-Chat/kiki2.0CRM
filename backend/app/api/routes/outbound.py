@@ -1,14 +1,16 @@
-"""Outbound calling endpoints (P1).
+"""Outbound calling endpoints (Path A — occasion-driven).
 
 Two entrypoints:
 
-  * ``POST /api/outbound/run-due-reminders`` — the daily sweep, fired by an
-    external cron / N8N. Secret-protected (X-HeyKiki-Secret), same gate as the
-    post-call webhook hop. Idempotent.
-  * ``POST /api/outbound/appointments/{id}/send-reminder`` — manual single
-    reminder (ad-hoc / UAT). Org-scoped via the logged-in user. Accepts an
-    optional ``to_number`` override so UAT dials a designated test number
-    instead of a real customer's stored phone.
+  * ``POST /api/outbound/run-due-reminders`` — the scheduled sweep, fired by an
+    external cron / N8N. Secret-protected (X-HeyKiki-Secret). Dispatches every
+    DUE + ENABLED occasion (appointment_reminder, kva_followup, …) across all
+    outbound-enabled orgs in-window. Idempotent via the ``outbound_calls``
+    ledger. Optional ``occasions=a,b`` scopes the sweep.
+  * ``POST /api/outbound/send`` — manual single-record trigger (ad-hoc / UAT).
+    Org-scoped via the logged-in user. Pass ``occasion`` + ``record_id``; an
+    optional ``to_number`` override dials a designated TEST number instead of a
+    real customer's stored phone (and makes the dispatch repeatable).
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, verify_post_call_secret
-from app.services import outbound_reminders
+from app.services import outbound_dispatch
 from app.services.outbound_call import OutboundCallError
 
 router = APIRouter(prefix="/api/outbound", tags=["outbound"])
@@ -27,37 +29,42 @@ router = APIRouter(prefix="/api/outbound", tags=["outbound"])
 async def run_due_reminders(
     dry_run: bool = False,
     only_org_id: str | None = None,
+    occasions: str | None = None,
     _: None = Depends(verify_post_call_secret),
 ) -> dict:
-    """Place reminder calls for every appointment due across all
-    outbound-enabled orgs that are currently in-window. Idempotent — already
-    reminded appointments are excluded by the query."""
+    """Dispatch every due + enabled outbound occasion across all outbound-enabled
+    orgs currently in-window. Idempotent — already-dispatched records are
+    excluded by the ledger. ``occasions`` (comma-separated) scopes the sweep."""
+    occ = [o.strip() for o in occasions.split(",") if o.strip()] if occasions else None
     return await run_in_threadpool(
-        outbound_reminders.run_due_reminders,
+        outbound_dispatch.run_due_outbound,
         dry_run=dry_run,
         only_org_id=only_org_id,
+        occasions=occ,
     )
 
 
-class SendReminderBody(BaseModel):
+class SendOutboundBody(BaseModel):
+    occasion: str               # 'appointment_reminder' | 'kva_followup'
+    record_id: str              # appointment id / cost_estimate id
     to_number: str | None = None  # UAT override — dial a designated test number
     dry_run: bool = False
 
 
-@router.post("/appointments/{appointment_id}/send-reminder")
-async def send_reminder(
-    appointment_id: str,
-    body: SendReminderBody,
+@router.post("/send")
+async def send_outbound(
+    body: SendOutboundBody,
     user: CurrentUser = Depends(require_org),
 ) -> dict:
-    """Manual single-appointment reminder. Bypasses the time-window gate; pass
-    ``to_number`` to dial a designated test number instead of the customer's
-    stored phone (UAT safety)."""
+    """Manual single-record outbound dispatch. Bypasses the time-window gate;
+    pass ``to_number`` to dial a designated test number instead of the
+    customer's stored phone (UAT safety)."""
     try:
         return await run_in_threadpool(
-            outbound_reminders.send_reminder_for_appointment,
+            outbound_dispatch.send_single_outbound,
             org_id=user.org_id,
-            appointment_id=appointment_id,
+            occasion=body.occasion,
+            record_id=body.record_id,
             to_number_override=body.to_number,
             dry_run=body.dry_run,
         )

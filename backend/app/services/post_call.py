@@ -258,8 +258,12 @@ def _process_one(data: dict | None, fmt: str) -> dict:
     )
     call_log_id = upserted[0]["id"] if upserted else None
 
-    # Every call becomes an actionable request in Call Logs.
-    if call_log_id:
+    # Every INBOUND call becomes an actionable request in Call Logs.
+    # OUTBOUND calls do NOT spawn their own inquiry — they are already linked to
+    # the triggering case via outbound_calls.inquiry_id (set at dispatch). Letting
+    # ensure_call_inquiry run here would orphan a duplicate inquiry per outbound
+    # call (the bug that produced ANF-2026-0020). Inbound path unchanged.
+    if call_log_id and direction != "outbound":
         from app.services.inquiries import ensure_call_inquiry
 
         ensure_call_inquiry(client, org_id, upserted[0])

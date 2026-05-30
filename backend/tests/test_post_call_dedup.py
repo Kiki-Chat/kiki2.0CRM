@@ -206,3 +206,48 @@ def test_d_missing_conversation_id_skips_dedup_and_processes(monkeypatch):
 
     assert result["status"] == "processed", result
     assert result["skipReason"] is None
+
+
+# ─── orphan fix: outbound calls must NOT spawn a new inquiry ──────────────
+def test_outbound_call_does_not_spawn_inquiry(monkeypatch):
+    """An OUTBOUND post-call is already linked to its case via
+    outbound_calls.inquiry_id, so ensure_call_inquiry must NOT run (that was the
+    bug that produced the orphan ANF-2026-0020)."""
+    monkeypatch.setattr("app.services.customers.get_or_create_customer", lambda *a, **k: {"id": "cust_x"})
+    monkeypatch.setattr("app.services.post_call.broadcast_new_call", lambda *a, **k: None)
+    ensure = MagicMock(return_value={"id": "inq_x"})
+    monkeypatch.setattr("app.services.inquiries.ensure_call_inquiry", ensure)
+
+    client = _build_client({
+        "organizations": [[{"id": "org_x"}]],
+        "calls": [[], [{"id": "call_out"}]],  # dedup empty, then upsert
+        "inquiries": [[]],
+    })
+    monkeypatch.setattr("app.services.post_call.get_service_client", lambda: client)
+
+    payload = _payload(conv_id="conv_out")
+    payload["metadata"]["phone_call"]["direction"] = "outbound"
+    result = _process_one(payload, "envelope")
+
+    assert result["status"] == "processed", result
+    ensure.assert_not_called()  # orphan fix
+
+
+def test_inbound_call_still_spawns_inquiry(monkeypatch):
+    """Inbound path unchanged — ensure_call_inquiry still runs."""
+    monkeypatch.setattr("app.services.customers.get_or_create_customer", lambda *a, **k: {"id": "cust_x"})
+    monkeypatch.setattr("app.services.post_call.broadcast_new_call", lambda *a, **k: None)
+    ensure = MagicMock(return_value={"id": "inq_x"})
+    monkeypatch.setattr("app.services.inquiries.ensure_call_inquiry", ensure)
+
+    client = _build_client({
+        "organizations": [[{"id": "org_x"}]],
+        "calls": [[], [{"id": "call_in"}]],
+        "inquiries": [[]],
+    })
+    monkeypatch.setattr("app.services.post_call.get_service_client", lambda: client)
+
+    result = _process_one(_payload(conv_id="conv_in"), "envelope")  # direction inbound (default)
+
+    assert result["status"] == "processed", result
+    ensure.assert_called_once()
