@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -59,6 +60,7 @@ from fastapi import HTTPException, status
 
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
+from app.services.common import format_address
 from app.services.elevenlabs_agent import (
     CLIENT_EVENTS_PATH,
     OVERRIDES_WHITELIST_AGENT_PATH,
@@ -258,22 +260,140 @@ def _load_prompt_template() -> str:
         return f.read()
 
 
-def render_prompt_for_org(org_name: str) -> str:
-    """Return the master prompt with company name substituted to ``org_name``.
+# ─── Company-neutral generic blocks (replace Husmann-specific hours / area) ──
+_GENERIC_HOURS = (
+    "=== Geschäftszeiten ===\n"
+    "Die genauen Geschäftszeiten sind im System hinterlegt. Außerhalb der "
+    "Geschäftszeiten werden Anliegen aufgenommen und das Team meldet sich am "
+    "nächsten Werktag zurück."
+)
+_GENERIC_TAGESZEIT = (
+    "# Geschäftszeiten-Modus\n\n"
+    "  Innerhalb der Geschäftszeiten gilt der normale Leitfaden — Termine sind buchbar.\n"
+    "  Außerhalb der Geschäftszeiten oder wenn das Team nicht erreichbar ist, buchst du\n"
+    "  keinen festen Termin, sondern nimmst das Anliegen mit `hk_createInquiry`\n"
+    "  (`rueckrufGewuenscht=true`) auf — das Team meldet sich am nächsten Werktag.\n"
+    "  Bei einem echten Notfall greift der Notdienst (siehe Notfall-Definition unten).\n\n"
+    "  "
+)
+_GENERIC_EINSATZ = (
+    "# Einsatzgebiet\n"
+    "  Nimm Anliegen aus dem üblichen Einzugsgebiet regulär auf. Liegt der Einsatzort\n"
+    "  möglicherweise außerhalb, nimm das Anliegen trotzdem auf und sage dem Anrufer,\n"
+    "  dass das Team prüft, ob die Anfahrt machbar ist, und sich zurückmeldet — nicht\n"
+    "  direkt absagen."
+)
+_GENERIC_ERREICH = (
+    "# Erreichbarkeit\n"
+    "  Die genauen Geschäftszeiten sind im System hinterlegt. Außerhalb der\n"
+    "  Geschäftszeiten werden Anliegen aufgenommen; das Team meldet sich am nächsten\n"
+    "  Werktag. Bei echten Notfällen greift der Notdienst (siehe Notfall-Definition).\n\n"
+    "  "
+)
+# Identity literals that must NOT survive rendering for a non-Husmann org.
+_IDENTITY_RESIDUE = [
+    "Husmann", "Dreier", "Buxtehude", "Stader", "04161", "husmann-dreier",
+    "Jork", "Neu Wulmstorf", "Apensen", "Moisburg", "Horneburg",
+    "Nottensdorf", "Bliedersdorf", "Neuenkirchen",
+]
 
-    Belt-and-braces: re-verifies that zero ``wkp_shared_`` strings remain in
-    the final output (the file-on-disk transformation should already have
-    handled that, but re-checking guards against an accidental edit).
+
+def _fetch_org_identity(org_id: str | UUID) -> dict:
+    """Name + address + phone + email + trade + management for prompt rendering."""
+    db = get_service_client()
+    rows = (
+        db.table("organizations")
+        .select("name, address, phone_number, email, trade, management")
+        .eq("id", str(org_id))
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else {}
+
+
+def _company_contact_block(address: str, phone: str, email: str) -> str:
+    lines = []
+    if address:
+        lines.append(f"Adresse: {address}")
+    if phone:
+        lines.append(f"Telefon: {phone}")
+    if email:
+        lines.append(f"E-Mail: {email}")
+    body = "\n".join(lines) if lines else "Die Kontaktdaten sind im System hinterlegt."
+    return f"=== Firmeninformationen ===\n{body}"
+
+
+def _company_profile_block(name: str, address: str, phone: str, trade: str, directors: str) -> str:
+    first = f"{name} — {trade}." if trade else f"{name}."
+    lines = [first]
+    contact = []
+    if address:
+        contact.append(address)
+    if phone:
+        contact.append(f"Telefon {phone}")
+    if contact:
+        lines.append(". ".join(contact) + ".")
+    if directors:  # single-person field today — cannot represent two co-directors
+        lines.append(f"Geschäftsführung: {directors}.")
+    return "# Unternehmen\n" + "\n".join("  " + ln for ln in lines)
+
+
+def render_prompt_for_org(org_name: str, org: dict | None = None) -> str:
+    """Master inbound prompt with ALL company identity sourced per org.
+
+    Company name is substituted everywhere; address / phone / email / trade /
+    directors come from the org record (conditional-omit when empty — never
+    invented). Business-hours + service-area language is genericized to be
+    company-neutral (no hardcoded hours/towns); a real business_hours config is a
+    tracked follow-up. Trade-specific persona/emergency content is deliberately
+    left as-is this pass (separate genericization, to be sourced from
+    Kiki-Zentrale later). Hard-fails on any identity residue or stale
+    ``wkp_shared_`` token.
     """
+    org = org or {}
     text = _load_prompt_template()
+
+    # 1) Company name — every inline mention.
     for placeholder in _TEMPLATE_COMPANY_NAMES:
         text = text.replace(placeholder, org_name)
+
+    # 2) Identity from the org record (omit when empty — never invent).
+    address = format_address(org.get("address")) or ""
+    phone = (org.get("phone_number") or "").strip()
+    email = (org.get("email") or "").strip()
+    trade = (org.get("trade") or "").strip()
+    mgmt = org.get("management") if isinstance(org.get("management"), dict) else {}
+    directors = (mgmt.get("name") or "").strip()
+
+    # 3) Structured identity blocks → org-sourced (lambda replacements: no re escaping).
+    contact = _company_contact_block(address, phone, email)
+    profile = _company_profile_block(org_name, address, phone, trade, directors)
+    text = re.sub(r"=== Firmeninformationen ===.*?E-Mail: info@husmann-dreier\.de",
+                  lambda _m: contact, text, flags=re.DOTALL)
+    text = re.sub(r"# Unternehmen\n.*?Zahlwort\.",
+                  lambda _m: profile, text, flags=re.DOTALL)
+
+    # 4) Genericize hours + service area (no company-specific times/towns).
+    text = re.sub(r"=== Geschäftszeiten ===.*?(?=\n=== Systeminformationen ===)",
+                  lambda _m: _GENERIC_HOURS, text, flags=re.DOTALL)
+    text = re.sub(r"# Tageszeit-Modus.*?(?=## Notfall-Definition)",
+                  lambda _m: _GENERIC_TAGESZEIT, text, flags=re.DOTALL)
+    text = re.sub(r"# Einsatzgebiet.*?nicht direkt absagen\.",
+                  lambda _m: _GENERIC_EINSATZ, text, flags=re.DOTALL)
+    text = re.sub(r"# Erreichbarkeit.*?(?=# Notfall-Definition \(verbindlich\))",
+                  lambda _m: _GENERIC_ERREICH, text, flags=re.DOTALL)
+
+    # 5) Guards.
     if "wkp_shared_" in text:
-        # Hard-fail rather than ship a prompt with a stale wkp_shared_ reference.
         raise RuntimeError(
             "agent_prompt_template.txt still contains 'wkp_shared_' tokens — "
-            "the tool-name mapping is incomplete. Fix the template before retrying."
+            "the tool-name mapping is incomplete."
         )
+    residue = [m for m in _IDENTITY_RESIDUE if m in text]
+    if residue:
+        raise RuntimeError(f"company-identity residue after render: {residue}")
     return text
 
 
@@ -380,7 +500,7 @@ def configure_agent(
 
     # ─── B.3 Prompt (FIRST run only) ─────────────────────────────────────────
     if is_first_run:
-        prompt_text = render_prompt_for_org(org_name)
+        prompt_text = render_prompt_for_org(org_name, org=_fetch_org_identity(org_id))
         # Read current after the tool merge so we don't false-positive on a stale GET.
         current = get_agent_config(agent_id)
         existing_prompt = (_get_path(current, PROMPT_PATH) or "").strip()

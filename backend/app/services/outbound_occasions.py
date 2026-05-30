@@ -411,6 +411,90 @@ def _render_review(record: dict, customer: dict | None, org: dict) -> Rendered:
     return Rendered(first, voicemail, task, name)
 
 
+# ─── maintenance_due ─────────────────────────────────────────────────────────
+_MAINT_COLUMNS = "id, customer_id, last_service_at, interval_months, next_due_at, status"
+_MISSED_COLUMNS = "id, customer_id, caller_number, missed_at, status"
+_DEFAULT_MAINT_COOLDOWN_DAYS = 30
+_MAINT_MAX_CYCLES = 3
+
+
+def _select_maintenance_due(db, org_id: str, cfg: dict, now_local: datetime) -> list[dict]:
+    today = now_local.date().isoformat()
+    return (
+        db.table("maintenance_plans")
+        .select(_MAINT_COLUMNS)
+        .eq("org_id", org_id)
+        .eq("status", "active")
+        .lte("next_due_at", today)  # due
+        .execute()
+        .data
+        or []
+    )
+
+
+def _render_maintenance_due(record: dict, customer: dict | None, org: dict) -> Rendered:
+    company = org.get("name") or "uns"
+    name = (customer or {}).get("full_name") or ""
+    fuer = f" für {name}" if name else ""
+    first = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Eine kurze Erinnerung"
+        f"{fuer}: Bei Ihnen steht die nächste regelmäßige Wartung an. Sollen wir dafür "
+        "einen Termin vereinbaren?"
+    )
+    voicemail = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Eine kurze Erinnerung"
+        f"{fuer}: Bei Ihnen steht die nächste regelmäßige Wartung an. Melden Sie sich gerne "
+        "bei uns, dann vereinbaren wir einen Termin. Auf Wiederhören!"
+    )
+    task = (
+        "## PRIMÄRE AUFGABE – Wartung fällig\n"
+        "Deine erste Nachricht war eine Erinnerung, dass die regelmäßige Wartung ansteht.\n"
+        "- Möchte der Kunde einen Termin: mit hk_getAvailableAppointments freie Termine suchen "
+        "und mit hk_bookAppointment reservieren – nie ohne Bestätigung des Kunden.\n"
+        "- Möchte der Kunde später entscheiden oder hat Fragen: erfasse das mit hk_createInquiry "
+        "(rueckrufGewuenscht=true).\n"
+        "Bleibe kurz und freundlich; nenne keine internen Daten."
+    )
+    return Rendered(first, voicemail, task, name)
+
+
+# ─── missed_callback ─────────────────────────────────────────────────────────
+def _select_missed_callback(db, org_id: str, cfg: dict, now_local: datetime) -> list[dict]:
+    return (
+        db.table("missed_calls")
+        .select(_MISSED_COLUMNS)
+        .eq("org_id", org_id)
+        .eq("status", "pending")
+        .execute()
+        .data
+        or []
+    )
+
+
+def _render_missed_callback(record: dict, customer: dict | None, org: dict) -> Rendered:
+    company = org.get("name") or "uns"
+    name = (customer or {}).get("full_name") or ""
+    first = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Wir haben vorhin einen Anruf "
+        "von Ihnen verpasst und wollten uns gleich bei Ihnen zurückmelden. Wie können wir Ihnen "
+        "helfen?"
+    )
+    voicemail = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Wir haben Ihren Anruf leider "
+        "verpasst und wollten uns zurückmelden. Rufen Sie uns gerne wieder an – wir sind für Sie da. "
+        "Auf Wiederhören!"
+    )
+    task = (
+        "## PRIMÄRE AUFGABE – Rückruf nach verpasstem Anruf\n"
+        "Du rufst zurück, weil ein Anruf des Kunden verpasst wurde. Du weißt noch nicht, worum es geht.\n"
+        "- Frage offen, wie du helfen kannst, und bearbeite das Anliegen mit den passenden Werkzeugen "
+        "(Termin: hk_getAvailableAppointments + hk_bookAppointment; Nachricht/Rückruf: hk_createInquiry).\n"
+        "- Bei einem umfangreichen, abweichenden Anliegen leite mit transfer_to_agent weiter.\n"
+        "Bleibe freundlich und kurz."
+    )
+    return Rendered(first, voicemail, task, name)
+
+
 # ─── inquiry (case) derivation per occasion ──────────────────────────────────
 def _inq_from_record(db, org_id, record):
     """Default: the record carries inquiry_id directly (appointments, KVAs)."""
@@ -456,6 +540,7 @@ class OccasionSpec:
     cooldown_config_key: str | None = None       # agent_configs column overriding cooldown_days
     max_cycles: int | None = None                # cap on repeat attempts
     org_flag: str | None = None                  # organizations column that must be truthy
+    to_number_of: Callable | None = None         # (record, customer) -> phone; default = customer.phone
 
 
 _APPT_COLUMNS = "id, customer_id, scheduled_at, title, status"
@@ -519,10 +604,36 @@ OCCASIONS: dict[str, OccasionSpec] = {
         case_gate="must_be_completed",
         org_flag="google_reviews_enabled",
     ),
-    # Deferred — no data source / prerequisite first (NOT wired this round):
-    #   "maintenance_due"          (WARTUNG_FAELLIG)      — no maintenance-contract entity
-    #   "missed_callback"          (RUECKRUF_VERPASST)    — unanswered calls leave no record
-    #   "appointment_confirmation" (TERMIN_BESTAETIGUNG)  — net-new occasion key + trigger
+    "maintenance_due": OccasionSpec(
+        key="maintenance_due",
+        anlass_typ="WARTUNG_FAELLIG",
+        referenz_typ="Wartung",
+        table="maintenance_plans",
+        columns=_MAINT_COLUMNS,
+        select=_select_maintenance_due,
+        render=_render_maintenance_due,
+        case_gate="ignore",          # maintenance plans have no case
+        recurring=True,
+        cooldown_days=_DEFAULT_MAINT_COOLDOWN_DAYS,
+        cooldown_config_key="maintenance_reminder_days",
+        max_cycles=_MAINT_MAX_CYCLES,
+    ),
+    "missed_callback": OccasionSpec(
+        key="missed_callback",
+        anlass_typ="RUECKRUF_VERPASST",
+        referenz_typ="Rückruf",
+        table="missed_calls",
+        columns=_MISSED_COLUMNS,
+        select=_select_missed_callback,
+        render=_render_missed_callback,
+        case_gate="ignore",          # missed calls have no case
+        # dial the caller's number (a missed call may have no linked customer/phone)
+        to_number_of=lambda rec, cust: rec.get("caller_number") or (cust or {}).get("phone"),
+    ),
+    # Deferred — prerequisite first (NOT wired this round):
+    #   "appointment_confirmation" (TERMIN_BESTAETIGUNG) — net-new occasion key + trigger
+    # missed_callback real-traffic capture: a Twilio status-callback writer (no-answer/
+    # busy/failed -> insert missed_calls) is the one external dependency still needed.
 }
 
 OCCASION_KEYS = list(OCCASIONS.keys())

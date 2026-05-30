@@ -118,25 +118,31 @@ def test_phone_fetch_handles_missing_assigned_agent(monkeypatch):
 
 # ─── Prompt rendering ────────────────────────────────────────────────────────
 def test_render_prompt_substitutes_company_name():
-    out = ac.render_prompt_for_org("Test Org GmbH")
-    # Husmann & Dreier GmbH gone (replaced)
-    assert "Husmann & Dreier GmbH" not in out
-    assert "Husmann und Dreier" not in out
-    # 2026-05-27 Wave 3 V.2 regression: the bare "Husmann & Dreier" form (no
-    # GmbH suffix, no "und" variant) was initially omitted from substitution —
-    # 4 instances in headings/prose on lines 93, 161, 164, 214 leaked through.
-    # This assertion locks the fix.
-    assert "Husmann & Dreier" not in out
-    # Org name appears
+    org = {
+        "address": {"street": "Hafenweg 22", "city": "Münster", "postal_code": "48155"},
+        "phone_number": "+49251000000",
+        "email": "info@testorg.de",
+        "trade": "",            # empty → trade clause omitted (not invented)
+        "management": {"name": ""},  # empty → director line omitted (not invented)
+    }
+    out = ac.render_prompt_for_org("Test Org GmbH", org=org)
+    # ALL Husmann identity is gone now (name + directors + address + service area).
+    assert "Husmann" not in out
+    assert "Dreier" not in out
+    assert "Herr Husmann und Herr Dreier" not in out  # the formerly-hardcoded director line
+    assert "Buxtehude" not in out and "Stader" not in out and "04161" not in out
+    assert "Jork" not in out and "Neuenkirchen" not in out  # no service-area towns
+    assert "08:00" not in out and "16:00" not in out        # no hardcoded business hours
+    # Org identity present instead.
     assert "Test Org GmbH" in out
-    # NO wkp_shared_ tokens remain
+    assert "Hafenweg 22" in out and "Münster" in out        # address sourced from org
+    assert "info@testorg.de" in out                          # email sourced from org
+    # Empty fields omitted cleanly (not invented).
+    assert "Geschäftsführung:" not in out                    # management.name empty → omitted
+    # NO wkp_shared_ tokens; hk_* tools intact; emergency content untouched (deferred).
     assert "wkp_shared_" not in out
-    # The hk_* tool names are present (sanity: the mapping landed in the template)
-    assert "hk_identifyCustomer" in out
-    assert "hk_bookAppointment" in out
-    # The director-name lines (lines 919-920) are intentionally NOT substituted —
-    # those are bespoke per-org content that needs its own future field.
-    assert "Herr Husmann und Herr Dreier" in out
+    assert "hk_identifyCustomer" in out and "hk_bookAppointment" in out
+    assert "Notfall-Definition" in out                       # emergency content left as-is
 
 
 def test_render_prompt_strips_sendkva_parenthetical():

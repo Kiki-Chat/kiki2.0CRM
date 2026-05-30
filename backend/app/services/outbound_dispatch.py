@@ -217,7 +217,9 @@ def _claim(db, claim: dict) -> bool:
 def _dispatch_one(
     db, *, org, org_id, spec, record, customer, inquiry_id, cycle_no, to_number_override, dry_run, now
 ):
-    to_number = to_number_override or (customer or {}).get("phone")
+    to_number = to_number_override or (
+        spec.to_number_of(record, customer) if spec.to_number_of else (customer or {}).get("phone")
+    )
     if not to_number:
         return {"skipped": "no_phone", "referenz_id": record["id"]}
 
