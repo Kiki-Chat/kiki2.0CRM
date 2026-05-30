@@ -30,6 +30,12 @@ What it does, in order:
 
   B.5  Assert "audio" is present in client_events.
 
+  B.6  Enable the Path A conversation_config_override whitelist (prompt,
+       first_message, language) so the CRM-provisioned (N8N-created) agent
+       accepts the per-call outbound override with ZERO manual toggling. Sets
+       ONLY booleans — never a prompt. Additive + idempotent (backfills on
+       re-sync, the way the phone_number_id capture does).
+
 All ElevenLabs writes route through ``patch_agent_safely`` (the only module
 permitted to PATCH agent config — see ``elevenlabs_agent`` module docstring).
 
@@ -55,6 +61,7 @@ from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.services.elevenlabs_agent import (
     CLIENT_EVENTS_PATH,
+    OVERRIDES_WHITELIST_AGENT_PATH,
     PROMPT_PATH,
     REQUIRED_AUDIO_EVENT,
     TOOL_IDS_PATH,
@@ -63,6 +70,7 @@ from app.services.elevenlabs_agent import (
     ElevenLabsWriteError,
     _get_path,
     get_agent_config,
+    override_flags_ok,
     patch_agent_safely,
 )
 
@@ -314,6 +322,7 @@ def configure_agent(
           "prompt_skipped_reason": "...",        # populated when False
           "webhook_enabled": True | False,       # True if our URL is set & toggle on
           "audio_ok": True,                      # always True post-call (else raise)
+          "overrides_whitelist_enabled": True,   # Path A per-call override flags on
         }
 
     Raises:
@@ -336,6 +345,7 @@ def configure_agent(
         "prompt_skipped_reason": None,
         "webhook_enabled": False,
         "audio_ok": False,
+        "overrides_whitelist_enabled": False,
     }
     is_first_run = not _is_agent_already_provisioned(org_id)
 
@@ -451,6 +461,39 @@ def configure_agent(
             endpoint_label="provision_audio",
         )
     summary["audio_ok"] = True
+
+    # ─── B.6 Overrides whitelist (per-call conversation_config_override) ──────
+    # Path A outbound ships the German prompt / first message / language as a
+    # per-call override; ElevenLabs only honors it when the agent whitelists
+    # those fields. Enabling the three flags here means a CRM-provisioned
+    # (N8N-created) agent accepts the per-call override with ZERO manual
+    # toggling. Set ONLY these booleans — never a prompt; the outbound prompt
+    # text stays per-call (hard constraint). Additive + idempotent (the
+    # required_override_flags verify confirms the flags actually took, else
+    # patch_agent_safely rolls back).
+    current = get_agent_config(agent_id)
+    if not override_flags_ok(_get_path(current, OVERRIDES_WHITELIST_AGENT_PATH)):
+        patch_agent_safely(
+            agent_id=agent_id,
+            field_patches={
+                "platform_settings": {
+                    "overrides": {
+                        "conversation_config_override": {
+                            "agent": {
+                                "first_message": True,
+                                "language": True,
+                                "prompt": {"prompt": True},
+                            }
+                        }
+                    }
+                }
+            },
+            required_override_flags=True,
+            actor_id=actor_id,
+            org_id=org_id,
+            endpoint_label="provision_overrides_whitelist",
+        )
+    summary["overrides_whitelist_enabled"] = True
 
     # ─── Stamp the org so re-runs skip the prompt step. ──────────────────────
     if is_first_run:

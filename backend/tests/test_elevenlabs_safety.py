@@ -328,3 +328,52 @@ def test_client_events_union_always_keeps_audio(monkeypatch):
     assert "audio" in ce  # never stripped
     assert "user_transcript" in ce  # added
     assert "interruption" in ce  # pre-existing preserved
+
+
+# ─── Path A overrides whitelist (B.6 verify guard) ───────────────────────────
+def test_override_flags_ok_helper():
+    good = {"first_message": True, "language": True, "prompt": {"prompt": True}}
+    assert ea.override_flags_ok(good) is True
+    assert ea.override_flags_ok({**good, "language": False}) is False
+    assert ea.override_flags_ok({"first_message": True, "language": True}) is False  # prompt missing
+    assert ea.override_flags_ok(None) is False
+
+
+def test_verify_override_flags_guard():
+    base = {
+        "agent_id": AGENT,
+        "conversation_config": {"conversation": {"client_events": ["audio"]}},
+        "platform_settings": {"overrides": {"conversation_config_override": {
+            "agent": {"first_message": True, "language": True, "prompt": {"prompt": True}}}}},
+    }
+    ok, _ = ea._verify(base, base, base, {}, require_override_flags=True)
+    assert ok
+    bad = copy.deepcopy(base)
+    bad["platform_settings"]["overrides"]["conversation_config_override"]["agent"]["language"] = False
+    ok, reason = ea._verify(bad, bad, bad, {}, require_override_flags=True)
+    assert not ok and "override" in reason.lower()
+    # Guard is opt-in: same bad post passes when the flag isn't requested.
+    ok2, _ = ea._verify(bad, bad, bad, {})
+    assert ok2
+
+
+def test_patch_agent_safely_sets_override_flags(monkeypatch):
+    server = FakeServer(base_cfg())  # base_cfg has no platform_settings
+    db = _db()
+    _wire(monkeypatch, server, db)
+
+    out = ea.patch_agent_safely(
+        agent_id=AGENT,
+        field_patches={"platform_settings": {"overrides": {"conversation_config_override": {
+            "agent": {"first_message": True, "language": True, "prompt": {"prompt": True}}}}}},
+        required_override_flags=True,
+        actor_id="u1",
+        org_id="o1",
+        endpoint_label="provision_overrides_whitelist",
+    )
+    assert ea.override_flags_ok(ea._get_path(out, ea.OVERRIDES_WHITELIST_AGENT_PATH))
+    inserted = [t for t, _ in db.store["inserts"]]
+    assert "agent_config_snapshots" in inserted and "agent_writes_audit" in inserted
+    assert "audio" in ea._get_path(out, ea.CLIENT_EVENTS_PATH)  # audio preserved
+    # Pre-existing tools preserved (clobber guard).
+    assert len(ea._get_path(out, ea.TOOLS_PATH)) == 2

@@ -56,6 +56,12 @@ WEBHOOK_ENABLED_PATH = (
     "platform_settings.overrides."
     "enable_conversation_initiation_client_data_from_webhook"
 )
+# Path A overrides whitelist — the agent-level flags that must be true for
+# ElevenLabs to honor a per-call conversation_config_override (outbound). Only
+# these booleans are set at provisioning; the override prompt text stays per-call.
+OVERRIDES_WHITELIST_AGENT_PATH = (
+    "platform_settings.overrides.conversation_config_override.agent"
+)
 
 
 # ─── Exceptions ──────────────────────────────────────────────────────────────
@@ -109,6 +115,19 @@ def assert_audio_event(client_events: Any) -> None:
             "Refusing write: 'audio' is missing from client_events — the agent would "
             "go silent on calls (LLM/text work, caller hears nothing)."
         )
+
+
+def override_flags_ok(agent_overrides: Any) -> bool:
+    """True iff the three Path A override flags — prompt.prompt, first_message,
+    language — are all exactly True in the agent-level conversation_config_override.
+    """
+    a = agent_overrides if isinstance(agent_overrides, dict) else {}
+    prompt = a.get("prompt") if isinstance(a.get("prompt"), dict) else {}
+    return (
+        a.get("first_message") is True
+        and a.get("language") is True
+        and prompt.get("prompt") is True
+    )
 
 
 def _now() -> str:
@@ -244,6 +263,7 @@ def patch_agent_safely(
     field_patches: dict,
     merge_arrays: list[str] | None = None,
     required_client_events: list[str] | None = None,
+    required_override_flags: bool = False,
     actor_id: str | UUID | None,
     org_id: str | UUID,
     endpoint_label: str,
@@ -324,7 +344,9 @@ def patch_agent_safely(
 
     # 9) Verify via re-GET; auto-rollback on failure.
     post = get_agent_config(agent_id)
-    ok, reason = _verify(post, merged, current, changes)
+    ok, reason = _verify(
+        post, merged, current, changes, require_override_flags=required_override_flags
+    )
     if not ok:
         _restore_full(agent_id, current)  # automatic rollback from snapshot
         _audit(
@@ -344,7 +366,10 @@ def patch_agent_safely(
     return post
 
 
-def _verify(post: dict, intended: dict, pre: dict, changes: dict) -> tuple[bool, str]:
+def _verify(
+    post: dict, intended: dict, pre: dict, changes: dict,
+    require_override_flags: bool = False,
+) -> tuple[bool, str]:
     """Confirm the write landed without breaking the agent."""
     if not isinstance(post, dict) or not post.get("agent_id"):
         return False, "agent unreachable after write"
@@ -368,6 +393,11 @@ def _verify(post: dict, intended: dict, pre: dict, changes: dict) -> tuple[bool,
     # Defense-in-depth: pre-existing tools must not have shrunk (clobber guard).
     if len(_get_path(post, TOOLS_PATH) or []) < len(_get_path(pre, TOOLS_PATH) or []):
         return False, "tools array shrank after write (clobber risk)"
+    # Path A overrides whitelist must be fully enabled after the dedicated step.
+    if require_override_flags and not override_flags_ok(
+        _get_path(post, OVERRIDES_WHITELIST_AGENT_PATH)
+    ):
+        return False, "override whitelist flags not all true after write"
     return True, "ok"
 
 

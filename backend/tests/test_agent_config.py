@@ -161,8 +161,19 @@ class _RecordingPatch:
 
 def _build_current_cfg(
     *, tool_ids=None, prompt="OLD", client_events=None,
-    webhook_url=None, webhook_enabled=False,
+    webhook_url=None, webhook_enabled=False, override_flags=False,
 ) -> dict:
+    overrides = {
+        "enable_conversation_initiation_client_data_from_webhook": webhook_enabled,
+    }
+    if override_flags:
+        overrides["conversation_config_override"] = {
+            "agent": {
+                "first_message": True,
+                "language": True,
+                "prompt": {"prompt": True},
+            }
+        }
     return {
         "agent_id": AGENT_ID,
         "conversation_config": {
@@ -182,10 +193,7 @@ def _build_current_cfg(
                     {"url": webhook_url} if webhook_url else {}
                 ),
             },
-            "overrides": {
-                "enable_conversation_initiation_client_data_from_webhook":
-                    webhook_enabled,
-            },
+            "overrides": overrides,
         },
     }
 
@@ -236,6 +244,9 @@ def test_configure_agent_fresh_full_path(monkeypatch):
     assert "provision_prompt" in endpoints
     assert "provision_webhook" in endpoints
     assert "provision_audio" not in endpoints  # already present
+    # B.6: the Path A override whitelist is set on a fresh (untoggled) agent.
+    assert "provision_overrides_whitelist" in endpoints
+    assert summary["overrides_whitelist_enabled"] is True
 
 
 def test_configure_agent_rerun_skips_prompt(monkeypatch):
@@ -247,6 +258,7 @@ def test_configure_agent_rerun_skips_prompt(monkeypatch):
             "http://localhost:8000/api/elevenlabs/conversation-init"
         ),
         webhook_enabled=True,
+        override_flags=True,
     )
     rec = _wire_configure_agent(monkeypatch, current_cfg=cfg, provisioned=True)
 
@@ -270,6 +282,7 @@ def test_configure_agent_adds_only_missing_audio(monkeypatch):
             "http://localhost:8000/api/elevenlabs/conversation-init"
         ),
         webhook_enabled=True,
+        override_flags=True,
     )
     rec = _wire_configure_agent(monkeypatch, current_cfg=cfg, provisioned=True)
 
@@ -323,3 +336,65 @@ def test_configure_agent_missing_tool_raises(monkeypatch):
         )
     assert exc.value.status_code == 400
     assert ac.HK_TOOL_NAMES[-1] in exc.value.detail
+
+
+# ─── B.6 overrides whitelist ─────────────────────────────────────────────────
+def _no_strings(node) -> bool:
+    """True iff no string VALUE appears anywhere in the structure (only bool/dict)."""
+    if isinstance(node, str):
+        return False
+    if isinstance(node, dict):
+        return all(_no_strings(v) for v in node.values())
+    if isinstance(node, list):
+        return all(_no_strings(v) for v in node)
+    return True
+
+
+def test_configure_agent_sets_override_whitelist_when_absent(monkeypatch):
+    # Fully provisioned EXCEPT the override flags → only the whitelist write fires.
+    cfg = _build_current_cfg(
+        tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
+        prompt="customer hand-edited content",
+        client_events=["audio"],
+        webhook_url="http://localhost:8000/api/elevenlabs/conversation-init",
+        webhook_enabled=True,
+        override_flags=False,
+    )
+    rec = _wire_configure_agent(monkeypatch, current_cfg=cfg, provisioned=True)
+
+    summary = ac.configure_agent(org_id=ORG_ID, agent_id=AGENT_ID, org_name=ORG_NAME)
+
+    assert summary["overrides_whitelist_enabled"] is True
+    wl = [c for c in rec.calls if c["endpoint_label"] == "provision_overrides_whitelist"]
+    assert len(wl) == 1
+    call = wl[0]
+    # verify is told to enforce the flags (rollback if they don't take).
+    assert call["required_override_flags"] is True
+    # Sets ONLY the three booleans — no prompt / first_message TEXT written here.
+    agent = (
+        call["field_patches"]["platform_settings"]["overrides"]
+        ["conversation_config_override"]["agent"]
+    )
+    assert agent == {"first_message": True, "language": True, "prompt": {"prompt": True}}
+    assert _no_strings(call["field_patches"]) is True  # never a prompt string
+
+
+def test_configure_agent_override_whitelist_idempotent(monkeypatch):
+    # Flags already true on a fully-provisioned agent → B.6 must NOT patch.
+    cfg = _build_current_cfg(
+        tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
+        prompt="x",
+        client_events=["audio"],
+        webhook_url="http://localhost:8000/api/elevenlabs/conversation-init",
+        webhook_enabled=True,
+        override_flags=True,
+    )
+    rec = _wire_configure_agent(monkeypatch, current_cfg=cfg, provisioned=True)
+
+    summary = ac.configure_agent(org_id=ORG_ID, agent_id=AGENT_ID, org_name=ORG_NAME)
+
+    assert summary["overrides_whitelist_enabled"] is True
+    assert not any(
+        c["endpoint_label"] == "provision_overrides_whitelist" for c in rec.calls
+    )
+    assert rec.calls == []  # fully provisioned incl. flags → zero writes
