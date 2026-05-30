@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     brevo_smtp_password: str = Field(default="", validation_alias="BREVO_SMTP_KEY")
     brevo_smtp_from_address: str = "info@kiki-zusammenfassung.de"
     brevo_smtp_from_name: str = "HeyKiki"
+    # Brevo transactional HTTP API key (api.brevo.com/v3/smtp/email, HTTPS/443).
+    # Tier-3 fallback sends via the HTTP API instead of SMTP/587 (Railway egress
+    # blocks outbound SMTP — connect-timeout on 587). Stored in Railway as
+    # BREVO_API_KEY. The key stays in env — never hardcoded.
+    brevo_api_key: str = Field(default="", validation_alias="BREVO_API_KEY")
 
     @property
     def cors_origin_list(self) -> list[str]:

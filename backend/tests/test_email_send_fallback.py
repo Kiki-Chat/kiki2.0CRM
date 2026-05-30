@@ -115,9 +115,9 @@ def _patch_db(monkeypatch, *, email_config: dict | None, org_name: str | None = 
     )
 
 
-def _patch_brevo_creds(monkeypatch, *, username: str = "brevo-user", password: str = "brevo-pass"):
-    monkeypatch.setattr(es.settings, "brevo_smtp_username", username, raising=False)
-    monkeypatch.setattr(es.settings, "brevo_smtp_password", password, raising=False)
+def _patch_brevo_creds(monkeypatch, *, api_key: str = "brevo-api-key"):
+    # Tier-3 now uses Brevo's HTTP API (BREVO_API_KEY), not SMTP creds.
+    monkeypatch.setattr(es.settings, "brevo_api_key", api_key, raising=False)
 
 
 def _patch_oauth_creds(monkeypatch):
@@ -230,7 +230,7 @@ def test_oauth_failed_customer_smtp_succeeds(monkeypatch):
 
 # ─── Tier 1 + 2 fail → Tier 3 (Brevo) succeeds ──────────────────────────────
 def test_oauth_and_customer_smtp_fail_brevo_succeeds(monkeypatch):
-    """Both OAuth and customer SMTP fail; Brevo is reached and succeeds."""
+    """Both OAuth and customer SMTP fail; Brevo (HTTP API) is reached and succeeds."""
     _patch_db(monkeypatch, email_config=_config_oauth_plus_smtp())
     _patch_oauth_creds(monkeypatch)
     _patch_brevo_creds(monkeypatch)
@@ -240,14 +240,15 @@ def test_oauth_and_customer_smtp_fail_brevo_succeeds(monkeypatch):
         httpx.Client, "post",
         _fake_httpx_post({
             "gmail.googleapis.com": httpx.Response(503, text="busy"),
+            "api.brevo.com": httpx.Response(201, json={"messageId": "brevo-1"}),
         }),
     )
 
-    # Customer SMTP SSL fails; Brevo (STARTTLS on 587) succeeds.
+    # Customer SMTP SSL fails; Brevo now goes via the HTTP API (no SMTP at all).
     def fake_smtp_ssl(host, port, timeout=0):
         return _FakeSMTPFail(host, port, timeout)
     def fake_smtp(host, port, timeout=0):
-        return _FakeSMTP(host, port, timeout)
+        return _FakeSMTPFail(host, port, timeout)
     monkeypatch.setattr("smtplib.SMTP_SSL", fake_smtp_ssl)
     monkeypatch.setattr("smtplib.SMTP", fake_smtp)
 
@@ -259,16 +260,15 @@ def test_oauth_and_customer_smtp_fail_brevo_succeeds(monkeypatch):
     )
     assert res.success is True
     assert res.provider_used == "brevo_smtp"
+    assert res.message_id == "brevo-1"
     assert res.fallback_chain == [
         "gmail_oauth_failed",
         "customer_smtp_failed",
         "brevo_smtp_success",
     ]
-    # Customer SMTP attempted (fail), then Brevo (success): 2 instances total.
-    assert len(_FakeSMTP.instances) == 2
-    brevo_inst = _FakeSMTP.instances[1]
-    assert brevo_inst.host == "smtp-relay.brevo.com"
-    assert brevo_inst.port == 587
+    # Only the customer SMTP attempt opens an SMTP session; Brevo is HTTP now.
+    assert len(_FakeSMTP.instances) == 1
+    assert _FakeSMTP.instances[0].host == "mail.example.com"
 
 
 # ─── All three fail → raises with full chain in message ──────────────────────
@@ -312,6 +312,12 @@ def test_no_config_goes_straight_to_brevo(monkeypatch):
     _patch_brevo_creds(monkeypatch)
     _FakeSMTP.instances.clear()
 
+    monkeypatch.setattr(
+        httpx.Client, "post",
+        _fake_httpx_post({
+            "api.brevo.com": httpx.Response(201, json={"messageId": "brevo-2"}),
+        }),
+    )
     monkeypatch.setattr("smtplib.SMTP_SSL", _FakeSMTP)
     monkeypatch.setattr("smtplib.SMTP", _FakeSMTP)
 
@@ -322,9 +328,8 @@ def test_no_config_goes_straight_to_brevo(monkeypatch):
     assert res.success is True
     assert res.provider_used == "brevo_smtp"
     assert res.fallback_chain == ["brevo_smtp_success"]
-    # Exactly one SMTP session opened (to Brevo).
-    assert len(_FakeSMTP.instances) == 1
-    assert _FakeSMTP.instances[0].host == "smtp-relay.brevo.com"
+    # Brevo is HTTP now → no SMTP session opened at all.
+    assert _FakeSMTP.instances == []
 
 
 def test_smtp_only_config_skips_oauth_tier(monkeypatch):
@@ -388,10 +393,10 @@ def test_oauth_refresh_triggers_when_access_token_expired(monkeypatch):
 
 # ─── Brevo creds missing while reaching tier 3 → raises with reason in chain ──
 def test_brevo_creds_missing_at_last_tier_raises(monkeypatch):
-    """No OAuth, no customer SMTP, and Brevo creds blank → tier 3 fails on
+    """No OAuth, no customer SMTP, and Brevo API key blank → tier 3 fails on
     config check and the overall call raises with chain populated."""
     _patch_db(monkeypatch, email_config=None)
-    _patch_brevo_creds(monkeypatch, username="", password="")
+    _patch_brevo_creds(monkeypatch, api_key="")
     _FakeSMTP.instances.clear()
 
     monkeypatch.setattr("smtplib.SMTP_SSL", _FakeSMTP)
@@ -402,7 +407,7 @@ def test_brevo_creds_missing_at_last_tier_raises(monkeypatch):
             org_id=ORG_ID, to_email=TO_EMAIL,
             subject="Test", body_html="<p>hi</p>",
         )
-    assert "Brevo SMTP credentials not configured" in str(exc.value)
+    assert "Brevo API key not configured" in str(exc.value)
     assert "brevo_smtp_failed" in str(exc.value)
 
 
@@ -428,3 +433,37 @@ def test_mime_builder_attaches_pdf_and_includes_cc():
     assert ("text/plain", None) in parts
     assert ("text/html", None) in parts
     assert ("application/pdf", "kva.pdf") in parts
+
+
+# ─── The shipped fix: Brevo failures on 443 (non-2xx OR timeout) are HANDLED ──
+@pytest.mark.parametrize("mode", ["http_401", "http_500", "timeout"])
+def test_brevo_failure_modes_handled_not_unhandled_crash(monkeypatch, mode):
+    """Regression guard for the exact bug this change fixes: a Brevo failure on
+    the HTTP API — a non-2xx response (401 / 500) OR an httpx timeout/transport
+    error — must be CAUGHT by send_email's broad ``except Exception``, recorded
+    as ``brevo_smtp_failed``, and surface as the orderly
+    ``RuntimeError('All email tiers failed…')``. A raw httpx error must NEVER
+    escape send_email (the original failure mode was an unhandled timeout)."""
+    _patch_db(monkeypatch, email_config=None)   # no OAuth, no customer SMTP → straight to Brevo
+    _patch_brevo_creds(monkeypatch)             # Brevo API key present
+    _FakeSMTP.instances.clear()
+
+    def fake_post(self, url, *args, **kwargs):  # noqa: ARG001
+        assert "api.brevo.com" in url
+        if mode == "http_401":
+            return httpx.Response(401, text="unauthorized")
+        if mode == "http_500":
+            return httpx.Response(500, text="brevo upstream error")
+        raise httpx.ConnectTimeout("connect timed out")  # the production failure on 443
+    monkeypatch.setattr(httpx.Client, "post", fake_post)
+    monkeypatch.setattr("smtplib.SMTP_SSL", _FakeSMTP)
+    monkeypatch.setattr("smtplib.SMTP", _FakeSMTP)
+
+    # RuntimeError (the handled summary) — NOT httpx.*. If the Tier-3 except were
+    # narrow, the timeout case would escape as httpx.ConnectTimeout and fail here.
+    with pytest.raises(RuntimeError) as exc:
+        send_email(org_id=ORG_ID, to_email=TO_EMAIL, subject="T", body_html="<p>x</p>")
+    msg = str(exc.value)
+    assert "All email tiers failed" in msg
+    assert "brevo_smtp_failed" in msg
+    assert _FakeSMTP.instances == []  # Brevo is HTTP now — no SMTP session opened

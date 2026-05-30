@@ -595,17 +595,19 @@ def _send_via_brevo(
     bcc: list[str],
     reply_to: str | None = None,
 ) -> str | None:
-    """Send via HeyKiki's central Brevo SMTP relay (no-reply@heykiki.de).
+    """Send via HeyKiki's central Brevo relay using Brevo's transactional HTTP
+    API (``api.brevo.com/v3/smtp/email``, HTTPS/443) — NOT SMTP.
 
     Used when the org hasn't configured anything OR every per-org tier failed.
-    Credentials live in env vars; if either is unset, raises (caller surfaces
-    the chain).
+    We use the HTTP API rather than SMTP because Railway's egress blocks
+    outbound SMTP (port 587 connect-times-out), whereas 443 works. Credential is
+    the Brevo API key (``BREVO_API_KEY``); if unset, raises (caller surfaces the
+    chain). Contract is identical to the prior SMTP impl: return the provider
+    message id on success, raise on any non-2xx so ``send_email`` records
+    ``brevo_smtp_failed`` and the fallback chain is unchanged.
     """
-    host = settings.brevo_smtp_host
-    port = int(settings.brevo_smtp_port or 587)
-    username = settings.brevo_smtp_username
-    password = settings.brevo_smtp_password
-    sender = settings.brevo_smtp_from_address
+    api_key = settings.brevo_api_key
+    sender_email = settings.brevo_smtp_from_address
     # From-name is "<org> via HeyKiki" so recipients see who the email is
     # nominally from — even when the relay envelope is heykiki.de.
     sender_name = (
@@ -613,35 +615,46 @@ def _send_via_brevo(
         if org_name else settings.brevo_smtp_from_name
     )
 
-    if not username or not password:
+    if not api_key:
         raise RuntimeError(
-            "Brevo SMTP credentials not configured (BREVO_SMTP_USERNAME / "
-            "BREVO_SMTP_PASSWORD env vars)."
+            "Brevo API key not configured (BREVO_API_KEY env var)."
         )
 
-    msg = _build_mime_message(
-        sender_email=sender,
-        sender_name=sender_name,
-        reply_to_email=reply_to,  # per-customer Reply-To (org email) — #21
-        to_email=to_email,
-        subject=subject,
-        body_html=body_html,
-        body_text=body_text,
-        attachments=attachments,
-        cc=cc,
-        bcc=bcc,
-    )
+    payload: dict[str, Any] = {
+        "sender": {"email": sender_email, "name": sender_name},
+        "to": [{"email": to_email}],
+        "subject": subject,
+        "htmlContent": body_html,
+        "textContent": body_text or _html_to_text_fallback(body_html),
+    }
+    if cc:
+        payload["cc"] = [{"email": e} for e in cc if e]
+    if bcc:
+        payload["bcc"] = [{"email": e} for e in bcc if e]
+    if reply_to:  # per-customer Reply-To (org email) — #21
+        payload["replyTo"] = {"email": reply_to}
+    if attachments:
+        payload["attachment"] = [
+            {
+                "name": a.filename,
+                "content": base64.b64encode(a.content).decode("ascii"),
+            }
+            for a in attachments
+        ]
 
-    # Brevo's relay uses STARTTLS on 587 (use_ssl=False) by default. If
-    # someone sets port 465 explicitly we honor SSL transport instead.
-    return _smtp_send(
-        host=host,
-        port=port,
-        username=username,
-        password=password,
-        use_ssl=(port == 465),
-        msg=msg,
-    )
+    with httpx.Client(timeout=30.0) as client:
+        r = client.post(
+            "https://api.brevo.com/v3/smtp/email",
+            json=payload,
+            headers={
+                "api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+    if r.status_code not in (200, 201, 202):
+        raise RuntimeError(f"brevo api {r.status_code}: {r.text[:300]}")
+    return (r.json() or {}).get("messageId")
 
 
 # ─── Shared MIME builder + SMTP transport ────────────────────────────────────
