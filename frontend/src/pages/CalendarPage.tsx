@@ -429,10 +429,9 @@ function AppointmentDetailModal({
   const start = appt.scheduled_at ? new Date(appt.scheduled_at) : null
   const loc = locStr(appt.location)
   const [pushMsg, setPushMsg] = useState<string | null>(null)
-  // Echo-loop guard (UI side): ONLY CRM-native appointments are pushable to
-  // Google. Imported events (source='google_import') get NO push affordance —
-  // pushing them back would create a loop.
-  const isCrm = appt.source === 'crm'
+  // Pushable = CRM-native (echo-loop guard: imported google_import events get NO
+  // push affordance) AND confirmed (never push tentative/pending bookings).
+  const pushable = appt.source === 'crm' && appt.status === 'confirmed'
   const alreadyPushed = !!appt.google_event_id
   const push = useMutation({
     mutationFn: () =>
@@ -466,7 +465,7 @@ function AppointmentDetailModal({
         {appt.customer_name && <DetailRow label="Kunde">{appt.customer_name}</DetailRow>}
         {loc && <DetailRow label="Ort">{loc}</DetailRow>}
         {appt.notes && <DetailRow label="Notizen">{appt.notes}</DetailRow>}
-        {isCrm && (
+        {pushable && (
           <div className="border-t border-border pt-3">
             {alreadyPushed ? (
               <span className="text-sm font-medium text-success">✓ In Google Kalender</span>

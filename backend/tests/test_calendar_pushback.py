@@ -56,9 +56,9 @@ class _PushClient:
 
 def _appt(**over):
     base = {
-        "id": "a1", "source": "crm", "google_event_id": None, "title": "Kundentermin",
-        "scheduled_at": "2026-06-02T08:00:00+00:00", "duration_minutes": 90,
-        "notes": "Heizung prüfen", "location": {"raw": "Baustelle 1"},
+        "id": "a1", "source": "crm", "status": "confirmed", "google_event_id": None,
+        "title": "Kundentermin", "scheduled_at": "2026-06-02T08:00:00+00:00",
+        "duration_minutes": 90, "notes": "Heizung prüfen", "location": {"raw": "Baustelle 1"},
     }
     base.update(over)
     return base
@@ -97,6 +97,15 @@ def test_push_rejects_google_import_event(monkeypatch):
     monkeypatch.setattr(cs, "_insert_event", _no_insert)
     with pytest.raises(cs.CalendarWriteError) as e:
         cs.push_crm_event_to_google("org-1", "g1")
+    assert e.value.status == 400
+
+
+def test_push_rejects_pending_appointment(monkeypatch):
+    """CONFIRMED-only guard: a tentative/pending booking is never pushed."""
+    _patch(monkeypatch, _appt(id="p1", status="pending"))
+    monkeypatch.setattr(cs, "_insert_event", _no_insert)
+    with pytest.raises(cs.CalendarWriteError) as e:
+        cs.push_crm_event_to_google("org-1", "p1")
     assert e.value.status == 400
 
 

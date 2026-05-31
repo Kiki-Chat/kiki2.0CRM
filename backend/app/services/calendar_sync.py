@@ -301,7 +301,7 @@ def push_crm_event_to_google(org_id: str, appointment_id: str) -> dict:
     client = get_service_client()
     appt = (
         client.table("appointments")
-        .select("id, source, google_event_id, title, scheduled_at, duration_minutes, notes, location")
+        .select("id, source, status, google_event_id, title, scheduled_at, duration_minutes, notes, location")
         .eq("org_id", org_id)
         .eq("id", appointment_id)
         .limit(1)
@@ -316,6 +316,13 @@ def push_crm_event_to_google(org_id: str, appointment_id: str) -> dict:
         raise CalendarWriteError(
             "Nur eigene CRM-Termine können zu Google übertragen werden — "
             "importierte Termine nicht.",
+            400,
+        )
+    # Only CONFIRMED appointments are pushable — never tentative/pending bookings.
+    if appt.get("status") != "confirmed":
+        raise CalendarWriteError(
+            "Nur bestätigte Termine können zu Google übertragen werden "
+            "(keine vorläufigen/ausstehenden Buchungen).",
             400,
         )
     if appt.get("google_event_id"):

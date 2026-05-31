@@ -39,7 +39,7 @@ def _list(org_id: str, frm: str | None, to: str | None) -> list[dict]:
         .select(
             "id, title, scheduled_at, duration_minutes, status, category, color, "
             "location, notes, customer_id, inquiry_id, assigned_employee_id, "
-            "vehicle_id, tool_id"
+            "vehicle_id, tool_id, source, google_event_id"
         )
         .eq("org_id", org_id)
     )
