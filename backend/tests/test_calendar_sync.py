@@ -87,3 +87,38 @@ def test_pull_google_events_orchestration(monkeypatch):
         "success": True, "fetched": 1, "created": 1, "updated": 0,
         "cancelled": 0, "synced_at": NOW.isoformat(), "window_days": 60,
     }
+
+
+# ─── Bug A: disconnect purges ONLY imported events (crm rows are safe) ────────
+def test_purge_imported_events_scoped_to_google_import(monkeypatch):
+    """purge deletes ONLY source='google_import' rows for the org — native crm
+    appointments (source='crm') are never matched, so they survive disconnect."""
+    captured: dict = {"eq": {}}
+
+    class _Res:
+        data = [{"id": "a"}, {"id": "b"}]
+
+    class _Chain:
+        def delete(self):
+            captured["delete"] = True
+            return self
+
+        def eq(self, col, val):
+            captured["eq"][col] = val
+            return self
+
+        def execute(self):
+            return _Res()
+
+    class _Client:
+        def table(self, name):
+            captured["table"] = name
+            return _Chain()
+
+    monkeypatch.setattr(cs, "get_service_client", lambda: _Client())
+    n = cs.purge_imported_events("org-9")
+    assert n == 2
+    assert captured["table"] == "appointments"
+    assert captured["delete"] is True
+    # Filtered by org_id AND source='google_import' ONLY → crm/ics never matched.
+    assert captured["eq"] == {"org_id": "org-9", "source": "google_import"}

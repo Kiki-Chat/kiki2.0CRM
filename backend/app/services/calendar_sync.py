@@ -80,6 +80,28 @@ def pull_google_events(
     }
 
 
+def purge_imported_events(org_id: str) -> int:
+    """Delete all sync-imported (``source='google_import'``) events for the org.
+
+    Called when the CALENDAR provider is disconnected, so stale imported
+    blocked-time doesn't survive and pollute a later-linked provider's view.
+    Scoped strictly to ``source='google_import'`` — the user's own native
+    appointments (``source='crm'``) and ICS imports (``source='ics'``) are
+    NEVER touched."""
+    rows = (
+        get_service_client()
+        .table("appointments")
+        .delete()
+        .eq("org_id", org_id)
+        .eq("source", SOURCE_GOOGLE)
+        .execute()
+        .data
+        or []
+    )
+    log.info("calendar_sync org=%s purged_imported=%d", org_id, len(rows))
+    return len(rows)
+
+
 # ─── Google fetch (READ-ONLY) ────────────────────────────────────────────────
 def _fetch_events(access_token: str, time_min: str, time_max: str) -> list[dict]:
     """GET primary-calendar events in ``[time_min, time_max]``, recurrences

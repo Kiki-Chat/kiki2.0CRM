@@ -197,6 +197,7 @@ def test_disconnect_calendar_keeps_grant_shared_with_email(monkeypatch):
     monkeypatch.setattr(oauth_routes.oauth_tokens, "delete_connection", delete)
     db = _DB()
     monkeypatch.setattr(oauth_routes, "get_service_client", lambda: db)
+    monkeypatch.setattr(oauth_routes.calendar_sync, "purge_imported_events", MagicMock())
 
     out = asyncio.run(oauth_routes.disconnect(purpose="calendar", user=_user()))
     assert out["grant_kept"] is True and out["grant_revoked"] is False
@@ -267,3 +268,30 @@ def test_authorize_rejects_calendly_for_email(monkeypatch):
     with pytest.raises(HTTPException) as e:
         asyncio.run(oauth_routes.authorize("calendly", purpose="email", user=_user()))
     assert e.value.status_code == 400
+
+
+# ─── Bug A: disconnecting calendar purges imported events; email never does ──
+def test_disconnect_calendar_purges_imported_events(monkeypatch):
+    monkeypatch.setattr(oauth_routes.oauth_tokens, "delete_purpose_link", lambda o, pur: "google")
+    monkeypatch.setattr(oauth_routes.oauth_tokens, "purposes_for_provider", lambda o, p: [])
+    monkeypatch.setattr(oauth_routes.oauth_tokens, "revoke_grant", lambda o, p: True)
+    monkeypatch.setattr(oauth_routes.oauth_tokens, "delete_connection", lambda o, p: 1)
+    purge = MagicMock(return_value=3)
+    monkeypatch.setattr(oauth_routes.calendar_sync, "purge_imported_events", purge)
+    monkeypatch.setattr(oauth_routes, "get_service_client", lambda: _DB())
+
+    asyncio.run(oauth_routes.disconnect(purpose="calendar", user=_user()))
+    purge.assert_called_once_with("org-1")
+
+
+def test_disconnect_email_does_not_purge_calendar_events(monkeypatch):
+    monkeypatch.setattr(oauth_routes.oauth_tokens, "delete_purpose_link", lambda o, pur: "google")
+    monkeypatch.setattr(oauth_routes.oauth_tokens, "purposes_for_provider", lambda o, p: ["calendar"])
+    monkeypatch.setattr(oauth_routes.oauth_tokens, "revoke_grant", lambda o, p: True)
+    monkeypatch.setattr(oauth_routes.oauth_tokens, "delete_connection", lambda o, p: 1)
+    purge = MagicMock()
+    monkeypatch.setattr(oauth_routes.calendar_sync, "purge_imported_events", purge)
+    monkeypatch.setattr(oauth_routes, "get_service_client", lambda: _DB())
+
+    asyncio.run(oauth_routes.disconnect(purpose="email", user=_user()))
+    purge.assert_not_called()

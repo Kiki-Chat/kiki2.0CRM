@@ -285,12 +285,13 @@ async def email_test(user: CurrentUser = Depends(require_org)) -> dict:
             .eq("org_id", user.org_id).limit(1).execute().data or [None]
         )[0]
         # Send the test to the CONNECTED sending account's own inbox — that's
-        # where a tradesperson clicking "Test-E-Mail" expects it to arrive (the
-        # account they just linked). Fall back to the org email when nothing is
-        # connected (SMTP / Brevo-only).
+        # where a tradesperson clicking "Test-E-Mail" expects it. When nothing is
+        # connected (Brevo fallback), send to the REGISTERED USER's own email
+        # (the admin clicking the button) — NOT the org's generic address.
         to_email = (
             (ec or {}).get("oauth_account_email")
             or (ec or {}).get("smtp_sender_email")
+            or user.email
             or org.get("email")
         )
         if not to_email:

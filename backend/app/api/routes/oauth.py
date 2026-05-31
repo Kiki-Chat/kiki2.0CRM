@@ -38,7 +38,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.core.crypto import encrypt
 from app.db.supabase_client import get_service_client
-from app.services import oauth_tokens
+from app.services import calendar_sync, oauth_tokens
 from app.services.oauth_providers import (
     EMAIL_PROVIDERS,
     can_serve,
@@ -272,6 +272,11 @@ async def disconnect(
         # Email purpose → drop the email-send mirror (email no longer uses it).
         if purpose == "email":
             _clear_email_mirror(user.org_id)
+        # Calendar purpose → purge this org's imported (google_import) events so
+        # stale blocked-time doesn't survive into a later-linked provider's view.
+        # Scoped to source='google_import'; native crm appointments are untouched.
+        elif purpose == "calendar":
+            calendar_sync.purge_imported_events(user.org_id)
         # Revoke + delete the grant ONLY if no purpose still references it.
         remaining = oauth_tokens.purposes_for_provider(user.org_id, provider)
         revoked = False
