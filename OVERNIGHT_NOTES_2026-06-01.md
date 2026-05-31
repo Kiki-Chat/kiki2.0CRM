@@ -16,6 +16,8 @@ Rollback anchor for the whole session: `git reset --hard 9715518` (pre-session H
 | 3 | Frontend role-UX (hide admin-only controls) | ✅ DONE + DEPLOYED (`86a9eb3`) |
 | 4 | Redis cache + observability (BUILD-ONLY) | ✅ BUILT + TESTED — NOT deployed (dormant in tree; awaits your env vars) |
 
+**Final suite status:** hermetic suite `pytest -m "not live"` = **317 passed, 6 deselected** (green). The 6 `live` tests hit the real ElevenLabs API; `test_live_knowledge_push_remove` flaked once on a full run then **passed on re-run** (transient API timing, not a code regression — confirmed it's unrelated to the Item-1 `org_id` change, which it exercises and passes). Git: `f4b4914` = `origin/main`, tree clean. Prod backend `/health` 200 (items 1+2), prod frontend `/` 200 (item 3); item 4 not deployed.
+
 ---
 
 ## ITEM 1 — FK hardening  ✅ DONE + DEPLOYED
