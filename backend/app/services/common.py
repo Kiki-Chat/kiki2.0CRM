@@ -9,7 +9,46 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from fastapi import HTTPException
+
 BERLIN = ZoneInfo("Europe/Berlin")
+
+
+def validate_fk_in_org(
+    client,
+    *,
+    table: str,
+    fk_id: str | None,
+    org_id: str,
+    label: str,
+    require_active: bool = False,
+) -> None:
+    """Reject a cross-tenant foreign-key pointer (FK hardening, Item 1).
+
+    When ``fk_id`` is set, confirm a row with that id exists in ``table`` *within
+    the caller's org*; raise HTTP 422 otherwise. This stops a caller from
+    attaching another org's customer / project / employee / inquiry id to a row
+    in their own org — a dangling cross-tenant pointer (integrity, not a leak).
+
+    A falsy ``fk_id`` (``None`` / ``""``) is a deliberate no-op: clearing or
+    omitting an optional FK is always allowed. ``require_active=True`` adds the
+    ``deleted = False`` filter (only the ``employees`` table has that boolean
+    soft-delete — ``inquiries`` use a ``status='deleted'`` value, not a column).
+
+    Centralises the same-org check first shipped at ``inquiries._assign`` /
+    ``projects.add_project_employee`` so every write path validates FKs the same
+    way, with the same German message.
+    """
+    if not fk_id:
+        return
+    q = client.table(table).select("id").eq("org_id", org_id).eq("id", fk_id)
+    if require_active:
+        q = q.eq("deleted", False)
+    if not (q.limit(1).execute().data or []):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label} gehört nicht zu dieser Organisation.",
+        )
 
 _WEEKDAYS = {
     "montag": 0, "monday": 0, "dienstag": 1, "tuesday": 1, "mittwoch": 2,

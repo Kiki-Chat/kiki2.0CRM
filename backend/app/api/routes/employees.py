@@ -10,6 +10,7 @@ from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import AbsenceCreate, EmployeeCreate, EmployeeUpdate
 from app.services import csv_import, employee_invite
+from app.services.common import validate_fk_in_org
 
 log = logging.getLogger(__name__)
 
@@ -440,6 +441,11 @@ async def list_all_absences(
 
 def _create_absence(org_id: str, employee_id: str, payload: AbsenceCreate) -> dict:
     client = get_service_client()
+    # FK hardening: can't file an absence against another org's employee.
+    validate_fk_in_org(
+        client, table="employees", fk_id=employee_id, org_id=org_id,
+        label="Mitarbeiter", require_active=True,
+    )
     row = {
         "org_id": org_id,
         "employee_id": employee_id,

@@ -91,7 +91,7 @@ def test_live_patch_then_rollback():
     assert ea.get_agent_config(AGENT).get("name") == new_name
 
     snap_id = _latest_snapshot_id(ORG_ID)  # snapshot captured before the name change
-    ea.rollback_to_snapshot(snapshot_id=snap_id, actor_id=None)
+    ea.rollback_to_snapshot(snapshot_id=snap_id, actor_id=None, org_id=ORG_ID)
     assert ea.get_agent_config(AGENT).get("name") == orig_name
 
 
@@ -140,11 +140,11 @@ def test_live_knowledge_push_remove():
     )
     rid = row["id"]
     try:
-        res = ea.push_knowledge_resource_to_elevenlabs(resource_id=rid)
+        res = ea.push_knowledge_resource_to_elevenlabs(resource_id=rid, org_id=ORG_ID)
         assert res["status"] == "ready"
         assert res["chunk_count"] > 0
         assert len(ea.list_knowledge_base(AGENT)) == base_kb + 1
     finally:
-        ea.remove_knowledge_resource_from_elevenlabs(resource_id=rid)
+        ea.remove_knowledge_resource_from_elevenlabs(resource_id=rid, org_id=ORG_ID)
         db.table("knowledge_resources").delete().eq("id", rid).execute()
     assert len(ea.list_knowledge_base(AGENT)) == base_kb

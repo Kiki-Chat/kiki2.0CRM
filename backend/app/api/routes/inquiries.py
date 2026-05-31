@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import InquiryUpdate
-from app.services.common import gen_inquiry_number
+from app.services.common import gen_inquiry_number, validate_fk_in_org
 
 router = APIRouter(prefix="/api/inquiries", tags=["inquiries"])
 
@@ -23,6 +23,9 @@ class InquiryCreate(BaseModel):
 
 def _create(org_id: str, payload: InquiryCreate) -> dict:
     client = get_service_client()
+    # FK hardening: a customer_id / project_id from the body must belong to this org.
+    validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
+    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
     row = {
         "org_id": org_id,
         "customer_id": payload.customer_id,
@@ -45,6 +48,14 @@ async def create_inquiry(
 
 def _update(org_id: str, inquiry_id: str, payload: InquiryUpdate) -> dict | None:
     client = get_service_client()
+    # FK hardening: project_id / assigned_employee_id from the body must be same-org.
+    # (The dedicated /assign route already validates the employee; the generic
+    # PATCH path did not — close that gap here.)
+    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+    validate_fk_in_org(
+        client, table="employees", fk_id=payload.assigned_employee_id,
+        org_id=org_id, label="Mitarbeiter", require_active=True,
+    )
     fields: dict = {}
     if payload.status is not None:
         if payload.status not in _ALLOWED_STATUS:

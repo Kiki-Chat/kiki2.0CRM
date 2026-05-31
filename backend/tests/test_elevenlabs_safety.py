@@ -277,7 +277,7 @@ def test_rollback_to_snapshot_restores_and_audits(monkeypatch):
     )
     _wire(monkeypatch, server, db)
 
-    out = ea.rollback_to_snapshot(snapshot_id="snap-1", actor_id="u1")
+    out = ea.rollback_to_snapshot(snapshot_id="snap-1", actor_id="u1", org_id="o1")
 
     assert out["name"] == "ORIGINAL"  # agent restored
     audit_inserts = [p for t, p in db.store["inserts"] if t == "agent_writes_audit"]

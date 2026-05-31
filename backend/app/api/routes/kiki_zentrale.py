@@ -561,7 +561,7 @@ async def add_knowledge_url(payload: KnowledgeUrlCreate, user: CurrentUser = Dep
                 "display_name": payload.display_name, "status": "pending",
             }
         ).execute().data[0]
-        ea.push_knowledge_resource_to_elevenlabs(resource_id=row["id"])
+        ea.push_knowledge_resource_to_elevenlabs(resource_id=row["id"], org_id=user.org_id)
         return (
             client.table("knowledge_resources").select("*").eq("id", row["id"])
             .limit(1).execute().data or [row]
@@ -590,7 +590,7 @@ async def add_knowledge_pdf(file: UploadFile = File(...), user: CurrentUser = De
                 "display_name": display_name, "status": "pending",
             }
         ).execute().data[0]
-        ea.push_knowledge_resource_to_elevenlabs(resource_id=row["id"])
+        ea.push_knowledge_resource_to_elevenlabs(resource_id=row["id"], org_id=user.org_id)
         return (
             client.table("knowledge_resources").select("*").eq("id", row["id"])
             .limit(1).execute().data or [row]
@@ -612,7 +612,7 @@ async def delete_knowledge_resource(resource_id: str, user: CurrentUser = Depend
         if not row:
             return "missing"
         res = row[0]
-        ea.remove_knowledge_resource_from_elevenlabs(resource_id=resource_id)
+        ea.remove_knowledge_resource_from_elevenlabs(resource_id=resource_id, org_id=user.org_id)
         if res.get("kind") == "pdf" and res.get("source"):
             try:
                 client.storage.from_(KNOWLEDGE_BUCKET).remove([res["source"]])
@@ -642,11 +642,11 @@ async def reindex_knowledge_resource(resource_id: str, user: CurrentUser = Depen
         if not row:
             raise HTTPException(status_code=404, detail="Wissens-Quelle nicht gefunden.")
         # Detach the old document, then re-push fresh.
-        ea.remove_knowledge_resource_from_elevenlabs(resource_id=resource_id)
+        ea.remove_knowledge_resource_from_elevenlabs(resource_id=resource_id, org_id=user.org_id)
         client.table("knowledge_resources").update(
             {"elevenlabs_doc_id": None, "status": "pending", "updated_at": _now()}
         ).eq("id", resource_id).execute()
-        ea.push_knowledge_resource_to_elevenlabs(resource_id=resource_id)
+        ea.push_knowledge_resource_to_elevenlabs(resource_id=resource_id, org_id=user.org_id)
         return (
             client.table("knowledge_resources").select("*").eq("id", resource_id)
             .limit(1).execute().data or [{}]
@@ -901,7 +901,7 @@ async def rollback(snapshot_id: str, user: CurrentUser = Depends(require_org)) -
         )
         if not snap:
             raise HTTPException(status_code=404, detail="Snapshot nicht gefunden.")
-        ea.rollback_to_snapshot(snapshot_id=snapshot_id, actor_id=user.id)
+        ea.rollback_to_snapshot(snapshot_id=snapshot_id, actor_id=user.id, org_id=user.org_id)
         return {"success": True}
 
     return await run_in_threadpool(_do)

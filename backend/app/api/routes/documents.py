@@ -5,6 +5,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
+from app.services.common import validate_fk_in_org
 
 router = APIRouter(prefix="/api/customers", tags=["documents"])
 
@@ -48,6 +49,8 @@ def _upload(
     category: str | None,
 ) -> dict:
     client = get_service_client()
+    # FK hardening: can't attach a document to another org's customer.
+    validate_fk_in_org(client, table="customers", fk_id=customer_id, org_id=org_id, label="Kunde")
     is_image = bool(content_type and content_type.startswith("image/"))
     safe = (filename or "datei").replace("/", "_")
     path = f"{org_id}/{customer_id}/{uuid.uuid4().hex}_{safe}"

@@ -9,6 +9,7 @@ from app.db.supabase_client import get_service_client
 from app.schemas.admin import AppointmentCreate, AppointmentPatch
 from app.services import calendar_sync
 from app.services.appointments import import_ics
+from app.services.common import validate_fk_in_org
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
 
@@ -95,6 +96,14 @@ async def list_appointments(
 
 def _create(org_id: str, payload: AppointmentCreate) -> dict:
     client = get_service_client()
+    # FK hardening: every foreign-key id in the body must belong to this org.
+    validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
+    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+    validate_fk_in_org(client, table="inquiries", fk_id=payload.inquiry_id, org_id=org_id, label="Anfrage")
+    validate_fk_in_org(
+        client, table="employees", fk_id=payload.assigned_employee_id,
+        org_id=org_id, label="Mitarbeiter", require_active=True,
+    )
     row = {
         "org_id": org_id,
         "customer_id": payload.customer_id,
@@ -130,6 +139,13 @@ async def import_appointments_ics(
 
 def _patch(org_id: str, appointment_id: str, payload: AppointmentPatch) -> dict | None:
     client = get_service_client()
+    # FK hardening: employee / vehicle / tool reassignment must stay same-org.
+    validate_fk_in_org(
+        client, table="employees", fk_id=payload.assigned_employee_id,
+        org_id=org_id, label="Mitarbeiter", require_active=True,
+    )
+    validate_fk_in_org(client, table="vehicles", fk_id=payload.vehicle_id, org_id=org_id, label="Fahrzeug")
+    validate_fk_in_org(client, table="tools", fk_id=payload.tool_id, org_id=org_id, label="Werkzeug")
     fields = payload.model_dump(exclude_unset=True)
     if "location" in fields and isinstance(fields["location"], str):
         fields["location"] = {"raw": fields["location"]}

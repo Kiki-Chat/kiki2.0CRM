@@ -430,13 +430,20 @@ def _audit(
     db.table("agent_writes_audit").insert(row).execute()
 
 
-def rollback_to_snapshot(*, snapshot_id: str | UUID, actor_id: str | UUID | None) -> dict:
-    """Restore the agent to a snapshot's full config (itself a safe, audited write)."""
+def rollback_to_snapshot(
+    *, snapshot_id: str | UUID, actor_id: str | UUID | None, org_id: str | UUID
+) -> dict:
+    """Restore the agent to a snapshot's full config (itself a safe, audited write).
+
+    ``org_id`` scopes the snapshot lookup (defense-in-depth — a snapshot_id from
+    another tenant resolves to nothing, so an org can never roll back, or read the
+    config of, an agent it does not own)."""
     db = get_service_client()
     rows = (
         db.table("agent_config_snapshots")
         .select("*")
         .eq("id", str(snapshot_id))
+        .eq("org_id", str(org_id))
         .limit(1)
         .execute()
         .data
@@ -545,11 +552,17 @@ def _kb_delete(doc_id: str) -> None:
         raise ElevenLabsWriteError(f"KB delete failed {r.status_code}: {r.text[:300]}")
 
 
-def push_knowledge_resource_to_elevenlabs(*, resource_id: str | UUID) -> dict:
-    """Create the KB document, attach it to the agent (additively), persist doc id."""
+def push_knowledge_resource_to_elevenlabs(
+    *, resource_id: str | UUID, org_id: str | UUID
+) -> dict:
+    """Create the KB document, attach it to the agent (additively), persist doc id.
+
+    ``org_id`` scopes the resource lookup (defense-in-depth — a resource_id from
+    another tenant resolves to nothing, never to a foreign org's agent)."""
     db = get_service_client()
     rows = (
-        db.table("knowledge_resources").select("*").eq("id", str(resource_id)).limit(1)
+        db.table("knowledge_resources").select("*")
+        .eq("id", str(resource_id)).eq("org_id", str(org_id)).limit(1)
         .execute().data
     )
     if not rows:
@@ -625,11 +638,17 @@ def push_knowledge_resource_to_elevenlabs(*, resource_id: str | UUID) -> dict:
         raise
 
 
-def remove_knowledge_resource_from_elevenlabs(*, resource_id: str | UUID) -> None:
-    """Detach the doc from the agent (audited) and delete it from the KB."""
+def remove_knowledge_resource_from_elevenlabs(
+    *, resource_id: str | UUID, org_id: str | UUID
+) -> None:
+    """Detach the doc from the agent (audited) and delete it from the KB.
+
+    ``org_id`` scopes the resource lookup (defense-in-depth) — a foreign-tenant
+    resource_id resolves to nothing and the call is a safe no-op."""
     db = get_service_client()
     rows = (
-        db.table("knowledge_resources").select("*").eq("id", str(resource_id)).limit(1)
+        db.table("knowledge_resources").select("*")
+        .eq("id", str(resource_id)).eq("org_id", str(org_id)).limit(1)
         .execute().data
     )
     if not rows:
