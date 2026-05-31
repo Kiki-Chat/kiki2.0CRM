@@ -191,3 +191,140 @@ def get_valid_access_token(
         account_email=conn.get("account_email"),
     )
     return new_access
+
+
+# ─── per-purpose linkage (which provider serves email vs calendar) ───────────
+# Source of truth for the EMAIL and CALENDAR axes. PK (org_id, purpose) makes
+# the linkage exclusive — exactly one provider per purpose. A single grant in
+# oauth_connections may be referenced by 0, 1, or 2 purpose links.
+_LINKS_TABLE = "oauth_purpose_links"
+PURPOSES = ("email", "calendar")
+
+
+def set_purpose_link(
+    org_id: str, purpose: str, provider: str, account_email: str | None = None
+) -> None:
+    """Link ``purpose`` ('email'|'calendar') to ``provider`` for the org. Upsert
+    on (org_id, purpose) → switching providers for a purpose replaces the link
+    (exclusivity)."""
+    get_service_client().table(_LINKS_TABLE).upsert(
+        {
+            "org_id": org_id,
+            "purpose": purpose,
+            "provider": provider,
+            "account_email": account_email,
+            "updated_at": _now().isoformat(),
+        },
+        on_conflict="org_id,purpose",
+    ).execute()
+
+
+def get_purpose_link(org_id: str, purpose: str) -> dict | None:
+    rows = (
+        get_service_client()
+        .table(_LINKS_TABLE)
+        .select("*")
+        .eq("org_id", org_id)
+        .eq("purpose", purpose)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else None
+
+
+def list_purpose_links(org_id: str) -> dict[str, dict]:
+    """``{purpose: {provider, account_email}}`` for the org."""
+    rows = (
+        get_service_client()
+        .table(_LINKS_TABLE)
+        .select("purpose, provider, account_email")
+        .eq("org_id", org_id)
+        .execute()
+        .data
+        or []
+    )
+    return {
+        r["purpose"]: {"provider": r["provider"], "account_email": r.get("account_email")}
+        for r in rows
+    }
+
+
+def delete_purpose_link(org_id: str, purpose: str) -> str | None:
+    """Delete the link for ``purpose``; return the provider it pointed to (or
+    None if there was no link)."""
+    rows = (
+        get_service_client()
+        .table(_LINKS_TABLE)
+        .delete()
+        .eq("org_id", org_id)
+        .eq("purpose", purpose)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0]["provider"] if rows else None
+
+
+def purposes_for_provider(org_id: str, provider: str) -> list[str]:
+    """Which purposes still reference this provider's grant — used to decide
+    whether a disconnect should revoke (revoke only when this returns empty)."""
+    rows = (
+        get_service_client()
+        .table(_LINKS_TABLE)
+        .select("purpose")
+        .eq("org_id", org_id)
+        .eq("provider", provider)
+        .execute()
+        .data
+        or []
+    )
+    return [r["purpose"] for r in rows]
+
+
+def calendar_provider(org_id: str) -> str | None:
+    """The provider serving the org's CALENDAR purpose (or None if unlinked).
+    Calendar read/write callers resolve the provider through this, never a
+    hardcoded 'google'."""
+    link = get_purpose_link(org_id, "calendar")
+    return link["provider"] if link else None
+
+
+# ─── revoke (called only when the LAST purpose using a grant disconnects) ────
+def revoke_grant(org_id: str, provider: str) -> bool:
+    """Best-effort revoke of the provider grant at its revocation endpoint.
+
+    MUST be called only when no purpose link references the grant anymore (the
+    caller checks ``purposes_for_provider``). Returns True if a revoke request
+    returned 2xx. Never raises — revocation is best-effort and the caller
+    deletes the local row regardless (providers without a revoke endpoint, e.g.
+    Microsoft, simply return False)."""
+    cfg = get_provider(provider)
+    revoke_url = cfg.get("revoke_url")
+    conn = get_connection(org_id, provider)
+    if not revoke_url or not conn:
+        return False
+    # Revoking the refresh token revokes the whole grant at Google; fall back to
+    # the access token if no refresh token is stored.
+    token = decrypt(conn.get("refresh_token_encrypted")) or decrypt(
+        conn.get("access_token_encrypted")
+    )
+    if not token:
+        return False
+    try:
+        with httpx.Client(timeout=_TIMEOUT) as c:
+            r = c.post(
+                revoke_url,
+                data={"token": token},
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        ok = r.status_code in (200, 204)
+        logger.info(
+            "oauth_revoke org=%s provider=%s status=%s ok=%s",
+            org_id, provider, r.status_code, ok,
+        )
+        return ok
+    except Exception as exc:  # noqa: BLE001 — revoke is best-effort
+        logger.warning("oauth_revoke org=%s provider=%s failed err=%s", org_id, provider, exc)
+        return False

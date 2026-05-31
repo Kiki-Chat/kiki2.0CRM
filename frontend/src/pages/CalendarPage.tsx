@@ -22,6 +22,7 @@ interface Appointment {
   duration_minutes: number | null
   status: string
   category: string | null
+  source: string | null
   color: string | null
   location: { raw?: string } | string | null
   notes: string | null
@@ -46,6 +47,8 @@ interface Me {
 // ─── Constants ───────────────────────────────────────────────────────────────
 const EMP_COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#0891B2', '#65A30D']
 const UNASSIGNED_COLOR = '#78756F'
+// Google-imported events render as read-only "blocked time" — distinct slate.
+const GOOGLE_BLOCK_COLOR = '#64748B'
 const PROJECT_STATUS_COLOR: Record<string, string> = {
   planning: '#9CA3AF',
   active: '#2D6B3D',
@@ -120,6 +123,9 @@ export function CalendarPage() {
       appointments
         .filter((a) => {
           if (!a.scheduled_at || a.status === 'cancelled') return false
+          // Google-imported events are external "blocked time" — always shown,
+          // independent of the employee filter (they block everyone).
+          if (a.source === 'google_import') return true
           if (filter === 'all') return true
           if (filter === 'mine') return a.assigned_employee_id === myEmployeeId
           if (filter === 'unassigned') return !a.assigned_employee_id
@@ -128,8 +134,14 @@ export function CalendarPage() {
         .map((a) => {
           const start = new Date(a.scheduled_at!)
           const end = new Date(start.getTime() + (a.duration_minutes ?? 60) * 60000)
-          const color = colorFor(a.assigned_employee_id)
-          const title = a.customer_name ? `${a.title ?? 'Termin'} · ${a.customer_name}` : a.title ?? 'Termin'
+          const isGoogle = a.source === 'google_import'
+          const color = isGoogle ? GOOGLE_BLOCK_COLOR : colorFor(a.assigned_employee_id)
+          const base = a.title ?? 'Termin'
+          const title = isGoogle
+            ? `🔒 ${a.title ?? 'Google-Termin'}`
+            : a.customer_name
+              ? `${base} · ${a.customer_name}`
+              : base
           return {
             id: a.id,
             title,
@@ -137,6 +149,7 @@ export function CalendarPage() {
             end: end.toISOString(),
             backgroundColor: color,
             borderColor: color,
+            editable: !isGoogle, // Google blocks are read-only (no drag/resize)
             extendedProps: { appt: a },
           }
         }),

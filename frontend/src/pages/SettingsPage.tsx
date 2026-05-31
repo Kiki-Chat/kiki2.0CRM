@@ -605,26 +605,41 @@ function Banner({ children }: { children: React.ReactNode }) {
 }
 
 // ─── OAuth connect (Google / Microsoft / Calendly) ────────────────────────────
+type Purpose = 'email' | 'calendar'
+
 interface OAuthConnection {
   provider: string
   connected: boolean
   account_email: string | null
   token_expires_at: string | null
 }
+interface PurposeLink {
+  provider: string
+  account_email: string | null
+}
+interface OAuthState {
+  connections: OAuthConnection[]
+  purposes: Partial<Record<Purpose, PurposeLink>>
+}
 
 function useOAuthConnections() {
   return useQuery({
     queryKey: ['oauth-connections'],
-    queryFn: () => apiFetch<{ connections: OAuthConnection[] }>('/api/settings/oauth/connections'),
+    queryFn: () => apiFetch<OAuthState>('/api/settings/oauth/connections'),
     staleTime: STALE,
   })
 }
 
-/** Open the provider consent in a popup and refresh connection state on success.
- *  The popup is opened synchronously (preserves the click gesture so it isn't
- *  blocked), then pointed at the authed authorize URL once it returns. The
- *  callback page posts {source:'heykiki-oauth', success, message} back here. */
-function startOAuthConnect(provider: string, qc: QueryClient, flash: (m: string) => void) {
+/** Open the provider consent in a popup for a given PURPOSE (email|calendar) and
+ *  refresh connection state on success. The popup is opened synchronously
+ *  (preserves the click gesture), then pointed at the authed authorize URL. The
+ *  callback posts {source:'heykiki-oauth', success, message} back here. */
+function startOAuthConnect(
+  provider: string,
+  purpose: Purpose,
+  qc: QueryClient,
+  flash: (m: string) => void,
+) {
   const popup = window.open('', 'heykiki-oauth', 'width=520,height=680')
   if (!popup) {
     flash('Bitte Popups für diese Seite erlauben und erneut versuchen.')
@@ -637,7 +652,7 @@ function startOAuthConnect(provider: string, qc: QueryClient, flash: (m: string)
     if (e.data.success) qc.invalidateQueries({ queryKey: ['oauth-connections'] })
   }
   window.addEventListener('message', onMessage)
-  apiFetch<{ url: string }>(`/api/settings/oauth/${provider}/authorize`)
+  apiFetch<{ url: string }>(`/api/settings/oauth/${provider}/authorize?purpose=${purpose}`)
     .then(({ url }) => {
       popup.location.href = url
     })
@@ -648,10 +663,30 @@ function startOAuthConnect(provider: string, qc: QueryClient, flash: (m: string)
     })
 }
 
-async function disconnectOAuth(provider: string, qc: QueryClient, flash: (m: string) => void) {
+/** "Use the same account": link an already-connected provider grant to another
+ *  purpose without a fresh consent (no popup). */
+async function linkPurpose(
+  provider: string,
+  purpose: Purpose,
+  qc: QueryClient,
+  flash: (m: string) => void,
+) {
   try {
-    await apiFetch(`/api/settings/oauth/${provider}/disconnect`, { method: 'POST' })
+    await apiFetch(`/api/settings/oauth/${provider}/link?purpose=${purpose}`, { method: 'POST' })
     qc.invalidateQueries({ queryKey: ['oauth-connections'] })
+    flash('Verbunden — vorhandenes Konto wiederverwendet.')
+  } catch (e) {
+    flash((e as Error).message)
+  }
+}
+
+/** Purpose-scoped disconnect. The backend drops only this purpose's link and
+ *  revokes the underlying grant ONLY if no purpose still uses it. */
+async function disconnectPurpose(purpose: Purpose, qc: QueryClient, flash: (m: string) => void) {
+  try {
+    await apiFetch(`/api/settings/oauth/disconnect?purpose=${purpose}`, { method: 'POST' })
+    qc.invalidateQueries({ queryKey: ['oauth-connections'] })
+    qc.invalidateQueries({ queryKey: ['calendar-sync-status'] })
     flash('Verbindung getrennt.')
   } catch (e) {
     flash((e as Error).message)
@@ -660,10 +695,22 @@ async function disconnectOAuth(provider: string, qc: QueryClient, flash: (m: str
 function EmailVersandSection({ config, flash }: { config: EmailConfig | null; flash: (m: string) => void }) {
   const qc = useQueryClient()
   const conns = useOAuthConnections()
-  const connOf = (v: string) => {
-    const prov = v === 'gmail' ? 'google' : v === 'outlook' ? 'microsoft' : null
-    return prov ? (conns.data?.connections ?? []).find((c) => c.provider === prov) : undefined
-  }
+  const emailLink = conns.data?.purposes?.email // {provider, account_email} | undefined
+  // Which tile ('gmail'|'outlook'|'smtp') currently serves email — the basis for
+  // exclusivity (exactly one active; the other two go to disabled mode).
+  const activeEmail: string | null =
+    emailLink?.provider === 'google'
+      ? 'gmail'
+      : emailLink?.provider === 'microsoft'
+        ? 'outlook'
+        : config?.smtp_host
+          ? 'smtp'
+          : null
+  const accountOf = (v: string): string | null =>
+    (v === 'gmail' && emailLink?.provider === 'google') ||
+    (v === 'outlook' && emailLink?.provider === 'microsoft')
+      ? emailLink?.account_email ?? null
+      : null
   const [provider, setProvider] = useState(config?.provider || 'smtp')
   const [host, setHost] = useState(config?.smtp_host || '')
   const [port, setPort] = useState(config?.smtp_port ?? 465)
@@ -682,37 +729,60 @@ function EmailVersandSection({ config, flash }: { config: EmailConfig | null; fl
   return (
     <Card>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {providers.map(([v, l]) => (
-          <button key={v} onClick={() => setProvider(v)} className={cn('rounded-lg border p-4 text-left transition', provider === v ? 'border-green-primary bg-green-tint-50' : 'border-border hover:bg-alt')}>
-            <div className="flex items-center justify-between"><span className="font-semibold text-text">{l}</span>{provider === v && <Check size={16} className="text-green-deep" />}</div>
-            <div className="mt-1 text-xs text-muted">{v === 'smtp' ? 'HeyKiki Standard' : connOf(v)?.connected ? 'Verbunden' : 'Nicht verbunden'}</div>
-          </button>
-        ))}
+        {providers.map(([v, l]) => {
+          // Exclusivity: when one email provider is active, the others are shown
+          // disabled ("disconnect to switch").
+          const locked = activeEmail !== null && activeEmail !== v
+          return (
+            <button
+              key={v}
+              disabled={locked}
+              onClick={() => !locked && setProvider(v)}
+              className={cn(
+                'rounded-lg border p-4 text-left transition',
+                provider === v ? 'border-green-primary bg-green-tint-50' : 'border-border hover:bg-alt',
+                locked && 'cursor-not-allowed opacity-50 hover:bg-transparent',
+              )}
+            >
+              <div className="flex items-center justify-between"><span className="font-semibold text-text">{l}</span>{provider === v && <Check size={16} className="text-green-deep" />}</div>
+              <div className="mt-1 text-xs text-muted">
+                {activeEmail === v
+                  ? 'Aktiv'
+                  : locked
+                    ? 'Zum Wechseln andere Verbindung trennen'
+                    : v === 'smtp'
+                      ? 'HeyKiki Standard'
+                      : 'Nicht verbunden'}
+              </div>
+            </button>
+          )
+        })}
       </div>
       <div className="mt-5">
         {provider === 'gmail' && (
           <div>
             <Banner>Verbindung über Google OAuth. Höhere Zustellrate als SMTP.</Banner>
-            {connOf('gmail')?.connected ? (
+            {activeEmail === 'gmail' ? (
               <div className="mt-3 flex items-center gap-3">
-                <span className="text-sm font-medium text-success">✓ Verbunden{connOf('gmail')?.account_email ? ` als ${connOf('gmail')?.account_email}` : ''}</span>
-                <button onClick={() => disconnectOAuth('google', qc, flash)} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt">Trennen</button>
+                <span className="text-sm font-medium text-success">✓ Verbunden{accountOf('gmail') ? ` als ${accountOf('gmail')}` : ''}</span>
+                <button onClick={() => disconnectPurpose('email', qc, flash)} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt">Trennen</button>
               </div>
             ) : (
-              <button onClick={() => startOAuthConnect('google', qc, flash)} className="mt-3 rounded-md bg-green-primary px-5 py-2 text-sm font-semibold text-white hover:brightness-110">Mit Gmail verbinden</button>
+              <button onClick={() => startOAuthConnect('google', 'email', qc, flash)} className="mt-3 rounded-md bg-green-primary px-5 py-2 text-sm font-semibold text-white hover:brightness-110">Mit Gmail verbinden</button>
             )}
           </div>
         )}
         {provider === 'outlook' && (
           <div>
             <Banner>Verbindung über Microsoft OAuth. Höhere Zustellrate als SMTP.</Banner>
-            {connOf('outlook')?.connected ? (
+            {activeEmail === 'outlook' ? (
               <div className="mt-3 flex items-center gap-3">
-                <span className="text-sm font-medium text-success">✓ Verbunden{connOf('outlook')?.account_email ? ` als ${connOf('outlook')?.account_email}` : ''}</span>
-                <button onClick={() => disconnectOAuth('microsoft', qc, flash)} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt">Trennen</button>
+                <span className="text-sm font-medium text-success">✓ Verbunden{accountOf('outlook') ? ` als ${accountOf('outlook')}` : ''}</span>
+                <button onClick={() => disconnectPurpose('email', qc, flash)} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt">Trennen</button>
               </div>
             ) : (
-              <button onClick={() => startOAuthConnect('microsoft', qc, flash)} className="mt-3 rounded-md bg-green-primary px-5 py-2 text-sm font-semibold text-white hover:brightness-110">Mit Outlook verbinden</button>
+              // Outlook OAuth has no credentials yet → shown but disabled.
+              <button disabled title="Microsoft-Zugangsdaten noch nicht hinterlegt" className="mt-3 cursor-not-allowed rounded-md bg-green-primary px-5 py-2 text-sm font-semibold text-white opacity-50">Mit Outlook verbinden (demnächst)</button>
             )}
           </div>
         )}
@@ -806,7 +876,7 @@ function EmailVorlagenSection({ config, flash }: { config: EmailConfig | null; f
 // ─── Kalender-Sync ────────────────────────────────────────────────────────────
 function KalenderSyncSection({ flash }: { flash: (m: string) => void }) {
   const providers = [
-    { provider: 'google', name: 'Google Kalender', summary: 'Termine werden automatisch zwischen CRM und Google Kalender synchronisiert.' },
+    { provider: 'google', name: 'Google Kalender', summary: 'Google-Termine werden als belegte Zeit ins CRM übernommen (Lesen). Eine Übertragung CRM → Google erfolgt nur nach manueller Freigabe je Termin.' },
     { provider: 'microsoft', name: 'Outlook Kalender', summary: 'Termine werden automatisch zwischen CRM und Outlook synchronisiert.' },
     { provider: 'calendly', name: 'Calendly', summary: 'Eingehende Calendly-Buchungen erscheinen automatisch im CRM-Kalender.' },
   ]
@@ -815,27 +885,84 @@ function KalenderSyncSection({ flash }: { flash: (m: string) => void }) {
 function CalendarProviderCard({ p, flash }: { p: { provider: string; name: string; summary: string }; flash: (m: string) => void }) {
   const qc = useQueryClient()
   const conns = useOAuthConnections()
-  const conn = (conns.data?.connections ?? []).find((c) => c.provider === p.provider)
+  const calLink = conns.data?.purposes?.calendar        // provider serving the calendar axis
+  const grants = conns.data?.connections ?? []
+  const isConnected = calLink?.provider === p.provider
+  const activeProvider = calLink?.provider ?? null
+  // Exclusivity: another provider already serves calendar → this card is locked.
+  const locked = activeProvider !== null && activeProvider !== p.provider
+  // "Use the same account?": this provider already has a grant (e.g. connected
+  // for email) → offer to reuse it for calendar without a fresh consent.
+  const existingGrant = grants.find((c) => c.provider === p.provider)
+  const noCreds = p.provider === 'microsoft' // Outlook calendar: no credentials yet
   const [more, setMore] = useState(false)
+  const isGoogle = p.provider === 'google'
+  // Only Google has a working read-sync today; status + manual sync are Google-only.
+  const syncStatus = useQuery({
+    queryKey: ['calendar-sync-status'],
+    queryFn: () => apiFetch<{ last_synced_at: string | null; event_count: number }>('/api/calendar/sync-status'),
+    enabled: isGoogle && isConnected,
+  })
+  const syncNow = useMutation({
+    mutationFn: () => apiFetch<{ fetched: number; created: number; updated: number; cancelled: number }>('/api/calendar/sync', { method: 'POST' }),
+    onSuccess: (r) => {
+      flash(`Synchronisiert: ${r.fetched} Google-Termine übernommen.`)
+      qc.invalidateQueries({ queryKey: ['calendar-sync-status'] })
+      qc.invalidateQueries({ queryKey: ['appointments'] })
+    },
+    onError: (e: unknown) => flash(e instanceof Error ? e.message : 'Synchronisierung fehlgeschlagen.'),
+  })
+  const lastSynced = syncStatus.data?.last_synced_at
+
+  const connect = () => {
+    // Reuse an existing google/microsoft grant for calendar if one exists.
+    if (existingGrant && (p.provider === 'google' || p.provider === 'microsoft')) {
+      const ok = window.confirm(
+        `Dasselbe Konto${existingGrant.account_email ? ` (${existingGrant.account_email})` : ''} auch für den Kalender verwenden?`,
+      )
+      if (ok) {
+        linkPurpose(p.provider, 'calendar', qc, flash)
+        return
+      }
+    }
+    startOAuthConnect(p.provider, 'calendar', qc, flash)
+  }
+
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2"><Calendar size={18} className="text-green-deep" /><span className="font-bold text-text">{p.name}</span></div>
-        <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', conn?.connected ? 'bg-success-bg text-success' : 'bg-alt text-muted')}>{conn?.connected ? 'Verbunden' : 'Nicht verbunden'}</span>
+        <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', isConnected ? 'bg-success-bg text-success' : 'bg-alt text-muted')}>{isConnected ? 'Verbunden' : locked ? 'Andere Verbindung aktiv' : 'Nicht verbunden'}</span>
       </div>
       <p className="mt-1 text-sm text-muted">{p.summary}</p>
-      <div className="mt-3 flex items-center gap-3">
-        {conn?.connected ? (
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        {isConnected ? (
           <>
-            {conn.account_email && <span className="text-sm font-medium text-success">✓ {conn.account_email}</span>}
-            <button onClick={() => disconnectOAuth(p.provider, qc, flash)} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt">Trennen</button>
+            {calLink?.account_email && <span className="text-sm font-medium text-success">✓ {calLink.account_email}</span>}
+            {isGoogle && (
+              <button onClick={() => syncNow.mutate()} disabled={syncNow.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60">
+                {syncNow.isPending ? 'Synchronisiert…' : 'Jetzt synchronisieren'}
+              </button>
+            )}
+            <button onClick={() => disconnectPurpose('calendar', qc, flash)} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt">Trennen</button>
           </>
+        ) : locked ? (
+          <span className="text-sm text-muted">Zum Wechseln zuerst die aktive Kalender-Verbindung trennen.</span>
+        ) : noCreds ? (
+          <button disabled title="Microsoft-Zugangsdaten noch nicht hinterlegt" className="cursor-not-allowed rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white opacity-50">Verbinden (demnächst)</button>
         ) : (
-          <button onClick={() => startOAuthConnect(p.provider, qc, flash)} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110">Verbinden</button>
+          <button onClick={connect} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110">{existingGrant ? 'Verbinden (Konto wiederverwenden)' : 'Verbinden'}</button>
         )}
         <button onClick={() => setMore((m) => !m)} className="text-sm font-medium text-green-deep hover:underline">Mehr erfahren</button>
       </div>
-      {more && <ul className="mt-3 list-disc space-y-1 border-t border-border pt-3 pl-5 text-sm text-muted"><li>Zwei-Wege-Synchronisierung von Terminen</li><li>Automatische Aktualisierung bei Änderungen</li><li>Konfliktvermeidung bei Doppelbuchungen</li></ul>}
+      {isGoogle && isConnected && (
+        <p className="mt-2 text-xs text-muted">
+          {lastSynced
+            ? `Zuletzt synchronisiert: ${new Date(lastSynced).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })} · ${syncStatus.data?.event_count ?? 0} Termine als belegte Zeit im CRM.`
+            : 'Noch nicht synchronisiert — „Jetzt synchronisieren", um Google-Termine als belegte Zeit zu übernehmen.'}
+        </p>
+      )}
+      {more && <ul className="mt-3 list-disc space-y-1 border-t border-border pt-3 pl-5 text-sm text-muted"><li>Google-Termine erscheinen als belegte Zeit im CRM (Lesen)</li><li>Übertragung CRM → Google nur nach manueller Freigabe je Termin</li><li>Keine automatische Zwei-Wege-Synchronisierung</li></ul>}
     </Card>
   )
 }

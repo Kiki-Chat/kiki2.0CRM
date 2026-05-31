@@ -296,7 +296,7 @@ def test_authorize_google_includes_calendar_scope(monkeypatch):
 def test_authorize_calendly_omits_scope_param(monkeypatch):
     monkeypatch.setattr(cfg, "calendly_client_id", "cid")
     monkeypatch.setattr(cfg, "calendly_client_secret", "csec")
-    out = asyncio.run(oauth_routes.authorize("calendly", user=_user()))
+    out = asyncio.run(oauth_routes.authorize("calendly", purpose="calendar", user=_user()))
     url = out["url"]
     assert url.startswith("https://auth.calendly.com/oauth/authorize?")
     assert "scope=" not in url  # Calendly has no scope list
@@ -310,63 +310,10 @@ def test_authorize_unconfigured_provider_503(monkeypatch):
     assert e.value.status_code == 503
 
 
-# ─── persistence: canonical store + email mirror ────────────────────────────
-def test_persist_tokens_google_writes_both_stores(monkeypatch):
-    up = MagicMock()
-    monkeypatch.setattr(oauth_routes.oauth_tokens, "upsert_connection", up)
-    rec = _RecClient()
-    monkeypatch.setattr(oauth_routes, "get_service_client", lambda: rec)
-
-    oauth_routes._persist_tokens(
-        org_id="org-1",
-        provider="google",
-        refresh_token="RT",
-        access_token="AT",
-        expires_at=None,
-        account_email="g@x.de",
-        scope="calendar",
-    )
-    up.assert_called_once()
-    assert any(t == "email_configs" for (t, _r, _c) in rec.upserts)
-
-
-def test_persist_tokens_calendly_writes_canonical_only(monkeypatch):
-    up = MagicMock()
-    monkeypatch.setattr(oauth_routes.oauth_tokens, "upsert_connection", up)
-    rec = _RecClient()
-    monkeypatch.setattr(oauth_routes, "get_service_client", lambda: rec)
-
-    oauth_routes._persist_tokens(
-        org_id="org-1",
-        provider="calendly",
-        refresh_token="RT",
-        access_token="AT",
-        expires_at=None,
-        account_email="c@x.de",
-    )
-    up.assert_called_once()
-    assert rec.upserts == []  # no email_configs mirror for calendar-only provider
-
-
-def test_disconnect_google_clears_email_mirror(monkeypatch):
-    monkeypatch.setattr(
-        oauth_routes.oauth_tokens, "delete_connection", lambda o, p: 1
-    )
-    rec = _RecClient()
-    monkeypatch.setattr(oauth_routes, "get_service_client", lambda: rec)
-    out = asyncio.run(oauth_routes.disconnect("google", user=_user()))
-    assert out["success"] is True
-    assert any(t == "email_configs" for (t, _u) in rec.updates)
-
-
-def test_disconnect_calendly_skips_email_mirror(monkeypatch):
-    monkeypatch.setattr(
-        oauth_routes.oauth_tokens, "delete_connection", lambda o, p: 1
-    )
-    rec = _RecClient()
-    monkeypatch.setattr(oauth_routes, "get_service_client", lambda: rec)
-    asyncio.run(oauth_routes.disconnect("calendly", user=_user()))
-    assert rec.updates == []  # calendar-only: no email_configs touched
+# ─── persistence + disconnect (per-purpose) ──────────────────────────────────
+# The pre-purpose persist/disconnect tests were superseded by the per-purpose
+# model. Grant+link persistence, the email mirror, purpose-scoped disconnect,
+# and the revoke-on-last-purpose logic are covered in tests/test_oauth_purpose.py.
 
 
 # ─── userinfo + state ────────────────────────────────────────────────────────
@@ -393,9 +340,9 @@ def test_fetch_userinfo_unwraps_calendly_resource(monkeypatch):
 
 
 def test_state_token_roundtrip_and_guards():
-    state = oauth_routes._make_state("user-9", "org-9", "google")
-    uid, oid = oauth_routes._verify_state(state, "google")
-    assert (uid, oid) == ("user-9", "org-9")
+    state = oauth_routes._make_state("user-9", "org-9", "google", "calendar")
+    uid, oid, purpose = oauth_routes._verify_state(state, "google")
+    assert (uid, oid, purpose) == ("user-9", "org-9", "calendar")
 
     # provider mismatch
     with pytest.raises(HTTPException):

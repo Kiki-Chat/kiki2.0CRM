@@ -19,6 +19,9 @@ from app.core.config import settings
 # OAuth callback mirrors tokens onto email_configs for these so Amber's
 # (separate) email-send track keeps working unchanged. Calendly is excluded.
 EMAIL_PROVIDERS = {"google", "microsoft"}
+# Providers that can serve the CALENDAR axis (calendly is calendar-only; it
+# cannot serve email).
+CALENDAR_PROVIDERS = {"google", "microsoft", "calendly"}
 
 PROVIDERS: dict[str, dict[str, Any]] = {
     "google": {
@@ -26,6 +29,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "client_secret_attr": "google_client_secret",
         "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_url": "https://oauth2.googleapis.com/token",
+        "revoke_url": "https://oauth2.googleapis.com/revoke",
         "scopes": [
             "https://www.googleapis.com/auth/gmail.send",
             "https://www.googleapis.com/auth/calendar",
@@ -59,6 +63,7 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "client_secret_attr": "calendly_client_secret",
         "authorize_url": "https://auth.calendly.com/oauth/authorize",
         "token_url": "https://auth.calendly.com/oauth/token",
+        "revoke_url": "https://auth.calendly.com/oauth/revoke",
         # Calendly issues a default scope on the auth-code grant; no scope param.
         "scopes": [],
         "userinfo_url": "https://api.calendly.com/users/me",
@@ -76,6 +81,15 @@ def get_provider(provider: str) -> dict[str, Any]:
     if not cfg:
         raise HTTPException(status_code=404, detail=f"Unknown OAuth provider: {provider}")
     return cfg
+
+
+def can_serve(provider: str, purpose: str) -> bool:
+    """Whether ``provider`` can serve ``purpose`` ('email' | 'calendar')."""
+    if purpose == "email":
+        return provider in EMAIL_PROVIDERS
+    if purpose == "calendar":
+        return provider in CALENDAR_PROVIDERS
+    return False
 
 
 def get_credentials(provider: str) -> tuple[str, str]:
