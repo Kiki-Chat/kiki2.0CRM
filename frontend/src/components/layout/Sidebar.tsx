@@ -7,10 +7,12 @@ import {
   LogOut,
   Settings,
 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../../auth/AuthProvider'
+import { apiFetch } from '../../lib/api'
 import { cn, initials } from '../../lib/utils'
 import { PersonalSettingsModal } from '../PersonalSettingsModal'
 import { isGroup, NAV, type NavLeaf } from './nav'
@@ -58,6 +60,15 @@ export function Sidebar({
   const navigate = useNavigate()
   const [personalOpen, setPersonalOpen] = useState(false)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  // White-label: show WHICH company's CRM this is. org_name comes from /api/me
+  // (available to every user incl. employees). ProtectedRoute already primes
+  // the ['me'] cache, so this is instant.
+  const { data: me } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => apiFetch<{ org_name: string | null }>('/api/me'),
+    staleTime: 5 * 60 * 1000,
+  })
+  const companyName = me?.org_name
 
   const email = session?.user.email ?? 'Setup pending'
   const userName = (session?.user.user_metadata?.full_name as string) ?? 'HeyKiki User'
@@ -77,7 +88,9 @@ export function Sidebar({
         {!collapsed && (
           <div>
             <div className="text-base font-bold leading-tight text-text">HeyKiki</div>
-            <div className="text-xs text-muted">CRM Portal</div>
+            <div className="max-w-[150px] truncate text-xs text-muted" title={companyName ?? undefined}>
+              {companyName ?? 'CRM Portal'}
+            </div>
           </div>
         )}
       </div>

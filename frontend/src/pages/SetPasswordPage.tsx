@@ -57,23 +57,6 @@ export function SetPasswordPage() {
     }
   }
 
-  const Shell = ({ children }: { children: React.ReactNode }) => (
-    <div className="flex h-screen items-center justify-center bg-bg px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-brand to-green-primary text-xl font-extrabold text-white">
-            K
-          </div>
-          <div className="text-center">
-            <h1 className="text-xl font-bold text-text">HeyKiki Portal</h1>
-            <p className="text-sm text-muted">Passwort festlegen</p>
-          </div>
-        </div>
-        {children}
-      </div>
-    </div>
-  )
-
   if (done) {
     return (
       <Shell>
@@ -139,5 +122,26 @@ export function SetPasswordPage() {
         </Button>
       </form>
     </Shell>
+  )
+}
+
+// Module-scope so it keeps a stable identity across re-renders — defining it
+// inside SetPasswordPage remounted the inputs on every keystroke (focus loss).
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-screen items-center justify-center bg-bg px-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-brand to-green-primary text-xl font-extrabold text-white">
+            K
+          </div>
+          <div className="text-center">
+            <h1 className="text-xl font-bold text-text">HeyKiki Portal</h1>
+            <p className="text-sm text-muted">Passwort festlegen</p>
+          </div>
+        </div>
+        {children}
+      </div>
+    </div>
   )
 }

@@ -13,6 +13,7 @@ import {
   EyeOff,
   FileText,
   Info,
+  Lock,
   Mail,
   Palette,
   Plug,
@@ -125,16 +126,47 @@ const ALL_SLUGS = new Set([...NAV_GROUPS.flatMap((g) => g.items.map((i) => i.slu
 export function SettingsPage() {
   const { section = 'stammdaten' } = useParams()
   const navigate = useNavigate()
+  const me = useQuery({
+    queryKey: ['me'],
+    queryFn: () => apiFetch<{ role: string | null }>('/api/me'),
+    staleTime: 5 * 60 * 1000,
+  })
+  const isAdmin = me.data?.role === 'org_admin' || me.data?.role === 'super_admin'
   const { data, isLoading } = useQuery({
     queryKey: ['settings'],
     queryFn: () => apiFetch<SettingsResponse>('/api/settings'),
     staleTime: STALE,
+    enabled: isAdmin,
   })
 
   const [toast, setToast] = useState<string | null>(null)
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 4000) }
 
   if (!ALL_SLUGS.has(section)) return <Navigate to="/settings/stammdaten" replace />
+
+  // Employees (non-admins) get an explicit RESTRICTED message — not a perpetual
+  // loader (GET /api/settings is admin-only). Wait for the role to resolve first.
+  if (!me.isLoading && !isAdmin) {
+    return (
+      <div className="p-8">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-text">Einstellungen</h1>
+        </div>
+        <div className="mx-auto mt-6 max-w-md rounded-xl border border-border bg-surface p-8 text-center">
+          <div className="mb-3 flex justify-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-alt">
+              <Lock size={22} className="text-muted" />
+            </div>
+          </div>
+          <h2 className="text-lg font-bold text-text">Nur für Administratoren</h2>
+          <p className="mt-1.5 text-sm text-muted">
+            Die Unternehmenseinstellungen sind nur für Administratoren zugänglich. Bitte
+            wenden Sie sich an Ihren Administrator, wenn Sie Änderungen benötigen.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-8">

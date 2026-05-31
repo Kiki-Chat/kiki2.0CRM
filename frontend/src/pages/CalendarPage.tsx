@@ -121,6 +121,18 @@ export function CalendarPage() {
     enabled: !!range,
   })
 
+  // FIX 1 — calendar connection state, to gate the push button (provider-aware).
+  // /api/settings/oauth/connections is require_org, so employees can read it too.
+  const { data: oauthState } = useQuery({
+    queryKey: ['oauth-connections'],
+    queryFn: () =>
+      apiFetch<{ purposes?: { calendar?: { provider: string } | null } }>(
+        '/api/settings/oauth/connections',
+      ),
+    staleTime: 5 * 60 * 1000,
+  })
+  const calendarProvider = oauthState?.purposes?.calendar?.provider ?? null
+
   // Deep-link focus: the dashboard "Anstehende Termine" rows link here with
   // ?date=<YYYY-MM-DD>&appointment=<id>. Jump the calendar to that date so the
   // event is in view; once that month's appointments load, open the matching
@@ -413,6 +425,7 @@ export function CalendarPage() {
         <AppointmentDetailModal
           appt={detail}
           color={colorFor(detail.assigned_employee_id)}
+          calendarProvider={calendarProvider}
           onClose={() => setDetail(null)}
         />
       )}
@@ -465,13 +478,24 @@ function locStr(l: Appointment['location']): string | null {
   return typeof l === 'string' ? l : l.raw ?? null
 }
 
+const CAL_PROVIDER_LABEL: Record<string, string> = {
+  google: 'Google Kalender',
+  microsoft: 'Outlook-Kalender',
+  calendly: 'Calendly',
+}
+// Only Google has a write/push path today (events.insert). Outlook-write isn't
+// implemented and Calendly is booking/read-only — so neither is pushable.
+const PUSHABLE_CAL_PROVIDERS = new Set(['google'])
+
 function AppointmentDetailModal({
   appt,
   color,
+  calendarProvider,
   onClose,
 }: {
   appt: Appointment
   color: string
+  calendarProvider: string | null
   onClose: () => void
 }) {
   const qc = useQueryClient()
@@ -482,6 +506,13 @@ function AppointmentDetailModal({
   // push affordance) AND confirmed (never push tentative/pending bookings).
   const pushable = appt.source === 'crm' && appt.status === 'confirmed'
   const alreadyPushed = !!appt.google_event_id
+  const providerLabel = calendarProvider
+    ? CAL_PROVIDER_LABEL[calendarProvider] ?? 'Kalender'
+    : null
+  const canPush = !!calendarProvider && PUSHABLE_CAL_PROVIDERS.has(calendarProvider)
+  const pushDisabledReason = !calendarProvider
+    ? 'Kein Kalender verbunden – bitte zuerst in den Einstellungen einen Kalender verbinden.'
+    : `Übertragung an ${providerLabel} wird noch nicht unterstützt.`
   const push = useMutation({
     mutationFn: () =>
       apiFetch<{ success: boolean; google_event_id?: string }>(
@@ -489,7 +520,7 @@ function AppointmentDetailModal({
         { method: 'POST' },
       ),
     onSuccess: () => {
-      setPushMsg('✓ Zu Google Kalender hinzugefügt.')
+      setPushMsg(`✓ Zu ${providerLabel ?? 'Kalender'} hinzugefügt.`)
       qc.invalidateQueries({ queryKey: ['appointments'] })
     },
     onError: (e: unknown) =>
@@ -533,15 +564,26 @@ function AppointmentDetailModal({
         {pushable && (
           <div className="border-t border-border pt-3">
             {alreadyPushed ? (
-              <span className="text-sm font-medium text-success">✓ In Google Kalender</span>
-            ) : (
+              <span className="text-sm font-medium text-success">✓ Im Kalender</span>
+            ) : canPush ? (
               <button
                 onClick={() => push.mutate()}
                 disabled={push.isPending}
                 className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60"
               >
-                {push.isPending ? 'Wird übertragen…' : 'Zu Google Kalender hinzufügen'}
+                {push.isPending ? 'Wird übertragen…' : `Zu ${providerLabel} hinzufügen`}
               </button>
+            ) : (
+              <>
+                <button
+                  disabled
+                  title={pushDisabledReason}
+                  className="cursor-not-allowed rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white opacity-50"
+                >
+                  Zum Kalender hinzufügen
+                </button>
+                <p className="mt-2 text-xs text-muted">{pushDisabledReason}</p>
+              </>
             )}
             {pushMsg && <p className="mt-2 text-xs text-muted">{pushMsg}</p>}
           </div>

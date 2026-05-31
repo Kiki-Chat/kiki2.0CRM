@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Eye, EyeOff, Lock, LogOut } from 'lucide-react'
+import { Building2, ChevronDown, Eye, EyeOff, Lock, LogOut } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { useAuth } from '../auth/AuthProvider'
@@ -36,6 +36,13 @@ export function PersonalSettingsModal({ open, onClose }: { open: boolean; onClos
   const { data: me } = useQuery({
     queryKey: ['users-me'],
     queryFn: () => apiFetch<Me>('/api/users/me'),
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  })
+  // org_name (the company whose CRM this is) — from /api/me, shared cache.
+  const { data: meCore } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => apiFetch<{ org_name: string | null }>('/api/me'),
     enabled: open,
     staleTime: 5 * 60 * 1000,
   })
@@ -98,6 +105,13 @@ export function PersonalSettingsModal({ open, onClose }: { open: boolean; onClos
                 <Lock size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-faint" />
               </div>
               <p className="mt-1 text-xs text-muted">E-Mail kann nicht geändert werden.</p>
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-semibold text-body">Unternehmen</div>
+              <div className="relative">
+                <input value={meCore?.org_name ?? ''} readOnly className={cn(inputCls, 'cursor-not-allowed pr-9 text-muted')} />
+                <Building2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-faint" />
+              </div>
             </div>
           </div>
         </section>
