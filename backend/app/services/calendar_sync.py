@@ -71,10 +71,14 @@ def pull_google_events(
     existing = _existing_google_rows(client, org_id, time_min, time_max)  # gid -> {id,status}
     created, updated = _apply_rows(client, org_id, rows, existing)
     cancelled = _reconcile_deletions(client, org_id, existing, seen_ids, now_dt)
+    # SAFETY: a pushed source='crm' job whose Google copy vanished is NEVER
+    # deleted — only its google_event_id link is detached (it becomes pushable
+    # again) so Google can't silently destroy a real CRM appointment.
+    detached = _detach_vanished_pushed(client, org_id, time_min, time_max, seen_ids, now_dt)
 
     log.info(
-        "calendar_sync org=%s fetched=%d created=%d updated=%d cancelled=%d window_days=%d",
-        org_id, len(events), created, updated, cancelled, window_days,
+        "calendar_sync org=%s fetched=%d created=%d updated=%d cancelled=%d detached=%d window_days=%d",
+        org_id, len(events), created, updated, cancelled, detached, window_days,
     )
     return {
         "success": True,
@@ -82,6 +86,7 @@ def pull_google_events(
         "created": created,
         "updated": updated,
         "cancelled": cancelled,
+        "detached": detached,
         "synced_at": now_dt.isoformat(),
         "window_days": window_days,
     }
@@ -389,3 +394,61 @@ def _insert_event(access_token: str, body: dict) -> str | None:
     if r.status_code not in (200, 201):
         raise CalendarWriteError(f"google calendar insert {r.status_code}: {r.text[:300]}", 502)
     return (r.json() or {}).get("id")
+
+
+def delete_google_event(org_id: str, google_event_id: str | None) -> bool:
+    """Best-effort delete of a Google Calendar event (CRM→Google propagation for
+    cancel/delete). NEVER raises and never blocks the CRM action — the CRM is
+    authoritative for this direction. Returns True when Google confirms the event
+    gone (incl. already-deleted 404/410). The caller invokes this only when a
+    google_event_id is set; the grant resolves via the calendar purpose link."""
+    if not google_event_id:
+        return False
+    try:
+        if calendar_provider(org_id) != "google":
+            return False
+        access_token = get_valid_access_token(org_id, "google")
+        with httpx.Client(timeout=_TIMEOUT) as client:
+            r = client.delete(
+                f"{_EVENTS_URL}/{google_event_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        ok = r.status_code in (200, 204, 404, 410)  # 404/410 → already gone
+        log.info(
+            "calendar_delete org=%s gid=%s status=%s ok=%s",
+            org_id, google_event_id, r.status_code, ok,
+        )
+        return ok
+    except Exception as exc:  # noqa: BLE001 — best-effort; the CRM action proceeds regardless
+        log.warning("calendar_delete org=%s gid=%s failed err=%s", org_id, google_event_id, exc)
+        return False
+
+
+def _detach_vanished_pushed(
+    client, org_id: str, time_min: str, time_max: str, seen_ids: set[str], now_dt: datetime
+) -> int:
+    """SAFETY INVARIANT (Google deletion → CRM): a source='crm' appointment that
+    was PUSHED (holds a google_event_id) whose Google event has vanished must
+    NEVER be hard-deleted — it's the CRM's own source-of-truth job record.
+    Instead DETACH the link (clear google_event_id), keeping the row, so the user
+    sees it as pushable again and can re-push or cancel it. Scoped to the window."""
+    rows = (
+        client.table("appointments")
+        .select("id, google_event_id")
+        .eq("org_id", org_id)
+        .eq("source", "crm")
+        .gte("scheduled_at", time_min)
+        .lte("scheduled_at", time_max)
+        .execute()
+        .data
+        or []
+    )
+    detached = 0
+    for r in rows:
+        gid = r.get("google_event_id")
+        if gid and gid not in seen_ids:
+            client.table("appointments").update({"google_event_id": None}).eq(
+                "org_id", org_id
+            ).eq("id", r["id"]).execute()
+            detached += 1
+    return detached

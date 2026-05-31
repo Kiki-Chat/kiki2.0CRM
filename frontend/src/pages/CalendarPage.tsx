@@ -6,7 +6,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin from '@fullcalendar/list'
 import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
-import { Check, ChevronDown, Clock, Plus, Upload } from 'lucide-react'
+import { Check, ChevronDown, Clock, Plus, RefreshCw, Upload } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -216,6 +216,23 @@ export function CalendarPage() {
     },
   })
 
+  const syncCal = useMutation({
+    mutationFn: () =>
+      apiFetch<{ fetched: number; created: number; updated: number; cancelled: number; detached: number }>(
+        '/api/calendar/sync',
+        { method: 'POST' },
+      ),
+    onSuccess: (r) => {
+      setImportMsg(`Synchronisiert: ${r.fetched} Termine geprüft.`)
+      setTimeout(() => setImportMsg(null), 5000)
+      qc.invalidateQueries({ queryKey: ['appointments'] })
+    },
+    onError: (e: unknown) => {
+      setImportMsg(e instanceof Error ? e.message : 'Synchronisierung fehlgeschlagen.')
+      setTimeout(() => setImportMsg(null), 5000)
+    },
+  })
+
   return (
     <div className="flex h-full flex-col p-8">
       {/* Header */}
@@ -276,6 +293,15 @@ export function CalendarPage() {
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
 
+          <button
+            onClick={() => syncCal.mutate()}
+            disabled={syncCal.isPending}
+            title="Google-Kalender synchronisieren (neue Termine + Löschungen abgleichen)"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-60"
+          >
+            <RefreshCw size={15} className={syncCal.isPending ? 'animate-spin' : ''} />
+            {syncCal.isPending ? 'Synchronisiert…' : 'Sync'}
+          </button>
           <button
             onClick={() => {
               const d = new Date()
@@ -446,6 +472,22 @@ function AppointmentDetailModal({
     onError: (e: unknown) =>
       setPushMsg(e instanceof Error ? e.message : 'Übertragung fehlgeschlagen.'),
   })
+  const afterMutate = () => {
+    qc.invalidateQueries({ queryKey: ['appointments'] })
+    onClose()
+  }
+  // Cancel keeps the row (status='cancelled'); Delete hard-removes it. Both
+  // propagate to Google (events.delete) server-side when the event was pushed.
+  const cancel = useMutation({
+    mutationFn: () => apiFetch(`/api/appointments/${appt.id}/cancel`, { method: 'POST' }),
+    onSuccess: afterMutate,
+    onError: (e: unknown) => setPushMsg(e instanceof Error ? e.message : 'Stornieren fehlgeschlagen.'),
+  })
+  const del = useMutation({
+    mutationFn: () => apiFetch(`/api/appointments/${appt.id}`, { method: 'DELETE' }),
+    onSuccess: afterMutate,
+    onError: (e: unknown) => setPushMsg(e instanceof Error ? e.message : 'Löschen fehlgeschlagen.'),
+  })
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={appt.title ?? 'Termin'}>
       <div className="space-y-3 text-sm">
@@ -481,6 +523,22 @@ function AppointmentDetailModal({
             {pushMsg && <p className="mt-2 text-xs text-muted">{pushMsg}</p>}
           </div>
         )}
+        <div className="flex items-center justify-between border-t border-border pt-3">
+          <button
+            onClick={() => cancel.mutate()}
+            disabled={cancel.isPending}
+            className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt disabled:opacity-60"
+          >
+            {cancel.isPending ? 'Storniert…' : 'Stornieren'}
+          </button>
+          <button
+            onClick={() => { if (window.confirm('Diesen Termin endgültig löschen?')) del.mutate() }}
+            disabled={del.isPending}
+            className="rounded-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+          >
+            {del.isPending ? 'Löscht…' : 'Löschen'}
+          </button>
+        </div>
       </div>
     </Modal>
   )

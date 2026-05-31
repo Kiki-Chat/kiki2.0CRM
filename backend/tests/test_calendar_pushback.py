@@ -124,6 +124,58 @@ def test_push_requires_google_calendar_linked(monkeypatch):
     assert e.value.status == 409
 
 
+def _fake_delete_client(status_code):
+    class _R:
+        pass
+    r = _R()
+    r.status_code = status_code
+
+    class _C:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def delete(self, url, headers=None):
+            _C.url = url
+            return r
+
+    return _C
+
+
+def test_delete_google_event_calls_events_delete(monkeypatch):
+    monkeypatch.setattr(cs, "calendar_provider", lambda org: "google")
+    monkeypatch.setattr(cs, "get_valid_access_token", lambda o, p: "tok")
+    C = _fake_delete_client(204)
+    monkeypatch.setattr(cs.httpx, "Client", lambda **k: C())
+    assert cs.delete_google_event("org-1", "GEVT") is True
+    assert C.url.endswith("/events/GEVT")
+
+
+def test_delete_google_event_already_gone_is_ok(monkeypatch):
+    monkeypatch.setattr(cs, "calendar_provider", lambda org: "google")
+    monkeypatch.setattr(cs, "get_valid_access_token", lambda o, p: "tok")
+    monkeypatch.setattr(cs.httpx, "Client", lambda **k: _fake_delete_client(410)())
+    assert cs.delete_google_event("org-1", "X") is True  # 410 Gone = already deleted
+
+
+def test_delete_google_event_noop_without_gid(monkeypatch):
+    def _boom(*a, **k):
+        raise AssertionError("must not resolve provider without a gid")
+    monkeypatch.setattr(cs, "calendar_provider", _boom)
+    assert cs.delete_google_event("org-1", None) is False
+
+
+def test_delete_google_event_is_best_effort_on_error(monkeypatch):
+    monkeypatch.setattr(cs, "calendar_provider", lambda org: "google")
+    monkeypatch.setattr(cs, "get_valid_access_token", lambda o, p: "tok")
+    def _raise(**k):
+        raise RuntimeError("network down")
+    monkeypatch.setattr(cs.httpx, "Client", _raise)
+    assert cs.delete_google_event("org-1", "X") is False  # never raises; CRM proceeds
+
+
 def test_push_not_found(monkeypatch):
     _patch(monkeypatch, None)
     with pytest.raises(cs.CalendarWriteError) as e:

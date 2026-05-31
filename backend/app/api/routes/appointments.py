@@ -7,6 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import AppointmentCreate, AppointmentPatch
+from app.services import calendar_sync
 from app.services.appointments import import_ics
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
@@ -430,3 +431,63 @@ async def propose_alternative_appointment(
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
     return appt
+
+
+# ─── CRM cancel / delete (propagate to Google) ───────────────────────────────
+# CRM is authoritative for this direction: attempt the Google events.delete
+# (best-effort) ONLY when the appointment was pushed (google_event_id set), then
+# perform the CRM mutation regardless of the Google result (a failed/already-gone
+# Google delete is logged, never blocks the CRM action).
+def _cancel(org_id: str, appointment_id: str) -> dict | None:
+    appt = _get_appointment(org_id, appointment_id)
+    if not appt:
+        return None
+    if appt.get("google_event_id"):
+        calendar_sync.delete_google_event(org_id, appt["google_event_id"])
+    updated = (
+        get_service_client()
+        .table("appointments")
+        .update({"status": "cancelled", "google_event_id": None})
+        .eq("org_id", org_id)
+        .eq("id", appointment_id)
+        .execute()
+        .data
+    )
+    return updated[0] if updated else None
+
+
+@router.post("/{appointment_id}/cancel")
+async def cancel_appointment_route(
+    appointment_id: str, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Cancel an appointment (status='cancelled', row kept for history). If it
+    was pushed to Google, delete the Google event too (best-effort) and clear the
+    link. The main Kalender already hides cancelled appointments."""
+    appt = await run_in_threadpool(_cancel, user.org_id, appointment_id)
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return appt
+
+
+def _delete(org_id: str, appointment_id: str) -> bool:
+    appt = _get_appointment(org_id, appointment_id)
+    if not appt:
+        return False
+    if appt.get("google_event_id"):
+        calendar_sync.delete_google_event(org_id, appt["google_event_id"])
+    get_service_client().table("appointments").delete().eq("org_id", org_id).eq(
+        "id", appointment_id
+    ).execute()
+    return True
+
+
+@router.delete("/{appointment_id}")
+async def delete_appointment_route(
+    appointment_id: str, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Hard-delete an appointment. If it was pushed to Google, delete the Google
+    event first (best-effort), then remove the CRM row."""
+    ok = await run_in_threadpool(_delete, user.org_id, appointment_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return {"success": True, "deleted": True}

@@ -82,11 +82,12 @@ def test_pull_google_events_orchestration(monkeypatch):
     monkeypatch.setattr(cs, "_existing_google_rows", lambda c, o, a, b: {})
     monkeypatch.setattr(cs, "_apply_rows", lambda c, o, rows, existing: (len(rows), 0))
     monkeypatch.setattr(cs, "_reconcile_deletions", lambda c, o, existing, seen, now: 0)
+    monkeypatch.setattr(cs, "_detach_vanished_pushed", lambda c, o, a, b, s, n: 0)
 
     res = cs.pull_google_events(ORG, now=NOW)
     assert res == {
         "success": True, "fetched": 1, "created": 1, "updated": 0,
-        "cancelled": 0, "synced_at": NOW.isoformat(), "window_days": 60,
+        "cancelled": 0, "detached": 0, "synced_at": NOW.isoformat(), "window_days": 60,
     }
 
 
@@ -146,5 +147,101 @@ def test_pull_skips_crm_owned_pushed_events(monkeypatch):
         ),
     )
     monkeypatch.setattr(cs, "_reconcile_deletions", lambda c, o, e, s, n: 0)
+    monkeypatch.setattr(cs, "_detach_vanished_pushed", lambda c, o, a, b, s, n: 0)
     cs.pull_google_events("org-1", now=NOW)
     assert captured["ids"] == ["EXT2"]  # PUSHED1 (our own pushed event) skipped
+
+
+# ─── Google deletion → CRM (the data-safety invariant) ───────────────────────
+class _RecRes:
+    def __init__(self, data):
+        self.data = data
+
+
+def test_reconcile_cancels_vanished_google_import():
+    """source='google_import' whose Google event vanished → status='cancelled'."""
+    class _Chain:
+        def __init__(self, parent):
+            self.parent = parent
+            self._payload = None
+
+        def update(self, row):
+            self._payload = row
+            return self
+
+        def eq(self, *a, **k):
+            return self
+
+        def execute(self):
+            self.parent.updates.append(self._payload)
+            return _RecRes([{}])
+
+    class _Client:
+        def __init__(self):
+            self.updates: list = []
+
+        def table(self, name):
+            return _Chain(self)
+
+    client = _Client()
+    existing = {"G1": {"id": "i1", "status": "confirmed"}, "G2": {"id": "i2", "status": "confirmed"}}
+    n = cs._reconcile_deletions(client, "org-1", existing, {"G2"}, NOW)  # G1 vanished
+    assert n == 1
+    assert client.updates == [{"status": "cancelled", "last_synced_at": NOW.isoformat()}]
+
+
+def test_detach_vanished_pushed_keeps_crm_row_and_clears_link():
+    """SAFETY INVARIANT: a pushed source='crm' event that vanished in Google is
+    NEVER deleted — only its google_event_id link is detached; the row survives."""
+    class _Chain:
+        def __init__(self, parent):
+            self.parent = parent
+            self._op = "select"
+            self._payload = None
+
+        def select(self, *a, **k):
+            self._op = "select"
+            return self
+
+        def update(self, row):
+            self._op = "update"
+            self._payload = row
+            return self
+
+        def delete(self):  # must NEVER be called by detach
+            self.parent.deleted = True
+            return self
+
+        def eq(self, *a, **k):
+            return self
+
+        def gte(self, *a, **k):
+            return self
+
+        def lte(self, *a, **k):
+            return self
+
+        def execute(self):
+            if self._op == "update":
+                self.parent.updates.append(self._payload)
+                return _RecRes([{}])
+            return _RecRes(self.parent.rows)
+
+    class _Client:
+        def __init__(self, rows):
+            self.rows = rows
+            self.updates: list = []
+            self.deleted = False
+
+        def table(self, name):
+            return _Chain(self)
+
+    client = _Client([
+        {"id": "crm1", "google_event_id": "VANISHED"},     # pushed, gone from Google
+        {"id": "crm2", "google_event_id": "STILL_THERE"},  # pushed, still present
+        {"id": "crm3", "google_event_id": None},           # never pushed
+    ])
+    n = cs._detach_vanished_pushed(client, "org-1", "t0", "t1", {"STILL_THERE"}, NOW)
+    assert n == 1
+    assert client.updates == [{"google_event_id": None}]  # only crm1 detached
+    assert client.deleted is False  # the row is NEVER hard-deleted
