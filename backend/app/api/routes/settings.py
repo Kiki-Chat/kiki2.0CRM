@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_org
+from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.core.crypto import encrypt
 from app.db.supabase_client import get_service_client
 from app.services.common import now_berlin
@@ -150,7 +150,7 @@ def _get_settings(org_id: str) -> dict:
 
 
 @router.get("")
-async def get_settings(user: CurrentUser = Depends(require_org)) -> dict:
+async def get_settings(user: CurrentUser = Depends(require_org_admin)) -> dict:
     return await run_in_threadpool(_get_settings, user.org_id)
 
 
@@ -163,23 +163,23 @@ def _update_org(org_id: str, fields: dict) -> dict:
 
 
 @router.patch("/general")
-async def update_general(payload: GeneralUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_general(payload: GeneralUpdate, user: CurrentUser = Depends(require_org_admin)) -> dict:
     return await run_in_threadpool(_update_org, user.org_id, payload.model_dump(exclude_unset=True))
 
 
 @router.patch("/design")
-async def update_design(payload: DesignUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_design(payload: DesignUpdate, user: CurrentUser = Depends(require_org_admin)) -> dict:
     return await run_in_threadpool(_update_org, user.org_id, payload.model_dump(exclude_unset=True))
 
 
 @router.patch("/google-reviews")
-async def update_google_reviews(payload: GoogleReviewsUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_google_reviews(payload: GoogleReviewsUpdate, user: CurrentUser = Depends(require_org_admin)) -> dict:
     return await run_in_threadpool(_update_org, user.org_id, {"google_reviews_enabled": payload.google_reviews_enabled})
 
 
 # ─── Logo ─────────────────────────────────────────────────────────────────────
 @router.post("/logo")
-async def upload_logo(file: UploadFile = File(...), user: CurrentUser = Depends(require_org)) -> dict:
+async def upload_logo(file: UploadFile = File(...), user: CurrentUser = Depends(require_org_admin)) -> dict:
     content = await file.read()
     if len(content) > MAX_LOGO_BYTES:
         raise HTTPException(status_code=413, detail="Logo zu groß (max. 2 MB).")
@@ -205,7 +205,7 @@ async def upload_logo(file: UploadFile = File(...), user: CurrentUser = Depends(
 
 
 @router.delete("/logo")
-async def delete_logo(user: CurrentUser = Depends(require_org)) -> dict:
+async def delete_logo(user: CurrentUser = Depends(require_org_admin)) -> dict:
     def _do() -> bool:
         client = get_service_client()
         try:
@@ -224,7 +224,7 @@ async def delete_logo(user: CurrentUser = Depends(require_org)) -> dict:
 
 # ─── AI suggestions (agent_configs) ───────────────────────────────────────────
 @router.patch("/ai-suggestions")
-async def update_ai_suggestions(payload: AiSuggestionsUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_ai_suggestions(payload: AiSuggestionsUpdate, user: CurrentUser = Depends(require_org_admin)) -> dict:
     fields = payload.model_dump(exclude_unset=True)
 
     def _do() -> dict:
@@ -242,14 +242,14 @@ async def update_ai_suggestions(payload: AiSuggestionsUpdate, user: CurrentUser 
 
 
 @router.post("/generate-suggestions")
-async def generate_suggestions(user: CurrentUser = Depends(require_org)) -> dict:
+async def generate_suggestions(user: CurrentUser = Depends(require_org_admin)) -> dict:
     # Stub: real generation runs on the nightly job; manual trigger acknowledged.
     return {"success": True, "generated": 0, "message": "Vorschläge werden in Kürze generiert."}
 
 
 # ─── Email config ─────────────────────────────────────────────────────────────
 @router.patch("/email-config")
-async def update_email_config(payload: EmailConfigUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_email_config(payload: EmailConfigUpdate, user: CurrentUser = Depends(require_org_admin)) -> dict:
     fields = payload.model_dump(exclude_unset=True)
     pw = fields.pop("smtp_password", None)
 
@@ -266,7 +266,7 @@ async def update_email_config(payload: EmailConfigUpdate, user: CurrentUser = De
 
 
 @router.post("/email-test")
-async def email_test(user: CurrentUser = Depends(require_org)) -> dict:
+async def email_test(user: CurrentUser = Depends(require_org_admin)) -> dict:
     """Test the org's email-send chain by sending a self-addressed message.
 
     Uses the 3-tier fallback (OAuth → customer SMTP → Brevo); the chain +
@@ -328,7 +328,7 @@ async def email_test(user: CurrentUser = Depends(require_org)) -> dict:
 
 # ─── PDS config ───────────────────────────────────────────────────────────────
 @router.patch("/pds-config")
-async def update_pds_config(payload: PdsConfigUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_pds_config(payload: PdsConfigUpdate, user: CurrentUser = Depends(require_org_admin)) -> dict:
     fields = payload.model_dump(exclude_unset=True)
     key = fields.pop("api_key", None)
 
@@ -345,12 +345,12 @@ async def update_pds_config(payload: PdsConfigUpdate, user: CurrentUser = Depend
 
 
 @router.post("/pds-test")
-async def pds_test(user: CurrentUser = Depends(require_org)) -> dict:
+async def pds_test(user: CurrentUser = Depends(require_org_admin)) -> dict:
     return {"success": False, "message": "Verbindungstest in Kürze verfügbar."}
 
 
 @router.post("/pds-sync")
-async def pds_sync(user: CurrentUser = Depends(require_org)) -> dict:
+async def pds_sync(user: CurrentUser = Depends(require_org_admin)) -> dict:
     return {"success": False, "message": "Synchronisierung in Kürze verfügbar."}
 
 

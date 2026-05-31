@@ -96,6 +96,25 @@ def require_super_admin(user: CurrentUser = Depends(get_current_user)) -> Curren
     return user
 
 
+def require_org_admin(user: CurrentUser = Depends(require_org)) -> CurrentUser:
+    """Gate for org-management actions (Wave 2 three-tier model).
+
+    Chains on ``require_org`` (so the caller is in a present, non-disabled org)
+    and additionally requires an admin role. Plain ``employee`` logins get 403.
+
+    Allowed roles: ``org_admin`` (the Meister/client) and ``super_admin``
+    (HeyKiki, when acting inside an org context). Applied to every endpoint that
+    manages users/credentials/roles or mutates billing/settings/agent config —
+    the things an employee must NOT be able to do.
+    """
+    if user.role not in ("org_admin", "super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Nur Administratoren dürfen diese Aktion ausführen.",
+        )
+    return user
+
+
 def verify_post_call_secret(
     x_heykiki_secret: str | None = Header(default=None, alias="X-HeyKiki-Secret"),
 ) -> None:

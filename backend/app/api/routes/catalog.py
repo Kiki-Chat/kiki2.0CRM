@@ -4,7 +4,7 @@ import io
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_org
+from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import CatalogItemUpsert
 
@@ -76,7 +76,7 @@ def _create(org_id: str, payload: CatalogItemUpsert) -> dict:
 
 @router.post("")
 async def create_catalog(
-    payload: CatalogItemUpsert, user: CurrentUser = Depends(require_org)
+    payload: CatalogItemUpsert, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     return await run_in_threadpool(_create, user.org_id, payload)
 
@@ -158,7 +158,7 @@ def _import_csv(org_id: str, content: bytes) -> dict:
 
 @router.post("/import")
 async def import_catalog(
-    file: UploadFile = File(...), user: CurrentUser = Depends(require_org)
+    file: UploadFile = File(...), user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     content = await file.read()
     return await run_in_threadpool(_import_csv, user.org_id, content)
@@ -182,7 +182,7 @@ def _update(org_id: str, item_id: str, payload: CatalogItemUpsert) -> dict | Non
 
 @router.patch("/{item_id}")
 async def update_catalog(
-    item_id: str, payload: CatalogItemUpsert, user: CurrentUser = Depends(require_org)
+    item_id: str, payload: CatalogItemUpsert, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     row = await run_in_threadpool(_update, user.org_id, item_id, payload)
     if not row:
@@ -191,7 +191,7 @@ async def update_catalog(
 
 
 @router.delete("/{item_id}")
-async def delete_catalog(item_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+async def delete_catalog(item_id: str, user: CurrentUser = Depends(require_org_admin)) -> dict:
     def _delete() -> bool:
         client = get_service_client()
         res = (

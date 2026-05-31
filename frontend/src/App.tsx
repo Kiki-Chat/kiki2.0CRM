@@ -22,6 +22,7 @@ import { Placeholder } from './pages/Placeholder'
 import { ProjectFormPage } from './pages/ProjectFormPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectWorkspacePage } from './pages/ProjectWorkspacePage'
+import { SetPasswordPage } from './pages/SetPasswordPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 export default function App() {
@@ -32,6 +33,9 @@ export default function App() {
       <Route path="/admin/*" element={<AdminApp />} />
 
       <Route path="/login" element={<LoginPage />} />
+      {/* Employee invite / password-recovery landing (Wave 2) — public: the
+          recovery token in the URL establishes the session for setting a pw. */}
+      <Route path="/set-password" element={<SetPasswordPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route index element={<DashboardPage />} />

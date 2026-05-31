@@ -538,18 +538,30 @@ async def add_project_employee(
     def _add():
         client = get_service_client()
         if not _fetch(client, user.org_id, project_id):
-            return None
+            return "no_project"
+        # Wave 2 — validate the employee belongs to THIS org before linking
+        # (same pattern as inquiries._assign). Without this, employee_id from the
+        # request body could reference another org's employee (cross-tenant FK).
+        emp = (
+            client.table("employees").select("id")
+            .eq("org_id", user.org_id).eq("id", payload.employee_id)
+            .eq("deleted", False).limit(1).execute().data
+        )
+        if not emp:
+            return "bad_employee"
         try:
             client.table("project_employees").insert(
                 {"project_id": project_id, "employee_id": payload.employee_id}
             ).execute()
         except Exception:
             pass  # already assigned (unique constraint)
-        return True
+        return "ok"
 
-    ok = await run_in_threadpool(_add)
-    if not ok:
+    res = await run_in_threadpool(_add)
+    if res == "no_project":
         raise HTTPException(status_code=404, detail="Project not found")
+    if res == "bad_employee":
+        raise HTTPException(status_code=404, detail="Mitarbeiter nicht gefunden")
     return {"success": True}
 
 

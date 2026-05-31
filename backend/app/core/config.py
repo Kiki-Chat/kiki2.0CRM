@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # Used to build OAuth redirect URIs at runtime. Must match the value
     # registered with Google + Azure (see §1.4 / §2.1 of P1.8_OAUTH_SETUP.md).
     backend_public_url: str = "http://localhost:8000"
+    # Public URL of the customer frontend. Used to build the employee
+    # set-password link (Wave 2 invite email → {frontend}/set-password). For
+    # the link to resolve, this path must be on Supabase Auth's Redirect-URL
+    # allow-list. Set FRONTEND_PUBLIC_URL in Railway to the prod frontend.
+    frontend_public_url: str = "http://localhost:5173"
 
     # ── Brevo SMTP relay (P1.8 Phase 3 / Wave 1.2) ─────────────────────────
     # Final fallback in the email_send.py chain when an org has no OAuth and

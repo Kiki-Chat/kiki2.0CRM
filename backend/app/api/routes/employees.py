@@ -1,14 +1,24 @@
 import json
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_org
+from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import AbsenceCreate, EmployeeCreate, EmployeeUpdate
-from app.services import csv_import
+from app.services import csv_import, employee_invite
+
+log = logging.getLogger(__name__)
+
+
+def _org_name(client, org_id: str) -> str | None:
+    rows = (
+        client.table("organizations").select("name").eq("id", org_id).limit(1).execute().data
+    )
+    return rows[0].get("name") if rows else None
 
 
 class SetPasswordRequest(BaseModel):
@@ -118,14 +128,19 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
             client.table("users").select("id").eq("email", payload.email).limit(1).execute().data
         )
         if existing:
+            # Email already has a login → link it; never reset its password here.
             user_id = existing[0]["id"]
         else:
+            # New login (Wave 2): generate a set-password invite link (this creates
+            # the auth user; Supabase sends NO email), create the public.users row,
+            # then send OUR branded welcome email carrying the link — NEVER a
+            # password. Two independent try-blocks so an email failure still leaves
+            # a usable login (admin can resend or set a password manually).
+            link = None
             try:
-                res = client.auth.admin.invite_user_by_email(payload.email)
-                invited = getattr(res, "user", None)
-                if invited is None:
-                    raise ValueError("no user returned")
-                user_id = invited.id
+                link, user_id = employee_invite.generate_set_password_link(
+                    payload.email, new_user=True
+                )
                 client.table("users").insert(
                     {
                         "id": user_id,
@@ -135,15 +150,31 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                         "role": "org_admin" if payload.access_role == "admin" else "employee",
                     }
                 ).execute()
-            except Exception as exc:
-                # Email delivery not configured (no SMTP/template) → don't lose the
-                # record. Create the employee without login; admin can resend later.
+            except Exception as exc:  # noqa: BLE001
+                # Could not create the login → don't lose the record; create the
+                # employee without login. Admin can resend / set a password later.
                 user_id = None
+                link = None
                 warning = (
-                    "Mitarbeiter angelegt, aber die Einladung konnte nicht gesendet "
-                    f"werden ({exc}). Bitte den E-Mail-Versand in Supabase konfigurieren "
-                    "und die Einladung anschließend erneut senden."
+                    "Mitarbeiter angelegt, aber der Login-Zugang konnte nicht "
+                    f"erstellt werden ({exc}). Sie können die Einladung später erneut "
+                    "senden oder ein Passwort manuell setzen."
                 )
+            if user_id and link:
+                try:
+                    employee_invite.send_employee_welcome(
+                        org_id=org_id,
+                        company_name=_org_name(client, org_id),
+                        display_name=payload.display_name,
+                        login_email=payload.email,
+                        set_password_link=link,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    warning = (
+                        "Login erstellt, aber die Willkommens-E-Mail konnte nicht "
+                        f"gesendet werden ({exc}). Bitte die Einladung erneut senden "
+                        "oder ein Passwort manuell setzen."
+                    )
 
     row = {
         "org_id": org_id,
@@ -164,7 +195,7 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
 
 @router.post("")
 async def create_employee(
-    payload: EmployeeCreate, user: CurrentUser = Depends(require_org)
+    payload: EmployeeCreate, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     return await run_in_threadpool(_create, user.org_id, payload)
 
@@ -173,7 +204,7 @@ async def create_employee(
 async def import_employees_csv(
     file: UploadFile = File(...),
     mapping: str = Form("{}"),
-    user: CurrentUser = Depends(require_org),
+    user: CurrentUser = Depends(require_org_admin),
 ) -> dict:
     """Bulk CSV import for employees. ``mapping`` = JSON {target_field: csv_header}.
     Dedups on email/name (skips duplicates). Does NOT send login invites — rows
@@ -216,7 +247,7 @@ def _update(org_id: str, employee_id: str, payload: EmployeeUpdate) -> dict | No
 
 @router.patch("/{employee_id}")
 async def update_employee(
-    employee_id: str, payload: EmployeeUpdate, user: CurrentUser = Depends(require_org)
+    employee_id: str, payload: EmployeeUpdate, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     emp = await run_in_threadpool(_update, user.org_id, employee_id, payload)
     if not emp:
@@ -250,7 +281,7 @@ def _delete(org_id: str, employee_id: str) -> str:
 
 @router.delete("/{employee_id}")
 async def delete_employee(
-    employee_id: str, user: CurrentUser = Depends(require_org)
+    employee_id: str, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     result = await run_in_threadpool(_delete, user.org_id, employee_id)
     if result == "not_found":
@@ -266,7 +297,7 @@ def _resend_invite(org_id: str, employee_id: str) -> str:
     client = get_service_client()
     rows = (
         client.table("employees")
-        .select("email")
+        .select("email, user_id, display_name, access_role")
         .eq("org_id", org_id)
         .eq("id", employee_id)
         .limit(1)
@@ -275,22 +306,57 @@ def _resend_invite(org_id: str, employee_id: str) -> str:
     )
     if not rows:
         return "not_found"
-    email = rows[0].get("email")
+    emp = rows[0]
+    email = emp.get("email")
     if not email:
         return "no_email"
-    client.auth.admin.invite_user_by_email(email)
+    try:
+        if emp.get("user_id"):
+            # Existing login → recovery (set-new-password) link.
+            link, _ = employee_invite.generate_set_password_link(email, new_user=False)
+        else:
+            # No login yet → invite link (creates the auth user); create the
+            # users row and back-link it onto the employee record.
+            link, new_uid = employee_invite.generate_set_password_link(email, new_user=True)
+            client.table("users").insert(
+                {
+                    "id": new_uid,
+                    "org_id": org_id,
+                    "full_name": emp.get("display_name"),
+                    "email": email,
+                    "role": "org_admin" if emp.get("access_role") == "admin" else "employee",
+                }
+            ).execute()
+            client.table("employees").update({"user_id": new_uid}).eq(
+                "org_id", org_id
+            ).eq("id", employee_id).execute()
+        employee_invite.send_employee_welcome(
+            org_id=org_id,
+            company_name=_org_name(client, org_id),
+            display_name=emp.get("display_name"),
+            login_email=email,
+            set_password_link=link,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("resend_invite_failed org=%s emp=%s err=%s", org_id, employee_id, exc)
+        return "send_failed"
     return "ok"
 
 
 @router.post("/{employee_id}/resend-invite")
 async def resend_invite(
-    employee_id: str, user: CurrentUser = Depends(require_org)
+    employee_id: str, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     result = await run_in_threadpool(_resend_invite, user.org_id, employee_id)
     if result == "not_found":
         raise HTTPException(status_code=404, detail="Employee not found")
     if result == "no_email":
         raise HTTPException(status_code=400, detail="Keine E-Mail-Adresse hinterlegt")
+    if result == "send_failed":
+        raise HTTPException(
+            status_code=502,
+            detail="Einladungs-E-Mail konnte nicht gesendet werden. Bitte später erneut versuchen.",
+        )
     return {"success": True}
 
 
@@ -316,7 +382,7 @@ def _set_password(org_id: str, employee_id: str, password: str) -> str:
 
 @router.post("/{employee_id}/set-password")
 async def set_password(
-    employee_id: str, payload: SetPasswordRequest, user: CurrentUser = Depends(require_org)
+    employee_id: str, payload: SetPasswordRequest, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     if len(payload.password) < 6:
         raise HTTPException(

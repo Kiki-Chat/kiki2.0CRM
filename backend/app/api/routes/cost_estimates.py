@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_org
+from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import (
     CostEstimateSend,
@@ -139,7 +139,7 @@ def _create(org_id: str, user_id: str | None, payload: CostEstimateUpsert) -> di
 
 @router.post("")
 async def create_estimate(
-    payload: CostEstimateUpsert, user: CurrentUser = Depends(require_org)
+    payload: CostEstimateUpsert, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     return await run_in_threadpool(_create, user.org_id, user.id, payload)
 
@@ -182,7 +182,7 @@ def _update(org_id: str, ce_id: str, payload: CostEstimateUpsert) -> dict | None
 
 @router.patch("/{ce_id}")
 async def update_estimate(
-    ce_id: str, payload: CostEstimateUpsert, user: CurrentUser = Depends(require_org)
+    ce_id: str, payload: CostEstimateUpsert, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     row = await run_in_threadpool(_update, user.org_id, ce_id, payload)
     if not row:
@@ -191,7 +191,7 @@ async def update_estimate(
 
 
 @router.delete("/{ce_id}")
-async def delete_estimate(ce_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+async def delete_estimate(ce_id: str, user: CurrentUser = Depends(require_org_admin)) -> dict:
     def _delete() -> bool:
         client = get_service_client()
         res = (
@@ -265,7 +265,7 @@ def _preview_pdf(org_id: str, payload: CostEstimateUpsert) -> bytes:
 
 @router.post("/preview")
 async def preview_pdf(
-    payload: CostEstimateUpsert, user: CurrentUser = Depends(require_org)
+    payload: CostEstimateUpsert, user: CurrentUser = Depends(require_org_admin)
 ) -> Response:
     pdf_bytes = await run_in_threadpool(_preview_pdf, user.org_id, payload)
     return Response(content=pdf_bytes, media_type="application/pdf",
@@ -330,7 +330,7 @@ def _build_kva_email(
 
 @router.post("/{ce_id}/send")
 async def send_estimate(
-    ce_id: str, payload: CostEstimateSend, user: CurrentUser = Depends(require_org)
+    ce_id: str, payload: CostEstimateSend, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     def _load() -> dict | None:
         client = get_service_client()
@@ -419,7 +419,7 @@ async def send_estimate(
 
 
 @router.post("/{ce_id}/duplicate")
-async def duplicate_estimate(ce_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+async def duplicate_estimate(ce_id: str, user: CurrentUser = Depends(require_org_admin)) -> dict:
     def _dup() -> dict | None:
         client = get_service_client()
         rows = (
@@ -444,7 +444,7 @@ async def duplicate_estimate(ce_id: str, user: CurrentUser = Depends(require_org
 
 @router.patch("/{ce_id}/status")
 async def set_status(
-    ce_id: str, payload: CostEstimateStatus, user: CurrentUser = Depends(require_org)
+    ce_id: str, payload: CostEstimateStatus, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     fields = {"status": payload.status}
     stamp = _STAMP.get(payload.status)

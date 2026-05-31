@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Response
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_org
+from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import InvoiceSend, InvoiceStatus, InvoiceUpsert
 from app.services.cost_estimates import build_pdf, compute_totals, fetch_customer, fetch_org
@@ -129,7 +129,7 @@ def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
 
 @router.post("")
 async def create_invoice(
-    payload: InvoiceUpsert, user: CurrentUser = Depends(require_org)
+    payload: InvoiceUpsert, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     return await run_in_threadpool(_create, user.org_id, user.id, payload)
 
@@ -174,7 +174,7 @@ def _update(org_id: str, inv_id: str, payload: InvoiceUpsert) -> dict | None:
 
 @router.patch("/{inv_id}")
 async def update_invoice(
-    inv_id: str, payload: InvoiceUpsert, user: CurrentUser = Depends(require_org)
+    inv_id: str, payload: InvoiceUpsert, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     row = await run_in_threadpool(_update, user.org_id, inv_id, payload)
     if not row:
@@ -183,7 +183,7 @@ async def update_invoice(
 
 
 @router.delete("/{inv_id}")
-async def delete_invoice(inv_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+async def delete_invoice(inv_id: str, user: CurrentUser = Depends(require_org_admin)) -> dict:
     def _delete() -> str:
         client = get_service_client()
         rows = (
@@ -269,7 +269,7 @@ def _preview_pdf(org_id: str, payload: InvoiceUpsert) -> bytes:
 
 @router.post("/preview")
 async def preview_pdf(
-    payload: InvoiceUpsert, user: CurrentUser = Depends(require_org)
+    payload: InvoiceUpsert, user: CurrentUser = Depends(require_org_admin)
 ) -> Response:
     pdf_bytes = await run_in_threadpool(_preview_pdf, user.org_id, payload)
     return Response(content=pdf_bytes, media_type="application/pdf",
@@ -323,7 +323,7 @@ def _build_invoice_email(
 
 @router.post("/{inv_id}/send")
 async def send_invoice(
-    inv_id: str, payload: InvoiceSend, user: CurrentUser = Depends(require_org)
+    inv_id: str, payload: InvoiceSend, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     def _load() -> dict | None:
         client = get_service_client()
@@ -408,7 +408,7 @@ async def send_invoice(
 
 
 @router.post("/{inv_id}/duplicate")
-async def duplicate_invoice(inv_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+async def duplicate_invoice(inv_id: str, user: CurrentUser = Depends(require_org_admin)) -> dict:
     def _dup() -> dict | None:
         client = get_service_client()
         rows = (
@@ -435,7 +435,7 @@ async def duplicate_invoice(inv_id: str, user: CurrentUser = Depends(require_org
 
 @router.patch("/{inv_id}/status")
 async def set_status(
-    inv_id: str, payload: InvoiceStatus, user: CurrentUser = Depends(require_org)
+    inv_id: str, payload: InvoiceStatus, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     if payload.status not in STORABLE_STATUSES:
         raise HTTPException(status_code=400, detail=f"Ungültiger Status: {payload.status}")
