@@ -18,6 +18,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
 import { apiBlobUrl, apiFetch } from '../lib/api'
+import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 interface Invoice {
@@ -56,6 +57,7 @@ const fmtDate = (d: string | null) =>
 export function InvoicesPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { isAdmin } = useMe()
   const [num, setNum] = useState('')
   const [customer, setCustomer] = useState('')
   const [status, setStatus] = useState('all')
@@ -142,12 +144,14 @@ export function InvoicesPage() {
             <p className="mt-0.5 text-sm text-muted">{invoices.length} Rechnungen</p>
           </div>
         </div>
-        <button
-          onClick={() => navigate('/invoices/new')}
-          className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
-        >
-          + Neue Rechnung
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => navigate('/invoices/new')}
+            className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+          >
+            + Neue Rechnung
+          </button>
+        )}
       </div>
 
       {/* Filter */}
@@ -258,18 +262,21 @@ export function InvoicesPage() {
                   <td className={cn('px-4 py-3', isOverdue ? 'font-semibold text-error' : 'text-muted')}>{fmtDate(inv.due_date)}</td>
                   <td className="px-4 py-3 text-right font-semibold text-text">{money(inv.total)}</td>
                   <td className="px-4 py-3" onClick={(ev) => ev.stopPropagation()}>
-                    <StatusSelect inv={inv} onChange={(s) => act.mutate({ id: inv.id, action: s })} />
+                    <StatusSelect inv={inv} readOnly={!isAdmin} onChange={(s) => act.mutate({ id: inv.id, action: s })} />
                   </td>
                   <td className="px-4 py-3" onClick={(ev) => ev.stopPropagation()}>
                     <div className="flex items-center justify-end gap-0.5 text-muted">
                       <Icon title="Vorschau" onClick={() => openPdf(inv.id, false)}><Eye size={15} /></Icon>
                       <Icon title="PDF herunterladen" onClick={() => openPdf(inv.id, true)}><Download size={15} /></Icon>
-                      {canSend && <Icon title="Per E-Mail senden" cls="text-info" onClick={() => setSendFor(inv)}><Mail size={15} /></Icon>}
-                      <Icon title="Duplizieren" cls="text-ai" onClick={() => act.mutate({ id: inv.id, action: 'duplicate' })}><Copy size={15} /></Icon>
-                      {canPay && <Icon title="Als bezahlt markieren" cls="text-success" onClick={() => act.mutate({ id: inv.id, action: 'paid' })}><CheckCircle2 size={15} /></Icon>}
-                      {canCancel && <Icon title="Stornieren" cls="text-error" onClick={() => confirm(`${inv.number} stornieren?`) && act.mutate({ id: inv.id, action: 'cancelled' })}><Ban size={15} /></Icon>}
-                      {isDraft && <Icon title="Bearbeiten" cls="text-warning" onClick={() => navigate(`/invoices/${inv.id}`)}><Pencil size={15} /></Icon>}
-                      {isDraft && <Icon title="Löschen" cls="text-error" onClick={() => confirm(`${inv.number} löschen?`) && act.mutate({ id: inv.id, action: 'delete' })}><Trash2 size={15} /></Icon>}
+                      {/* Mutations are admin-only on the backend — hidden for employees. */}
+                      {isAdmin && <>
+                        {canSend && <Icon title="Per E-Mail senden" cls="text-info" onClick={() => setSendFor(inv)}><Mail size={15} /></Icon>}
+                        <Icon title="Duplizieren" cls="text-ai" onClick={() => act.mutate({ id: inv.id, action: 'duplicate' })}><Copy size={15} /></Icon>
+                        {canPay && <Icon title="Als bezahlt markieren" cls="text-success" onClick={() => act.mutate({ id: inv.id, action: 'paid' })}><CheckCircle2 size={15} /></Icon>}
+                        {canCancel && <Icon title="Stornieren" cls="text-error" onClick={() => confirm(`${inv.number} stornieren?`) && act.mutate({ id: inv.id, action: 'cancelled' })}><Ban size={15} /></Icon>}
+                        {isDraft && <Icon title="Bearbeiten" cls="text-warning" onClick={() => navigate(`/invoices/${inv.id}`)}><Pencil size={15} /></Icon>}
+                        {isDraft && <Icon title="Löschen" cls="text-error" onClick={() => confirm(`${inv.number} löschen?`) && act.mutate({ id: inv.id, action: 'delete' })}><Trash2 size={15} /></Icon>}
+                      </>}
                     </div>
                   </td>
                 </tr>
@@ -297,8 +304,16 @@ export function InvoicesPage() {
   )
 }
 
-function StatusSelect({ inv, onChange }: { inv: Invoice; onChange: (s: string) => void }) {
+function StatusSelect({ inv, onChange, readOnly }: { inv: Invoice; onChange: (s: string) => void; readOnly?: boolean }) {
   const sm = STATUS_META[inv.status] ?? STATUS_META.draft
+  // Employees see the status but can't change it (status change is admin-only).
+  if (readOnly) {
+    return (
+      <span className={cn('inline-block rounded-full py-1 px-2.5 text-xs font-medium', sm.cls)}>
+        {sm.label}
+      </span>
+    )
+  }
   return (
     <div className="relative inline-block">
       <select

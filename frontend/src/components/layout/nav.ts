@@ -14,6 +14,9 @@ export interface NavLeaf {
   icon?: LucideIcon
   label: string
   badgeKey?: 'calls'
+  /** Hidden from non-admin (employee) users. Backend still enforces; this is
+   * cosmetic so employees don't see a link to a page they can't use. */
+  adminOnly?: boolean
 }
 
 export interface NavGroupDef {
@@ -50,5 +53,5 @@ export const NAV: NavEntry[] = [
       { to: '/catalog', label: 'Katalog' },
     ],
   },
-  { to: '/employees', icon: HardHat, label: 'Mitarbeiter' },
+  { to: '/employees', icon: HardHat, label: 'Mitarbeiter', adminOnly: true },
 ]

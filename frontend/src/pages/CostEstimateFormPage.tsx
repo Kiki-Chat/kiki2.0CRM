@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { apiFetch, apiPostBlob } from '../lib/api'
+import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 interface Position {
@@ -69,6 +70,7 @@ function calcTotals(positions: Position[], surcharge: number, discountPct: numbe
 }
 
 export function CostEstimateFormPage() {
+  const { isAdmin } = useMe()
   const { id } = useParams()
   const isEdit = !!id
   const [params] = useSearchParams()
@@ -359,10 +361,13 @@ export function CostEstimateFormPage() {
 
       {/* Sticky bottom bar */}
       <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-border bg-surface px-8 py-3">
-        <button onClick={() => navigate('/cost-estimates')} className="rounded-md border border-border bg-alt px-5 py-2 text-sm font-medium text-body">Abbrechen</button>
-        <button disabled={!customerId || save.isPending} onClick={() => save.mutate()} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
-          {save.isPending ? 'Speichert…' : isEdit ? 'Aktualisieren' : 'Erstellen'}
-        </button>
+        <button onClick={() => navigate('/cost-estimates')} className="rounded-md border border-border bg-alt px-5 py-2 text-sm font-medium text-body">{isAdmin ? 'Abbrechen' : 'Zurück'}</button>
+        {/* Saving KVAs is admin-only; employees can still view (PDF preview). */}
+        {isAdmin && (
+          <button disabled={!customerId || save.isPending} onClick={() => save.mutate()} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+            {save.isPending ? 'Speichert…' : isEdit ? 'Aktualisieren' : 'Erstellen'}
+          </button>
+        )}
       </div>
     </div>
   )

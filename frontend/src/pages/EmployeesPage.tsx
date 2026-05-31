@@ -11,6 +11,7 @@ import {
   ClipboardList,
   KeyRound,
   Link2,
+  Lock,
   Mail,
   Pencil,
   Plus,
@@ -27,6 +28,7 @@ import { useMemo, useState } from 'react'
 import { CsvImportModal } from '../components/CsvImportModal'
 import { Modal } from '../components/ui/Modal'
 import { apiFetch } from '../lib/api'
+import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -99,6 +101,7 @@ function AbsenceLegend() {
 
 export function EmployeesPage() {
   const qc = useQueryClient()
+  const { isAdmin, isLoading: meLoading } = useMe()
   const [tab, setTab] = useState<Tab>('employees')
   const [newOpen, setNewOpen] = useState(false)
   const [csvOpen, setCsvOpen] = useState(false)
@@ -110,6 +113,33 @@ export function EmployeesPage() {
   }
 
   const isAbsenceTab = tab === 'calendar' || tab === 'applications'
+
+  // Employee management (accounts, access roles, set-password) is admin-only on
+  // the backend, and the roster exposes sensitive HR data (rates, vacation
+  // balances). Non-admins get a restricted panel rather than 403-ing buttons.
+  // (Employee self-service absences = deferred Part C; revisit if that ships.)
+  if (!meLoading && !isAdmin) {
+    return (
+      <div className="p-8">
+        <div className="mb-6 flex items-center gap-3">
+          <Users size={26} className="text-green-primary" />
+          <h1 className="text-2xl font-bold text-text">Mitarbeiter</h1>
+        </div>
+        <div className="mx-auto mt-6 max-w-md rounded-xl border border-border bg-surface p-8 text-center">
+          <div className="mb-3 flex justify-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-alt">
+              <Lock size={22} className="text-muted" />
+            </div>
+          </div>
+          <h2 className="text-lg font-bold text-text">Nur für Administratoren</h2>
+          <p className="mt-1.5 text-sm text-muted">
+            Die Mitarbeiterverwaltung ist nur für Administratoren zugänglich. Bitte
+            wenden Sie sich an Ihren Administrator, wenn Sie Änderungen benötigen.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-8">

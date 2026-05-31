@@ -7,15 +7,14 @@ import {
   LogOut,
   Settings,
 } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../../auth/AuthProvider'
-import { apiFetch } from '../../lib/api'
+import { useMe } from '../../lib/useMe'
 import { cn, initials } from '../../lib/utils'
 import { PersonalSettingsModal } from '../PersonalSettingsModal'
-import { isGroup, NAV, type NavLeaf } from './nav'
+import { isGroup, NAV, type NavEntry, type NavLeaf } from './nav'
 
 const leafClass = ({ isActive }: { isActive: boolean }) =>
   cn(
@@ -60,15 +59,18 @@ export function Sidebar({
   const navigate = useNavigate()
   const [personalOpen, setPersonalOpen] = useState(false)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
-  // White-label: show WHICH company's CRM this is. org_name comes from /api/me
-  // (available to every user incl. employees). ProtectedRoute already primes
-  // the ['me'] cache, so this is instant.
-  const { data: me } = useQuery({
-    queryKey: ['me'],
-    queryFn: () => apiFetch<{ org_name: string | null }>('/api/me'),
-    staleTime: 5 * 60 * 1000,
-  })
+  // White-label company name + role come from /api/me (ProtectedRoute primes the
+  // ['me'] cache, so this is instant). isAdmin drives cosmetic hiding of
+  // admin-only nav entries — the backend still enforces every action.
+  const { me, isAdmin } = useMe()
   const companyName = me?.org_name
+
+  // Drop admin-only leaves (and now-empty groups) for employees.
+  const visibleNav = NAV.flatMap<NavEntry>((entry) => {
+    if (!isGroup(entry)) return entry.adminOnly && !isAdmin ? [] : [entry]
+    const children = entry.children.filter((c) => !(c.adminOnly && !isAdmin))
+    return children.length ? [{ ...entry, children }] : []
+  })
 
   const email = session?.user.email ?? 'Setup pending'
   const userName = (session?.user.user_metadata?.full_name as string) ?? 'HeyKiki User'
@@ -97,7 +99,7 @@ export function Sidebar({
 
       {/* Nav */}
       <nav className="flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden px-2.5 py-3">
-        {NAV.map((entry) => {
+        {visibleNav.map((entry) => {
           if (!isGroup(entry)) {
             return <Leaf key={entry.to} leaf={entry} collapsed={collapsed} badges={badges} />
           }
@@ -133,17 +135,22 @@ export function Sidebar({
           )
         })}
 
-        {/* AI configuration — visually separated */}
-        <div className="my-3 h-px bg-border" />
-        {!collapsed && (
-          <div className="px-2 pb-2 text-xs font-bold uppercase tracking-wide text-faint">
-            KI-Konfiguration
-          </div>
+        {/* AI configuration — admin-only (Kiki-Zentrale mutations all 403 an
+            employee); hide the whole section for non-admins. */}
+        {isAdmin && (
+          <>
+            <div className="my-3 h-px bg-border" />
+            {!collapsed && (
+              <div className="px-2 pb-2 text-xs font-bold uppercase tracking-wide text-faint">
+                KI-Konfiguration
+              </div>
+            )}
+            <NavLink to="/kiki-zentrale" className={leafClass} title="Kiki-Zentrale">
+              <Bot size={16} className="flex-shrink-0 text-ai" />
+              {!collapsed && <span className="flex-1">Kiki-Zentrale</span>}
+            </NavLink>
+          </>
         )}
-        <NavLink to="/kiki-zentrale" className={leafClass} title="Kiki-Zentrale">
-          <Bot size={16} className="flex-shrink-0 text-ai" />
-          {!collapsed && <span className="flex-1">Kiki-Zentrale</span>}
-        </NavLink>
       </nav>
 
       {/* Profile menu */}
@@ -177,12 +184,14 @@ export function Sidebar({
               >
                 <Settings size={14} /> Persönliche Einstellungen
               </DropdownMenu.Item>
-              <DropdownMenu.Item
-                onSelect={() => navigate('/settings')}
-                className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body outline-none data-[highlighted]:bg-alt"
-              >
-                <Building2 size={14} /> Firmeneinstellungen
-              </DropdownMenu.Item>
+              {isAdmin && (
+                <DropdownMenu.Item
+                  onSelect={() => navigate('/settings')}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body outline-none data-[highlighted]:bg-alt"
+                >
+                  <Building2 size={14} /> Firmeneinstellungen
+                </DropdownMenu.Item>
+              )}
               <DropdownMenu.Separator className="my-1 h-px bg-border" />
               <DropdownMenu.Item
                 onSelect={() => signOut()}

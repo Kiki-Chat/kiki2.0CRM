@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { apiFetch, apiPostBlob } from '../lib/api'
+import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 interface Position {
@@ -67,6 +68,7 @@ function calcTotals(positions: Position[], surcharge: number, discountPct: numbe
 }
 
 export function InvoiceFormPage() {
+  const { isAdmin } = useMe()
   const { id } = useParams()
   const isEdit = !!id
   const [params] = useSearchParams()
@@ -374,13 +376,18 @@ export function InvoiceFormPage() {
 
       {/* Sticky bottom bar */}
       <div className="sticky bottom-0 flex items-center justify-end gap-4 border-t border-border bg-surface px-8 py-3">
-        <button onClick={() => navigate('/invoices')} className="rounded-md border border-border bg-alt px-5 py-2 text-sm font-medium text-body">Abbrechen</button>
-        <button disabled={!customerId || busy} onClick={() => save.mutate()} className="text-sm font-medium text-body hover:text-text disabled:opacity-50">
-          {save.isPending ? 'Speichert…' : isEdit ? 'Speichern' : 'Nur erstellen'}
-        </button>
-        <button disabled={!customerId || busy} onClick={() => createSend.mutate()} className="inline-flex items-center gap-2 rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
-          <Mail size={15} /> {createSend.isPending ? 'Sendet…' : isEdit ? 'Speichern & senden' : 'Erstellen & Rechnung senden'}
-        </button>
+        <button onClick={() => navigate('/invoices')} className="rounded-md border border-border bg-alt px-5 py-2 text-sm font-medium text-body">{isAdmin ? 'Abbrechen' : 'Zurück'}</button>
+        {/* Saving invoices is admin-only; employees can still view (PDF preview). */}
+        {isAdmin && (
+          <>
+            <button disabled={!customerId || busy} onClick={() => save.mutate()} className="text-sm font-medium text-body hover:text-text disabled:opacity-50">
+              {save.isPending ? 'Speichert…' : isEdit ? 'Speichern' : 'Nur erstellen'}
+            </button>
+            <button disabled={!customerId || busy} onClick={() => createSend.mutate()} className="inline-flex items-center gap-2 rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+              <Mail size={15} /> {createSend.isPending ? 'Sendet…' : isEdit ? 'Speichern & senden' : 'Erstellen & Rechnung senden'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

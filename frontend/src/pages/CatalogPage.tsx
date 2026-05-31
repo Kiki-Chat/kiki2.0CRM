@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 
 import { Modal } from '../components/ui/Modal'
 import { apiBlobUrl, apiFetch, apiUpload } from '../lib/api'
+import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -91,6 +92,7 @@ const labelCls = 'mb-1.5 block text-xs font-semibold text-body'
 type Tab = 'positions' | 'text' | 'vehicles' | 'tools'
 
 export function CatalogPage() {
+  const { isAdmin } = useMe()
   const [tab, setTab] = useState<Tab>('positions')
   const [creating, setCreating] = useState<Tab | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -134,18 +136,24 @@ export function CatalogPage() {
             <p className="mt-0.5 text-sm text-muted">Positionen und Textbausteine verwalten</p>
           </div>
         </div>
+        {/* Create / import are admin-only (mutations 403 an employee); CSV
+            export stays available as a read action. */}
         <div className="flex items-center gap-2">
           {tab === 'positions' && (
             <>
               <button onClick={exportCsv} className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"><Download size={15} /> CSV Export</button>
-              <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"><Upload size={15} /> CSV Import</button>
-              {newBtn('Neue Position')}
-              <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f && confirm(`CSV "${f.name}" importieren?`)) importCsv.mutate(f); e.target.value = '' }} />
+              {isAdmin && (
+                <>
+                  <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"><Upload size={15} /> CSV Import</button>
+                  {newBtn('Neue Position')}
+                  <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f && confirm(`CSV "${f.name}" importieren?`)) importCsv.mutate(f); e.target.value = '' }} />
+                </>
+              )}
             </>
           )}
-          {tab === 'text' && newBtn('Neuer Textbaustein')}
-          {tab === 'vehicles' && newBtn('Neues Fahrzeug')}
-          {tab === 'tools' && newBtn('Neues Werkzeug')}
+          {isAdmin && tab === 'text' && newBtn('Neuer Textbaustein')}
+          {isAdmin && tab === 'vehicles' && newBtn('Neues Fahrzeug')}
+          {isAdmin && tab === 'tools' && newBtn('Neues Werkzeug')}
         </div>
       </div>
 
@@ -176,6 +184,7 @@ export function CatalogPage() {
 // ─── Positionen tab ──────────────────────────────────────────────────────────
 function PositionsTab({ items, flash }: { items: CatalogItem[]; flash: (m: string) => void }) {
   const qc = useQueryClient()
+  const { isAdmin } = useMe()
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('all')
   const [status, setStatus] = useState('active')
@@ -234,7 +243,7 @@ function PositionsTab({ items, flash }: { items: CatalogItem[]; flash: (m: strin
                 <td className="px-4 py-3 text-right text-body">{i.purchase_price != null ? money(i.purchase_price) : '–'}</td>
                 <td className="px-4 py-3 text-right text-body">{margin(i.unit_price, i.purchase_price)}</td>
                 <td className="px-4 py-3"><span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', i.is_active ? 'bg-success-bg text-success' : 'bg-alt text-muted')}>{i.is_active ? 'Aktiv' : 'Inaktiv'}</span></td>
-                <td className="px-4 py-3"><div className="flex items-center justify-end gap-1"><button title="Bearbeiten" onClick={() => setEditing(i)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button><button title="Löschen" onClick={() => confirm(`${i.name} löschen?`) && del.mutate(i.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button></div></td>
+                <td className="px-4 py-3"><div className="flex items-center justify-end gap-1">{isAdmin && <><button title="Bearbeiten" onClick={() => setEditing(i)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button><button title="Löschen" onClick={() => confirm(`${i.name} löschen?`) && del.mutate(i.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button></>}</div></td>
               </tr>
             ))}
             {!filtered.length && <tr><td colSpan={10} className="px-4 py-12 text-center text-muted">Keine Positionen.</td></tr>}
@@ -258,6 +267,7 @@ function SummaryCard({ color, label, value }: { color: string; label: string; va
 // ─── Textbausteine tab ───────────────────────────────────────────────────────
 function TextModulesTab({ modules, flash, onCreate }: { modules: TextModule[]; flash: (m: string) => void; onCreate: () => void }) {
   const qc = useQueryClient()
+  const { isAdmin } = useMe()
   const [cat, setCat] = useState('all')
   const [editing, setEditing] = useState<TextModule | null>(null)
   const filtered = modules.filter((m) => cat === 'all' || m.category === cat)
@@ -286,10 +296,12 @@ function TextModulesTab({ modules, flash, onCreate }: { modules: TextModule[]; f
                 </div>
                 <div className="mt-0.5 truncate text-sm text-muted">{m.content}</div>
               </div>
-              <div className="flex items-center gap-1">
-                <button title="Bearbeiten" onClick={() => setEditing(m)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button>
-                <button title="Löschen" onClick={() => confirm(`${m.name} löschen?`) && del.mutate(m.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button>
-              </div>
+              {isAdmin && (
+                <div className="flex items-center gap-1">
+                  <button title="Bearbeiten" onClick={() => setEditing(m)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button>
+                  <button title="Löschen" onClick={() => confirm(`${m.name} löschen?`) && del.mutate(m.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -298,7 +310,7 @@ function TextModulesTab({ modules, flash, onCreate }: { modules: TextModule[]; f
           <FileText size={44} className="mx-auto mb-4 text-faint" strokeWidth={1.5} />
           <div className="text-lg font-bold text-text">Keine Textbausteine vorhanden</div>
           <p className="mt-1 text-sm text-muted">Erstellen Sie Ihren ersten Textbaustein.</p>
-          <button onClick={onCreate} className="mt-4 inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110">+ Textbaustein erstellen</button>
+          {isAdmin && <button onClick={onCreate} className="mt-4 inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110">+ Textbaustein erstellen</button>}
         </div>
       )}
       {editing && <TextModuleModal module={editing} onClose={() => setEditing(null)} onSaved={() => { qc.invalidateQueries({ queryKey: ['text-modules'] }); setEditing(null) }} />}
@@ -308,6 +320,7 @@ function TextModulesTab({ modules, flash, onCreate }: { modules: TextModule[]; f
 
 // ─── Fahrzeuge tab ───────────────────────────────────────────────────────────
 function VehiclesTab({ vehicles, flash }: { vehicles: Vehicle[]; flash: (m: string) => void }) {
+  const { isAdmin } = useMe()
   const qc = useQueryClient()
   const [status, setStatus] = useState('all')
   const [editing, setEditing] = useState<Vehicle | null>(null)
@@ -333,7 +346,7 @@ function VehiclesTab({ vehicles, flash }: { vehicles: Vehicle[]; flash: (m: stri
                 <td className="px-5 py-3.5 text-body">{v.vehicle_type || '–'}</td>
                 <td className="px-5 py-3.5"><span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', s.cls)}>{s.l}</span></td>
                 <td className="px-5 py-3.5 text-body">{fmtDate(v.next_appointment)}</td>
-                <td className="px-5 py-3.5"><div className="flex items-center justify-end gap-1"><button title="Bearbeiten" onClick={() => setEditing(v)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button><button title="Deaktivieren" onClick={() => confirm(`${v.name} deaktivieren?`) && del.mutate(v.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button></div></td>
+                <td className="px-5 py-3.5"><div className="flex items-center justify-end gap-1">{isAdmin && <><button title="Bearbeiten" onClick={() => setEditing(v)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button><button title="Deaktivieren" onClick={() => confirm(`${v.name} deaktivieren?`) && del.mutate(v.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button></>}</div></td>
               </tr>
             )})}
             {!filtered.length && <tr><td colSpan={6} className="px-5 py-12 text-center text-muted">Keine Fahrzeuge.</td></tr>}
@@ -347,6 +360,7 @@ function VehiclesTab({ vehicles, flash }: { vehicles: Vehicle[]; flash: (m: stri
 
 // ─── Werkzeug tab ────────────────────────────────────────────────────────────
 function ToolsTab({ tools, flash }: { tools: Tool[]; flash: (m: string) => void }) {
+  const { isAdmin } = useMe()
   const qc = useQueryClient()
   const [cond, setCond] = useState('all')
   const [editing, setEditing] = useState<Tool | null>(null)
@@ -371,7 +385,7 @@ function ToolsTab({ tools, flash }: { tools: Tool[]; flash: (m: string) => void 
                 <td className="px-5 py-3.5 text-body">{t.serial_number || '–'}</td>
                 <td className="px-5 py-3.5"><span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', c.cls)}>{c.l}</span></td>
                 <td className="px-5 py-3.5 text-body">{fmtDate(t.next_maintenance)}</td>
-                <td className="px-5 py-3.5"><div className="flex items-center justify-end gap-1"><button title="Bearbeiten" onClick={() => setEditing(t)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button><button title="Deaktivieren" onClick={() => confirm(`${t.name} deaktivieren?`) && del.mutate(t.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button></div></td>
+                <td className="px-5 py-3.5"><div className="flex items-center justify-end gap-1">{isAdmin && <><button title="Bearbeiten" onClick={() => setEditing(t)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button><button title="Deaktivieren" onClick={() => confirm(`${t.name} deaktivieren?`) && del.mutate(t.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button></>}</div></td>
               </tr>
             )})}
             {!filtered.length && <tr><td colSpan={6} className="px-5 py-12 text-center text-muted">Keine Werkzeuge.</td></tr>}

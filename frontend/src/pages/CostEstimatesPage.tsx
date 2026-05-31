@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
 import { apiBlobUrl, apiFetch } from '../lib/api'
+import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 interface Estimate {
@@ -56,6 +57,7 @@ const fmtDate = (d: string | null) =>
 export function CostEstimatesPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { isAdmin } = useMe()
   const [num, setNum] = useState('')
   const [customer, setCustomer] = useState('')
   const [status, setStatus] = useState('all')
@@ -134,12 +136,14 @@ export function CostEstimatesPage() {
             <p className="mt-0.5 text-sm text-muted">{estimates.length} Kostenvoranschläge</p>
           </div>
         </div>
-        <button
-          onClick={() => navigate('/cost-estimates/new')}
-          className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
-        >
-          + Neuer KVA
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => navigate('/cost-estimates/new')}
+            className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
+          >
+            + Neuer KVA
+          </button>
+        )}
       </div>
 
       {/* Filter */}
@@ -247,12 +251,15 @@ export function CostEstimatesPage() {
                     <div className="flex items-center justify-end gap-0.5 text-muted">
                       <Icon title="Vorschau" onClick={() => openPdf(e.id, false)}><Eye size={15} /></Icon>
                       <Icon title="PDF herunterladen" onClick={() => openPdf(e.id, true)}><Download size={15} /></Icon>
-                      {isDraft && <Icon title="Bearbeiten" cls="text-warning" onClick={() => navigate(`/cost-estimates/${e.id}`)}><Pencil size={15} /></Icon>}
-                      <Icon title="Per E-Mail senden" cls="text-info" onClick={() => setSendFor(e)}><Mail size={15} /></Icon>
-                      <Icon title="Duplizieren" cls="text-ai" onClick={() => act.mutate({ id: e.id, action: 'duplicate' })}><Copy size={15} /></Icon>
-                      {e.status !== 'accepted' && <Icon title="Als akzeptiert markieren" cls="text-success" onClick={() => act.mutate({ id: e.id, action: 'accepted' })}><CheckCircle2 size={15} /></Icon>}
-                      <Icon title="In Rechnung umwandeln" cls="text-green-deep" onClick={() => navigate(`/invoices/new?kva_id=${e.id}`)}><FileText size={15} /></Icon>
-                      {isDraft && <Icon title="Löschen" cls="text-error" onClick={() => confirm(`${e.number} löschen?`) && act.mutate({ id: e.id, action: 'delete' })}><Trash2 size={15} /></Icon>}
+                      {/* Mutations are admin-only on the backend — hidden for employees. */}
+                      {isAdmin && <>
+                        {isDraft && <Icon title="Bearbeiten" cls="text-warning" onClick={() => navigate(`/cost-estimates/${e.id}`)}><Pencil size={15} /></Icon>}
+                        <Icon title="Per E-Mail senden" cls="text-info" onClick={() => setSendFor(e)}><Mail size={15} /></Icon>
+                        <Icon title="Duplizieren" cls="text-ai" onClick={() => act.mutate({ id: e.id, action: 'duplicate' })}><Copy size={15} /></Icon>
+                        {e.status !== 'accepted' && <Icon title="Als akzeptiert markieren" cls="text-success" onClick={() => act.mutate({ id: e.id, action: 'accepted' })}><CheckCircle2 size={15} /></Icon>}
+                        <Icon title="In Rechnung umwandeln" cls="text-green-deep" onClick={() => navigate(`/invoices/new?kva_id=${e.id}`)}><FileText size={15} /></Icon>
+                        {isDraft && <Icon title="Löschen" cls="text-error" onClick={() => confirm(`${e.number} löschen?`) && act.mutate({ id: e.id, action: 'delete' })}><Trash2 size={15} /></Icon>}
+                      </>}
                     </div>
                   </td>
                 </tr>

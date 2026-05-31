@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity, BadgeEuro, BookOpen, Bot, CalendarClock, FileSpreadsheet,
-  History, ListChecks, Phone, PhoneOutgoing, RotateCcw, Siren, Sparkles, Tags, Wrench,
+  History, ListChecks, Lock, Phone, PhoneOutgoing, RotateCcw, Siren, Sparkles, Tags, Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -14,6 +14,7 @@ import { VerlaufSection } from '../components/kiki/VerlaufSection'
 import { Modal } from '../components/ui/Modal'
 import { apiFetch } from '../lib/api'
 import { KZ, KZ_STALE, minutesAgo, SECTION_ENDPOINT_LABEL, type KzAudit, type KzHealth, type KzOverview } from '../lib/kikiApi'
+import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 interface NavItem { slug: string; label: string; icon: LucideIcon }
@@ -45,6 +46,7 @@ export function KikiZentralePage() {
   const { section = 'verhalten' } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { isAdmin, isLoading: meLoading } = useMe()
   const [toast, setToast] = useState<string | null>(null)
   const [healthOpen, setHealthOpen] = useState(false)
   const [rollbackSnap, setRollbackSnap] = useState<string | null>(null)
@@ -63,6 +65,31 @@ export function KikiZentralePage() {
   })
 
   if (!ALL_SLUGS.has(section)) return <Navigate to="/kiki-zentrale/verhalten" replace />
+
+  // Kiki-Zentrale is the AI control surface — every mutation is admin-only on the
+  // backend. Non-admins get a restricted panel instead of forms that 403.
+  if (!meLoading && !isAdmin) {
+    return (
+      <div className="p-8">
+        <div className="mb-6 flex items-center gap-3">
+          <Bot size={26} className="text-ai" />
+          <h1 className="text-2xl font-bold text-text">Kiki-Zentrale</h1>
+        </div>
+        <div className="mx-auto mt-6 max-w-md rounded-xl border border-border bg-surface p-8 text-center">
+          <div className="mb-3 flex justify-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-alt">
+              <Lock size={22} className="text-muted" />
+            </div>
+          </div>
+          <h2 className="text-lg font-bold text-text">Nur für Administratoren</h2>
+          <p className="mt-1.5 text-sm text-muted">
+            Die Kiki-Zentrale (KI-Konfiguration) ist nur für Administratoren
+            zugänglich. Bitte wenden Sie sich an Ihren Administrator.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   const agent = data?.agent
   const healthy = !!agent?.reachable && !!agent?.audio_event_present
