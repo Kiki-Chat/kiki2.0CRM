@@ -7,14 +7,33 @@ export function KpiCard({
   value,
   sub,
   icon: Icon,
+  onClick,
 }: {
   label: string
   value: string | number
   sub?: string
   icon?: LucideIcon
+  onClick?: () => void
 }) {
+  const clickable = !!onClick
   return (
-    <Card className="flex items-center gap-4 p-5">
+    <Card
+      variant={clickable ? 'interactive' : 'standard'}
+      className="flex items-center gap-4 p-5"
+      onClick={onClick}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onClick?.()
+              }
+            }
+          : undefined
+      }
+    >
       {Icon && (
         <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-green-tint-100">
           <Icon size={18} className="text-green-deep" />

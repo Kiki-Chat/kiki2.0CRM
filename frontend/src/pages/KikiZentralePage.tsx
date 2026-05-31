@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Activity, BadgeEuro, BookOpen, Bot, CalendarClock, FileSpreadsheet, FileText,
+  Activity, BadgeEuro, BookOpen, Bot, CalendarClock, FileSpreadsheet,
   History, ListChecks, Phone, PhoneOutgoing, RotateCcw, Siren, Sparkles, Tags, Wrench,
   type LucideIcon,
 } from 'lucide-react'
@@ -8,7 +8,6 @@ import { useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import { AusgehendeSection, BrancheKontextSection, KvaAutomationSection, LeistungsangebotSection, NotdienstSection, PflichtfelderSection, PreisauskunftSection, TelefonSection, TerminkategorienSection, TerminregelnSection } from '../components/kiki/ConfigSections'
-import { PromptEditorSection } from '../components/kiki/PromptEditorSection'
 import { ConfirmDialog } from '../components/kiki/shared'
 import { VerhaltenSection } from '../components/kiki/VerhaltenSection'
 import { VerlaufSection } from '../components/kiki/VerlaufSection'
@@ -21,7 +20,6 @@ interface NavItem { slug: string; label: string; icon: LucideIcon }
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: 'Konfiguration', items: [
     { slug: 'verhalten', label: 'Verhalten', icon: Sparkles },
-    { slug: 'prompt-editor', label: 'Prompt-Editor', icon: FileText },
     { slug: 'pflichtfelder', label: 'Pflichtfelder', icon: ListChecks },
     { slug: 'branche-kontext', label: 'Branche & Kontext', icon: BookOpen },
   ] },
@@ -156,7 +154,6 @@ export function KikiZentralePage() {
 function SectionContent({ section, data, flash }: { section: string; data: KzOverview; flash: (m: string) => void }) {
   switch (section) {
     case 'verhalten': return <VerhaltenSection data={data} flash={flash} />
-    case 'prompt-editor': return <PromptEditorSection flash={flash} />
     case 'pflichtfelder': return <PflichtfelderSection data={data} flash={flash} />
     case 'branche-kontext': return <BrancheKontextSection data={data} flash={flash} />
     case 'terminregeln': return <TerminregelnSection data={data} flash={flash} />

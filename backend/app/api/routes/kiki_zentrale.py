@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_org
+from app.api.deps import CurrentUser, require_org, require_super_admin
 from app.db.supabase_client import get_service_client
 from app.services import elevenlabs_agent as ea
 
@@ -362,7 +362,7 @@ async def update_verhalten(payload: VerhaltenUpdate, user: CurrentUser = Depends
 
 # ─── Prompt-Editor (ElevenLabs) ──────────────────────────────────────────────
 @router.get("/prompt")
-async def get_prompt(user: CurrentUser = Depends(require_org)) -> dict:
+async def get_prompt(user: CurrentUser = Depends(require_super_admin)) -> dict:
     def _do() -> dict:
         agent_id = ea.get_org_agent_id(user.org_id)
         current = ea._get_path(ea.get_agent_config(agent_id), ea.PROMPT_PATH) or ""
@@ -395,9 +395,7 @@ async def get_prompt(user: CurrentUser = Depends(require_org)) -> dict:
 
 
 @router.patch("/prompt")
-async def update_prompt(payload: PromptUpdate, user: CurrentUser = Depends(require_org)) -> dict:
-    _require_admin(user)
-
+async def update_prompt(payload: PromptUpdate, user: CurrentUser = Depends(require_super_admin)) -> dict:
     def _do() -> dict:
         agent_id = ea.get_org_agent_id(user.org_id)
         ea.patch_agent_safely(
@@ -415,7 +413,7 @@ async def update_prompt(payload: PromptUpdate, user: CurrentUser = Depends(requi
 
 
 @router.post("/prompt/diff")
-async def prompt_diff(payload: PromptDiffRequest, user: CurrentUser = Depends(require_org)) -> dict:
+async def prompt_diff(payload: PromptDiffRequest, user: CurrentUser = Depends(require_super_admin)) -> dict:
     def _do() -> dict:
         agent_id = ea.get_org_agent_id(user.org_id)
         current = ea._get_path(ea.get_agent_config(agent_id), ea.PROMPT_PATH) or ""

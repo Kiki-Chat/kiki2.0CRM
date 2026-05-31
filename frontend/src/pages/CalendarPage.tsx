@@ -7,7 +7,7 @@ import listPlugin from '@fullcalendar/list'
 import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import { Check, ChevronDown, Clock, Plus, RefreshCw, Upload } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
@@ -91,6 +91,8 @@ export function CalendarPage() {
   const [searchParams] = useSearchParams()
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
+  const calRef = useRef<FullCalendar | null>(null)
+  const focusedApptRef = useRef(false)
   const [range, setRange] = useState<{ from: string; to: string } | null>(null)
   const [filter, setFilter] = useState<Filter>(() => searchParams.get('employee') || 'all')
   const [detail, setDetail] = useState<Appointment | null>(null)
@@ -118,6 +120,26 @@ export function CalendarPage() {
     queryFn: () => apiFetch<Appointment[]>(`/api/appointments?from=${range!.from}&to=${range!.to}`),
     enabled: !!range,
   })
+
+  // Deep-link focus: the dashboard "Anstehende Termine" rows link here with
+  // ?date=<YYYY-MM-DD>&appointment=<id>. Jump the calendar to that date so the
+  // event is in view; once that month's appointments load, open the matching
+  // appointment's detail modal exactly once.
+  useEffect(() => {
+    const dateStr = searchParams.get('date')
+    if (dateStr && calRef.current) calRef.current.getApi().gotoDate(dateStr)
+    focusedApptRef.current = false
+  }, [searchParams])
+
+  useEffect(() => {
+    const apptId = searchParams.get('appointment')
+    if (!apptId || focusedApptRef.current) return
+    const appt = appointments.find((a) => a.id === apptId)
+    if (appt) {
+      setDetail(appt)
+      focusedApptRef.current = true
+    }
+  }, [appointments, searchParams])
 
   const events = useMemo(
     () =>
@@ -349,6 +371,7 @@ export function CalendarPage() {
       {/* Calendar */}
       <div className="min-h-0 flex-1 rounded-xl border border-border bg-surface p-4">
         <FullCalendar
+          ref={calRef}
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
           initialView="dayGridMonth"
           locale={deLocale}
