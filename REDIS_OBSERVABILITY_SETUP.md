@@ -60,7 +60,7 @@ Recommended order + the writes that MUST invalidate:
 - Caching: unset `REDIS_URL` (or remove the Redis service) → layer goes dormant
   instantly; no code change.
 - Observability: set `OBSERVABILITY_ENABLED=0` → middleware not registered.
-- Code: `git revert <item4-sha>` if you want it out of the tree entirely.
+- Code: `git revert 2e80b19` if you want it out of the tree entirely.
 
 ## Tests
 `backend/tests/test_cache.py` (cross-org isolation, get_or_set, invalidation,
