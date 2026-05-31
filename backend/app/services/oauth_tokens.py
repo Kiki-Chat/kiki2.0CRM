@@ -93,25 +93,57 @@ def get_connection(org_id: str, provider: str) -> dict | None:
 
 
 def list_connections(org_id: str) -> list[dict]:
-    """Connection status for the org — never returns token material."""
+    """Connection status for the org — never returns token material.
+
+    ``connected`` reflects a genuinely USABLE credential, not mere row-existence:
+    a row whose access or refresh token actually decrypts under the current
+    ``SETTINGS_ENC_KEY``. A row whose tokens can't be decrypted (wrong/rotated
+    key, or a tampered value) is reported ``connected=False`` with
+    ``status="token_unreadable"`` — surfacing the problem instead of a misleading
+    green badge. The token material itself is never returned (only booleans /
+    a status string). ``status`` is one of:
+      * ``"ok"``               — at least one token decrypts → usable
+      * ``"token_unreadable"`` — ciphertext present but won't decrypt (key issue)
+      * ``"no_token"``         — row exists but no ciphertext stored (re-connect)
+    """
     rows = (
         get_service_client()
         .table(_TABLE)
-        .select("provider, account_email, token_expires_at, updated_at")
+        .select(
+            "provider, account_email, token_expires_at, updated_at, "
+            "access_token_encrypted, refresh_token_encrypted"
+        )
         .eq("org_id", org_id)
         .execute()
         .data
         or []
     )
-    return [
-        {
-            "provider": r["provider"],
-            "connected": True,
-            "account_email": r.get("account_email"),
-            "token_expires_at": r.get("token_expires_at"),
-        }
-        for r in rows
-    ]
+    out: list[dict] = []
+    for r in rows:
+        has_ciphertext = bool(
+            r.get("access_token_encrypted") or r.get("refresh_token_encrypted")
+        )
+        # decrypt() logs on failure, so a key problem also lands in the logs.
+        usable = bool(
+            decrypt(r.get("access_token_encrypted"))
+            or decrypt(r.get("refresh_token_encrypted"))
+        )
+        if usable:
+            status = "ok"
+        elif has_ciphertext:
+            status = "token_unreadable"
+        else:
+            status = "no_token"
+        out.append(
+            {
+                "provider": r["provider"],
+                "connected": usable,
+                "status": status,
+                "account_email": r.get("account_email"),
+                "token_expires_at": r.get("token_expires_at"),
+            }
+        )
+    return out
 
 
 def delete_connection(org_id: str, provider: str) -> int:

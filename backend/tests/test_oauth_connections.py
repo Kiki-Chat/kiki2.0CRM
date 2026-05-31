@@ -238,11 +238,62 @@ def test_list_connections_never_leaks_tokens(monkeypatch):
         {
             "provider": "google",
             "connected": True,
+            "status": "ok",
             "account_email": "g@x.de",
             "token_expires_at": None,
         }
     ]
     assert "access_token_encrypted" not in out[0]
+    assert "refresh_token_encrypted" not in out[0]
+
+
+def test_list_connections_unreadable_token_is_not_green(monkeypatch, caplog):
+    """A row whose ciphertext won't decrypt (wrong/rotated SETTINGS_ENC_KEY or a
+    tampered value) must report connected=False + status='token_unreadable',
+    NOT a misleading green — and the decrypt failure is logged."""
+    import logging
+
+    rows = [
+        {
+            "org_id": "org-1",
+            "provider": "google",
+            "account_email": "g@x.de",
+            "token_expires_at": None,
+            "access_token_encrypted": "not-a-valid-fernet-token",
+            "refresh_token_encrypted": "also-garbage",
+        }
+    ]
+    monkeypatch.setattr(
+        oauth_tokens, "get_service_client", lambda: _TokDB({"oauth_connections": rows})
+    )
+    with caplog.at_level(logging.WARNING, logger="app.core.crypto"):
+        out = oauth_tokens.list_connections("org-1")
+
+    assert out[0]["connected"] is False
+    assert out[0]["status"] == "token_unreadable"
+    assert "access_token_encrypted" not in out[0]
+    # decrypt() logged the failure (visibility for a key problem).
+    assert any("InvalidToken" in r.getMessage() for r in caplog.records)
+
+
+def test_list_connections_no_token_status(monkeypatch):
+    """A row with no ciphertext stored → connected=False, status='no_token'."""
+    rows = [
+        {
+            "org_id": "org-1",
+            "provider": "microsoft",
+            "account_email": "m@x.de",
+            "token_expires_at": None,
+            "access_token_encrypted": None,
+            "refresh_token_encrypted": None,
+        }
+    ]
+    monkeypatch.setattr(
+        oauth_tokens, "get_service_client", lambda: _TokDB({"oauth_connections": rows})
+    )
+    out = oauth_tokens.list_connections("org-1")
+    assert out[0]["connected"] is False
+    assert out[0]["status"] == "no_token"
 
 
 def test_refresh_access_token_posts_grant_type(monkeypatch):

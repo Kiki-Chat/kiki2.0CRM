@@ -6,9 +6,13 @@ backend refuses to start without a valid key — rather than silently storing
 plaintext and failing a random PATCH days later.
 """
 
+import logging
+
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _GENERATE_HINT = (
     'python -c "from cryptography.fernet import Fernet; '
@@ -39,10 +43,24 @@ def encrypt(plaintext: str | None) -> str | None:
 
 
 def decrypt(token: str | None) -> str | None:
-    """Decrypt a stored secret. Returns None if absent or tampered."""
+    """Decrypt a stored secret.
+
+    Returns None when absent (``token`` falsy) — the legitimate "nothing stored"
+    case — and ALSO None when the ciphertext fails to decrypt, but the failure is
+    LOGGED first. A wrong/rotated ``SETTINGS_ENC_KEY`` makes EVERY stored secret
+    fail to decrypt; logging it (rather than silently returning None) means a key
+    problem surfaces in the logs instead of masquerading as "no token stored".
+    The token/ciphertext is never logged.
+    """
     if not token:
         return None
     try:
         return _fernet.decrypt(token.encode()).decode()
     except InvalidToken:
+        logger.warning(
+            "crypto.decrypt: ciphertext could not be decrypted (InvalidToken). "
+            "Most likely SETTINGS_ENC_KEY is wrong or was rotated (this affects "
+            "ALL stored credentials), or the stored value was tampered with. "
+            "Returning None — the caller will see this as a missing credential."
+        )
         return None
