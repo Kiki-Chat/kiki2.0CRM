@@ -95,6 +95,17 @@ def send_email(
     config = _load_email_config(org_id_str)
     org_name = _load_org_name(org_id_str)
 
+    # Reply-To resolves to the org's CONNECTED sending account (the inbox the
+    # tradesperson linked) so a recipient's reply lands with them — not the
+    # generic org address or HeyKiki. Applied uniformly to every tier (so even a
+    # Brevo-fallback send still replies to the connected account). Falls back to
+    # the caller-supplied reply_to (typically the org email) when nothing is
+    # connected. Empty-string config values are treated as "not set".
+    sending_account = None
+    if config:
+        sending_account = config.get("oauth_account_email") or config.get("smtp_sender_email")
+    reply_to = sending_account or reply_to
+
     # ── Tier 1: OAuth (Gmail / Microsoft) ─────────────────────────────────
     if config and config.get("oauth_provider") and config.get(
         "oauth_refresh_token_encrypted"

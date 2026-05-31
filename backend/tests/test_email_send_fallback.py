@@ -467,3 +467,50 @@ def test_brevo_failure_modes_handled_not_unhandled_crash(monkeypatch, mode):
     assert "All email tiers failed" in msg
     assert "brevo_smtp_failed" in msg
     assert _FakeSMTP.instances == []  # Brevo is HTTP now — no SMTP session opened
+
+
+# ─── Reply-To resolves to the CONNECTED sending account (not the org email) ──
+def test_reply_to_defaults_to_connected_oauth_account(monkeypatch):
+    """Gmail connected → Reply-To is the connected account (oauth_account_email),
+    NOT the caller-supplied org email — so a recipient's reply reaches the
+    tradesperson's own inbox."""
+    _patch_db(monkeypatch, email_config=_config_oauth_google())
+    _patch_oauth_creds(monkeypatch)
+    captured: dict = {}
+    monkeypatch.setattr(es, "_gmail_api_send", lambda **kw: captured.update(kw) or "msg-1")
+
+    res = send_email(
+        org_id=ORG_ID, to_email=TO_EMAIL, subject="S", body_html="<p>x</p>",
+        reply_to="info@kikichat.de",  # caller's org email — must be overridden
+    )
+    assert res.provider_used == "gmail_oauth"
+    assert captured["reply_to"] == "agrawalamber01@gmail.com"
+
+
+def test_reply_to_uses_smtp_sender_when_only_smtp(monkeypatch):
+    """SMTP-only org → Reply-To is the configured SMTP sender address."""
+    _patch_db(monkeypatch, email_config=_config_smtp())
+    captured: dict = {}
+    monkeypatch.setattr(es, "_send_via_customer_smtp", lambda **kw: captured.update(kw) or "m")
+
+    res = send_email(
+        org_id=ORG_ID, to_email=TO_EMAIL, subject="S", body_html="<p>x</p>",
+        reply_to="info@kikichat.de",
+    )
+    assert res.provider_used == "customer_smtp"
+    assert captured["reply_to"] == "amber@example.com"
+
+
+def test_reply_to_falls_back_to_caller_when_nothing_connected(monkeypatch):
+    """No OAuth + no customer SMTP → Reply-To stays the caller-supplied org email."""
+    _patch_db(monkeypatch, email_config=None)
+    _patch_brevo_creds(monkeypatch)
+    captured: dict = {}
+    monkeypatch.setattr(es, "_send_via_brevo", lambda **kw: captured.update(kw) or "b")
+
+    res = send_email(
+        org_id=ORG_ID, to_email=TO_EMAIL, subject="S", body_html="<p>x</p>",
+        reply_to="info@kikichat.de",
+    )
+    assert res.provider_used == "brevo_smtp"
+    assert captured["reply_to"] == "info@kikichat.de"

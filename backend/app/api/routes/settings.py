@@ -279,9 +279,22 @@ async def email_test(user: CurrentUser = Depends(require_org)) -> dict:
             client.table("organizations").select("name, email")
             .eq("id", user.org_id).limit(1).execute().data or [{}]
         )[0]
-        to_email = org.get("email")
+        ec = (
+            client.table("email_configs")
+            .select("oauth_account_email, smtp_sender_email")
+            .eq("org_id", user.org_id).limit(1).execute().data or [None]
+        )[0]
+        # Send the test to the CONNECTED sending account's own inbox — that's
+        # where a tradesperson clicking "Test-E-Mail" expects it to arrive (the
+        # account they just linked). Fall back to the org email when nothing is
+        # connected (SMTP / Brevo-only).
+        to_email = (
+            (ec or {}).get("oauth_account_email")
+            or (ec or {}).get("smtp_sender_email")
+            or org.get("email")
+        )
         if not to_email:
-            return {"success": False, "message": "Keine Organisations-E-Mail hinterlegt."}
+            return {"success": False, "message": "Keine Empfänger-E-Mail hinterlegt."}
         try:
             result = send_email(
                 org_id=user.org_id,

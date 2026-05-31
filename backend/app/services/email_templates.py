@@ -48,6 +48,26 @@ def render_message_email(*, company_name: str | None, message_text: str | None) 
     return render_email(company_name=company_name, body_html=message_to_html(message_text))
 
 
+_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+
+
+def substitute(template: str | None, **values: str) -> str:
+    """Substitute ``{key}`` placeholders from ``values`` into a customer-authored
+    template. Unknown ``{placeholders}`` and stray/literal braces are left
+    untouched.
+
+    Unlike ``str.format``, this NEVER raises on a template that contains a
+    literal ``{`` / ``}`` or an unrecognised placeholder — a malformed template
+    degrades to (mostly) literal text instead of crashing the whole send with a
+    500. Known keys today: ``number`` / ``customer_name`` / ``org_name``.
+    """
+    if not template:
+        return template or ""
+    return _PLACEHOLDER_RE.sub(
+        lambda m: str(values.get(m.group(1), m.group(0))), template
+    )
+
+
 _SHELL = r"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="de">
 <head>

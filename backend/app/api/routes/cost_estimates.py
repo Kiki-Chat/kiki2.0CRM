@@ -303,16 +303,18 @@ def _build_kva_email(
 
     subject = (
         payload.subject
-        or (tpl_subject.format(
-            number=number, customer_name=cust_name, org_name=org_name,
+        or (email_templates.substitute(
+            tpl_subject, number=number, customer_name=cust_name, org_name=org_name,
+            firmenname=org_name, kundename=cust_name, rechnungsnummer=number, kvanummer=number,
         ) if tpl_subject else None)
         or f"{type_label} {number} von {org_name}"
     )
     if payload.message:
         body_text = payload.message
     elif tpl_body:
-        body_text = tpl_body.format(
-            number=number, customer_name=cust_name, org_name=org_name,
+        body_text = email_templates.substitute(
+            tpl_body, number=number, customer_name=cust_name, org_name=org_name,
+            firmenname=org_name, kundename=cust_name, rechnungsnummer=number, kvanummer=number,
         )
     else:
         greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
