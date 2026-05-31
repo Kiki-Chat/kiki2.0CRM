@@ -60,6 +60,20 @@ class Settings(BaseSettings):
     # BREVO_API_KEY. The key stays in env — never hardcoded.
     brevo_api_key: str = Field(default="", validation_alias="BREVO_API_KEY")
 
+    # ── Redis cache + observability (Item 4 — dormant until set) ───────────
+    # The cache layer (app/core/cache.py) is DISABLED while redis_url is empty:
+    # every operation is a no-op / cache-miss, so the app behaves exactly as it
+    # does today. Set REDIS_URL (e.g. the Railway Redis add-on's private URL) to
+    # activate caching. NEVER hardcode the URL — it carries a password.
+    redis_url: str = Field(default="", validation_alias="REDIS_URL")
+    # Namespace prefix so two environments can share one Redis without collisions.
+    cache_prefix: str = "kj"
+    # Default TTL (seconds) for cached entries when a caller doesn't specify one.
+    cache_default_ttl: int = 300
+    # Gate for the structured-logging + request-context middleware (off by default
+    # so it ships dormant and only activates under supervision).
+    observability_enabled: bool = Field(default=False, validation_alias="OBSERVABILITY_ENABLED")
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

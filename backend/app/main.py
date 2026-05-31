@@ -47,6 +47,15 @@ from app.core.config import settings
 
 app = FastAPI(title="HeyKiki Portal API", version="0.1.0")
 
+# Observability (Item 4) — dormant unless OBSERVABILITY_ENABLED=1. Structured
+# JSON logging + a request-context middleware (request id, timing, access log).
+if settings.observability_enabled:
+    from app.core.logging_config import configure_logging
+    from app.core.observability import RequestContextMiddleware
+
+    configure_logging()
+    app.add_middleware(RequestContextMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, require_org_admin
+from app.core import cache
 from app.core.crypto import encrypt
 from app.db.supabase_client import get_service_client
 from app.services.common import now_berlin
@@ -159,6 +160,11 @@ def _update_org(org_id: str, fields: dict) -> dict:
     client = get_service_client()
     if fields:
         client.table("organizations").update(fields).eq("id", org_id).execute()
+        # Item 4: the org row backs the cached `org_name` (PATCH /general changes
+        # it). Invalidate on any org write so a renamed company never serves stale.
+        # No-op until caching is enabled. NOTE for rollout: super-admin org edits
+        # must also invalidate `org_name` when caching is turned on.
+        cache.invalidate(org_id, "org_name")
     return (client.table("organizations").select("*").eq("id", org_id).limit(1).execute().data or [{}])[0]
 
 

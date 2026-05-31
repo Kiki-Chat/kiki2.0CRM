@@ -2,22 +2,29 @@ from fastapi import APIRouter, Depends
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, get_current_user
+from app.core import cache
 from app.db.supabase_client import get_service_client
 
 router = APIRouter(prefix="/api", tags=["me"])
 
 
 def _org_name(org_id: str) -> str | None:
-    rows = (
-        get_service_client()
-        .table("organizations")
-        .select("name")
-        .eq("id", org_id)
-        .limit(1)
-        .execute()
-        .data
-    )
-    return rows[0].get("name") if rows else None
+    # Reference cache target (Item 4): read on every page load (sidebar + /api/me),
+    # changes only via PATCH /api/settings/general (single writer → unambiguous
+    # invalidation). org-scoped key; no-op until REDIS_URL is set.
+    def _load() -> str | None:
+        rows = (
+            get_service_client()
+            .table("organizations")
+            .select("name")
+            .eq("id", org_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return rows[0].get("name") if rows else None
+
+    return cache.get_or_set(org_id, "org_name", _load)
 
 
 @router.get("/me")
