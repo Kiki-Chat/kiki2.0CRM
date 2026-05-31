@@ -23,6 +23,7 @@ interface Appointment {
   status: string
   category: string | null
   source: string | null
+  google_event_id: string | null
   color: string | null
   location: { raw?: string } | string | null
   notes: string | null
@@ -424,8 +425,28 @@ function AppointmentDetailModal({
   color: string
   onClose: () => void
 }) {
+  const qc = useQueryClient()
   const start = appt.scheduled_at ? new Date(appt.scheduled_at) : null
   const loc = locStr(appt.location)
+  const [pushMsg, setPushMsg] = useState<string | null>(null)
+  // Echo-loop guard (UI side): ONLY CRM-native appointments are pushable to
+  // Google. Imported events (source='google_import') get NO push affordance —
+  // pushing them back would create a loop.
+  const isCrm = appt.source === 'crm'
+  const alreadyPushed = !!appt.google_event_id
+  const push = useMutation({
+    mutationFn: () =>
+      apiFetch<{ success: boolean; google_event_id?: string }>(
+        `/api/calendar/push/${appt.id}`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => {
+      setPushMsg('✓ Zu Google Kalender hinzugefügt.')
+      qc.invalidateQueries({ queryKey: ['appointments'] })
+    },
+    onError: (e: unknown) =>
+      setPushMsg(e instanceof Error ? e.message : 'Übertragung fehlgeschlagen.'),
+  })
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={appt.title ?? 'Termin'}>
       <div className="space-y-3 text-sm">
@@ -445,6 +466,22 @@ function AppointmentDetailModal({
         {appt.customer_name && <DetailRow label="Kunde">{appt.customer_name}</DetailRow>}
         {loc && <DetailRow label="Ort">{loc}</DetailRow>}
         {appt.notes && <DetailRow label="Notizen">{appt.notes}</DetailRow>}
+        {isCrm && (
+          <div className="border-t border-border pt-3">
+            {alreadyPushed ? (
+              <span className="text-sm font-medium text-success">✓ In Google Kalender</span>
+            ) : (
+              <button
+                onClick={() => push.mutate()}
+                disabled={push.isPending}
+                className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60"
+              >
+                {push.isPending ? 'Wird übertragen…' : 'Zu Google Kalender hinzufügen'}
+              </button>
+            )}
+            {pushMsg && <p className="mt-2 text-xs text-muted">{pushMsg}</p>}
+          </div>
+        )}
       </div>
     </Modal>
   )

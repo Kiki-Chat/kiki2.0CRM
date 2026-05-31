@@ -89,3 +89,24 @@ async def sync_status(user: CurrentUser = Depends(require_org)) -> dict:
         }
 
     return await run_in_threadpool(_do)
+
+
+# ─── Calendar write-back (Phase 4): per-event, approval-gated push ───────────
+@router.post("/push/{appointment_id}")
+async def push_appointment(
+    appointment_id: str, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Push ONE CRM-native appointment to the org's Google calendar (per-event,
+    manual, one-directional INSERT). The echo-loop guard in
+    ``calendar_sync.push_crm_event_to_google`` rejects source='google_import'
+    events, so imported events can never be pushed back."""
+    try:
+        return await run_in_threadpool(
+            calendar_sync.push_crm_event_to_google, user.org_id, appointment_id
+        )
+    except calendar_sync.CalendarWriteError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message)
+    except OAuthTokenError as exc:
+        raise HTTPException(status_code=409, detail=f"Google-Kalender nicht verbunden: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Übertragung zu Google fehlgeschlagen: {exc}")

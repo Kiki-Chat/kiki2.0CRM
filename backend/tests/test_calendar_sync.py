@@ -78,6 +78,7 @@ def test_pull_google_events_orchestration(monkeypatch):
     }]
     monkeypatch.setattr(cs, "_fetch_events", lambda tok, tmin, tmax: events)
     monkeypatch.setattr(cs, "get_service_client", lambda: object())
+    monkeypatch.setattr(cs, "_crm_owned_event_ids", lambda c, o: set())
     monkeypatch.setattr(cs, "_existing_google_rows", lambda c, o, a, b: {})
     monkeypatch.setattr(cs, "_apply_rows", lambda c, o, rows, existing: (len(rows), 0))
     monkeypatch.setattr(cs, "_reconcile_deletions", lambda c, o, existing, seen, now: 0)
@@ -122,3 +123,28 @@ def test_purge_imported_events_scoped_to_google_import(monkeypatch):
     assert captured["delete"] is True
     # Filtered by org_id AND source='google_import' ONLY → crm/ics never matched.
     assert captured["eq"] == {"org_id": "org-9", "source": "google_import"}
+
+
+# ─── Phase 4 echo-loop guard (pull side): don't re-import events we pushed ────
+def test_pull_skips_crm_owned_pushed_events(monkeypatch):
+    monkeypatch.setattr(cs, "get_valid_access_token", lambda o, p: "tok")
+    events = [
+        {"id": "PUSHED1", "status": "confirmed", "summary": "Mine",
+         "start": {"dateTime": "2026-06-02T10:00:00Z"}, "end": {"dateTime": "2026-06-02T11:00:00Z"}},
+        {"id": "EXT2", "status": "confirmed", "summary": "External",
+         "start": {"dateTime": "2026-06-03T10:00:00Z"}, "end": {"dateTime": "2026-06-03T11:00:00Z"}},
+    ]
+    monkeypatch.setattr(cs, "_fetch_events", lambda t, a, b: events)
+    monkeypatch.setattr(cs, "get_service_client", lambda: object())
+    monkeypatch.setattr(cs, "_crm_owned_event_ids", lambda c, o: {"PUSHED1"})
+    captured: dict = {}
+    monkeypatch.setattr(cs, "_existing_google_rows", lambda c, o, a, b: {})
+    monkeypatch.setattr(
+        cs, "_apply_rows",
+        lambda c, o, rows, existing: (
+            captured.update({"ids": [r["google_event_id"] for r in rows]}) or (len(rows), 0)
+        ),
+    )
+    monkeypatch.setattr(cs, "_reconcile_deletions", lambda c, o, e, s, n: 0)
+    cs.pull_google_events("org-1", now=NOW)
+    assert captured["ids"] == ["EXT2"]  # PUSHED1 (our own pushed event) skipped

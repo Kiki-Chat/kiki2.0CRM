@@ -31,7 +31,7 @@ import httpx
 
 from app.db.supabase_client import get_service_client
 from app.services.common import BERLIN
-from app.services.oauth_tokens import get_valid_access_token
+from app.services.oauth_tokens import calendar_provider, get_valid_access_token
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +61,13 @@ def pull_google_events(
     rows, seen_ids = _to_rows(org_id, events, now_dt)
 
     client = get_service_client()
+    # Echo-loop guard (PULL side): never re-import an event WE pushed to Google.
+    # Such events are owned by a source='crm' appointment that already holds their
+    # google_event_id; importing them as google_import would both duplicate the
+    # appointment and collide with the unique (org_id, google_event_id) index.
+    pushed_ids = _crm_owned_event_ids(client, org_id)
+    if pushed_ids:
+        rows = [r for r in rows if r["google_event_id"] not in pushed_ids]
     existing = _existing_google_rows(client, org_id, time_min, time_max)  # gid -> {id,status}
     created, updated = _apply_rows(client, org_id, rows, existing)
     cancelled = _reconcile_deletions(client, org_id, existing, seen_ids, now_dt)
@@ -252,3 +259,126 @@ def _reconcile_deletions(
             or []
         )
     return cancelled
+
+
+# ─── Echo-loop guard helper (pull side) ──────────────────────────────────────
+def _crm_owned_event_ids(client, org_id: str) -> set[str]:
+    """``google_event_id``s held by source='crm' appointments — i.e. events WE
+    pushed to Google. The pull skips these (see pull_google_events)."""
+    rows = (
+        client.table("appointments")
+        .select("google_event_id")
+        .eq("org_id", org_id)
+        .eq("source", "crm")
+        .execute()
+        .data
+        or []
+    )
+    return {r["google_event_id"] for r in rows if r.get("google_event_id")}
+
+
+# ─── Calendar write-back (Phase 4): per-event, approval-gated push ───────────
+class CalendarWriteError(Exception):
+    """A push-to-Google failure carrying an HTTP status for the route to surface."""
+
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+def push_crm_event_to_google(org_id: str, appointment_id: str) -> dict:
+    """Push ONE CRM-native appointment to the org's Google calendar
+    (``events.insert``) and store the returned ``google_event_id`` on the row.
+
+    ECHO-LOOP GUARD (push side): ONLY ``source='crm'`` appointments are pushable.
+    A ``source='google_import'`` event came FROM Google — pushing it back would
+    loop — so it is rejected here (and the UI shows no push affordance for it).
+    One-directional: this only ever INSERTS; it never reads back or deletes.
+    Idempotent: an appointment that already has a ``google_event_id`` is not
+    re-inserted.
+    """
+    client = get_service_client()
+    appt = (
+        client.table("appointments")
+        .select("id, source, google_event_id, title, scheduled_at, duration_minutes, notes, location")
+        .eq("org_id", org_id)
+        .eq("id", appointment_id)
+        .limit(1)
+        .execute()
+        .data
+        or [None]
+    )[0]
+    if not appt:
+        raise CalendarWriteError("Termin nicht gefunden.", 404)
+    # ECHO-LOOP GUARD — only CRM-native appointments may be pushed.
+    if appt.get("source") != "crm":
+        raise CalendarWriteError(
+            "Nur eigene CRM-Termine können zu Google übertragen werden — "
+            "importierte Termine nicht.",
+            400,
+        )
+    if appt.get("google_event_id"):
+        return {
+            "success": True,
+            "already_pushed": True,
+            "google_event_id": appt["google_event_id"],
+        }
+
+    if calendar_provider(org_id) != "google":
+        raise CalendarWriteError(
+            "Kein Google-Kalender verbunden — bitte zuerst den Kalender verbinden.", 409
+        )
+    access_token = get_valid_access_token(org_id, "google")
+    gid = _insert_event(access_token, _appointment_to_gcal_event(appt))
+
+    client.table("appointments").update({"google_event_id": gid}).eq("org_id", org_id).eq(
+        "id", appointment_id
+    ).execute()
+    log.info("calendar_push org=%s appt=%s google_event_id=%s", org_id, appointment_id, gid)
+    return {"success": True, "google_event_id": gid}
+
+
+def _appointment_to_gcal_event(appt: dict) -> dict:
+    """Build a Google Calendar event body from a CRM appointment."""
+    start = _parse_stored_iso(appt.get("scheduled_at"))
+    if not start:
+        raise CalendarWriteError("Termin hat kein gültiges Datum.", 400)
+    end = start + timedelta(minutes=int(appt.get("duration_minutes") or 60))
+    loc = appt.get("location")
+    loc_str = loc.get("raw") if isinstance(loc, dict) else (loc if isinstance(loc, str) else None)
+    body: dict = {
+        "summary": appt.get("title") or "Termin",
+        "start": {"dateTime": start.isoformat()},
+        "end": {"dateTime": end.isoformat()},
+    }
+    if appt.get("notes"):
+        body["description"] = appt["notes"]
+    if loc_str:
+        body["location"] = loc_str
+    return body
+
+
+def _parse_stored_iso(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _insert_event(access_token: str, body: dict) -> str | None:
+    """POST ``events.insert`` to the primary calendar; returns the new event id."""
+    with httpx.Client(timeout=_TIMEOUT) as client:
+        r = client.post(
+            _EVENTS_URL,
+            json=body,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+        )
+    if r.status_code not in (200, 201):
+        raise CalendarWriteError(f"google calendar insert {r.status_code}: {r.text[:300]}", 502)
+    return (r.json() or {}).get("id")
