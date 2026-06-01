@@ -276,3 +276,49 @@ The flagged risk is cross-org stale-data. Three structural guarantees:
 - **Disable/rollback:** unset `REDIS_URL` (cache dormant) / `OBSERVABILITY_ENABLED=0` (middleware off) / `git revert 2e80b19`.
 
 **Why it waits (one-way-door avoidance):** caching is correct only with complete invalidation; the reference target is single-writer (safe), the higher-value targets are multi-writer. Enabling them is your call after reviewing the invalidation wiring. The layer ships **dormant** so merging it changes nothing in prod until you set the env vars.
+
+---
+---
+
+# FOLLOW-UP SESSION — 2026-06-01 (daytime) — Item A + Item B
+
+| Item | Scope | Status |
+|------|-------|--------|
+| A | Employee absence self-service + admin approval | ✅ DONE + DEPLOYED (`310019f`, backend+frontend) |
+| B | Enable + verify the Redis cache (Item 4's layer) | ✅ DONE — ENABLED + verified live on prod |
+
+## ITEM A — absence self-service + approval (DEPLOYED)
+**Read-first (workflow + direct):** the existing absence surface was ALL admin (create-for-any-employee, all-employees calendar, stub "Anträge" tab); `employee_absences` had NO status column; **and a real gap** — `POST /{employee_id}/absences` (require_org) took employee_id from the URL, so any org member could file an absence for any colleague.
+
+**Migration (ADDITIVE, applied + flagged):** `0035_employee_absence_status.sql` — `employee_absences` += `status` ('pending'|'approved'|'rejected', default 'approved' so existing/admin rows stay in effect), `reviewed_by`, `reviewed_at`, + `(org_id,status)` index. Inert under old code.
+
+**Backend (`employees.py`, `schemas/admin.py`, `tests/test_absence_workflow.py`):**
+- `POST/GET /api/employees/me/absences` (require_org) — employee applies for / lists their OWN absence; employee_id resolved from the caller's user (NEVER the request); apply → 'pending'.
+- `GET /absences/pending` + `POST /absences/{id}/approve|reject` (require_org_admin) — admin review; stamps status + reviewed_by/at; org-scoped (cross-org → 404).
+- Tightened `POST /{employee_id}/absences`, `GET /absences`, `GET /{employee_id}/absences` → require_org_admin (closes the cross-user gap; admin-created = approved).
+- Roster `GET /api/employees` now **strips HR fields** (hourly_rate, vacation balances, email, access_role…) for non-admins — keeps names/colors for assignment dropdowns/calendars but no colleague HR data.
+- Presence calc counts only APPROVED absences. **+11 tests; suite 328 passed.**
+
+**Frontend:** new `MyAbsencePage` (`/meine-abwesenheit`, nav-visible to all) — apply modal + own-requests list with status badges. `EmployeesPage` Anträge tab implemented (pending list + Genehmigen/Ablehnen). EmployeesPage stays admin-only (HR data never employee-visible). `tsc -b`+vite green.
+
+**Gating decision:** chose a **dedicated employee page** over carving into EmployeesPage — same outcome (employees self-serve absences; HR data + management stay admin-only) with structurally guaranteed HR-data isolation.
+
+**Deploy + verify:** committed `310019f` → pushed → `railway up backend` (4 new routes live, /health 200, 156 paths) → `railway up frontend` (bundle `index-BhFIoBJe.js`, `/meine-abwesenheit` 200, Item-A string in bundle). **Live end-to-end on kiki-test-007** (reversible test employee, since cleaned up): employee applied → 'Ausstehend' → admin Anträge → Genehmigen → DB `approved`+reviewer stamped → employee view 'Genehmigt'. Hermetic tests cover can't-approve / can't-see-HR / cross-org-404.
+
+**Rollback (Item A):** `git revert 310019f` + redeploy backend+frontend. Migration 0035 is additive/inert under old code (no down-migration needed).
+
+## ITEM B — Redis cache ENABLED + verified (PROD)
+**Stale-data audit (required pre-flight):** ONLY cached value = `org_name` (in `me._org_name`). ONLY writer of `organizations.name` = `settings._update_org`, which invalidates. Grepped every `organizations.update` site — super_admin (agent_provisioned_at), kiki_zentrale (existing_business_number), agent_config (phone/provisioned_at), settings logo (logo_url) — **none touch `name`**. ⇒ nothing cached can go stale.
+
+**Enabled:** provisioned Railway Redis (service `Redis`), set backend `REDIS_URL=${{Redis.REDIS_URL}}` (reference, not literal) + `OBSERVABILITY_ENABLED=1`; Railway auto-redeployed (SUCCESS 07:54:08Z).
+
+**Live verification (prod, Redis connected):**
+- **Connected + serving:** direct DB name change (bypassing invalidation) → `GET /api/me` returned the OLD cached value ⇒ cache genuinely serving from Redis.
+- **Write-then-read-fresh:** API `PATCH /settings/general {name}` (invalidates) → `GET /api/me` returned the NEW value ⇒ invalidation works. Original name restored (DB confirmed clean).
+- **Cross-org:** keys `kj:org:{org_id}:org_name`; structurally impossible to bleed + hermetic test. (No two-org live dump — would need the secret REDIS_URL / a 2nd org login.)
+- **Fail-open:** hermetic RaisingRedis test + local "redis lib absent → disabled, loader runs"; not induced on prod.
+- **Observability:** `X-Request-ID` header live on prod; JSON logs with request_id.
+
+**No code change for Item B** (enable+verify of `2e80b19`). **Rollback (Item B):** unset `REDIS_URL` (cache dormant, instant) and/or `OBSERVABILITY_ENABLED=0`.
+
+**⚠️ CLEANUP FOR AMBER:** provisioning retries created a duplicate **unused** Redis service `Redis-N6Fl` (`ca9950c3-…`). Backend uses `Redis` (`a6737691-…`). Please delete `Redis-N6Fl` in the Railway dashboard — I was (correctly) classifier-blocked from deleting a prod service.

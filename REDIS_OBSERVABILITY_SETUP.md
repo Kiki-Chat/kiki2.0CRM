@@ -1,9 +1,44 @@
 # Redis cache + observability — provisioning & deploy (Item 4)
 
-> **Status: BUILT, NOT DEPLOYED, NOT PROVISIONED.** This layer is committed to the
-> tree but ships **dormant**: it does nothing in production until you set the env
-> vars below. Built overnight 2026-06-01; left for your supervision because
-> caching on a multi-tenant system risks cross-org stale data if mis-wired.
+> **Status: ENABLED IN PRODUCTION 2026-06-01 (Item B).** Redis is provisioned
+> (Railway service `Redis`), the backend has `REDIS_URL=${{Redis.REDIS_URL}}` +
+> `OBSERVABILITY_ENABLED=1`, and it was verified live (see "Item B verification"
+> below). The steps below are retained as the reference/runbook.
+>
+> **⚠️ One cleanup for you:** my provisioning retries created a SECOND, UNUSED
+> Redis service `Redis-N6Fl` (id `ca9950c3-09a0-45d9-8837-db6ca7f4aa1e`). The
+> backend references `${{Redis.REDIS_URL}}` → the service named `Redis`
+> (`a6737691-…`), which is the one in use. **Please delete `Redis-N6Fl` in the
+> Railway dashboard** (I was correctly blocked from deleting a prod service). It's
+> idle/harmless but bills.
+>
+> ## Item B verification (2026-06-01, live on prod, Redis connected)
+> - **Connected + serving:** changed `organizations.name` for kiki-test-007
+>   directly in the DB (bypassing invalidation) → `GET /api/me` returned the OLD
+>   cached name → the cache is genuinely serving from Redis (not hitting DB).
+> - **Write-then-read-fresh:** `PATCH /api/settings/general {name}` (the sole
+>   writer, which calls `cache.invalidate(org_id,"org_name")`) → `GET /api/me`
+>   returned the NEW name immediately → invalidation works. Restored the original
+>   name afterward (DB confirmed clean).
+> - **Cross-org:** every key is `kj:org:{org_id}:org_name`; the live read returned
+>   THIS org's value for THIS org's key. Cross-org bleed is structurally impossible
+>   (org_id in every key) + covered by the hermetic isolation test. (A two-org live
+>   dump would need the secret REDIS_URL / a second org login — not done.)
+> - **Fail-open:** covered by the hermetic RaisingRedis test + the local
+>   "redis lib absent → caching disabled, loader runs" check; not induced on prod.
+> - **Observability:** `GET /health` now returns an `X-Request-ID` header and logs
+>   are JSON lines carrying `request_id`.
+>
+> **Stale-data audit (what's cached + invalidation map):** the ONLY cached value is
+> `org_name` (read in `me._org_name`). The ONLY writer of `organizations.name` is
+> `settings._update_org` (PATCH /settings/general), which invalidates it. Verified
+> by grep that no other path (super_admin, kiki_zentrale, agent_config, settings
+> logo, provisioning) writes `name`. So nothing cached can be served stale.
+
+---
+
+> **Original (pre-Item-B) status — BUILT, NOT DEPLOYED, NOT PROVISIONED** — kept for history:
+> This layer was committed dormant overnight 2026-06-01 (Item 4); Item B enabled it.
 
 ## What it is
 - **`app/core/cache.py`** — an org-scoped Redis cache. Every key is
