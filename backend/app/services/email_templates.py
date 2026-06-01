@@ -37,15 +37,57 @@ def message_to_html(text: str | None) -> str:
     return out
 
 
-def render_email(*, company_name: str | None, body_html: str) -> str:
-    """Wrap pre-rendered body HTML in the branded shell. Header = company name."""
-    company = _html.escape(company_name) if company_name and str(company_name).strip() else "Heykiki"
-    return _SHELL.replace("@@COMPANY@@", company).replace("@@BODY@@", body_html)
+def addr_line(address: dict | None) -> str | None:
+    """One-line address from the org's address jsonb (street, PLZ + city)."""
+    if not address:
+        return None
+    city = " ".join(p for p in [address.get("postal_code") or address.get("zip"), address.get("city")] if p).strip()
+    line = ", ".join(p for p in [address.get("street"), city] if p)
+    return line or None
 
 
-def render_message_email(*, company_name: str | None, message_text: str | None) -> str:
+_FF = "font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;"
+
+
+def _footer_html(company: str, contact_email: str | None, address: str | None) -> str:
+    """White-label footer = the SENDING company's own contact (name + address +
+    email). NEVER HeyKiki/Kiki-Chat branding."""
+    parts = [
+        f'<p class="footer-brand" style="margin: 0 0 8px 0; color: #03423A; font-weight: 600; font-size: 18px; {_FF}">{company}</p>'
+    ]
+    if address:
+        parts.append(f'<p class="footer-tagline" style="margin: 0 0 8px 0; color: #555555; font-size: 13px; {_FF}">{_html.escape(address)}</p>')
+    if contact_email:
+        em = _html.escape(contact_email)
+        parts.append(f'<p style="margin: 0 0 8px 0;"><a href="mailto:{em}" style="color: #03423A; text-decoration: none; {_FF}">{em}</a></p>')
+    parts.append(f'<p class="footer-disclaimer" style="margin: 12px 0 0 0; color: #555555; font-size: 11px; {_FF}">Diese E-Mail wurde automatisch generiert. Bei Fragen antworten Sie bitte direkt auf diese E-Mail.</p>')
+    return "\n".join(parts)
+
+
+def render_email(
+    *, company_name: str | None, body_html: str,
+    contact_email: str | None = None, address: str | None = None,
+) -> str:
+    """Wrap pre-rendered body HTML in the branded shell. Header + footer carry the
+    SENDING company's identity (name + contact), never HeyKiki/Kiki-Chat."""
+    company = _html.escape(company_name) if company_name and str(company_name).strip() else "Ihr Dienstleister"
+    footer = _footer_html(company, (contact_email or "").strip() or None, (address or "").strip() or None)
+    return (
+        _SHELL.replace("@@COMPANY@@", company)
+        .replace("@@BODY@@", body_html)
+        .replace("@@FOOTER@@", footer)
+    )
+
+
+def render_message_email(
+    *, company_name: str | None, message_text: str | None,
+    contact_email: str | None = None, address: str | None = None,
+) -> str:
     """Shell + a client-authored plain-text message (Invoice / KVA / Test)."""
-    return render_email(company_name=company_name, body_html=message_to_html(message_text))
+    return render_email(
+        company_name=company_name, body_html=message_to_html(message_text),
+        contact_email=contact_email, address=address,
+    )
 
 
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
@@ -121,11 +163,7 @@ _SHELL = r"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "htt
           </tr>
           <tr>
             <td class="footer-cell" style="background-color: #AFC4C4; padding: 30px 25px; text-align: center;">
-              <p class="footer-brand" style="margin: 0 0 10px 0; color: #03423A; font-weight: 600; font-size: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;">Heykiki</p>
-              <p class="footer-tagline" style="margin: 0 0 12px 0; color: #555555; font-size: 14px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;">Die smarte KI-Telefonistin für Handwerksbetriebe</p>
-              <p class="footer-company" style="margin: 0 0 14px 0; color: #ffffff; font-size: 14px; font-weight: 600; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;">Kiki-Chat GmbH</p>
-              <p style="margin: 0 0 10px 0;"><a href="mailto:info@kikichat.de" style="color: #03423A; text-decoration: none; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;">info@kikichat.de</a></p>
-              <p class="footer-disclaimer" style="margin: 12px 0 0 0; color: #555555; font-size: 11px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, Arial, sans-serif;">Diese E-Mail wurde automatisch generiert. Bei Fragen wenden Sie sich bitte an unser Support-Team.</p>
+@@FOOTER@@
             </td>
           </tr>
         </table>

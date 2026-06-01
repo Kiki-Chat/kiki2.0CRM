@@ -324,7 +324,10 @@ def _build_kva_email(
             f"Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.\n\n"
             f"Mit freundlichen Grüßen\n{org_name}"
         )
-    body_html = email_templates.render_message_email(company_name=org_name, message_text=body_text)
+    body_html = email_templates.render_message_email(
+        company_name=org_name, message_text=body_text,
+        contact_email=org.get("email"), address=email_templates.addr_line(org.get("address")),
+    )
     return subject, body_html
 
 

@@ -37,7 +37,19 @@ def test_company_name_is_dynamic_per_org():
 
 def test_company_name_falls_back_when_missing():
     out = et.render_message_email(company_name=None, message_text="Hallo")
-    assert "Heykiki" in out  # fallback brand, not a crash / blank header
+    # White-label: a NEUTRAL fallback, never HeyKiki/Kiki-Chat branding.
+    assert "Ihr Dienstleister" in out
+    assert "Heykiki" not in out and "Kiki-Chat" not in out and "kikichat.de" not in out
+
+
+def test_footer_is_white_label_company_contact():
+    out = et.render_message_email(
+        company_name="Muster Heizungsbau GmbH", message_text="Hallo",
+        contact_email="info@muster.de", address="Hauptstr. 1, 12345 Berlin",
+    )
+    assert "info@muster.de" in out and "Hauptstr. 1, 12345 Berlin" in out
+    # No HeyKiki/Kiki-Chat anywhere in the customer-facing email.
+    assert "Kiki-Chat" not in out and "kikichat.de" not in out and "Telefonistin" not in out
 
 
 # ─── German placeholders the template editor emits actually interpolate ──────
