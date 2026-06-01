@@ -22,7 +22,7 @@ const WEEKDAYS: [string, string][] = [['mon', 'Mo'], ['tue', 'Di'], ['wed', 'Mi'
 const OCCASIONS: [string, string][] = [
   ['kva_followup', 'KVA-Nachfassen'], ['appointment_reminder', 'Terminerinnerung'],
   ['payment_reminder', 'Zahlungserinnerung'], ['maintenance_due', 'Wartung fällig'],
-  ['satisfaction_survey', 'Zufriedenheitsumfrage'], ['missed_call_callback', 'Rückruf bei verpasstem Anruf'],
+  ['satisfaction_survey', 'Zufriedenheitsumfrage'], ['missed_callback', 'Rückruf bei verpasstem Anruf'],
   ['review_request', 'Bewertungsanfrage'],
 ]
 
@@ -581,6 +581,14 @@ export function AusgehendeSection({ data, flash }: Props) {
             </label>
           ))}
         </div>
+        <p className="mt-3 text-xs text-muted">
+          Hinweis: Ist „Terminerinnerung" aktiv, löst ein Klick auf
+          <span className="font-medium text-body"> Bestätigen</span>,
+          <span className="font-medium text-body"> Absagen</span> oder
+          <span className="font-medium text-body"> Verschieben</span> in den
+          Anrufen automatisch den passenden Ausgangsanruf samt E-Mail an den
+          Kunden aus. Ist der Schalter aus, bleibt der Klick ohne Anruf.
+        </p>
       </Card>
       <Card className={cn(over && 'border-error/50')}>
         <GroupLabel>Geschätzte Belastung</GroupLabel>

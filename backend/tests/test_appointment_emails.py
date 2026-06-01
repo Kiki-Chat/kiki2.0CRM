@@ -98,12 +98,15 @@ def test_email_refused_out_of_scope(monkeypatch, scope_on):
     send.assert_not_called()
 
 
-def test_existing_occasion_without_email_render_is_inert(monkeypatch, scope_on):
-    # kva_followup has no email_render yet (Cluster C) → no send.
+def test_existing_occasion_inert_when_flag_off(monkeypatch, scope_on):
+    # scope_on sets OUTBOUND_OCCASION_EMAILS_ENABLED=False. kva_followup now has an
+    # email_render (Cluster C) but email_always=False → flag-gated → ships INERT.
     send = MagicMock()
     monkeypatch.setattr(outbound_dispatch, "send_email", send)
     to = outbound_dispatch._maybe_send_occasion_email(
-        spec=OCCASIONS["kva_followup"], record={"id": "k"}, customer=_CUST, org=_ORG, org_id=TEST_ORG
+        spec=OCCASIONS["kva_followup"],
+        record={"id": "k", "number": "KVA-1", "subject": "Heizung", "total": 100, "sent_at": None},
+        customer=_CUST, org=_ORG, org_id=TEST_ORG,
     )
     assert to is None
     send.assert_not_called()

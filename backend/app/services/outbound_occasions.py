@@ -550,6 +550,18 @@ def _appt_email(occasion_key: str):
     return _render
 
 
+def _occ_email(occasion_key: str):
+    """Lazy bridge to the Cluster C email renderer for the EXISTING 7 occasions
+    (same no-cycle pattern as _appt_email)."""
+
+    def _render(record: dict, customer: dict | None, org: dict):
+        from app.services.occasion_emails import render_occasion_email
+
+        return render_occasion_email(occasion_key, record, customer, org)
+
+    return _render
+
+
 def _appt_clauses(record: dict, customer: dict | None, org: dict):
     company = org.get("name") or "uns"
     name = (customer or {}).get("full_name") or ""
@@ -693,6 +705,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_APPT_COLUMNS,
         select=_select_appointment_reminder,
         render=_render_appointment_reminder,
+        email_render=_occ_email("appointment_reminder"),
     ),
     "kva_followup": OccasionSpec(
         key="kva_followup",
@@ -702,6 +715,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_KVA_COLUMNS,
         select=_select_kva_followup,
         render=_render_kva_followup,
+        email_render=_occ_email("kva_followup"),
     ),
     "payment_reminder": OccasionSpec(
         key="payment_reminder",
@@ -711,6 +725,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_INV_COLUMNS,
         select=_select_payment_reminder,
         render=_render_payment_reminder,
+        email_render=_occ_email("payment_reminder"),
         inquiry_id_of=_inq_from_invoice,
         case_gate="must_be_open",
         recurring=True,
@@ -726,6 +741,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_INQ_COLUMNS,
         select=_select_completed_inquiries,
         render=_render_satisfaction,
+        email_render=_occ_email("satisfaction_survey"),
         inquiry_id_of=_inq_self,
         case_gate="must_be_completed",
     ),
@@ -737,6 +753,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_INQ_COLUMNS,
         select=_select_completed_inquiries,
         render=_render_review,
+        email_render=_occ_email("review_request"),
         inquiry_id_of=_inq_self,
         case_gate="must_be_completed",
         org_flag="google_reviews_enabled",
@@ -749,6 +766,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_MAINT_COLUMNS,
         select=_select_maintenance_due,
         render=_render_maintenance_due,
+        email_render=_occ_email("maintenance_due"),
         case_gate="ignore",          # maintenance plans have no case
         recurring=True,
         cooldown_days=_DEFAULT_MAINT_COOLDOWN_DAYS,
@@ -763,6 +781,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_MISSED_COLUMNS,
         select=_select_missed_callback,
         render=_render_missed_callback,
+        email_render=_occ_email("missed_callback"),
         case_gate="ignore",          # missed calls have no case
         # dial the caller's number (a missed call may have no linked customer/phone)
         to_number_of=lambda rec, cust: rec.get("caller_number") or (cust or {}).get("phone"),
