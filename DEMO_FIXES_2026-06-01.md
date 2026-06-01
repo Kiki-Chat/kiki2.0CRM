@@ -165,3 +165,18 @@ Running notes: root cause + fix + test + commit SHA per item. State as of sessio
 - **YOUR VERIFY (test org, needs admin login + a test inbox — I can't auth/read mail):** create → invite received; recreate same email/new name → old password fails, new invite works, name+role correct on /api/me + sidebar; no inherited Google grant. The DB/identity side is locked by the hermetic tests; the email-delivery + old-password-fails checks are live-only.
 - **Migration:** none (optional additive partial-unique on active `(org_id, email)` not applied — flag if you want it).
 - **Files:** `backend/app/services/employee_invite.py`, `backend/app/api/routes/employees.py`, `backend/tests/test_wave2_employee_tiers.py`.
+
+## Round 3 (Amber field-test feedback) — email footer + dashboard data
+
+### Email-template footer white-label ✅ (commit `458aecf`)
+- **Issue:** the in-app footer was fixed (Cluster 2), but the **email** shell still hardcoded "Heykiki" / "Kiki-Chat GmbH" / info@kikichat.de (seen in a sent invoice).
+- **Fix:** `email_templates._SHELL` footer → `@@FOOTER@@`, built per-send from the SENDING company's own name + address + contact email (threaded `org.email` + `addr_line(org.address)` from the KVA + invoice senders); neutral "Ihr Dienstleister" fallback (never HeyKiki). Welcome email shows company name + disclaimer.
+- **Test:** updated `test_email_templates` (no Heykiki/Kiki-Chat/kikichat.de; asserts company email + address present). Suite 345→ green.
+- **Files:** `email_templates.py`, `cost_estimates.py`, `invoices.py`, `tests/test_email_templates.py`.
+
+### Dashboard "wrong data" — diagnosed (NOT a regression) + rolling-window fix ✅ (commit `84991e9`)
+- **Root cause (DB-verified):** all **19 test calls are dated May 24–30**; it's June 2, so the calendar-month default ("dieser Monat") was genuinely empty → "0 / -19 vs previous month". `_anrufe` (the Anrufe tab) is **code I never touched this session** and used the same calendar-month logic, which is why BOTH tabs emptied at month rollover. Same code, new month — not a commit regression.
+- **Fix:** switched the period windows to **ROLLING** (`_period_window`): Tag = today, Woche = last 7 days, Monat = last 30 days; applied to BOTH `_anrufe` + `_ki_nutzung`. Added the **same Tag/Woche/Monat/Zeitraum filter to Anrufe** (shared `usePeriodFilter` hook). The monthly AI-minute contingent (quota bar + Restlaufzeit) stays calendar-month, decoupled from the analytics window. Trend label "ggü. Vormonat" → "Vorperiode".
+- **Live-verified on the real test org** (read-only call into the handlers): Monat → **19 calls / 30 min** (was 0), Woche → 16 calls / 25 min, Tag → 0 (no calls today). `month_minutes_used` (June quota) = 0, correct.
+- **Test:** `test_dashboard_ki_nutzung` updated for rolling boundaries + `_anrufe` period test (7 pass). Full hermetic suite **346 passed**; build clean; backend restarted.
+- **Files:** `dashboard.py`, `tests/test_dashboard_ki_nutzung.py`, `dashApi.ts`, `dashboard/shared.tsx`, `dashboard/AnrufeTab.tsx`, `dashboard/KiNutzungTab.tsx`.
