@@ -263,6 +263,9 @@ export function CallLogsPage() {
   const navigate = useNavigate()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  // Direction + status filters (client-side over the already-fetched list).
+  const [dirFilter, setDirFilter] = useState<'all' | 'inbound' | 'outbound'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'in_progress' | 'completed'>('all')
   // Wave 2 / Agent 2.2 — LEFT sidebar tab switcher: Anfragen | Aktionen.
   // Simple local state (not a router query param) keeps this self-contained;
   // deep-linking to the Aktionen tab is a follow-up if the team wants it.
@@ -362,13 +365,18 @@ export function CallLogsPage() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return calls
-    return calls.filter(
-      (c) =>
-        displayName(c).toLowerCase().includes(q) ||
-        (c.summary_title ?? '').toLowerCase().includes(q),
-    )
-  }, [calls, search])
+    return calls.filter((c) => {
+      if (dirFilter !== 'all' && c.direction !== dirFilter) return false
+      if (statusFilter !== 'all' && c.inquiry_status !== statusFilter) return false
+      if (
+        q &&
+        !displayName(c).toLowerCase().includes(q) &&
+        !(c.summary_title ?? '').toLowerCase().includes(q)
+      )
+        return false
+      return true
+    })
+  }, [calls, search, dirFilter, statusFilter])
 
   const listResize = useColumnResize('hk-calls-list-w', 320, {
     min: 240,
@@ -422,18 +430,43 @@ export function CallLogsPage() {
             })}
           </div>
           {tab === 'anfragen' && (
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-              <input
-                type="search"
-                name="call-inquiry-search"
-                autoComplete="off"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Suchen…"
-                className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
-              />
-            </div>
+            <>
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+                <input
+                  type="search"
+                  name="call-inquiry-search"
+                  autoComplete="off"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Suchen…"
+                  className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
+                />
+              </div>
+              <div className="mt-2 flex gap-2">
+                <select
+                  value={dirFilter}
+                  onChange={(e) => setDirFilter(e.target.value as typeof dirFilter)}
+                  aria-label="Richtung filtern"
+                  className="flex-1 rounded-md border border-border bg-alt px-2 py-1.5 text-xs text-body outline-none focus:border-green-primary"
+                >
+                  <option value="all">Alle Richtungen</option>
+                  <option value="inbound">Eingehend</option>
+                  <option value="outbound">Ausgehend</option>
+                </select>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                  aria-label="Status filtern"
+                  className="flex-1 rounded-md border border-border bg-alt px-2 py-1.5 text-xs text-body outline-none focus:border-green-primary"
+                >
+                  <option value="all">Alle Status</option>
+                  <option value="open">Offen</option>
+                  <option value="in_progress">In Bearbeitung</option>
+                  <option value="completed">Abgeschlossen</option>
+                </select>
+              </div>
+            </>
           )}
         </div>
 
@@ -538,13 +571,15 @@ function CallListCard({
       }}
       className={cn(
         'relative flex w-full cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors',
-        active
-          ? 'border-green-primary/40 bg-green-tint-50'
-          : 'border-border bg-surface hover:bg-alt',
-        // Unread marker: STATIC left-border accent (Gmail-style), no
-        // animation. Per Amber's rule, pulsing/blinking is reserved
-        // exclusively for emergency calls (the red Notdienst badge below) as
-        // an attention signal — every other card stays visually calm.
+        // Direction colour: OUTBOUND = yellow border, INBOUND = green border.
+        // (solid green-primary — the /opacity modifier doesn't resolve on this
+        // CSS-var token and silently falls back to the default grey border.)
+        call.direction === 'outbound' ? 'border-amber-400' : 'border-green-primary',
+        // Selection: bg tint + ring so the direction border stays visible.
+        active ? 'bg-green-tint-50 ring-1 ring-green-primary' : 'bg-surface hover:bg-alt',
+        // Unread marker: STATIC thick green left-accent (Gmail-style), no
+        // animation. Per Amber's rule, pulsing/blinking is reserved exclusively
+        // for emergency calls (the red Notdienst badge below).
         isUnread && 'border-l-4 border-l-green-primary',
       )}
     >
