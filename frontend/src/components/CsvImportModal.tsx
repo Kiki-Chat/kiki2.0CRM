@@ -110,11 +110,33 @@ export function CsvImportModal({
       .filter(Boolean)
     setHeaders(hs)
     setRowCount(Math.max(0, lines.length - 1))
+    // Two-pass auto-map. Pass 1: EXACT header match (highest confidence), hints in
+    // priority order. Pass 2: substring fallback, but only for hints ≥4 chars — so a
+    // wide DATEV export can't bind phone→"Titel" ('tel'), city→"Suchwort" ('ort'), or
+    // name→"Kurzname" ('name') the way a naive first-substring match did. Each CSV
+    // header is used by at most one field; the dropdowns below still allow override.
+    const norm = (h: string) => h.toLowerCase().trim()
     const m: Record<string, string> = {}
+    const used = new Set<string>()
     for (const t of targets) {
       const hints = HINTS[t.key] ?? [t.key]
-      const found = hs.find((h) => hints.some((kw) => h.toLowerCase().includes(kw)))
-      if (found) m[t.key] = found
+      for (const kw of hints) {
+        const found = hs.find((h) => !used.has(h) && norm(h) === kw)
+        if (found) {
+          m[t.key] = found
+          used.add(found)
+          break
+        }
+      }
+    }
+    for (const t of targets) {
+      if (m[t.key]) continue
+      const hints = (HINTS[t.key] ?? [t.key]).filter((kw) => kw.length >= 4)
+      const found = hs.find((h) => !used.has(h) && hints.some((kw) => norm(h).includes(kw)))
+      if (found) {
+        m[t.key] = found
+        used.add(found)
+      }
     }
     setMapping(m)
   }

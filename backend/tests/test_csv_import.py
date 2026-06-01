@@ -183,6 +183,57 @@ def test_import_customers_generates_number_when_missing(monkeypatch):
     assert db.inserted("customers")[0]["customer_number"] == "101006"
 
 
+# ─── real DATEV export (B5 field-test regression) ────────────────────────────
+# Wide DATEV header with the decoy columns (Suchwort/Titel/Kurzname) that the OLD
+# frontend auto-mapper mis-bound (city→Suchwort, phone→Titel, name→Kurzname). This
+# locks the BACKEND parse + the CORRECT mapping the fixed exact-match-first mapper
+# now produces — including a quoted Bemerkung that spans physical lines.
+_DATEV_HEADER = (
+    "Adressnummer,Kundennummer,Suchwort,Kurzname,Anrede,Titel,Vorname,Name,"
+    "Titel+Vorname+Name,Strasse,Land,PLZ,Ort,Telefon,Fax,Mail,Mobil,Internet,Bemerkung\n"
+)
+_DATEV_MAP = {
+    "full_name": "Titel+Vorname+Name",
+    "email": "Mail",
+    "phone": "Telefon",
+    "phone2": "Mobil",
+    "street": "Strasse",
+    "postal_code": "PLZ",
+    "city": "Ort",
+    "notes": "Bemerkung",
+    "customer_number": "Kundennummer",
+}
+
+
+def _datev_csv() -> bytes:
+    # One person row with a MULTI-LINE quoted Bemerkung (embedded newline) + a quoted
+    # Kurzname containing commas — exactly the shapes that broke naive parsing.
+    row = (
+        '101003,101003,ADASCHBUXTEHUDE,"Adasch Henjek, Rübker Str.22b, Buxtehude",'
+        "Herr,,Henjek,Adasch,Henjek Adasch,Rübker Str. 22 b,D,21640,Buxtehude,"
+        "04161 713810,,test@example.de,0178 8239629,,"
+        '"WV-15119\nBitte nicht Hr. Hillermann schicken"\n'
+    )
+    return (_DATEV_HEADER + row).encode("utf-8")
+
+
+def test_import_customers_real_datev_mapping(monkeypatch):
+    db = _DB({"customers": []})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", _datev_csv(), _DATEV_MAP)
+    assert out["imported"] == 1 and out["errors"] == 0
+    rec = db.inserted("customers")[0]
+    assert rec["full_name"] == "Henjek Adasch"  # NOT the Suchwort/Kurzname
+    assert rec["email"] == "test@example.de"
+    assert rec["phone"] == "+494161713810"  # Telefon, NOT "Titel"
+    # Ort → city (NOT Suchwort "ADASCHBUXTEHUDE"); street/plz correct.
+    assert rec["address"] == {"street": "Rübker Str. 22 b", "postal_code": "21640", "city": "Buxtehude"}
+    assert rec["customer_number"] == "101003"
+    # Multi-line Bemerkung preserved across the embedded newline.
+    assert "WV-15119" in rec["notes"] and "Bitte nicht Hr. Hillermann" in rec["notes"]
+    assert "Mobil: +491788239629" in rec["notes"]  # Mobil kept as 2nd number
+
+
 # ─── numbering unification ───────────────────────────────────────────────────
 def test_gen_customer_number_is_numeric_continue(monkeypatch):
     db = _DB({"customers": [{"customer_number": "101008"}, {"customer_number": "KD-9"}]})

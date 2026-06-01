@@ -85,6 +85,11 @@ def send_email(
     forced to handle a hard failure). Partial failures (e.g. OAuth fails but
     SMTP succeeds) are reported in ``SendResult.fallback_chain``.
     """
+    # Fail-safe (B6): never attempt a send with an empty recipient. Route callers
+    # already guard (KVA/invoice → 400), but this protects every current + future
+    # caller from silently emitting to an empty "To:".
+    if not (to_email and str(to_email).strip()):
+        raise RuntimeError("Keine Empfänger-E-Mail angegeben.")
     org_id_str = str(org_id)
     attachments = attachments or []
     cc = cc or []

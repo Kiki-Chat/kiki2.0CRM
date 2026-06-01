@@ -138,6 +138,15 @@ def _fake_httpx_post(responses: dict[str, httpx.Response]):
     return _post
 
 
+# ─── B6: empty-recipient fail-safe (before any tier / DB lookup) ─────────────
+@pytest.mark.parametrize("bad", ["", "   ", None])
+def test_send_email_rejects_empty_recipient(bad):
+    # No monkeypatching: the guard must raise BEFORE config load, so a missing
+    # recipient can never silently emit to an empty "To:".
+    with pytest.raises(RuntimeError, match="Empfänger"):
+        send_email(org_id=ORG_ID, to_email=bad, subject="S", body_html="<p>x</p>")
+
+
 # ─── Tier 1: OAuth succeeds → no SMTP attempted ──────────────────────────────
 def test_oauth_gmail_success_no_smtp(monkeypatch):
     """Gmail OAuth send succeeds → result.provider_used == 'gmail_oauth',

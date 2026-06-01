@@ -297,6 +297,7 @@ function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose:
   const [copyToMe, setCopyToMe] = useState(false)
   const [attachPdf, setAttachPdf] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const noCustomerEmail = !estimate.customer_email
 
   const send = useMutation({
     mutationFn: () =>
@@ -326,6 +327,11 @@ function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose:
     >
       <div className="space-y-3">
         {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
+        {noCustomerEmail && (
+          <div className="rounded-md bg-warning-bg px-3 py-2 text-xs font-medium text-warning">
+            ⚠ Für diesen Kunden ist keine E-Mail hinterlegt. Bitte oben eine Empfänger-Adresse eintragen oder beim Kunden ergänzen — sonst kann nichts versendet werden.
+          </div>
+        )}
         <div><div className="mb-1 text-xs font-semibold text-body">An</div><input value={to} onChange={(e) => setTo(e.target.value)} placeholder="kunde@example.de" className={ta} /></div>
         <div><div className="mb-1 text-xs font-semibold text-body">Betreff</div><input value={subject} onChange={(e) => setSubject(e.target.value)} className={ta} /></div>
         <div><div className="mb-1 text-xs font-semibold text-body">Nachricht</div><textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} className={ta} /></div>
