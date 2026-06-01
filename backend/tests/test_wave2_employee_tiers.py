@@ -296,3 +296,119 @@ def test_send_employee_welcome_uses_pipeline_with_link_no_password(monkeypatch):
     assert link in captured["body_html"]
     assert "password" not in captured           # send_email has no password param
     assert "body_text" not in captured or "tok" not in str(captured.get("body_text", ""))
+
+
+# ─── B2 / Cluster 7 — recreate-by-email RE-PROVISIONS the reused login ────────
+class _RecreateFake:
+    """users select-by-email returns an EXISTING (org_admin) login → triggers the
+    reuse branch; captures the users.update + auth-metadata + employees insert."""
+
+    def __init__(self):
+        self.users_update_fields = None
+        self.employees_inserted: list[dict] = []
+        self.auth_calls: list[tuple] = []
+        outer = self
+
+        class _Admin:
+            def update_user_by_id(self, uid, attrs):
+                outer.auth_calls.append((uid, attrs))
+
+        class _Auth:
+            admin = _Admin()
+
+        self.auth = _Auth()
+
+    def table(self, name):
+        outer = self
+
+        class _T:
+            def __init__(self):
+                self._op = None
+                self._payload = None
+
+            def select(self, *a, **k): return self
+            def eq(self, *a, **k): return self
+            def limit(self, *a, **k): return self
+
+            def insert(self, row):
+                self._op = "insert"; self._payload = row; return self
+
+            def update(self, fields):
+                self._op = "update"; self._payload = fields; return self
+
+            def execute(self):
+                if name == "users":
+                    if self._op == "update":
+                        outer.users_update_fields = self._payload
+                        return _Res([{"id": "old-uid"}])
+                    return _Res([{"id": "old-uid", "role": "org_admin"}])  # existing login
+                if name == "organizations":
+                    return _Res([{"name": "Org A"}])
+                if name == "employees" and self._op == "insert":
+                    row = dict(self._payload); row["id"] = "emp-new"
+                    outer.employees_inserted.append(row); return _Res([row])
+                return _Res([])
+
+        return _T()
+
+
+def test_recreate_by_email_reprovisions_identity(monkeypatch):
+    fake = _RecreateFake()
+    monkeypatch.setattr(emp, "get_service_client", lambda: fake)
+    gen_calls: list = []
+    monkeypatch.setattr(
+        emp.employee_invite, "generate_set_password_link",
+        lambda email, *, new_user: (gen_calls.append(new_user), ("https://app/set-password#new", None))[1],
+    )
+    sent: dict = {}
+    monkeypatch.setattr(emp.employee_invite, "send_employee_welcome", lambda **kw: sent.update(kw))
+    revoked: list = []
+    monkeypatch.setattr(emp.employee_invite, "revoke_user_sessions", lambda uid: revoked.append(uid))
+
+    # The deleted person was an ADMIN; recreate as a plain employee with a NEW name.
+    payload = EmployeeCreate(display_name="Neue Person", email="reused@a.de", login_access=True, access_role="employee")
+    out = emp._create("org-A", payload)
+
+    # (a) identity refreshed on the REUSED login — name + role DEMOTED + org reset.
+    assert fake.users_update_fields == {"full_name": "Neue Person", "role": "employee", "org_id": "org-A"}
+    assert fake.auth_calls == [("old-uid", {"user_metadata": {"full_name": "Neue Person"}})]
+    # (b) prior holder's sessions revoked.
+    assert revoked == ["old-uid"]
+    # (c) fresh invite via a RECOVERY link (new_user=False), no password.
+    assert gen_calls == [False]
+    assert sent["set_password_link"] == "https://app/set-password#new"
+    assert sent["login_email"] == "reused@a.de" and sent["display_name"] == "Neue Person"
+    assert "password" not in sent
+    # employees row carries the NEW identity + the reused user_id.
+    assert out["display_name"] == "Neue Person" and out["user_id"] == "old-uid"
+
+
+def test_revoke_user_sessions_hits_admin_logout(monkeypatch):
+    captured: dict = {}
+
+    class _Resp:
+        status_code = 204
+        text = ""
+
+    def _post(url, headers=None, timeout=None):
+        captured["url"] = url; captured["headers"] = headers; return _Resp()
+
+    monkeypatch.setattr(employee_invite.httpx, "post", _post)
+    monkeypatch.setattr(employee_invite.settings, "supabase_url", "https://proj.supabase.co")
+    monkeypatch.setattr(employee_invite.settings, "supabase_service_role_key", "svc-key")
+    employee_invite.revoke_user_sessions("u-123")
+    assert captured["url"] == "https://proj.supabase.co/auth/v1/admin/users/u-123/logout"
+    assert captured["headers"]["Authorization"] == "Bearer svc-key"
+    assert captured["headers"]["apikey"] == "svc-key"
+
+
+def test_revoke_user_sessions_raises_on_non_2xx(monkeypatch):
+    class _Resp:
+        status_code = 500
+        text = "boom"
+
+    monkeypatch.setattr(employee_invite.httpx, "post", lambda *a, **k: _Resp())
+    monkeypatch.setattr(employee_invite.settings, "supabase_url", "https://proj.supabase.co")
+    monkeypatch.setattr(employee_invite.settings, "supabase_service_role_key", "svc-key")
+    with pytest.raises(RuntimeError):
+        employee_invite.revoke_user_sessions("u-123")

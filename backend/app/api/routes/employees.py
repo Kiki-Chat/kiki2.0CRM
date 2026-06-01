@@ -145,8 +145,46 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
             client.table("users").select("id").eq("email", payload.email).limit(1).execute().data
         )
         if existing:
-            # Email already has a login → link it; never reset its password here.
+            # Recreate-by-email (B2 / Cluster 7): the surviving auth+users login is
+            # REUSED, so it must be fully RE-PROVISIONED — otherwise the deleted
+            # person's name/role/sessions stick to the new hire. (a) refresh the
+            # identity (name/role/org), (b) revoke the prior holder's sessions,
+            # (c) reset the credential + send a fresh invite (never silently keep
+            # the old password as a way in).
             user_id = existing[0]["id"]
+            new_role = "org_admin" if payload.access_role == "admin" else "employee"
+            try:
+                client.table("users").update(
+                    {"full_name": payload.display_name, "role": new_role, "org_id": org_id}
+                ).eq("id", user_id).execute()
+                client.auth.admin.update_user_by_id(
+                    user_id, {"user_metadata": {"full_name": payload.display_name}}
+                )
+            except Exception as exc:  # noqa: BLE001
+                warning = (
+                    "Login wiederverwendet, aber das Profil konnte nicht vollständig "
+                    f"aktualisiert werden ({exc})."
+                )
+            try:
+                employee_invite.revoke_user_sessions(user_id)
+            except Exception as exc:  # noqa: BLE001 — best-effort; never block recreate
+                log.warning("recreate: session revoke failed user=%s err=%s", user_id, exc)
+            try:
+                link, _ = employee_invite.generate_set_password_link(
+                    payload.email, new_user=False
+                )
+                employee_invite.send_employee_welcome(
+                    org_id=org_id,
+                    company_name=_org_name(client, org_id),
+                    display_name=payload.display_name,
+                    login_email=payload.email,
+                    set_password_link=link,
+                )
+            except Exception as exc:  # noqa: BLE001
+                warning = ((warning + " ") if warning else "") + (
+                    "Login aktualisiert, aber die Einladungs-E-Mail konnte nicht "
+                    f"gesendet werden ({exc})."
+                )
         else:
             # New login (Wave 2): generate a set-password invite link (this creates
             # the auth user; Supabase sends NO email), create the public.users row,

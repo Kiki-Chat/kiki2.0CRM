@@ -20,6 +20,8 @@ from __future__ import annotations
 import html as _html
 import logging
 
+import httpx
+
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.services import email_send, email_templates
@@ -29,6 +31,25 @@ log = logging.getLogger(__name__)
 
 def _set_password_redirect() -> str:
     return f"{settings.frontend_public_url.rstrip('/')}/set-password"
+
+
+def revoke_user_sessions(user_id: str) -> None:
+    """Revoke ALL sessions + refresh tokens for ``user_id`` via the GoTrue admin
+    logout endpoint, so a REUSED login (recreate-by-email) can never be accessed
+    by its previous holder. The high-level client's ``auth.admin.sign_out`` needs
+    a JWT, not a user id, so we call the admin REST endpoint directly with the
+    service-role key. Best-effort: the caller wraps this and records a warning."""
+    base = (settings.supabase_url or "").rstrip("/")
+    key = settings.supabase_service_role_key or ""
+    if not base or not key:
+        raise RuntimeError("Supabase URL/service key not configured")
+    resp = httpx.post(
+        f"{base}/auth/v1/admin/users/{user_id}/logout",
+        headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        timeout=10.0,
+    )
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"admin logout HTTP {resp.status_code}: {resp.text[:200]}")
 
 
 def generate_set_password_link(email: str, *, new_user: bool) -> tuple[str, str | None]:
