@@ -152,15 +152,14 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
             address = {"street": street, "postal_code": plz, "city": city}
 
         notes = _get(row, mapping, "notes")
-        # Customers have a single phone column; preserve a second number in notes.
-        if phone2 and phone2 != phone:
-            notes = ((notes + "\n") if notes else "") + f"Mobil: {phone2}"
 
         to_insert.append({
             "org_id": org_id,
             "full_name": full_name,
             "email": email,
             "phone": phone,
+            # Second number (Mobil) lands in its own column; skip if identical to phone.
+            "phone2": phone2 if (phone2 and phone2 != phone) else None,
             "address": address,
             "notes": notes,
             "customer_type": "regular",   # CSV import = Stammkunde, never "new"

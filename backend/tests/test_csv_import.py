@@ -132,7 +132,7 @@ def test_import_customers_happy_path(monkeypatch):
     assert rec["customer_number"] == "101002"  # CSV Kundennummer kept
     assert rec["address"] == {"street": "Wischenwinkel 17", "postal_code": "21147", "city": "Hamburg"}
     assert "Messihaushalt, nur auf Mobil anrufen!" in rec["notes"]  # Bemerkung verbatim
-    assert "Mobil: +491758771486" in rec["notes"]  # second number preserved
+    assert rec["phone2"] == "+491758771486"  # Mobil → its own phone2 column
 
 
 def test_import_customers_skips_existing_email(monkeypatch):
@@ -231,7 +231,7 @@ def test_import_customers_real_datev_mapping(monkeypatch):
     assert rec["customer_number"] == "101003"
     # Multi-line Bemerkung preserved across the embedded newline.
     assert "WV-15119" in rec["notes"] and "Bitte nicht Hr. Hillermann" in rec["notes"]
-    assert "Mobil: +491788239629" in rec["notes"]  # Mobil kept as 2nd number
+    assert rec["phone2"] == "+491788239629"  # Mobil → its own phone2 column
 
 
 # ─── numbering unification ───────────────────────────────────────────────────

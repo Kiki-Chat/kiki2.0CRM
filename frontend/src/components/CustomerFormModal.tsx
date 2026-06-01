@@ -11,6 +11,7 @@ export interface CustomerFormValues {
   full_name?: string | null
   email?: string | null
   phone?: string | null
+  phone2?: string | null
   address?: { raw?: string } | string | null
   vat_id?: string | null
   customer_number?: string | null
@@ -49,6 +50,7 @@ export function CustomerFormModal({
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
+  const [phone2, setPhone2] = useState('')
   const [address, setAddress] = useState('')
   const [vat, setVat] = useState('')
   const [number, setNumber] = useState('')
@@ -61,6 +63,7 @@ export function CustomerFormModal({
     setName(customer?.full_name ?? '')
     setEmail(customer?.email ?? '')
     setPhone(customer?.phone ?? '')
+    setPhone2(customer?.phone2 ?? '')
     setAddress(addrToString(customer?.address))
     setVat(customer?.vat_id ?? '')
     setNumber(customer?.customer_number ?? '')
@@ -75,6 +78,7 @@ export function CustomerFormModal({
         full_name: name,
         email,
         phone,
+        phone2,
         address,
         vat_id: vat,
         customer_type: type,
@@ -143,6 +147,14 @@ export function CustomerFormModal({
         </Field>
         <Field label="Telefon">
           <input value={phone} onChange={(e) => setPhone(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="Telefon 2 (Mobil)">
+          <input
+            value={phone2}
+            onChange={(e) => setPhone2(e.target.value)}
+            placeholder="Zweite Rufnummer (optional)"
+            className={inputCls}
+          />
         </Field>
         <Field label="Adresse">
           <input value={address} onChange={(e) => setAddress(e.target.value)} className={inputCls} />

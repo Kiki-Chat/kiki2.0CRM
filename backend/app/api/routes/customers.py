@@ -174,6 +174,7 @@ def _create(org_id: str, payload: CustomerUpsert) -> dict:
         "full_name": payload.full_name,
         "email": payload.email,
         "phone": payload.phone,
+        "phone2": payload.phone2,
         "address": _addr(payload.address),
         "vat_id": payload.vat_id,
         "customer_type": payload.customer_type or "new",
@@ -210,6 +211,8 @@ def _update(org_id: str, customer_id: str, payload: CustomerUpsert) -> dict | No
         fields["email"] = payload.email
     if payload.phone is not None:
         fields["phone"] = payload.phone
+    if payload.phone2 is not None:
+        fields["phone2"] = payload.phone2
     if payload.address is not None:
         fields["address"] = _addr(payload.address)
     if payload.vat_id is not None:

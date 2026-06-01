@@ -19,6 +19,7 @@ class CustomerUpsert(BaseModel):
     full_name: str | None = None
     email: str | None = None
     phone: str | None = None
+    phone2: str | None = None
     address: str | None = None
     vat_id: str | None = None
     customer_type: str | None = None  # new | regular | supplier | property_management
