@@ -537,6 +537,19 @@ def _select_none(db, org_id: str, cfg: dict, now_local: datetime) -> list[dict]:
     return []
 
 
+def _appt_email(occasion_key: str):
+    """Lazy bridge to the Cluster B email renderer. The import is deferred to call
+    time so appointment_emails (which imports the German date formatters from THIS
+    module) never creates a load-time cycle."""
+
+    def _render(record: dict, customer: dict | None, org: dict):
+        from app.services.appointment_emails import render_appointment_email
+
+        return render_appointment_email(occasion_key, record, customer, org)
+
+    return _render
+
+
 def _appt_clauses(record: dict, customer: dict | None, org: dict):
     company = org.get("name") or "uns"
     name = (customer or {}).get("full_name") or ""
@@ -768,6 +781,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_APPT_OCCASION_COLUMNS,
         select=_select_none,
         render=_render_appointment_confirmation,
+        email_render=_appt_email("appointment_confirmation"),
         case_gate="ignore",
         email_always=True,
     ),
@@ -779,6 +793,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_APPT_OCCASION_COLUMNS,
         select=_select_none,
         render=_render_appointment_cancellation,
+        email_render=_appt_email("appointment_cancellation"),
         case_gate="ignore",
         email_always=True,
     ),
@@ -790,6 +805,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         columns=_APPT_OCCASION_COLUMNS,
         select=_select_none,
         render=_render_appointment_reschedule,
+        email_render=_appt_email("appointment_reschedule"),
         case_gate="ignore",
         email_always=True,
     ),

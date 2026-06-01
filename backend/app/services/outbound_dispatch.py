@@ -29,13 +29,16 @@ import logging
 import uuid
 from datetime import datetime, time, timedelta, timezone
 
+from app.core.config import settings
 from app.db.supabase_client import get_service_client
+from app.services.email_send import send_email
 from app.services.outbound_call import OutboundCallError, place_outbound_call
 from app.services.outbound_occasions import (
     OCCASION_KEYS,
     OCCASIONS,
     build_call_content,
 )
+from app.services.outbound_scope import OutOfScopeError, enforce_email_scope
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +126,7 @@ def _resolve_customers(db, org_id: str, customer_ids: list) -> dict:
         return {}
     rows = (
         db.table("customers")
-        .select("id, full_name, phone")
+        .select("id, full_name, phone, email")
         .eq("org_id", org_id)
         .in_("id", ids)
         .execute()
@@ -131,6 +134,37 @@ def _resolve_customers(db, org_id: str, customer_ids: list) -> dict:
         or []
     )
     return {r["id"]: r for r in rows}
+
+
+def _maybe_send_occasion_email(*, spec, record, customer, org, org_id) -> str | None:
+    """Best-effort per-occasion email (Cluster B/C). The 3 appointment occasions
+    (``email_always``) send unconditionally; the existing 7 only when
+    ``OUTBOUND_OCCASION_EMAILS_ENABLED`` is set (so that wiring ships INERT).
+    Scope-guarded (forced to the test inbox / refused out-of-scope while the
+    guard is on) and NEVER fatal — an email failure must not affect the placed
+    call. Returns the address actually emailed, or None."""
+    if not spec.email_render:
+        return None
+    if not (spec.email_always or settings.outbound_occasion_emails_enabled):
+        return None
+    try:
+        to_email = enforce_email_scope(org_id, (customer or {}).get("email"))
+    except OutOfScopeError as e:
+        logger.info("occasion email skipped (out of scope): %s", e)
+        return None
+    try:
+        subject, body_html = spec.email_render(record, customer, org)
+        send_email(
+            org_id=org_id,
+            to_email=to_email,
+            subject=subject,
+            body_html=body_html,
+            reply_to=(org.get("email") or None),
+        )
+        return to_email
+    except Exception as e:  # pragma: no cover — never break the placed call
+        logger.warning("occasion email failed (%s): %s", spec.key, e)
+        return None
 
 
 def _resolve_inquiry_statuses(db, org_id: str, inquiry_ids: list) -> dict:
@@ -288,6 +322,12 @@ def _dispatch_one(
             }
         ).eq("id", outbound_call_id).execute()
 
+    # Per-occasion email side-effect — one chokepoint for the sweep AND the click.
+    # Best-effort + scope-guarded; never affects the placed call above.
+    email_to = _maybe_send_occasion_email(
+        spec=spec, record=record, customer=customer, org=org, org_id=org_id
+    )
+
     return {
         "referenz_id": record["id"],
         "to_number": to_number,
@@ -297,6 +337,7 @@ def _dispatch_one(
         "cycle_no": cycle_no,
         "conversation_id": result.get("conversation_id"),
         "call_sid": result.get("callSid"),
+        "email_to": email_to,
     }
 
 
