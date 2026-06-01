@@ -8,7 +8,13 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.db.supabase_client import get_service_client
-from app.schemas.admin import AbsenceCreate, EmployeeCreate, EmployeeUpdate
+from app.schemas.admin import (
+    AbsenceApply,
+    AbsenceCreate,
+    AbsenceReview,
+    EmployeeCreate,
+    EmployeeUpdate,
+)
 from app.services import csv_import, employee_invite
 from app.services.common import validate_fk_in_org
 
@@ -34,7 +40,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _list(org_id: str) -> list[dict]:
+def _list(org_id: str, role: str | None = None) -> list[dict]:
     client = get_service_client()
     employees = (
         client.table("employees")
@@ -74,6 +80,7 @@ def _list(org_id: str) -> list[dict]:
             client.table("employee_absences")
             .select("employee_id, type, starts_at, ends_at")
             .eq("org_id", org_id)
+            .eq("status", "approved")  # only APPROVED absences mark someone absent
             .in_("employee_id", emp_ids)
             .lte("starts_at", now_iso)
             .gte("ends_at", now_iso)
@@ -110,12 +117,21 @@ def _list(org_id: str) -> list[dict]:
                 "absence_type": absence_type.get(e["id"]),
             }
         )
+    # Non-admins may read the roster (needed for assignment dropdowns, calendars,
+    # presence) but MUST NOT see colleagues' HR data. Strip the sensitive fields
+    # for employees; admins get the full record.
+    if role not in _OWNER_ROLES:
+        sensitive = (
+            "email", "has_login", "access_role", "is_org_owner",
+            "vacation_days_per_year", "remaining_vacation_days", "hourly_rate",
+        )
+        out = [{k: v for k, v in e.items() if k not in sensitive} for e in out]
     return out
 
 
 @router.get("")
 async def list_employees(user: CurrentUser = Depends(require_org)) -> list[dict]:
-    return await run_in_threadpool(_list, user.org_id)
+    return await run_in_threadpool(_list, user.org_id, user.role)
 
 
 def _create(org_id: str, payload: EmployeeCreate) -> dict:
@@ -402,21 +418,38 @@ async def set_password(
 
 
 # ─── Absences ────────────────────────────────────────────────────────────────
-def _list_all_absences(org_id: str, frm: str | None, to: str | None) -> list[dict]:
-    client = get_service_client()
-    query = client.table("employee_absences").select("*").eq("org_id", org_id)
-    if to:
-        query = query.lt("starts_at", to)
-    if frm:
-        query = query.gte("ends_at", frm)
-    absences = query.order("starts_at").execute().data or []
+# Two audiences (backend is the source of truth; UI follows):
+#   • Employees self-serve — apply for their OWN absence (status='pending') and
+#     view their own requests. The employee_id is resolved from the caller's user,
+#     NEVER taken from the request, so an employee can't file for a colleague.
+#   • Org-admins manage everyone — create (pre-approved), list all, and approve /
+#     reject pending requests. Admin-only (require_org_admin).
+_ABSENCE_STATUSES = {"pending", "approved", "rejected"}
 
+
+def _my_employee(client, org_id: str, user_id: str) -> dict | None:
+    """The caller's own employee record in this org (None if they have none)."""
+    rows = (
+        client.table("employees")
+        .select("id, display_name")
+        .eq("org_id", org_id)
+        .eq("user_id", user_id)
+        .eq("deleted", False)
+        .limit(1)
+        .execute()
+        .data
+    )
+    return rows[0] if rows else None
+
+
+def _attach_employee_names(client, org_id: str, absences: list[dict]) -> list[dict]:
     emp_ids = {a["employee_id"] for a in absences}
     names: dict[str, dict] = {}
     if emp_ids:
         for e in (
             client.table("employees")
             .select("id, display_name, calendar_color")
+            .eq("org_id", org_id)
             .in_("id", list(emp_ids))
             .execute()
             .data
@@ -430,15 +463,168 @@ def _list_all_absences(org_id: str, frm: str | None, to: str | None) -> list[dic
     return absences
 
 
+# ─── Admin: list all / pending, approve, reject ──────────────────────────────
+def _list_all_absences(org_id: str, frm: str | None, to: str | None) -> list[dict]:
+    client = get_service_client()
+    query = client.table("employee_absences").select("*").eq("org_id", org_id)
+    if to:
+        query = query.lt("starts_at", to)
+    if frm:
+        query = query.gte("ends_at", frm)
+    absences = query.order("starts_at").execute().data or []
+    return _attach_employee_names(client, org_id, absences)
+
+
 @router.get("/absences")
 async def list_all_absences(
     frm: str | None = Query(default=None, alias="from"),
     to: str | None = Query(default=None),
-    user: CurrentUser = Depends(require_org),
+    user: CurrentUser = Depends(require_org_admin),
 ) -> list[dict]:
     return await run_in_threadpool(_list_all_absences, user.org_id, frm, to)
 
 
+def _list_pending(org_id: str) -> list[dict]:
+    client = get_service_client()
+    rows = (
+        client.table("employee_absences")
+        .select("*")
+        .eq("org_id", org_id)
+        .eq("status", "pending")
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    return _attach_employee_names(client, org_id, rows)
+
+
+@router.get("/absences/pending")
+async def list_pending_absences(user: CurrentUser = Depends(require_org_admin)) -> list[dict]:
+    """Pending absence requests for the org — powers the admin Anträge tab."""
+    return await run_in_threadpool(_list_pending, user.org_id)
+
+
+def _review_absence(
+    org_id: str, absence_id: str, status: str, reviewer_id: str, note: str | None
+) -> dict | None:
+    client = get_service_client()
+    existing = (
+        client.table("employee_absences")
+        .select("id")
+        .eq("org_id", org_id)
+        .eq("id", absence_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not existing:
+        return None
+    fields: dict = {
+        "status": status,
+        "reviewed_by": reviewer_id,
+        "reviewed_at": _now().isoformat(),
+    }
+    if note is not None:
+        fields["internal_note"] = note
+    res = (
+        client.table("employee_absences")
+        .update(fields)
+        .eq("org_id", org_id)
+        .eq("id", absence_id)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+@router.post("/absences/{absence_id}/approve")
+async def approve_absence(
+    absence_id: str,
+    payload: AbsenceReview | None = None,
+    user: CurrentUser = Depends(require_org_admin),
+) -> dict:
+    note = payload.note if payload else None
+    row = await run_in_threadpool(
+        _review_absence, user.org_id, absence_id, "approved", user.id, note
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Abwesenheit nicht gefunden")
+    return row
+
+
+@router.post("/absences/{absence_id}/reject")
+async def reject_absence(
+    absence_id: str,
+    payload: AbsenceReview | None = None,
+    user: CurrentUser = Depends(require_org_admin),
+) -> dict:
+    note = payload.note if payload else None
+    row = await run_in_threadpool(
+        _review_absence, user.org_id, absence_id, "rejected", user.id, note
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Abwesenheit nicht gefunden")
+    return row
+
+
+# ─── Employee self-service (declared BEFORE /{employee_id}/* so "me" wins) ────
+def _apply_absence(org_id: str, user_id: str, payload: AbsenceApply) -> dict | str:
+    client = get_service_client()
+    me = _my_employee(client, org_id, user_id)
+    if not me:
+        return "no_employee"
+    row = {
+        "org_id": org_id,
+        "employee_id": me["id"],  # OWN record — never from the request
+        "type": payload.type,
+        "starts_at": payload.starts_at,
+        "ends_at": payload.ends_at,
+        "all_day": payload.all_day,
+        "reason": payload.reason,
+        "status": "pending",  # employee requests are pending until an admin reviews
+    }
+    return client.table("employee_absences").insert(row).execute().data[0]
+
+
+@router.post("/me/absences")
+async def apply_for_absence(
+    payload: AbsenceApply, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Employee applies for their OWN absence (lands as 'pending')."""
+    res = await run_in_threadpool(_apply_absence, user.org_id, user.id, payload)
+    if res == "no_employee":
+        raise HTTPException(
+            status_code=404,
+            detail="Kein Mitarbeiterprofil für dieses Konto gefunden.",
+        )
+    return res
+
+
+def _list_my_absences(org_id: str, user_id: str) -> list[dict] | None:
+    client = get_service_client()
+    me = _my_employee(client, org_id, user_id)
+    if not me:
+        return None
+    return (
+        client.table("employee_absences")
+        .select("*")
+        .eq("org_id", org_id)
+        .eq("employee_id", me["id"])
+        .order("starts_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+
+
+@router.get("/me/absences")
+async def list_my_absences(user: CurrentUser = Depends(require_org)) -> list[dict]:
+    """The caller's own absences (all statuses)."""
+    res = await run_in_threadpool(_list_my_absences, user.org_id, user.id)
+    return res or []
+
+
+# ─── Admin: create for any employee (pre-approved) / list one employee's ─────
 def _create_absence(org_id: str, employee_id: str, payload: AbsenceCreate) -> dict:
     client = get_service_client()
     # FK hardening: can't file an absence against another org's employee.
@@ -455,13 +641,15 @@ def _create_absence(org_id: str, employee_id: str, payload: AbsenceCreate) -> di
         "all_day": payload.all_day,
         "reason": payload.reason,
         "internal_note": payload.internal_note,
+        # status omitted → DB default 'approved' (an admin-created absence is
+        # authoritative, no approval step needed).
     }
     return client.table("employee_absences").insert(row).execute().data[0]
 
 
 @router.post("/{employee_id}/absences")
 async def create_absence(
-    employee_id: str, payload: AbsenceCreate, user: CurrentUser = Depends(require_org)
+    employee_id: str, payload: AbsenceCreate, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
     return await run_in_threadpool(_create_absence, user.org_id, employee_id, payload)
 
@@ -482,6 +670,6 @@ def _list_absences(org_id: str, employee_id: str) -> list[dict]:
 
 @router.get("/{employee_id}/absences")
 async def list_absences(
-    employee_id: str, user: CurrentUser = Depends(require_org)
+    employee_id: str, user: CurrentUser = Depends(require_org_admin)
 ) -> list[dict]:
     return await run_in_threadpool(_list_absences, user.org_id, employee_id)

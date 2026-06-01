@@ -17,6 +17,7 @@ import { InvoiceFormPage } from './pages/InvoiceFormPage'
 import { InvoicesPage } from './pages/InvoicesPage'
 import { KikiZentralePage } from './pages/KikiZentralePage'
 import { LoginPage } from './pages/LoginPage'
+import { MyAbsencePage } from './pages/MyAbsencePage'
 import { PlanningBoardPage } from './pages/PlanningBoardPage'
 import { Placeholder } from './pages/Placeholder'
 import { ProjectFormPage } from './pages/ProjectFormPage'
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="customers/:id" element={<CustomerDetailPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="calendar/business-hours" element={<BusinessHoursPage />} />
+          <Route path="meine-abwesenheit" element={<MyAbsencePage />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="projects/new" element={<ProjectFormPage />} />
           <Route path="projects/:id" element={<ProjectWorkspacePage />} />

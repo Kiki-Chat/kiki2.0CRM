@@ -22,6 +22,7 @@ import {
   Trash2,
   Upload,
   Users,
+  X,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
@@ -84,6 +85,8 @@ interface Absence {
   ends_at: string
   all_day: boolean
   reason: string | null
+  status: string
+  internal_note: string | null
 }
 
 function AbsenceLegend() {
@@ -1108,13 +1111,80 @@ function OverviewTab() {
 
 // ─── Anträge tab (absence requests) ──────────────────────────────────────────
 function AntraegeTab() {
+  const qc = useQueryClient()
+  const { data: pending = [], isLoading } = useQuery({
+    queryKey: ['absences-pending'],
+    queryFn: () => apiFetch<Absence[]>('/api/employees/absences/pending'),
+  })
+  const review = useMutation({
+    mutationFn: ({ id, action, note }: { id: string; action: 'approve' | 'reject'; note?: string }) =>
+      apiFetch(`/api/employees/absences/${id}/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ note: note ?? null }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['absences-pending'] })
+      qc.invalidateQueries({ queryKey: ['absences'] })
+      qc.invalidateQueries({ queryKey: ['employees-full'] })
+    },
+  })
+
+  if (!isLoading && !pending.length) {
+    return (
+      <div className="rounded-xl border border-border bg-surface py-20 text-center">
+        <CircleCheck size={48} className="mx-auto mb-4 text-success" strokeWidth={1.5} />
+        <div className="text-lg font-bold text-text">Keine offenen Anträge</div>
+        <p className="mt-1 text-sm text-muted">Alle Abwesenheitsanträge wurden bearbeitet.</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="rounded-xl border border-border bg-surface py-20 text-center">
-      <CircleCheck size={48} className="mx-auto mb-4 text-success" strokeWidth={1.5} />
-      <div className="text-lg font-bold text-text">Keine offenen Anträge</div>
-      <p className="mt-1 text-sm text-muted">Alle Abwesenheitsanträge wurden bearbeitet.</p>
+    <div className="space-y-3">
+      {pending.map((a) => {
+        const meta = ABSENCE_META[a.type]
+        return (
+          <div key={a.id} className="flex items-center gap-4 rounded-xl border border-border bg-surface px-5 py-4">
+            <span className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: meta?.color }} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-text">{a.employee_name ?? 'Mitarbeiter'}</span>
+                <span className="rounded-full bg-alt px-2 py-0.5 text-xs text-muted">{meta?.label ?? a.type}</span>
+              </div>
+              <div className="mt-0.5 text-sm text-muted">
+                {fmtAbsenceRange(a)}
+                {a.reason ? ` · ${a.reason}` : ''}
+              </div>
+            </div>
+            <div className="flex flex-shrink-0 items-center gap-2">
+              <button
+                disabled={review.isPending}
+                onClick={() => review.mutate({ id: a.id, action: 'approve' })}
+                className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+              >
+                <CircleCheck size={15} /> Genehmigen
+              </button>
+              <button
+                disabled={review.isPending}
+                onClick={() => {
+                  const note = window.prompt('Grund der Ablehnung (optional):') ?? undefined
+                  review.mutate({ id: a.id, action: 'reject', note: note || undefined })
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-error hover:bg-error-bg"
+              >
+                <X size={15} /> Ablehnen
+              </button>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
+}
+
+function fmtAbsenceRange(a: Absence): string {
+  const f = (s: string) => new Date(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return `${f(a.starts_at)} – ${f(a.ends_at)}`
 }
 
 // ─── Absence calendar tab ────────────────────────────────────────────────────

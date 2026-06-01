@@ -59,6 +59,23 @@ class AbsenceCreate(BaseModel):
     internal_note: str | None = None
 
 
+class AbsenceApply(BaseModel):
+    """Employee self-service absence REQUEST (lands as status='pending'). No
+    internal_note — that's an admin field; the employee's own employee_id is
+    resolved server-side, never taken from the request."""
+    type: str = "vacation"
+    starts_at: str
+    ends_at: str
+    all_day: bool = True
+    reason: str | None = None
+
+
+class AbsenceReview(BaseModel):
+    """Admin approve/reject payload. Optional note stored as the absence's
+    internal_note (e.g. a rejection reason)."""
+    note: str | None = None
+
+
 class VehicleUpsert(BaseModel):
     name: str | None = None
     model: str | None = None

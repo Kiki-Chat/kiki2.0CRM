@@ -3,6 +3,7 @@ import {
   Phone,
   Users,
   Calendar,
+  CalendarClock,
   Briefcase,
   Wallet,
   HardHat,
@@ -36,6 +37,7 @@ export const NAV: NavEntry[] = [
   { to: '/calls', icon: Phone, label: 'Anrufe', badgeKey: 'calls' },
   { to: '/customers', icon: Users, label: 'Kunden' },
   { to: '/calendar', icon: Calendar, label: 'Kalender' },
+  { to: '/meine-abwesenheit', icon: CalendarClock, label: 'Meine Abwesenheit' },
   {
     icon: Briefcase,
     label: 'Aufträge',
