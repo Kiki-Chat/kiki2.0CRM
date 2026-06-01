@@ -187,3 +187,11 @@ Running notes: root cause + fix + test + commit SHA per item. State as of sessio
 - **Frontend ([CustomersPage.tsx](frontend/src/pages/CustomersPage.tsx)):** per-card checkbox (stops card-navigate via `stopPropagation`), a select-all toggle with indeterminate state, and a red "Löschen (N)" bar with confirm. Selected cards get a green ring; selection clears when the filter/search (visible set) changes so a hidden row is never silently deleted.
 - **Test:** `test_customers_bulk_delete.py` (2) — soft-deletes scoped to org (cross-org row untouched) + empty-list no-op. Full hermetic suite **348 passed**; build clean; backend restarted + route live (401 unauth).
 - **Files:** `customers.py`, `tests/test_customers_bulk_delete.py`, `CustomersPage.tsx`.
+
+## Round 5 (feature) — Customer second phone number ✅ (commit `b3f272c`)
+- **Ask:** a 2nd phone field in the customer edit modal.
+- **Migration `0036_customers_phone2.sql`** (additive, **applied to prod Supabase** via MCP): `alter table customers add column if not exists phone2 text`.
+- **Backend:** `CustomerUpsert.phone2`; `_create`/`_update` persist it (`_detail` already `select *`). **CSV import** now stores Mobil in `phone2` (not appended to notes) — `test_csv_import` updated.
+- **Frontend:** "Telefon 2 (Mobil)" field in the create/edit modal (pre-fills from `customer.phone2`).
+- **Test:** full hermetic suite **348 passed**; build clean; prod column verified (`information_schema`); backend restarted clean.
+- **Files:** `0036_customers_phone2.sql`, `schemas/admin.py`, `customers.py`, `csv_import.py`, `tests/test_csv_import.py`, `CustomerFormModal.tsx`.
