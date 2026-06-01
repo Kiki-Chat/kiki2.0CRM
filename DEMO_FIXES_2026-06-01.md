@@ -89,6 +89,27 @@ Running notes: root cause + fix + test + commit SHA per item. State as of sessio
 
 ---
 
+# PHASE 0 (round 2) — DIAGNOSIS for Clusters 7 & 8
+
+## Cluster 7 — Employee invite email not firing at creation (+ folds in B2) — GATED ⛔
+**(a) Invite-timing root cause.** Premise is partly wrong on `main`: create **does** call the invite send ([employees.py:180-194](backend/app/api/routes/employees.py#L180), `send_employee_welcome`). The real defects: (1) the create-path send is **silently best-effort** — wrapped in try/except that downgrades any failure to a soft `warning` string the UI shows as a normal success toast ([EmployeesPage.tsx flash(data.warning)]); and if `generate_set_password_link(new_user=True)` ([employees.py:158](backend/app/api/routes/employees.py#L158)) or the `users` insert throws, the outer except sets `user_id=None`/`link=None` ([:170-174](backend/app/api/routes/employees.py#L170)) so the send block at `:180` is **skipped entirely** (employee created, no login, no email). (2) The **recreate-by-email branch** ([:144-149](backend/app/api/routes/employees.py#L144)) reuses the surviving login and **sends nothing + resets nothing**. The only reliable sender is the **resend-invite endpoint** = the RefreshCw "Einladung erneut senden" button ([EmployeesPage.tsx:279-286,381-384](frontend/src/pages/EmployeesPage.tsx#L279), `POST /api/employees/{id}/resend-invite` [employees.py:363-377](backend/app/api/routes/employees.py#L363)) — an all-in-one try block that returns a real 502 on failure. That "sync"/resend is what reliably mails. (There is **no** calendar-style sync involved.)
+**(c) `user_id`-inheritance audit (recreate reuses the same `user_id` because delete is soft + `users.email` is globally unique).**
+- **Google/calendar OAuth grant (`oauth_connections`), `oauth_purpose_links`, `email_configs` → ORG-scoped (`org_id`), NOT inherited.** ✅ A recreated employee does NOT inherit the deleted person's Google connection (there is no per-user grant).
+- **`inquiries.assigned_to`, `appointments.assigned_to`, `*.created_by`, audit `actor_id` → keyed by `users.id` → WOULD INHERIT** (attribution/ownership + audit integrity).
+- **`assigned_employee_id`, `time_entries.employee_id`, `employee_absences.employee_id` → keyed by `employees.id` → orphaned to the dead row, NOT inherited.**
+- **Supabase `auth` sessions + MFA factors → survive on `auth.users` → WOULD INHERIT (highest severity)** — the prior holder can still be logged in / hold 2FA on the reused login.
+**(d) Proposed COMBINED fix (one approval covers invite-timing + full B2):**
+1. **Create** → keep the immediate send but make "no login created" visibly distinct from "login created, email pending" (don't bury a hard failure in a success toast).
+2. **Recreate-by-email** → true re-provision: `users.update({full_name, role, org_id})` + mint a **recovery** link + `send_employee_welcome` (fresh invite) — so the old password stops being the way in and the new hire gets mailed. Never silently retain the old password.
+3. **Neutralize inherited access on recreate** → `auth.admin.sign_out(user_id)` + delete MFA factors before handing over (revokes the prior holder's sessions/2FA). **Open Q:** confirm the pinned `supabase` client exposes these (else use the Admin REST API).
+4. **Recommended (cleanest):** hard-delete the login on employee delete (`auth.admin.delete_user` — pattern already in `provisioning.py:149` — + delete the `public.users` row) so recreate takes the clean new-user path and the whole inheritance class disappears. Keep the `employees` row soft-deleted for history.
+**Migration:** none required. *Optional additive:* partial unique `employees(org_id, lower(email)) where deleted=false`. **Open product Qs for Amber:** hard-delete login on delete (4) vs soft+reprovision (2+3)? scrub `created_by`/audit `actor_id` on departure or retain as history? reuse the soft-deleted `employees` row vs insert a new one? **HOLDING — present with B2, one approval.**
+
+## Cluster 8 — Stale email pre-filling a search field — CLEAN FRONTEND, auto-fix ✅
+**(a) Root cause = (c) BROWSER AUTOFILL.** Ruled out shared React state (no `createContext`/module-level var ties search to email; every field is isolated `useState`) and stale store (no `defaultValue`/store binding). The employee email `<input>` ([EmployeesPage.tsx:712](frontend/src/pages/EmployeesPage.tsx#L712) + edit at :826) has **no `type`/`name`/`id`/`autoComplete`**, so Chrome classifies it (placeholder `email@example.de` + "E-Mail" label) as an email field and remembers the value; the **attribute-less search inputs** ([Topbar.tsx:33-36](frontend/src/components/layout/Topbar.tsx#L33), [EmployeesPage.tsx:299-304](frontend/src/pages/EmployeesPage.tsx#L299), [CustomersPage.tsx:106-111](frontend/src/pages/CustomersPage.tsx#L106), CatalogPage/CallLogsPage/CustomerDetailPage/projectTabs) then receive that remembered email via autofill.
+**(b/c) Fix (attributes only, no state change):** add `type="search" name="<unique>" autoComplete="off"` to the search inputs; add `type="email" name="employee_email" autoComplete="off"` to the employee email inputs. Severs the autofill link.
+**(d) VERDICT: CLEAN, ISOLATED, PURE-FRONTEND — does NOT share root with B2.** → auto-fixing per instruction.
+
 # FIX LOG (appended as each cluster ships)
 
 ## Cluster 1 — Admin settings = company only ✅ (commit `c644a4b`)
