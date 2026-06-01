@@ -2,6 +2,7 @@ import json
 from collections import Counter
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
@@ -266,3 +267,31 @@ async def delete_customer(
     if not ok:
         raise HTTPException(status_code=404, detail="Customer not found")
     return {"success": True}
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[str]
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_customers(
+    payload: BulkDeleteRequest, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Soft-delete one or more customers (status='deleted'), scoped to the caller's
+    org so a member can never delete another tenant's rows. Returns the count."""
+    ids = [i for i in (payload.ids or []) if i]
+    if not ids:
+        return {"deleted": 0}
+
+    def _soft_delete() -> int:
+        client = get_service_client()
+        res = (
+            client.table("customers")
+            .update({"status": "deleted"})
+            .eq("org_id", user.org_id)
+            .in_("id", ids)
+            .execute()
+        )
+        return len(res.data or [])
+
+    return {"deleted": await run_in_threadpool(_soft_delete)}

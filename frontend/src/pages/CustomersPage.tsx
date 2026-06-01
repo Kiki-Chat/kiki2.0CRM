@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AtSign,
   Download,
@@ -6,11 +6,12 @@ import {
   Phone,
   Plus,
   Search,
+  Trash2,
   Upload,
   User,
   Users,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { CsvImportModal } from '../components/CsvImportModal'
@@ -63,6 +64,7 @@ export function CustomersPage() {
   const [filter, setFilter] = useState('all')
   const [newOpen, setNewOpen] = useState(false)
   const [csvOpen, setCsvOpen] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const { data } = useQuery({
     queryKey: ['customers', filter, search],
@@ -76,6 +78,46 @@ export function CustomersPage() {
   })
   const customers = data?.customers ?? []
   const counts = data?.type_counts ?? {}
+
+  // Selection (checkbox multi-select + bulk remove). Cleared whenever the visible
+  // set changes so a hidden row can never be silently included in a delete.
+  useEffect(() => {
+    setSelected(new Set())
+  }, [filter, search])
+
+  const allSelected = customers.length > 0 && customers.every((c) => selected.has(c.id))
+  const someSelected = selected.size > 0 && !allSelected
+  const selectAllRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected
+  }, [someSelected])
+
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(customers.map((c) => c.id)))
+  const clear = () => setSelected(new Set())
+
+  const del = useMutation({
+    mutationFn: (ids: string[]) =>
+      apiFetch<{ deleted: number }>('/api/customers/bulk-delete', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      }),
+    onSuccess: () => {
+      clear()
+      qc.invalidateQueries({ queryKey: ['customers'] })
+    },
+  })
+  const removeSelected = () => {
+    const ids = [...selected]
+    if (!ids.length) return
+    if (window.confirm(`${ids.length} ${ids.length > 1 ? 'Kunden' : 'Kunde'} wirklich entfernen?`)) del.mutate(ids)
+  }
 
   return (
     <div className="mx-auto max-w-[1440px] p-8">
@@ -115,7 +157,7 @@ export function CustomersPage() {
       </div>
 
       {/* Filter tabs */}
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap gap-2">
         {FILTERS.map((f) => {
           const active = filter === f.key
           const count = f.key === 'all' ? counts.all ?? 0 : counts[f.type!] ?? 0
@@ -135,22 +177,72 @@ export function CustomersPage() {
         })}
       </div>
 
+      {/* Selection / bulk-remove bar */}
+      {customers.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-body">
+            <input
+              ref={selectAllRef}
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleAll}
+              className="h-4 w-4 cursor-pointer accent-green-primary"
+            />
+            {selected.size > 0 ? `${selected.size} ausgewählt` : 'Alle auswählen'}
+          </label>
+          {selected.size > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={clear}
+                className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={removeSelected}
+                disabled={del.isPending}
+                className="flex items-center gap-2 rounded-md bg-error px-4 py-1.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+              >
+                <Trash2 size={15} /> {del.isPending ? 'Löscht…' : `Löschen (${selected.size})`}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Grid */}
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
         {customers.map((c) => {
           const meta = TYPE_META[c.customer_type ?? 'new'] ?? TYPE_META.new
+          const isSel = selected.has(c.id)
           return (
-            <button
+            <div
               key={c.id}
+              role="button"
+              tabIndex={0}
               onClick={() => navigate(`/customers/${c.id}`)}
-              className="flex flex-col rounded-lg border border-border bg-surface p-5 text-left shadow-e1 transition hover:shadow-e2 hover:bg-green-tint-50"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') navigate(`/customers/${c.id}`)
+              }}
+              className={cn(
+                'relative flex cursor-pointer flex-col rounded-lg border bg-surface p-5 text-left shadow-e1 transition hover:bg-green-tint-50 hover:shadow-e2',
+                isSel ? 'border-green-primary ring-1 ring-green-primary' : 'border-border',
+              )}
             >
               <div className="mb-4 flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2.5">
-                  <User size={18} className="text-green-deep" />
-                  <span className="text-base font-bold text-text">{c.full_name ?? 'Unbekannt'}</span>
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={isSel}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => toggle(c.id)}
+                    aria-label={`${c.full_name ?? 'Kunde'} auswählen`}
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-green-primary"
+                  />
+                  <User size={18} className="shrink-0 text-green-deep" />
+                  <span className="truncate text-base font-bold text-text">{c.full_name ?? 'Unbekannt'}</span>
                 </div>
-                <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-bold', meta.badge)}>
+                <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold', meta.badge)}>
                   {meta.label}
                 </span>
               </div>
@@ -172,7 +264,7 @@ export function CustomersPage() {
                 {c.inquiry_count} Anfragen · {c.appointment_count} Termine · {c.photo_count} Fotos ·{' '}
                 {c.document_count} Dokumente
               </div>
-            </button>
+            </div>
           )
         })}
       </div>
