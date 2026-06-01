@@ -51,6 +51,13 @@ export interface PendingAppointment {
   alternative_end_time: string | null
   alternative_note: string | null
   alternative_proposed_at: string | null
+  // Customer counter-proposal recorded by the agent on a reschedule call
+  // (migration 0037). When customer_proposed_at is set, the card shows the
+  // "Kunde schlägt … vor — Genehmigen / Ablehnen" approval state.
+  customer_proposed_start_time: string | null
+  customer_proposed_end_time: string | null
+  customer_proposed_at: string | null
+  customer_proposal_source: string | null
 }
 
 export interface PendingAppointmentResponse {
@@ -212,9 +219,34 @@ export function AppointmentCard({
     onError: (e: Error) => setActionError(e.message || 'Alternative konnte nicht gesendet werden.'),
   })
 
+  const approveProposal = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/appointments/${appointment.id}/approve-proposal`, {
+        method: 'POST',
+      }),
+    onSuccess: invalidate,
+    onError: (e: Error) => setActionError(e.message || 'Genehmigung fehlgeschlagen.'),
+  })
+
+  const declineProposal = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/appointments/${appointment.id}/decline-proposal`, {
+        method: 'POST',
+      }),
+    onSuccess: invalidate,
+    onError: (e: Error) => setActionError(e.message || 'Ablehnen fehlgeschlagen.'),
+  })
+
   const busy =
-    confirm.isPending || reject.isPending || proposeAlt.isPending
+    confirm.isPending ||
+    reject.isPending ||
+    proposeAlt.isPending ||
+    approveProposal.isPending ||
+    declineProposal.isPending
   const altAlreadySent = !!appointment.alternative_proposed_at
+  // A customer counter-proposal supersedes the "Alternative gesendet" state —
+  // it's the next thing needing a human decision (approve → confirm + call).
+  const customerProposed = !!appointment.customer_proposed_at
 
   const location = appointment.location?.raw ?? null
   const effectiveDuration = customDuration ?? duration
@@ -259,13 +291,19 @@ export function AppointmentCard({
           <span
             className={cn(
               'flex flex-shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold',
-              altAlreadySent
-                ? 'bg-info-bg text-info'
-                : 'bg-green-tint-100 text-green-deep',
+              customerProposed
+                ? 'bg-amber-100 text-amber-700'
+                : altAlreadySent
+                  ? 'bg-info-bg text-info'
+                  : 'bg-green-tint-100 text-green-deep',
             )}
           >
             <Clock size={11} />
-            {altAlreadySent ? 'Alternative gesendet' : 'Wartet auf Bestätigung'}
+            {customerProposed
+              ? 'Kundenvorschlag'
+              : altAlreadySent
+                ? 'Alternative gesendet'
+                : 'Wartet auf Bestätigung'}
           </span>
         </div>
 
@@ -446,8 +484,51 @@ export function AppointmentCard({
           </div>
         )}
 
+        {/* Customer counter-proposal (reschedule loop): recorded by the agent on
+            the call. Approving applies the slot + fires the confirmation call+email;
+            Ablehnen clears it. Takes priority over the "Alternative gesendet" state. */}
+        {customerProposed && (
+          <div className="mt-3 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3">
+            <div className="text-xs font-semibold text-amber-700">
+              Kunde schlägt einen neuen Termin vor
+            </div>
+            <div className="text-sm font-bold text-text">
+              {fmtFullDate(appointment.customer_proposed_start_time)}
+            </div>
+            <p className="text-[11px] text-muted">
+              Im Anruf vom Kunden vorgeschlagen. „Genehmigen" verschiebt den Termin
+              und bestätigt ihn dem Kunden (Anruf + E-Mail); „Ablehnen" verwirft den
+              Vorschlag.
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <button
+                onClick={() => {
+                  setActionError(null)
+                  approveProposal.mutate()
+                }}
+                disabled={busy}
+                className="inline-flex items-center gap-1 rounded-md bg-green-primary px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:brightness-110 disabled:opacity-50"
+              >
+                <CheckCircle2 size={13} />
+                {approveProposal.isPending ? 'Genehmigt…' : 'Genehmigen'}
+              </button>
+              <button
+                onClick={() => {
+                  setActionError(null)
+                  declineProposal.mutate()
+                }}
+                disabled={busy}
+                className="inline-flex items-center gap-1 rounded-md bg-faint px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:brightness-110 disabled:opacity-50"
+              >
+                <X size={13} />
+                Ablehnen
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Inline status display for the "Alternative gesendet" lock state */}
-        {altAlreadySent && (
+        {altAlreadySent && !customerProposed && (
           <div className="mt-3 rounded-md border border-info/30 bg-info-bg/40 p-3 text-xs text-body">
             <div className="font-semibold text-info">Alternative gesendet</div>
             {appointment.alternative_start_time && (
@@ -473,8 +554,9 @@ export function AppointmentCard({
             Bestätigen · Alternative vorschlagen · Ablehnen · Ausblenden.
             `flex-wrap` lets them flow onto a second line only when the panel
             is dragged narrower than the row needs. Hidden once an alternative
-            has been sent (the appointment is locked pending the reply). */}
-        {!altAlreadySent && (
+            has been sent (the appointment is locked pending the reply). Also
+            hidden while a customer counter-proposal awaits approval. */}
+        {!altAlreadySent && !customerProposed && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => {

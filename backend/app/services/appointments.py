@@ -463,6 +463,23 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
         .execute()
         .data[0]
     )
+    # ADDITIVE (appointment epic, migration 0037): also stamp the customer's
+    # requested slot onto the matched appointment so a human can approve it in one
+    # click (call-detail action card → "Kunde schlägt {time} vor" →
+    # POST /appointments/{id}/approve-proposal applies it + fires the confirmation
+    # call+email). Purely additive: the appointment_change inquiry created above
+    # and this tool's return contract are UNCHANGED. Best-effort — a stamp failure
+    # must never change the agent-facing outcome.
+    try:
+        client.table("appointments").update(
+            {
+                "customer_proposed_start_time": new_dt.isoformat(),
+                "customer_proposed_at": now_berlin().isoformat(),
+                "customer_proposal_source": "agent_call",
+            }
+        ).eq("org_id", org_id).eq("id", appt["id"]).execute()
+    except Exception:  # pragma: no cover — never break the live change flow
+        pass
     return {
         "success": True,
         "changeRequestId": change["id"],

@@ -74,9 +74,32 @@ class Settings(BaseSettings):
     # so it ships dormant and only activates under supervision).
     observability_enabled: bool = Field(default=False, validation_alias="OBSERVABILITY_ENABLED")
 
+    # ── Appointment-epic outbound SCOPE GUARD (safety) ─────────────────────
+    # While ON (the default), every appointment-epic outbound CALL is forced to
+    # OUTBOUND_TEST_NUMBER and every EMAIL to OUTBOUND_TEST_EMAIL, and any send
+    # for an org NOT in OUTBOUND_TEST_ORG_IDS is REFUSED (OutOfScopeError). Flip
+    # to 0 only for go-live to real customers (see DEPLOY RUNBOOK). Default ON so
+    # a fresh deploy can never accidentally reach a real customer.
+    outbound_test_scope_only: bool = Field(default=True, validation_alias="OUTBOUND_TEST_SCOPE_ONLY")
+    outbound_test_number: str = Field(default="+917879997839", validation_alias="OUTBOUND_TEST_NUMBER")
+    outbound_test_email: str = Field(default="agrawalamber01@gmail.com", validation_alias="OUTBOUND_TEST_EMAIL")
+    # Comma-separated org UUIDs allowed to send while the scope guard is ON.
+    outbound_test_org_ids: str = Field(
+        default="c4dbf596-86fd-4484-88d9-095b2c082afb", validation_alias="OUTBOUND_TEST_ORG_IDS"
+    )
+    # Cluster C: attach an email to the EXISTING 7 outbound occasions. OFF by
+    # default so that wiring ships INERT until Amber enables it post-review.
+    outbound_occasion_emails_enabled: bool = Field(
+        default=False, validation_alias="OUTBOUND_OCCASION_EMAILS_ENABLED"
+    )
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def outbound_test_org_id_set(self) -> set[str]:
+        return {o.strip() for o in self.outbound_test_org_ids.split(",") if o.strip()}
 
 
 @lru_cache

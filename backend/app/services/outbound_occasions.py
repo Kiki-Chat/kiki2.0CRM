@@ -524,6 +524,119 @@ def _inq_from_invoice(db, org_id, record):
     return rows[0].get("inquiry_id") if rows else None
 
 
+# ─── appointment_confirmation / _cancellation / _reschedule (CLICK-triggered) ──
+# These three are fired ONLY by a human click in the call-log action tab (via
+# services/appointment_notify.notify_appointment_outcome → send_single_outbound).
+# They are NEVER part of the autonomous sweep: `select` returns [] so
+# run_due_outbound can never auto-dial them, and their occasion keys are never
+# enabled in agent_configs.outbound_occasions (the click is gated by the master
+# `appointment_reminder` toggle instead). Belt-and-suspenders against
+# "something dials on a state change".
+def _select_none(db, org_id: str, cfg: dict, now_local: datetime) -> list[dict]:
+    """Click-only occasions are never auto-swept — the human action is the sole trigger."""
+    return []
+
+
+def _appt_clauses(record: dict, customer: dict | None, org: dict):
+    company = org.get("name") or "uns"
+    name = (customer or {}).get("full_name") or ""
+    datum = de_long_date(record["scheduled_at"])
+    uhr = de_time(record["scheduled_at"])
+    titel = (record.get("title") or "").strip()
+    fuer = f" für {name}" if name else ""
+    titel_clause = f" zum Thema „{titel}“" if titel else ""
+    return company, name, datum, uhr, fuer, titel_clause
+
+
+def _render_appointment_confirmation(record: dict, customer: dict | None, org: dict) -> Rendered:
+    company, name, datum, uhr, fuer, titel_clause = _appt_clauses(record, customer, org)
+    first = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Ich rufe an, um Ihren "
+        f"Termin{fuer} am {datum} um {uhr} Uhr{titel_clause} zu bestätigen. Der Termin ist "
+        "fest eingeplant. Passt das so für Sie?"
+    )
+    voicemail = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Ihr Termin{fuer} am {datum} "
+        f"um {uhr} Uhr{titel_clause} ist bestätigt. Bei Fragen oder zur Verschiebung erreichen "
+        "Sie uns gerne telefonisch. Auf Wiederhören!"
+    )
+    task = (
+        "## PRIMÄRE AUFGABE – Terminbestätigung\n"
+        f"Deine erste Nachricht war eine Bestätigung des Termins am {datum} um {uhr} Uhr"
+        f"{titel_clause}. Der Termin ist bereits fest eingeplant.\n"
+        "- Bestätigt der Kunde: kurz freundlich bestätigen und zum Abschluss kommen.\n"
+        "- Möchte der Kunde doch verschieben oder absagen: neue Termine mit "
+        "hk_getAvailableAppointments suchen und mit hk_changeAppointment ändern bzw. mit "
+        "hk_cancelAppointment absagen – niemals ohne Bestätigung des Kunden.\n"
+        "Nenne keine technischen Details oder internen IDs."
+    )
+    return Rendered(first, voicemail, task, name)
+
+
+def _render_appointment_cancellation(record: dict, customer: dict | None, org: dict) -> Rendered:
+    company, name, datum, uhr, fuer, titel_clause = _appt_clauses(record, customer, org)
+    first = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Ich rufe an wegen Ihres "
+        f"Termins{fuer} am {datum} um {uhr} Uhr{titel_clause}. Leider müssen wir diesen Termin "
+        "absagen. Möchten Sie direkt einen neuen Termin vereinbaren?"
+    )
+    voicemail = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Leider müssen wir Ihren "
+        f"Termin{fuer} am {datum} um {uhr} Uhr{titel_clause} absagen. Für einen neuen Termin "
+        "melden Sie sich gerne bei uns. Auf Wiederhören!"
+    )
+    task = (
+        "## PRIMÄRE AUFGABE – Terminabsage\n"
+        f"Deine erste Nachricht war die Absage des Termins am {datum} um {uhr} Uhr"
+        f"{titel_clause}. Entschuldige die Unannehmlichkeit kurz.\n"
+        "- Möchte der Kunde einen neuen Termin: mit hk_getAvailableAppointments freie Termine "
+        "suchen und mit hk_bookAppointment reservieren – nie ohne Bestätigung des Kunden.\n"
+        "- Hat der Kunde eine Rückfrage: knapp beantworten oder mit hk_createInquiry einen "
+        "Rückruf erfassen.\n"
+        "Bleibe freundlich; nenne keine internen IDs."
+    )
+    return Rendered(first, voicemail, task, name)
+
+
+def _render_appointment_reschedule(record: dict, customer: dict | None, org: dict) -> Rendered:
+    company, name, datum, uhr, fuer, titel_clause = _appt_clauses(record, customer, org)
+    # ABSENCE TODO (deferred per Amber, must not be silently forgotten): the
+    # live availability the agent offers below (hk_getAvailableAppointments) is
+    # ORG-WIDE and does NOT consult employee absences (Urlaub/Krankheit, table
+    # employee_absences). A counter-slot the customer picks can land on an absent
+    # employee. Fix would teach get_available_slots to subtract approved absences.
+    alt = record.get("alternative_start_time")
+    if alt:
+        vorschlag = f"Wir möchten Ihren Termin auf {de_long_date(alt)} um {de_time(alt)} Uhr verschieben."
+        vorschlag_kurz = f"unser Vorschlag: {de_long_date(alt)} um {de_time(alt)} Uhr"
+    else:
+        vorschlag = "Wir müssten Ihren Termin leider verschieben und würden gerne einen neuen Termin finden."
+        vorschlag_kurz = "wir würden gerne einen neuen Termin finden"
+    first = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Es geht um Ihren Termin{fuer} "
+        f"am {datum} um {uhr} Uhr{titel_clause}. {vorschlag} Würde Ihnen das passen?"
+    )
+    voicemail = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Wir möchten Ihren Termin{fuer} "
+        f"am {datum} um {uhr} Uhr gerne verschieben – {vorschlag_kurz}. Melden Sie sich gerne bei "
+        "uns, dann finden wir einen passenden Termin. Auf Wiederhören!"
+    )
+    task = (
+        "## PRIMÄRE AUFGABE – Terminverschiebung\n"
+        f"Deine erste Nachricht schlug vor, den Termin vom {datum} um {uhr} Uhr zu verschieben "
+        f"({vorschlag_kurz}).\n"
+        "- Passt dem Kunden der vorgeschlagene Termin: bestätige freundlich und halte den "
+        "Wunschtermin mit hk_changeAppointment fest.\n"
+        "- Möchte der Kunde einen ANDEREN Termin: suche mit hk_getAvailableAppointments nur "
+        "tatsächlich freie Termine, biete sie an, und halte den vom Kunden gewählten Termin mit "
+        "hk_changeAppointment fest. Buche NICHT direkt.\n"
+        "- Sage immer: „Ich halte den Termin fest; die endgültige Bestätigung kommt von unserem "
+        "Team.“\n"
+        "Nenne keine internen IDs oder technischen Details."
+    )
+    return Rendered(first, voicemail, task, name)
+
+
 @dataclass(frozen=True)
 class OccasionSpec:
     key: str
@@ -541,9 +654,20 @@ class OccasionSpec:
     max_cycles: int | None = None                # cap on repeat attempts
     org_flag: str | None = None                  # organizations column that must be truthy
     to_number_of: Callable | None = None         # (record, customer) -> phone; default = customer.phone
+    # ── email-per-occasion (Cluster B/C) ───────────────────────────────────
+    email_render: Callable | None = None         # (record, customer, org) -> (subject, body_html)
+    email_always: bool = False                   # True ⇒ email sends regardless of the
+                                                 # OUTBOUND_OCCASION_EMAILS_ENABLED flag (the 3
+                                                 # appointment occasions). The existing 7 stay
+                                                 # flag-gated, so they ship INERT.
 
 
 _APPT_COLUMNS = "id, customer_id, scheduled_at, title, status"
+# Click-occasions need the proposed-alternative time for the reschedule opener.
+_APPT_OCCASION_COLUMNS = (
+    "id, customer_id, scheduled_at, title, status, "
+    "alternative_start_time, alternative_end_time, alternative_note"
+)
 _KVA_COLUMNS = "id, customer_id, number, subject, total, sent_at, status, type"
 
 
@@ -630,8 +754,45 @@ OCCASIONS: dict[str, OccasionSpec] = {
         # dial the caller's number (a missed call may have no linked customer/phone)
         to_number_of=lambda rec, cust: rec.get("caller_number") or (cust or {}).get("phone"),
     ),
-    # Deferred — prerequisite first (NOT wired this round):
-    #   "appointment_confirmation" (TERMIN_BESTAETIGUNG) — net-new occasion key + trigger
+    # ── Appointment epic — CLICK-triggered occasions (never auto-swept) ──────
+    # Fired by a human click in the call-log action tab (Confirm / Cancel /
+    # Reschedule) via appointment_notify.notify_appointment_outcome. select=[]
+    # so the sweep never auto-dials them; gated at the click by the master
+    # `appointment_reminder` toggle, not by their own keys. email_always=True so
+    # their email (Cluster B) sends without the OUTBOUND_OCCASION_EMAILS_ENABLED flag.
+    "appointment_confirmation": OccasionSpec(
+        key="appointment_confirmation",
+        anlass_typ="TERMIN_BESTAETIGUNG",
+        referenz_typ="Termin",
+        table="appointments",
+        columns=_APPT_OCCASION_COLUMNS,
+        select=_select_none,
+        render=_render_appointment_confirmation,
+        case_gate="ignore",
+        email_always=True,
+    ),
+    "appointment_cancellation": OccasionSpec(
+        key="appointment_cancellation",
+        anlass_typ="TERMIN_ABSAGE",
+        referenz_typ="Termin",
+        table="appointments",
+        columns=_APPT_OCCASION_COLUMNS,
+        select=_select_none,
+        render=_render_appointment_cancellation,
+        case_gate="ignore",
+        email_always=True,
+    ),
+    "appointment_reschedule": OccasionSpec(
+        key="appointment_reschedule",
+        anlass_typ="TERMIN_VERSCHIEBUNG",
+        referenz_typ="Termin",
+        table="appointments",
+        columns=_APPT_OCCASION_COLUMNS,
+        select=_select_none,
+        render=_render_appointment_reschedule,
+        case_gate="ignore",
+        email_always=True,
+    ),
     # missed_callback real-traffic capture: a Twilio status-callback writer (no-answer/
     # busy/failed -> insert missed_calls) is the one external dependency still needed.
 }

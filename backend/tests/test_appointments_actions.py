@@ -28,6 +28,17 @@ from app.api import deps
 from app.api.routes import appointments as appt_routes
 
 
+@pytest.fixture(autouse=True)
+def _no_outbound_side_effect(monkeypatch):
+    """Neutralize the best-effort appointment outbound side-effect for these
+    route tests — the call/email trigger is covered in test_appointment_notify.py.
+    Without this, confirm/reject/propose-alternative/approve-proposal would invoke
+    the real outbound path (a network call) after the status mutation."""
+    monkeypatch.setattr(
+        appt_routes, "notify_appointment_outcome", lambda *a, **k: {"fired": False}
+    )
+
+
 # ─── helpers ────────────────────────────────────────────────────────────────
 def _org_admin_user(org_id: str = "org-1") -> deps.CurrentUser:
     return deps.CurrentUser(
@@ -313,3 +324,57 @@ def test_pending_for_call_404_when_call_missing(monkeypatch):
             )
         )
     assert exc.value.status_code == 404
+
+
+# ─── approve / decline customer counter-proposal (reschedule loop) ───────────
+def test_approve_proposal_applies_slot_and_confirms(monkeypatch):
+    """Approving a customer counter-proposal sets scheduled_at to it, confirms
+    the appointment, and consumes the proposal fields."""
+    proposed = {
+        "id": "a", "org_id": "org-1", "status": "pending",
+        "customer_proposed_start_time": "2026-06-15T12:00:00+00:00",
+    }
+    confirmed = {**proposed, "status": "confirmed", "scheduled_at": "2026-06-15T12:00:00+00:00"}
+    client = _FakeClient([[proposed], [confirmed]])
+    monkeypatch.setattr(appt_routes, "get_service_client", lambda: client)
+
+    result = asyncio.run(
+        appt_routes.approve_customer_proposal("a", user=_org_admin_user("org-1"))
+    )
+    assert result["status"] == "confirmed"
+    upd = client._last_update_payload
+    assert upd["scheduled_at"] == "2026-06-15T12:00:00+00:00"
+    assert upd["status"] == "confirmed" and upd["confirmed_at"] is not None
+    assert upd["customer_proposed_start_time"] is None  # consumed
+    assert upd["customer_proposed_at"] is None
+
+
+def test_approve_proposal_409_when_no_proposal(monkeypatch):
+    """Approving with nothing proposed → 409 (state-machine guard)."""
+    no_prop = {"id": "a", "org_id": "org-1", "status": "pending", "customer_proposed_start_time": None}
+    monkeypatch.setattr(appt_routes, "get_service_client", lambda: _FakeClient([[no_prop]]))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(appt_routes.approve_customer_proposal("a", user=_org_admin_user("org-1")))
+    assert exc.value.status_code == 409
+
+
+def test_approve_proposal_404_when_other_org(monkeypatch):
+    monkeypatch.setattr(appt_routes, "get_service_client", lambda: _FakeClient([[]]))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(appt_routes.approve_customer_proposal("a", user=_org_admin_user("org-1")))
+    assert exc.value.status_code == 404
+
+
+def test_decline_proposal_clears_fields(monkeypatch):
+    """Declining clears the customer_proposed_* fields and leaves the rest as-is."""
+    proposed = {
+        "id": "a", "org_id": "org-1", "status": "pending",
+        "customer_proposed_start_time": "2026-06-15T12:00:00+00:00",
+    }
+    cleared = {**proposed, "customer_proposed_start_time": None}
+    client = _FakeClient([[proposed], [cleared]])
+    monkeypatch.setattr(appt_routes, "get_service_client", lambda: client)
+
+    asyncio.run(appt_routes.decline_customer_proposal("a", user=_org_admin_user("org-1")))
+    assert client._last_update_payload["customer_proposed_start_time"] is None
+    assert client._last_update_payload["customer_proposed_at"] is None

@@ -8,6 +8,7 @@ from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import AppointmentCreate, AppointmentPatch
 from app.services import calendar_sync
+from app.services.appointment_notify import notify_appointment_outcome
 from app.services.appointments import import_ics
 from app.services.common import validate_fk_in_org
 
@@ -315,6 +316,12 @@ async def confirm_appointment(
     appt = await run_in_threadpool(_confirm, user.org_id, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    # Best-effort outbound side-effect (call + email) — gated by the org's master
+    # Appointment-Reminders toggle, scope-guarded, non-blocking (a failure never
+    # rolls back the already-committed confirmation).
+    appt["_outbound"] = await run_in_threadpool(
+        notify_appointment_outcome, user.org_id, appointment_id, "confirm"
+    )
     return appt
 
 
@@ -334,6 +341,11 @@ async def reject_appointment(
     appt = await run_in_threadpool(_reject, user.org_id, appointment_id, reason)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    # Best-effort outbound side-effect — "Ablehnen" maps to the cancellation
+    # occasion (call + email). Non-blocking; gated by the master toggle.
+    appt["_outbound"] = await run_in_threadpool(
+        notify_appointment_outcome, user.org_id, appointment_id, "cancel"
+    )
     return appt
 
 
@@ -390,7 +402,8 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
             "color, location, notes, customer_id, inquiry_id, "
             "assigned_employee_id, confirmed_at, rejected_at, rejection_reason, "
             "alternative_start_time, alternative_end_time, alternative_note, "
-            "alternative_proposed_at"
+            "alternative_proposed_at, customer_proposed_start_time, "
+            "customer_proposed_end_time, customer_proposed_at, customer_proposal_source"
         )
         .eq("org_id", org_id)
         .eq("inquiry_id", inquiry_id)
@@ -444,6 +457,103 @@ async def propose_alternative_appointment(
     appt = await run_in_threadpool(
         _propose_alternative, user.org_id, appointment_id, payload
     )
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    # Best-effort outbound side-effect — propose-alternative maps to the
+    # reschedule occasion: the call proposes the new time; if the customer
+    # counters, the agent records it back as a customer proposal for approval.
+    appt["_outbound"] = await run_in_threadpool(
+        notify_appointment_outcome, user.org_id, appointment_id, "reschedule"
+    )
+    return appt
+
+
+# ─── Reschedule counter-proposal: approve / decline (human-in-the-loop) ──────
+# When a customer agrees to a slot on an outbound RESCHEDULE call, the agent
+# records it via hk_changeAppointment, which stamps customer_proposed_* on the
+# appointment (see services/appointments.change_appointment). The action card
+# then shows "Kunde schlägt {time} vor". Approving applies the slot, confirms the
+# appointment, and fires the final appointment_confirmation call+email; declining
+# clears the proposal and leaves the appointment unchanged.
+def _approve_proposal(org_id: str, appointment_id: str) -> dict | None:
+    appt = _get_appointment(org_id, appointment_id)
+    if not appt:
+        return None
+    new_start = appt.get("customer_proposed_start_time")
+    if not new_start:
+        raise HTTPException(
+            status_code=409,
+            detail="Kein Kundenvorschlag vorhanden, der genehmigt werden könnte.",
+        )
+    updated = (
+        get_service_client()
+        .table("appointments")
+        .update(
+            {
+                "scheduled_at": new_start,
+                "status": "confirmed",
+                "confirmed_at": _now_iso(),
+                # consume the proposal + clear any stale business-proposed alternative
+                "customer_proposed_start_time": None,
+                "customer_proposed_end_time": None,
+                "customer_proposed_at": None,
+                "customer_proposal_source": None,
+                "alternative_proposed_at": None,
+            }
+        )
+        .eq("org_id", org_id)
+        .eq("id", appointment_id)
+        .execute()
+        .data
+    )
+    return updated[0] if updated else None
+
+
+def _decline_proposal(org_id: str, appointment_id: str) -> dict | None:
+    appt = _get_appointment(org_id, appointment_id)
+    if not appt:
+        return None
+    updated = (
+        get_service_client()
+        .table("appointments")
+        .update(
+            {
+                "customer_proposed_start_time": None,
+                "customer_proposed_end_time": None,
+                "customer_proposed_at": None,
+                "customer_proposal_source": None,
+            }
+        )
+        .eq("org_id", org_id)
+        .eq("id", appointment_id)
+        .execute()
+        .data
+    )
+    return updated[0] if updated else None
+
+
+@router.post("/{appointment_id}/approve-proposal")
+async def approve_customer_proposal(
+    appointment_id: str, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Approve the customer's counter-proposed slot: set scheduled_at to it,
+    confirm the appointment, and fire the appointment_confirmation call+email."""
+    appt = await run_in_threadpool(_approve_proposal, user.org_id, appointment_id)
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    appt["_outbound"] = await run_in_threadpool(
+        notify_appointment_outcome, user.org_id, appointment_id, "confirm"
+    )
+    return appt
+
+
+@router.post("/{appointment_id}/decline-proposal")
+async def decline_customer_proposal(
+    appointment_id: str, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Decline the customer's counter-proposed slot (clears it; appointment stays
+    as-is). No outbound call is fired."""
+    appt = await run_in_threadpool(_decline_proposal, user.org_id, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
     return appt
