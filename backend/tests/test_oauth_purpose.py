@@ -238,12 +238,15 @@ def test_link_reuses_existing_grant_for_calendar_no_email_mirror(monkeypatch):
     )
     setlink = MagicMock()
     monkeypatch.setattr(oauth_routes.oauth_tokens, "set_purpose_link", setlink)
+    sync = MagicMock()
+    monkeypatch.setattr(oauth_routes.calendar_sync, "pull_google_events", sync)
     db = _DB()
     monkeypatch.setattr(oauth_routes, "get_service_client", lambda: db)
     out = asyncio.run(oauth_routes.link_purpose("google", purpose="calendar", user=_user()))
     assert out["success"] and out["provider"] == "google"
     setlink.assert_called_once()
     assert not _email_ops(db)  # calendar reuse never mirrors email
+    sync.assert_called_once_with("org-1")  # B3: reuse-link auto-syncs the calendar
 
 
 def test_link_email_requires_existing_grant(monkeypatch):
@@ -258,6 +261,30 @@ def test_link_rejects_provider_that_cannot_serve_purpose():
     with pytest.raises(HTTPException) as e:  # calendly cannot serve email
         asyncio.run(oauth_routes.link_purpose("calendly", purpose="email", user=_user()))
     assert e.value.status_code == 400
+
+
+# ─── B3: auto-sync on calendar connect (no manual button at the connect point) ─
+def test_auto_sync_calendar_pulls_for_google_calendar(monkeypatch):
+    sync = MagicMock()
+    monkeypatch.setattr(oauth_routes.calendar_sync, "pull_google_events", sync)
+    oauth_routes._auto_sync_calendar("org-9", "google", "calendar")
+    sync.assert_called_once_with("org-9")
+
+
+def test_auto_sync_calendar_skips_email_and_non_google(monkeypatch):
+    sync = MagicMock()
+    monkeypatch.setattr(oauth_routes.calendar_sync, "pull_google_events", sync)
+    oauth_routes._auto_sync_calendar("org-9", "google", "email")        # email purpose
+    oauth_routes._auto_sync_calendar("org-9", "microsoft", "calendar")  # non-google
+    sync.assert_not_called()
+
+
+def test_auto_sync_calendar_is_best_effort(monkeypatch):
+    def boom(_org):
+        raise RuntimeError("google 500")
+    monkeypatch.setattr(oauth_routes.calendar_sync, "pull_google_events", boom)
+    # Must NOT raise — the grant is already persisted; the sync is best-effort.
+    oauth_routes._auto_sync_calendar("org-9", "google", "calendar")
 
 
 # ─── authorize purpose validation ────────────────────────────────────────────

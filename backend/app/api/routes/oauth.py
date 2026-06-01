@@ -24,6 +24,7 @@ Automatic access-token refresh: services/oauth_tokens.get_valid_access_token.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -49,7 +50,24 @@ from app.services.oauth_providers import (
 
 router = APIRouter(prefix="/api/settings/oauth", tags=["oauth"])
 
+log = logging.getLogger(__name__)
+
 _VALID_PURPOSES = ("email", "calendar")
+
+
+def _auto_sync_calendar(org_id: str, provider: str, purpose: str) -> None:
+    """On a fresh CALENDAR connect (or reuse-link), pull the provider's events so
+    the CRM shows the owner's busy time immediately — no manual 'Jetzt
+    synchronisieren' click at the connection point. Only Google has a working
+    read-sync today. BEST-EFFORT: the grant is already persisted, so a sync
+    failure must never fail the connect; it's idempotent + read-only, so the
+    Kalender page's sync button (or the next auto-sync) recovers cleanly."""
+    if purpose != "calendar" or provider != "google":
+        return
+    try:
+        calendar_sync.pull_google_events(org_id)
+    except Exception:  # noqa: BLE001 — connect already succeeded; sync is best-effort
+        log.warning("auto-sync after calendar connect failed for org=%s", org_id, exc_info=True)
 
 
 # ─── State token: Fernet(user_id:org_id:provider:purpose:ts:nonce) ───────────
@@ -204,6 +222,10 @@ async def callback(
         scope=token_data.get("scope"),
     )
 
+    # Auto-sync on connect (B3): a fresh Google calendar grant pulls events now,
+    # so the connection point needs no manual sync button. Best-effort.
+    await run_in_threadpool(_auto_sync_calendar, org_id, provider, purpose)
+
     label = "E-Mail" if purpose == "email" else "Kalender"
     return _popup_close_response(
         success=True, message=f"{label} verbunden mit {account_email or provider}.",
@@ -240,6 +262,8 @@ async def link_purpose(
         oauth_tokens.set_purpose_link(user.org_id, purpose, provider, conn.get("account_email"))
         if purpose == "email" and provider in EMAIL_PROVIDERS:
             _mirror_email_from_connection(user.org_id, provider, conn)
+        # Reusing an existing grant for calendar should also sync immediately (B3).
+        _auto_sync_calendar(user.org_id, provider, purpose)
         return {
             "success": True,
             "purpose": purpose,

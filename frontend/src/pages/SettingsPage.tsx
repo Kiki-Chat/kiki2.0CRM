@@ -954,15 +954,8 @@ function CalendarProviderCard({ p, flash }: { p: { provider: string; name: strin
     queryFn: () => apiFetch<{ last_synced_at: string | null; event_count: number }>('/api/calendar/sync-status'),
     enabled: isGoogle && isConnected,
   })
-  const syncNow = useMutation({
-    mutationFn: () => apiFetch<{ fetched: number; created: number; updated: number; cancelled: number }>('/api/calendar/sync', { method: 'POST' }),
-    onSuccess: (r) => {
-      flash(`Synchronisiert: ${r.fetched} Google-Termine übernommen.`)
-      qc.invalidateQueries({ queryKey: ['calendar-sync-status'] })
-      qc.invalidateQueries({ queryKey: ['appointments'] })
-    },
-    onError: (e: unknown) => flash(e instanceof Error ? e.message : 'Synchronisierung fehlgeschlagen.'),
-  })
+  // B3: no manual sync button at the connection point — connecting auto-syncs
+  // (backend OAuth callback). Manual re-sync lives on the Kalender page.
   const lastSynced = syncStatus.data?.last_synced_at
 
   const connect = () => {
@@ -990,11 +983,6 @@ function CalendarProviderCard({ p, flash }: { p: { provider: string; name: strin
         {isConnected ? (
           <>
             {calLink?.account_email && <span className="text-sm font-medium text-success">✓ {calLink.account_email}</span>}
-            {isGoogle && (
-              <button onClick={() => syncNow.mutate()} disabled={syncNow.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60">
-                {syncNow.isPending ? 'Synchronisiert…' : 'Jetzt synchronisieren'}
-              </button>
-            )}
             <button onClick={() => disconnectPurpose('calendar', qc, flash)} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt">Trennen</button>
           </>
         ) : locked ? (
@@ -1010,7 +998,7 @@ function CalendarProviderCard({ p, flash }: { p: { provider: string; name: strin
         <p className="mt-2 text-xs text-muted">
           {lastSynced
             ? `Zuletzt synchronisiert: ${new Date(lastSynced).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })} · ${syncStatus.data?.event_count ?? 0} Termine als belegte Zeit im CRM.`
-            : 'Noch nicht synchronisiert — „Jetzt synchronisieren", um Google-Termine als belegte Zeit zu übernehmen.'}
+            : 'Wird beim Verbinden automatisch synchronisiert — Google-Termine erscheinen als belegte Zeit im CRM. Manuelle Synchronisierung auf der Kalender-Seite.'}
         </p>
       )}
       {more && <ul className="mt-3 list-disc space-y-1 border-t border-border pt-3 pl-5 text-sm text-muted"><li>Google-Termine erscheinen als belegte Zeit im CRM (Lesen)</li><li>Übertragung CRM → Google nur nach manueller Freigabe je Termin</li><li>Keine automatische Zwei-Wege-Synchronisierung</li></ul>}
