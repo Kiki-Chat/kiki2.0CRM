@@ -5,12 +5,11 @@
 > `OBSERVABILITY_ENABLED=1`, and it was verified live (see "Item B verification"
 > below). The steps below are retained as the reference/runbook.
 >
-> **⚠️ One cleanup for you:** my provisioning retries created a SECOND, UNUSED
-> Redis service `Redis-N6Fl` (id `ca9950c3-09a0-45d9-8837-db6ca7f4aa1e`). The
-> backend references `${{Redis.REDIS_URL}}` → the service named `Redis`
-> (`a6737691-…`), which is the one in use. **Please delete `Redis-N6Fl` in the
-> Railway dashboard** (I was correctly blocked from deleting a prod service). It's
-> idle/harmless but bills.
+> **Cleanup DONE:** my provisioning retries had created a second, unused Redis
+> service `Redis-N6Fl`; it was **deleted** (`railway service delete`, on your
+> explicit approval). Only the in-use `Redis` (`a6737691-…`, referenced by the
+> backend's `${{Redis.REDIS_URL}}`) remains — and the cache was **re-verified
+> connected after the deletion** (stale-probe still served the cached value).
 >
 > ## Item B verification (2026-06-01, live on prod, Redis connected)
 > - **Connected + serving:** changed `organizations.name` for kiki-test-007

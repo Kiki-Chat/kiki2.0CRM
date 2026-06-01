@@ -321,4 +321,4 @@ The flagged risk is cross-org stale-data. Three structural guarantees:
 
 **No code change for Item B** (enable+verify of `2e80b19`). **Rollback (Item B):** unset `REDIS_URL` (cache dormant, instant) and/or `OBSERVABILITY_ENABLED=0`.
 
-**⚠️ CLEANUP FOR AMBER:** provisioning retries created a duplicate **unused** Redis service `Redis-N6Fl` (`ca9950c3-…`). Backend uses `Redis` (`a6737691-…`). Please delete `Redis-N6Fl` in the Railway dashboard — I was (correctly) classifier-blocked from deleting a prod service.
+**CLEANUP DONE:** the duplicate unused Redis `Redis-N6Fl` (`ca9950c3-…`) was **deleted** (`railway service delete --service ca9950c3… --yes`, on Amber's explicit approval). Only the in-use `Redis` (`a6737691-…`) remains; the cache was **re-verified connected after deletion** (post-delete stale-probe still served the cached value; org name restored, DB clean).
