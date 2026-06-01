@@ -8,36 +8,48 @@ from app.db.supabase_client import get_service_client
 router = APIRouter(prefix="/api", tags=["me"])
 
 
-def _org_name(org_id: str) -> str | None:
-    # Reference cache target (Item 4): read on every page load (sidebar + /api/me),
-    # changes only via PATCH /api/settings/general (single writer → unambiguous
-    # invalidation). org-scoped key; no-op until REDIS_URL is set.
-    def _load() -> str | None:
+def _org_identity(org_id: str) -> dict:
+    # White-label identity read on every page load (sidebar badge + footer + /api/me):
+    # company name, contact email, logo, address. Available to EVERY authenticated
+    # user (incl. employees), unlike the admin-only /api/settings. Cache target
+    # (Item 4): changes only via PATCH /api/settings/general + the logo upload/delete
+    # routes (single writers → unambiguous invalidation). org-scoped key; no-op until
+    # REDIS_URL is set.
+    def _load() -> dict:
         rows = (
             get_service_client()
             .table("organizations")
-            .select("name")
+            .select("name, email, logo_url, address")
             .eq("id", org_id)
             .limit(1)
             .execute()
             .data
         )
-        return rows[0].get("name") if rows else None
+        row = rows[0] if rows else {}
+        return {
+            "name": row.get("name"),
+            "email": row.get("email"),
+            "logo_url": row.get("logo_url"),
+            "address": row.get("address"),
+        }
 
-    return cache.get_or_set(org_id, "org_name", _load)
+    return cache.get_or_set(org_id, "org_identity", _load)
 
 
 @router.get("/me")
 async def me(user: CurrentUser = Depends(get_current_user)) -> dict:
-    # org_name lets the (white-label) UI show WHICH company's CRM the user is in
-    # — surfaced in the sidebar header + personal settings. Available to every
-    # authenticated user (incl. employees), unlike the admin-only /api/settings.
-    org_name = await run_in_threadpool(_org_name, user.org_id) if user.org_id else None
+    # org_* fields let the white-label UI show WHOSE CRM this is — company name +
+    # contact email + logo + address surface in the sidebar badge, the footer, and
+    # personal settings. Available to every authenticated user (incl. employees).
+    ident = await run_in_threadpool(_org_identity, user.org_id) if user.org_id else {}
     return {
         "id": user.id,
         "email": user.email,
         "org_id": user.org_id,
         "role": user.role,
         "full_name": user.full_name,
-        "org_name": org_name,
+        "org_name": ident.get("name"),
+        "org_email": ident.get("email"),
+        "org_logo_url": ident.get("logo_url"),
+        "org_address": ident.get("address"),
     }

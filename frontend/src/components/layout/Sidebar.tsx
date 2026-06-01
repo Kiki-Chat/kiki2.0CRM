@@ -64,6 +64,8 @@ export function Sidebar({
   // admin-only nav entries — the backend still enforces every action.
   const { me, isAdmin } = useMe()
   const companyName = me?.org_name
+  const companyEmail = me?.org_email
+  const companyLogo = me?.org_logo_url
 
   // Drop admin-only leaves for employees, and employee-only (personal) leaves
   // for admins — plus any group left empty as a result.
@@ -75,7 +77,13 @@ export function Sidebar({
   })
 
   const email = session?.user.email ?? 'Setup pending'
-  const userName = (session?.user.user_metadata?.full_name as string) ?? 'HeyKiki User'
+  const userName = (session?.user.user_metadata?.full_name as string) ?? companyName ?? 'Konto'
+  // White-label bottom badge. The admin login REPRESENTS the company (no personal
+  // identity) → show company name + contact email + logo. An employee login is a
+  // person → show their own name + email (logo stays company-level, top header only).
+  const badgeName = isAdmin ? (companyName ?? 'Unternehmen') : userName
+  const badgeEmail = isAdmin ? (companyEmail ?? email) : email
+  const badgeLogo = isAdmin ? companyLogo : null
   // NOTE: Super-admin no longer enters via the customer-facing sidebar. The
   // admin surface lives at /admin/* (standalone tree, own login, own layout).
 
@@ -84,17 +92,22 @@ export function Sidebar({
       className="sticky top-0 z-20 flex h-screen flex-shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-200"
       style={{ width: collapsed ? 64 : 240 }}
     >
-      {/* Logo */}
+      {/* Brand / white-label company header — shows WHOSE CRM this is. No HeyKiki
+          branding in customer chrome: company logo (if uploaded) + company name. */}
       <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
-        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-green-brand to-green-primary text-base font-extrabold text-white">
-          K
-        </div>
+        {companyLogo ? (
+          <img src={companyLogo} alt={companyName ?? 'Logo'} className="h-9 w-9 flex-shrink-0 rounded-lg object-contain" />
+        ) : (
+          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-green-brand to-green-primary text-base font-extrabold text-white">
+            {companyName ? companyName.charAt(0).toUpperCase() : <Building2 size={18} />}
+          </div>
+        )}
         {!collapsed && (
-          <div>
-            <div className="text-base font-bold leading-tight text-text">HeyKiki</div>
-            <div className="max-w-[150px] truncate text-xs text-muted" title={companyName ?? undefined}>
+          <div className="min-w-0">
+            <div className="truncate text-base font-bold leading-tight text-text" title={companyName ?? undefined}>
               {companyName ?? 'CRM Portal'}
             </div>
+            {companyName && <div className="text-xs text-muted">CRM Portal</div>}
           </div>
         )}
       </div>
@@ -159,16 +172,20 @@ export function Sidebar({
       <div className="border-t border-border p-2.5">
         <DropdownMenu.Root>
           <DropdownMenu.Trigger className="flex w-full items-center gap-2.5 rounded-md p-2 transition-colors hover:bg-alt">
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-green-tint-200 text-xs font-bold text-green-deep">
-              {initials(userName)}
-            </div>
+            {badgeLogo ? (
+              <img src={badgeLogo} alt="" className="h-8 w-8 flex-shrink-0 rounded-md object-contain" />
+            ) : (
+              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-green-tint-200 text-xs font-bold text-green-deep">
+                {initials(badgeName)}
+              </div>
+            )}
             {!collapsed && (
               <>
                 <div className="min-w-0 flex-1 text-left">
                   <div className="truncate text-sm font-semibold leading-tight text-text">
-                    {userName}
+                    {badgeName}
                   </div>
-                  <div className="truncate text-xs text-muted">{email}</div>
+                  <div className="truncate text-xs text-muted">{badgeEmail}</div>
                 </div>
                 <ChevronDown size={13} className="text-muted" />
               </>

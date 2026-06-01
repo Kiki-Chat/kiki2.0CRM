@@ -160,11 +160,11 @@ def _update_org(org_id: str, fields: dict) -> dict:
     client = get_service_client()
     if fields:
         client.table("organizations").update(fields).eq("id", org_id).execute()
-        # Item 4: the org row backs the cached `org_name` (PATCH /general changes
-        # it). Invalidate on any org write so a renamed company never serves stale.
-        # No-op until caching is enabled. NOTE for rollout: super-admin org edits
-        # must also invalidate `org_name` when caching is turned on.
-        cache.invalidate(org_id, "org_name")
+        # Item 4: the org row backs the cached `org_identity` (name/email/logo/address
+        # used by /api/me → sidebar badge + footer). Invalidate on any org write so a
+        # renamed/re-emailed company never serves stale. No-op until caching is enabled.
+        # NOTE for rollout: super-admin org edits must also invalidate this key.
+        cache.invalidate(org_id, "org_identity")
     return (client.table("organizations").select("*").eq("id", org_id).limit(1).execute().data or [{}])[0]
 
 
@@ -205,6 +205,7 @@ async def upload_logo(file: UploadFile = File(...), user: CurrentUser = Depends(
         url = client.storage.from_(ORG_ASSETS_BUCKET).get_public_url(path).rstrip("?")
         url = f"{url}?t={int(time.time())}"  # cache-bust on replace
         client.table("organizations").update({"logo_url": url}).eq("id", user.org_id).execute()
+        cache.invalidate(user.org_id, "org_identity")  # logo_url feeds /api/me badge
         return url
 
     return {"logo_url": await run_in_threadpool(_do)}
@@ -222,6 +223,7 @@ async def delete_logo(user: CurrentUser = Depends(require_org_admin)) -> dict:
         except Exception:
             pass
         client.table("organizations").update({"logo_url": None}).eq("id", user.org_id).execute()
+        cache.invalidate(user.org_id, "org_identity")  # logo_url feeds /api/me badge
         return True
 
     await run_in_threadpool(_do)

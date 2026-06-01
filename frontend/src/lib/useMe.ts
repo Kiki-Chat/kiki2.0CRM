@@ -11,6 +11,11 @@ export interface Me {
   role: string | null
   full_name: string | null
   org_name: string | null
+  /** White-label company identity (from /api/me) — drives the sidebar badge +
+   * footer. Available to every authenticated user, unlike admin-only /api/settings. */
+  org_email: string | null
+  org_logo_url: string | null
+  org_address: Record<string, string> | null
 }
 
 export function isAdminRole(role: string | null | undefined): boolean {
