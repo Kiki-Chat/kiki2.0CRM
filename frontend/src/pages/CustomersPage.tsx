@@ -104,6 +104,9 @@ export function CustomersPage() {
       <div className="relative mb-4">
         <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-faint" />
         <input
+          type="search"
+          name="customer-search"
+          autoComplete="off"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Suche nach Name, E-Mail, Telefon, Adresse oder Kundennummer…"

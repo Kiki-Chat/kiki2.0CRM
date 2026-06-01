@@ -522,7 +522,7 @@ function AddEmployeeModal({ project, existing, onClose, onSaved }: { project: Pr
   const available = employees.filter((e) => !existing.includes(e.id) && (e.display_name ?? '').toLowerCase().includes(q.toLowerCase()))
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title="Mitarbeiter hinzufügen">
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Mitarbeiter suchen…" className={cn(inputCls, 'mb-3')} />
+      <input type="search" name="project-employee-search" autoComplete="off" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Mitarbeiter suchen…" className={cn(inputCls, 'mb-3')} />
       <div className="space-y-2">
         {available.map((e) => (
           <button key={e.id} onClick={() => add.mutate(e.id)} className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left hover:bg-alt">

@@ -31,6 +31,9 @@ export function Topbar({
           className="absolute left-3 top-1/2 -translate-y-1/2 text-faint"
         />
         <input
+          type="search"
+          name="global-search"
+          autoComplete="off"
           placeholder="Kunden, Anrufe, Aufträge suchen…"
           className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
         />

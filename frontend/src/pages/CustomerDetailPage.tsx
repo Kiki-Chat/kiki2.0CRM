@@ -297,6 +297,9 @@ function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => 
           <div className="relative mb-3">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input
+              type="search"
+              name="customer-inquiry-search"
+              autoComplete="off"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Anfragen durchsuchen…"

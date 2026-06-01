@@ -217,7 +217,7 @@ function PositionsTab({ items, flash }: { items: CatalogItem[]; flash: (m: strin
       <div className="mb-4 grid gap-3 md:grid-cols-[1fr_220px_180px]">
         <div className="relative">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Suchen…" className="w-full rounded-md border border-border bg-surface py-2.5 pl-9 pr-3 text-sm text-text outline-none focus:border-green-primary" />
+          <input type="search" name="catalog-search" autoComplete="off" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Suchen…" className="w-full rounded-md border border-border bg-surface py-2.5 pl-9 pr-3 text-sm text-text outline-none focus:border-green-primary" />
         </div>
         <select value={cat} onChange={(e) => setCat(e.target.value)} className={inputCls}><option value="all">Kategorie</option>{categories.map((c) => <option key={c} value={c}>{c}</option>)}</select>
         <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputCls}><option value="active">Aktiv</option><option value="inactive">Inaktiv</option><option value="all">Alle</option></select>

@@ -297,6 +297,9 @@ function EmployeesTab({ flash }: { flash: (m: string) => void }) {
       <div className="relative mb-4">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
         <input
+          type="search"
+          name="employee-search"
+          autoComplete="off"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Mitarbeiter suchen…"
@@ -709,7 +712,7 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
         </div>
         <div>
           <div className={labelCls}>E-Mail {loginAccess && '*'}</div>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.de" className={inputCls} />
+          <input type="email" name="employee_email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.de" className={inputCls} />
         </div>
         {loginAccess && (
           <div className="flex gap-2 rounded-md border border-info/30 bg-info-bg px-3 py-2.5 text-sm text-info">
@@ -823,7 +826,7 @@ function EditEmployeeModal({ employee, onClose }: { employee: Employee; onClose:
         </div>
         <div>
           <div className={labelCls}>E-Mail</div>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+          <input type="email" name="employee_email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
         </div>
         <div>
           <div className={labelCls}>Rolle</div>

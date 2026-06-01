@@ -425,6 +425,9 @@ export function CallLogsPage() {
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
               <input
+                type="search"
+                name="call-inquiry-search"
+                autoComplete="off"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Suchen…"
