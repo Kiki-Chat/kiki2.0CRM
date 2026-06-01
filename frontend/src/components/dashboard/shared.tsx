@@ -1,8 +1,50 @@
 import { ArrowDownRight, ArrowUpRight, type LucideIcon } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Line, LineChart, ResponsiveContainer } from 'recharts'
 
+import type { KiPeriod } from '../../lib/dashApi'
 import { cn } from '../../lib/utils'
+
+const PERIODS: [KiPeriod, string][] = [['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat'], ['range', 'Zeitraum']]
+
+/** Shared Tag/Woche/Monat/Zeitraum selector for the dashboard tabs. Owns the
+ * filter state; returns the rendered control + the query string + a React-Query
+ * key fragment. Windows are ROLLING server-side (last 24h / 7 / 30 days). */
+export function usePeriodFilter() {
+  const [period, setPeriod] = useState<KiPeriod>('month')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const rangeReady = period === 'range' && !!from && !!to
+  const qs = rangeReady
+    ? `?period=range&from_date=${from}&to_date=${to}`
+    : `?period=${period === 'range' ? 'month' : period}`
+  const queryKey = [period, rangeReady ? from : '', rangeReady ? to : '']
+  const element = (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-muted">Zeitraum</span>
+      {PERIODS.map(([p, l]) => (
+        <button
+          key={p}
+          onClick={() => setPeriod(p)}
+          className={cn(
+            'rounded-md px-3 py-1.5 text-sm font-medium transition',
+            period === p ? 'bg-green-primary text-white' : 'border border-border bg-surface text-body hover:bg-alt',
+          )}
+        >
+          {l}
+        </button>
+      ))}
+      {period === 'range' && (
+        <div className="flex items-center gap-2">
+          <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border bg-alt px-2 py-1.5 text-sm text-text outline-none focus:border-green-primary" />
+          <span className="text-muted">–</span>
+          <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border bg-alt px-2 py-1.5 text-sm text-text outline-none focus:border-green-primary" />
+        </div>
+      )}
+    </div>
+  )
+  return { qs, queryKey, element }
+}
 
 export function Panel({
   title,
@@ -40,14 +82,14 @@ function Sparkline({ data, color = 'var(--green-primary)' }: { data: number[]; c
 }
 
 export function TrendBadge({ delta, unit, goodWhenUp = true }: { delta: number; unit?: string; goodWhenUp?: boolean }) {
-  if (!delta) return <div className="mt-2 text-xs text-muted">±0{unit ? ` ${unit}` : ''} ggü. Vormonat</div>
+  if (!delta) return <div className="mt-2 text-xs text-muted">±0{unit ? ` ${unit}` : ''} ggü. Vorperiode</div>
   const up = delta > 0
   const positive = goodWhenUp ? up : !up
   const Icon = up ? ArrowUpRight : ArrowDownRight
   return (
     <div className={cn('mt-2 flex items-center gap-1 text-xs font-medium', positive ? 'text-success' : 'text-error')}>
       <Icon size={12} />
-      {up ? '+' : ''}{delta}{unit ? ` ${unit}` : ''} ggü. Vormonat
+      {up ? '+' : ''}{delta}{unit ? ` ${unit}` : ''} ggü. Vorperiode
     </div>
   )
 }

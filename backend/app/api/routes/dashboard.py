@@ -147,12 +147,23 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
     }
 
 
-# ─── Anrufe ──────────────────────────────────────────────────────────────────
-def _anrufe(org_id: str) -> dict:
+# ─── Anrufe (Tag/Woche/Monat/Zeitraum filter, rolling windows) ───────────────
+def _anrufe(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None) -> dict:
     client = get_service_client()
     now = _now()
-    cur_start, prev_start = _month_start(now), _prev_month_start(now)
-    cur, prev = _split_calls(_fetch_calls(client, org_id, prev_start.isoformat()), cur_start, prev_start)
+    start, end, prev_start, prev_end, label, x_label, by_hour = _period_window(period, from_date, to_date, now)
+    is_range = bool(from_date and to_date)
+
+    rows = _fetch_calls(client, org_id, prev_start.isoformat())
+    cur, prev = [], []
+    for r in rows:
+        eff = _parse(r.get("started_at") or r.get("created_at"))
+        if not eff:
+            continue
+        if start <= eff < end:
+            cur.append((r, eff))
+        elif prev_start <= eff < prev_end:
+            prev.append((r, eff))
 
     def stats(items):
         total = len(items)
@@ -165,10 +176,19 @@ def _anrufe(org_id: str) -> dict:
     t, a, o, avg = stats(cur)
     pt, pa, po, pavg = stats(prev)
 
-    daily = defaultdict(int)
-    for _, eff in cur:
-        daily[eff.day] += 1
-    daily_volume = [{"day": d, "count": daily.get(d, 0)} for d in range(1, _days_in_month(now) + 1)]
+    s_count: dict = defaultdict(int)
+    if by_hour:
+        for _, eff in cur:
+            s_count[eff.hour] += 1
+        series = [{"label": f"{h}", "count": s_count.get(h, 0)} for h in range(24)]
+    else:
+        for _, eff in cur:
+            s_count[eff.date().isoformat()] += 1
+        series = []
+        d, last = start.date(), min(end, now + timedelta(days=1)).date()
+        while d < last:
+            series.append({"label": d.strftime("%d.%m"), "count": s_count.get(d.isoformat(), 0)})
+            d += timedelta(days=1)
 
     inbound = sum(1 for r, _ in cur if r.get("direction") == "inbound")
     missed = sum(1 for r, _ in cur if r.get("status") == "missed")
@@ -194,15 +214,25 @@ def _anrufe(org_id: str) -> dict:
             "prev_total_calls": pt, "prev_answered": pa,
             "prev_avg_duration_seconds": pavg, "prev_outbound": po,
         },
-        "daily_volume": daily_volume,
+        "period": "range" if is_range else period,
+        "period_label": label,
+        "series": series,
+        "series_x_label": x_label,
         "breakdown": {"inbound": inbound, "outbound": o, "missed": missed},
         "recent_calls": recent,
     }
 
 
 @router.get("/anrufe")
-async def anrufe(user: CurrentUser = Depends(require_org)) -> dict:
-    return await run_in_threadpool(_anrufe, user.org_id)
+async def anrufe(
+    period: str = "month",
+    from_date: str | None = None,
+    to_date: str | None = None,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    if period not in ("day", "week", "month", "range"):
+        period = "month"
+    return await run_in_threadpool(_anrufe, user.org_id, period, from_date, to_date)
 
 
 # ─── Finanzen ────────────────────────────────────────────────────────────────
@@ -287,12 +317,14 @@ async def finanzen(user: CurrentUser = Depends(require_org)) -> dict:
 
 
 # ─── KI-Nutzung (AI quota transparency + Tag/Woche/Monat/Zeitraum filter) ─────
-def _ki_window(period: str, from_date: str | None, to_date: str | None, now: datetime):
-    """Berlin-local window for the selected period. Returns
-    (start, end, prev_start, prev_end, label, x_label, by_hour) — `prev_*` is the
-    immediately-preceding window of equal length (for the delta), `by_hour` picks
+def _period_window(period: str, from_date: str | None, to_date: str | None, now: datetime):
+    """ROLLING Berlin-local window for the dashboard period filter, so recent
+    activity always shows (never an empty calendar-month-start). Returns
+    (start, end, prev_start, prev_end, label, x_label, by_hour); `prev_*` is the
+    immediately-preceding window of equal length (for the delta); `by_hour` picks
     an hourly series (single day) vs a per-day series."""
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = midnight + timedelta(days=1)
     if from_date and to_date:
         start = (_parse(from_date) or midnight).replace(hour=0, minute=0, second=0, microsecond=0)
         end = (_parse(to_date) or midnight).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
@@ -301,18 +333,18 @@ def _ki_window(period: str, from_date: str | None, to_date: str | None, now: dat
         length = end - start
         return start, end, start - length, start, "Zeitraum", "Datum", False
     if period == "day":
-        return midnight, midnight + timedelta(days=1), midnight - timedelta(days=1), midnight, "Heute", "Uhrzeit", True
+        return midnight, tomorrow, midnight - timedelta(days=1), midnight, "Heute", "Uhrzeit", True
     if period == "week":
-        wk = midnight - timedelta(days=now.weekday())
-        return wk, wk + timedelta(days=7), wk - timedelta(days=7), wk, "Diese Woche", "Datum", False
-    ms = _month_start(now)
-    return ms, _add_months(ms, 1), _add_months(ms, -1), ms, "Dieser Monat", "Tag", False
+        start = midnight - timedelta(days=6)   # last 7 calendar days incl. today
+        return start, tomorrow, start - timedelta(days=7), start, "Letzte 7 Tage", "Datum", False
+    start = midnight - timedelta(days=29)       # "month" → last 30 days (rolling)
+    return start, tomorrow, start - timedelta(days=30), start, "Letzte 30 Tage", "Datum", False
 
 
 def _ki_nutzung(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None) -> dict:
     client = get_service_client()
     now = _now()
-    start, end, prev_start, prev_end, label, x_label, by_hour = _ki_window(period, from_date, to_date, now)
+    start, end, prev_start, prev_end, label, x_label, by_hour = _period_window(period, from_date, to_date, now)
     is_range = bool(from_date and to_date)
 
     org = client.table("organizations").select("ai_minutes_quota").eq("id", org_id).limit(1).execute().data
@@ -362,8 +394,7 @@ def _ki_nutzung(org_id: str, period: str = "month", from_date: str | None = None
         series = []
         d, last = start.date(), min(end, now + timedelta(days=1)).date()
         while d < last:
-            lbl = str(d.day) if period == "month" and not is_range else d.strftime("%d.%m")
-            series.append({"label": lbl, "minutes": round(s_min.get(d.isoformat(), 0)), "calls": s_calls.get(d.isoformat(), 0)})
+            series.append({"label": d.strftime("%d.%m"), "minutes": round(s_min.get(d.isoformat(), 0)), "calls": s_calls.get(d.isoformat(), 0)})
             d += timedelta(days=1)
 
     # Run-rate / estimate is ALWAYS the monthly contingent (not the window).

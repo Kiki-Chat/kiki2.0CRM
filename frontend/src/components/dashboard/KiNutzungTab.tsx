@@ -1,67 +1,31 @@
 import { useQuery } from '@tanstack/react-query'
 import { Clock, Hourglass, Phone, Timer } from 'lucide-react'
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 import { apiFetch } from '../../lib/api'
-import { fmtDur, type KiNutzungData, type KiPeriod } from '../../lib/dashApi'
+import { fmtDur, type KiNutzungData } from '../../lib/dashApi'
 import { cn, initials } from '../../lib/utils'
-import { CHART, DashError, DashKpi, DashLoading, KpiRow, Panel, tooltipStyle, TrendBadge } from './shared'
-
-const PERIODS: [KiPeriod, string][] = [['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat'], ['range', 'Zeitraum']]
+import { CHART, DashError, DashKpi, DashLoading, KpiRow, Panel, tooltipStyle, TrendBadge, usePeriodFilter } from './shared'
 
 export function KiNutzungTab() {
   const navigate = useNavigate()
-  const [period, setPeriod] = useState<KiPeriod>('month')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  // A custom range applies only once BOTH dates are set; until then the backend
-  // falls back to the current month.
-  const rangeReady = period === 'range' && !!from && !!to
-  const qs = rangeReady
-    ? `?period=range&from_date=${from}&to_date=${to}`
-    : `?period=${period === 'range' ? 'month' : period}`
-
+  const { qs, queryKey, element } = usePeriodFilter()
   const { data, isLoading, error } = useQuery({
-    queryKey: ['dash', 'ki-nutzung', period, rangeReady ? from : '', rangeReady ? to : ''],
+    queryKey: ['dash', 'ki-nutzung', ...queryKey],
     queryFn: () => apiFetch<KiNutzungData>(`/api/dashboard/ki-nutzung${qs}`),
     staleTime: 5 * 60 * 1000,
   })
 
-  const selector = (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-muted">Zeitraum</span>
-      {PERIODS.map(([p, l]) => (
-        <button
-          key={p}
-          onClick={() => setPeriod(p)}
-          className={cn(
-            'rounded-md px-3 py-1.5 text-sm font-medium transition',
-            period === p ? 'bg-green-primary text-white' : 'border border-border bg-surface text-body hover:bg-alt',
-          )}
-        >
-          {l}
-        </button>
-      ))}
-      {period === 'range' && (
-        <div className="flex items-center gap-2">
-          <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border bg-alt px-2 py-1.5 text-sm text-text outline-none focus:border-green-primary" />
-          <span className="text-muted">–</span>
-          <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border bg-alt px-2 py-1.5 text-sm text-text outline-none focus:border-green-primary" />
-        </div>
-      )}
-    </div>
-  )
-
-  if (isLoading) return <div className="space-y-5">{selector}<DashLoading /></div>
-  if (error || !data) return <div className="space-y-5">{selector}<DashError msg={(error as Error)?.message} /></div>
+  if (isLoading) return <div className="space-y-5">{element}<DashLoading /></div>
+  if (error || !data) return <div className="space-y-5">{element}<DashError msg={(error as Error)?.message} /></div>
 
   const k = data.kpis
   const quota = k.minutes_quota || 0
+  // The contingent is MONTHLY → the quota bar always tracks the calendar month
+  // (month_minutes_used), independent of the selected analytics window.
   const pct = quota ? Math.round((k.month_minutes_used / quota) * 100) : 0
   const barColor = !quota ? CHART.green : pct > 95 ? CHART.error : pct >= 70 ? CHART.warning : CHART.green
-  const isMonth = data.period === 'month'
   const pl = data.period_label
 
   // Restlaufzeit label (always the MONTHLY contingent)
@@ -77,24 +41,25 @@ export function KiNutzungTab() {
   // cumulative consumption over the selected window
   let cum = 0
   const cumData = data.series.map((d) => { cum += d.minutes; return { label: d.label, cum, minutes: d.minutes, calls: d.calls } })
-  const maxCum = Math.max(quota, cumData[cumData.length - 1]?.cum ?? 0, 1)
-  const thr = Math.min(1, Math.max(0, (maxCum - quota) / maxCum))
 
   return (
     <div className="space-y-5">
-      {selector}
+      {element}
       <KpiRow>
         <DashKpi
           label={`KI-Minuten verbraucht (${pl})`}
-          value={`${k.minutes_used}${isMonth ? ` / ${quota || '∞'}` : ''} Min`}
+          value={`${k.minutes_used} Min`}
           icon={Clock}
           spark={data.series.map((d) => d.minutes)}
           sparkColor={barColor}
           trend={<TrendBadge delta={k.minutes_used - k.previous_minutes} unit="Min" goodWhenUp={false} />}
         >
-          {isMonth && quota > 0 && (
-            <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-alt">
-              <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: barColor }} />
+          {quota > 0 && (
+            <div className="mt-2">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-alt">
+                <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: barColor }} />
+              </div>
+              <div className="mt-1 text-[11px] text-muted">{k.month_minutes_used} / {quota} Min · Monatskontingent</div>
             </div>
           )}
         </DashKpi>
@@ -110,9 +75,7 @@ export function KiNutzungTab() {
               <AreaChart data={cumData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="kiCum" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset={0} stopColor={CHART.error} stopOpacity={0.35} />
-                    <stop offset={thr} stopColor={CHART.error} stopOpacity={0.25} />
-                    <stop offset={thr} stopColor={CHART.green} stopOpacity={0.3} />
+                    <stop offset={0} stopColor={CHART.green} stopOpacity={0.3} />
                     <stop offset={1} stopColor={CHART.green} stopOpacity={0} />
                   </linearGradient>
                 </defs>
@@ -120,7 +83,6 @@ export function KiNutzungTab() {
                 <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--muted)' }} tickLine={false} axisLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: 'var(--muted)' }} tickLine={false} axisLine={false} />
                 <Tooltip contentStyle={tooltipStyle} formatter={(v, n) => (n === 'cum' ? [`${v} Min kumuliert`, 'Kumuliert'] : [v, n])} labelFormatter={(l) => `${data.series_x_label} ${l}`} />
-                {isMonth && quota > 0 && <ReferenceLine y={quota} stroke={CHART.error} strokeDasharray="4 4" label={{ value: `Kontingent: ${quota} Min`, fontSize: 11, fill: 'var(--error)', position: 'insideTopRight' }} />}
                 <Area type="monotone" dataKey="cum" stroke={CHART.green} strokeWidth={2} fill="url(#kiCum)" />
               </AreaChart>
             </ResponsiveContainer>

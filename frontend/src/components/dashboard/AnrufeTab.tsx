@@ -5,20 +5,22 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 
 import { apiFetch } from '../../lib/api'
 import { type AnrufeData, fmtDur } from '../../lib/dashApi'
-import { CHART, DashError, DashKpi, DashLoading, KpiRow, Panel, tooltipStyle, TrendBadge } from './shared'
+import { CHART, DashError, DashKpi, DashLoading, KpiRow, Panel, tooltipStyle, TrendBadge, usePeriodFilter } from './shared'
 
 export function AnrufeTab() {
   const navigate = useNavigate()
+  const { qs, queryKey, element } = usePeriodFilter()
   const { data, isLoading, error } = useQuery({
-    queryKey: ['dash', 'anrufe'],
-    queryFn: () => apiFetch<AnrufeData>('/api/dashboard/anrufe'),
+    queryKey: ['dash', 'anrufe', ...queryKey],
+    queryFn: () => apiFetch<AnrufeData>(`/api/dashboard/anrufe${qs}`),
     staleTime: 5 * 60 * 1000,
   })
-  if (isLoading) return <DashLoading />
-  if (error || !data) return <DashError msg={(error as Error)?.message} />
+  if (isLoading) return <div className="space-y-5">{element}<DashLoading /></div>
+  if (error || !data) return <div className="space-y-5">{element}<DashError msg={(error as Error)?.message} /></div>
 
   const k = data.kpis
-  const vol = data.daily_volume
+  const vol = data.series
+  const pl = data.period_label
   const bd = data.breakdown
   const bdTotal = bd.inbound + bd.outbound + bd.missed || 1
   const bdData = [
@@ -29,22 +31,23 @@ export function AnrufeTab() {
 
   return (
     <div className="space-y-5">
+      {element}
       <KpiRow>
-        <DashKpi label="Gesamtanrufe" value={k.total_calls} icon={Phone} spark={vol.map((d) => d.count)} trend={<TrendBadge delta={k.total_calls - k.prev_total_calls} />} />
+        <DashKpi label={`Gesamtanrufe (${pl})`} value={k.total_calls} icon={Phone} spark={vol.map((d) => d.count)} trend={<TrendBadge delta={k.total_calls - k.prev_total_calls} />} />
         <DashKpi label="Beantwortet" value={k.answered} sub={`${k.answer_rate}% Antwortrate`} icon={PhoneIncoming} trend={<TrendBadge delta={k.answered - k.prev_answered} />} />
         <DashKpi label="Durchschnittsdauer" value={fmtDur(k.avg_duration_seconds)} icon={Phone} trend={<TrendBadge delta={k.avg_duration_seconds - k.prev_avg_duration_seconds} unit="Sek" goodWhenUp={false} />} />
         <DashKpi label="Ausgehend" value={k.outbound} icon={PhoneOutgoing} trend={<TrendBadge delta={k.outbound - k.prev_outbound} />} />
       </KpiRow>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <Panel title="Anrufvolumen" className="lg:col-span-8">
+        <Panel title={`Anrufvolumen (${pl})`} className="lg:col-span-8">
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={vol} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--muted)' }} tickLine={false} axisLine={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--muted)' }} tickLine={false} axisLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: 'var(--muted)' }} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${v} Anrufe`, '']} labelFormatter={(l) => `Tag ${l}`} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${v} Anrufe`, '']} labelFormatter={(l) => `${data.series_x_label} ${l}`} />
                 <Line type="monotone" dataKey="count" stroke={CHART.green} strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
@@ -77,7 +80,7 @@ export function AnrufeTab() {
         }
       >
         {data.recent_calls.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted">Noch keine Anrufe in diesem Monat.</div>
+          <div className="py-8 text-center text-sm text-muted">Keine Anrufe in diesem Zeitraum.</div>
         ) : (
           <div className="divide-y divide-border">
             {data.recent_calls.map((c) => {

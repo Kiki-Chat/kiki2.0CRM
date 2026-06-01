@@ -7,7 +7,10 @@ export interface AnrufeData {
     prev_total_calls: number; prev_answered: number
     prev_avg_duration_seconds: number; prev_outbound: number
   }
-  daily_volume: { day: number; count: number }[]
+  period: KiPeriod
+  period_label: string
+  series: { label: string; count: number }[]
+  series_x_label: string
   breakdown: { inbound: number; outbound: number; missed: number }
   recent_calls: {
     id: string; customer_name: string | null; started_at: string | null

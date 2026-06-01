@@ -17,33 +17,32 @@ def _now() -> datetime:
     return datetime(2026, 6, 17, 14, 30, tzinfo=dash.BERLIN)
 
 
-def test_ki_window_month():
-    start, end, ps, pe, label, x, by_hour = dash._ki_window("month", None, None, _now())
-    assert start.date() == date(2026, 6, 1) and start.hour == 0
-    assert end.date() == date(2026, 7, 1)
-    assert ps.date() == date(2026, 5, 1) and pe.date() == date(2026, 6, 1)
-    assert label == "Dieser Monat" and x == "Tag" and by_hour is False
+def test_period_window_month_is_rolling_30d():
+    start, end, ps, pe, label, x, by_hour = dash._period_window("month", None, None, _now())
+    assert start.date() == date(2026, 5, 19) and start.hour == 0   # last 30 days incl. today
+    assert end.date() == date(2026, 6, 18)                          # tomorrow (exclusive)
+    assert (start - ps) == timedelta(days=30) and pe == start
+    assert label == "Letzte 30 Tage" and x == "Datum" and by_hour is False
 
 
-def test_ki_window_day():
-    start, end, ps, pe, label, x, by_hour = dash._ki_window("day", None, None, _now())
+def test_period_window_day():
+    start, end, ps, pe, label, x, by_hour = dash._period_window("day", None, None, _now())
     assert start.date() == date(2026, 6, 17) and start.hour == 0
     assert end.date() == date(2026, 6, 18)
     assert ps.date() == date(2026, 6, 16) and pe.date() == date(2026, 6, 17)
     assert label == "Heute" and x == "Uhrzeit" and by_hour is True
 
 
-def test_ki_window_week_starts_monday():
-    start, end, ps, pe, label, x, by_hour = dash._ki_window("week", None, None, _now())
-    assert start.weekday() == 0 and start.hour == 0   # Monday
-    assert (end - start) == timedelta(days=7)
+def test_period_window_week_is_rolling_7d():
+    start, end, ps, pe, label, x, by_hour = dash._period_window("week", None, None, _now())
+    assert start.date() == date(2026, 6, 11) and start.hour == 0   # last 7 days incl. today
+    assert end.date() == date(2026, 6, 18)
     assert (start - ps) == timedelta(days=7) and pe == start
-    assert start.date() == date(2026, 6, 15)          # the Monday of that week
-    assert label == "Diese Woche" and by_hour is False
+    assert label == "Letzte 7 Tage" and by_hour is False
 
 
-def test_ki_window_custom_range():
-    start, end, ps, pe, label, x, by_hour = dash._ki_window("range", "2026-06-10", "2026-06-12", _now())
+def test_period_window_custom_range():
+    start, end, ps, pe, label, x, by_hour = dash._period_window("range", "2026-06-10", "2026-06-12", _now())
     assert start.date() == date(2026, 6, 10) and start.hour == 0
     assert end.date() == date(2026, 6, 13)            # to-date inclusive → +1 day
     assert (start - ps) == timedelta(days=3)          # prev window = same length
@@ -96,14 +95,30 @@ def test_ki_nutzung_month_scopes_recent_call(monkeypatch):
     }
     monkeypatch.setattr(dash, "get_service_client", lambda: _FakeClient(db))
     out = dash._ki_nutzung("org-1", "month")
-    assert out["period"] == "month" and out["period_label"] == "Dieser Monat"
+    assert out["period"] == "month" and out["period_label"] == "Letzte 30 Tage"
     assert out["kpis"]["minutes_used"] == 3 and out["kpis"]["calls_count"] == 1
     assert out["kpis"]["minutes_quota"] == 500
     assert out["kpis"]["month_minutes_used"] == 3
     # contract keys the frontend depends on
-    assert isinstance(out["series"], list) and out["series_x_label"] == "Tag"
+    assert isinstance(out["series"], list) and out["series_x_label"] == "Datum"
     for key in ("previous_minutes", "previous_calls", "previous_avg_duration"):
         assert key in out["kpis"]
+
+
+def test_anrufe_month_scopes_recent_call(monkeypatch):
+    now = dash._now()
+    recent = (now - timedelta(minutes=2)).isoformat()
+    db = {
+        "calls": [{"id": "c1", "customer_id": None, "direction": "inbound",
+                   "started_at": recent, "duration_seconds": 120, "status": "completed",
+                   "created_at": recent}],
+        "customers": [],
+    }
+    monkeypatch.setattr(dash, "get_service_client", lambda: _FakeClient(db))
+    out = dash._anrufe("org-1", "month")
+    assert out["kpis"]["total_calls"] == 1 and out["kpis"]["answered"] == 1
+    assert out["period"] == "month" and out["period_label"] == "Letzte 30 Tage"
+    assert isinstance(out["series"], list) and out["series_x_label"] == "Datum"
 
 
 def test_ki_nutzung_range_excludes_out_of_window(monkeypatch):
