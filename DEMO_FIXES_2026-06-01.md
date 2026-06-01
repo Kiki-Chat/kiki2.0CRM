@@ -180,3 +180,10 @@ Running notes: root cause + fix + test + commit SHA per item. State as of sessio
 - **Live-verified on the real test org** (read-only call into the handlers): Monat → **19 calls / 30 min** (was 0), Woche → 16 calls / 25 min, Tag → 0 (no calls today). `month_minutes_used` (June quota) = 0, correct.
 - **Test:** `test_dashboard_ki_nutzung` updated for rolling boundaries + `_anrufe` period test (7 pass). Full hermetic suite **346 passed**; build clean; backend restarted.
 - **Files:** `dashboard.py`, `tests/test_dashboard_ki_nutzung.py`, `dashApi.ts`, `dashboard/shared.tsx`, `dashboard/AnrufeTab.tsx`, `dashboard/KiNutzungTab.tsx`.
+
+## Round 4 (feature) — Kunden multi-select + remove ✅ (commit `425985e`, committed locally, NOT pushed/deployed)
+- **Ask:** checkbox select one/multiple customers in Kunden + remove single or multiple.
+- **Backend:** new `POST /api/customers/bulk-delete` ({ids}) — soft-delete `status='deleted'`, **org-scoped** (`.eq(org_id).in_(id, ids)`) so a member can never delete another tenant's rows; returns `{deleted}`. Reuses the existing single soft-delete semantics.
+- **Frontend ([CustomersPage.tsx](frontend/src/pages/CustomersPage.tsx)):** per-card checkbox (stops card-navigate via `stopPropagation`), a select-all toggle with indeterminate state, and a red "Löschen (N)" bar with confirm. Selected cards get a green ring; selection clears when the filter/search (visible set) changes so a hidden row is never silently deleted.
+- **Test:** `test_customers_bulk_delete.py` (2) — soft-deletes scoped to org (cross-org row untouched) + empty-list no-op. Full hermetic suite **348 passed**; build clean; backend restarted + route live (401 unauth).
+- **Files:** `customers.py`, `tests/test_customers_bulk_delete.py`, `CustomersPage.tsx`.
