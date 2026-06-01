@@ -286,43 +286,93 @@ async def finanzen(user: CurrentUser = Depends(require_org)) -> dict:
     return await run_in_threadpool(_finanzen, user.org_id)
 
 
-# ─── KI-Nutzung (AI quota transparency; renamed from Zeiterfassung) ───────────
-def _ki_nutzung(org_id: str) -> dict:
+# ─── KI-Nutzung (AI quota transparency + Tag/Woche/Monat/Zeitraum filter) ─────
+def _ki_window(period: str, from_date: str | None, to_date: str | None, now: datetime):
+    """Berlin-local window for the selected period. Returns
+    (start, end, prev_start, prev_end, label, x_label, by_hour) — `prev_*` is the
+    immediately-preceding window of equal length (for the delta), `by_hour` picks
+    an hourly series (single day) vs a per-day series."""
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if from_date and to_date:
+        start = (_parse(from_date) or midnight).replace(hour=0, minute=0, second=0, microsecond=0)
+        end = (_parse(to_date) or midnight).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        if end <= start:
+            end = start + timedelta(days=1)
+        length = end - start
+        return start, end, start - length, start, "Zeitraum", "Datum", False
+    if period == "day":
+        return midnight, midnight + timedelta(days=1), midnight - timedelta(days=1), midnight, "Heute", "Uhrzeit", True
+    if period == "week":
+        wk = midnight - timedelta(days=now.weekday())
+        return wk, wk + timedelta(days=7), wk - timedelta(days=7), wk, "Diese Woche", "Datum", False
+    ms = _month_start(now)
+    return ms, _add_months(ms, 1), _add_months(ms, -1), ms, "Dieser Monat", "Tag", False
+
+
+def _ki_nutzung(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None) -> dict:
     client = get_service_client()
     now = _now()
-    cur_start, prev_start = _month_start(now), _prev_month_start(now)
+    start, end, prev_start, prev_end, label, x_label, by_hour = _ki_window(period, from_date, to_date, now)
+    is_range = bool(from_date and to_date)
 
     org = client.table("organizations").select("ai_minutes_quota").eq("id", org_id).limit(1).execute().data
     quota = (org[0].get("ai_minutes_quota") if org else None) or 0
 
-    cur, prev = _split_calls(_fetch_calls(client, org_id, prev_start.isoformat()), cur_start, prev_start)
+    # Fetch from the earliest boundary we need so the window, the prev-window delta,
+    # AND the (always-monthly) quota context all have data. created_at >= started_at
+    # always, so filtering the fetch by created_at never drops an in-window call.
+    month_start = _month_start(now)
+    rows = _fetch_calls(client, org_id, min(prev_start, month_start).isoformat())
+
+    cur, prev, month_rows = [], [], []
+    for r in rows:
+        eff = _parse(r.get("started_at") or r.get("created_at"))
+        if not eff:
+            continue
+        if start <= eff < end:
+            cur.append((r, eff))
+        if prev_start <= eff < prev_end:
+            prev.append((r, eff))
+        if eff >= month_start:
+            month_rows.append((r, eff))
 
     def minutes(items):
         return round(sum((r.get("duration_seconds") or 0) for r, _ in items) / 60)
 
     def avg_dur(items):
-        durs = [r.get("duration_seconds") or 0 for r, _ in items if r.get("status") == "completed"]
+        durs = [r.get("duration_seconds") or 0 for r, _ in items]
         return round(sum(durs) / len(durs)) if durs else 0
 
     minutes_used = minutes(cur)
-    calls_count = len(cur)
+    month_minutes = minutes(month_rows)
 
-    daily_min = defaultdict(float)
-    daily_calls = defaultdict(int)
-    for r, eff in cur:
-        daily_min[eff.day] += (r.get("duration_seconds") or 0) / 60
-        daily_calls[eff.day] += 1
-    daily_consumption = [
-        {"day": d, "minutes": round(daily_min.get(d, 0)), "calls": daily_calls.get(d, 0)}
-        for d in range(1, _days_in_month(now) + 1)
-    ]
+    # Series: hourly for a single day, else one point per calendar day up to now.
+    s_min: dict = defaultdict(float)
+    s_calls: dict = defaultdict(int)
+    if by_hour:
+        for r, eff in cur:
+            s_min[eff.hour] += (r.get("duration_seconds") or 0) / 60
+            s_calls[eff.hour] += 1
+        series = [{"label": f"{h}", "minutes": round(s_min.get(h, 0)), "calls": s_calls.get(h, 0)} for h in range(24)]
+    else:
+        for r, eff in cur:
+            k = eff.date().isoformat()
+            s_min[k] += (r.get("duration_seconds") or 0) / 60
+            s_calls[k] += 1
+        series = []
+        d, last = start.date(), min(end, now + timedelta(days=1)).date()
+        while d < last:
+            lbl = str(d.day) if period == "month" and not is_range else d.strftime("%d.%m")
+            series.append({"label": lbl, "minutes": round(s_min.get(d.isoformat(), 0)), "calls": s_calls.get(d.isoformat(), 0)})
+            d += timedelta(days=1)
 
+    # Run-rate / estimate is ALWAYS the monthly contingent (not the window).
     days_elapsed = now.day
-    run_rate = minutes_used / days_elapsed if days_elapsed else 0
-    if quota and minutes_used > quota:
-        est_days = 0  # exhausted/over
+    run_rate = month_minutes / days_elapsed if days_elapsed else 0
+    if quota and month_minutes > quota:
+        est_days = 0
     elif run_rate > 0 and quota:
-        est_days = max(0, round((quota - minutes_used) / run_rate))
+        est_days = max(0, round((quota - month_minutes) / run_rate))
     else:
         est_days = None
 
@@ -350,23 +400,34 @@ def _ki_nutzung(org_id: str) -> dict:
         "kpis": {
             "minutes_used": minutes_used,
             "minutes_quota": quota,
-            "calls_count": calls_count,
+            "month_minutes_used": month_minutes,
+            "calls_count": len(cur),
             "avg_duration_seconds": avg_dur(cur),
             "estimated_days_remaining": est_days,
-            "over_quota": bool(quota and minutes_used > quota),
-            "previous_month_minutes": minutes(prev),
-            "previous_month_calls": len(prev),
-            "previous_month_avg_duration": avg_dur(prev),
+            "over_quota": bool(quota and month_minutes > quota),
+            "previous_minutes": minutes(prev),
+            "previous_calls": len(prev),
+            "previous_avg_duration": avg_dur(prev),
         },
-        "daily_consumption": daily_consumption,
+        "period": "range" if is_range else period,
+        "period_label": label,
+        "series": series,
+        "series_x_label": x_label,
         "top_callers": top_callers,
         "calls_by_hour": calls_by_hour,
     }
 
 
 @router.get("/ki-nutzung")
-async def ki_nutzung(user: CurrentUser = Depends(require_org)) -> dict:
-    return await run_in_threadpool(_ki_nutzung, user.org_id)
+async def ki_nutzung(
+    period: str = "month",
+    from_date: str | None = None,
+    to_date: str | None = None,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    if period not in ("day", "week", "month", "range"):
+        period = "month"
+    return await run_in_threadpool(_ki_nutzung, user.org_id, period, from_date, to_date)
 
 
 # ─── KI-Insights ─────────────────────────────────────────────────────────────

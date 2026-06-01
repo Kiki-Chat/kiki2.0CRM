@@ -1,29 +1,70 @@
 import { useQuery } from '@tanstack/react-query'
 import { Clock, Hourglass, Phone, Timer } from 'lucide-react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 import { apiFetch } from '../../lib/api'
-import { fmtDur, type KiNutzungData } from '../../lib/dashApi'
+import { fmtDur, type KiNutzungData, type KiPeriod } from '../../lib/dashApi'
 import { cn, initials } from '../../lib/utils'
 import { CHART, DashError, DashKpi, DashLoading, KpiRow, Panel, tooltipStyle, TrendBadge } from './shared'
 
+const PERIODS: [KiPeriod, string][] = [['day', 'Tag'], ['week', 'Woche'], ['month', 'Monat'], ['range', 'Zeitraum']]
+
 export function KiNutzungTab() {
   const navigate = useNavigate()
+  const [period, setPeriod] = useState<KiPeriod>('month')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  // A custom range applies only once BOTH dates are set; until then the backend
+  // falls back to the current month.
+  const rangeReady = period === 'range' && !!from && !!to
+  const qs = rangeReady
+    ? `?period=range&from_date=${from}&to_date=${to}`
+    : `?period=${period === 'range' ? 'month' : period}`
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['dash', 'ki-nutzung'],
-    queryFn: () => apiFetch<KiNutzungData>('/api/dashboard/ki-nutzung'),
+    queryKey: ['dash', 'ki-nutzung', period, rangeReady ? from : '', rangeReady ? to : ''],
+    queryFn: () => apiFetch<KiNutzungData>(`/api/dashboard/ki-nutzung${qs}`),
     staleTime: 5 * 60 * 1000,
   })
-  if (isLoading) return <DashLoading />
-  if (error || !data) return <DashError msg={(error as Error)?.message} />
+
+  const selector = (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-muted">Zeitraum</span>
+      {PERIODS.map(([p, l]) => (
+        <button
+          key={p}
+          onClick={() => setPeriod(p)}
+          className={cn(
+            'rounded-md px-3 py-1.5 text-sm font-medium transition',
+            period === p ? 'bg-green-primary text-white' : 'border border-border bg-surface text-body hover:bg-alt',
+          )}
+        >
+          {l}
+        </button>
+      ))}
+      {period === 'range' && (
+        <div className="flex items-center gap-2">
+          <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border bg-alt px-2 py-1.5 text-sm text-text outline-none focus:border-green-primary" />
+          <span className="text-muted">–</span>
+          <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border bg-alt px-2 py-1.5 text-sm text-text outline-none focus:border-green-primary" />
+        </div>
+      )}
+    </div>
+  )
+
+  if (isLoading) return <div className="space-y-5">{selector}<DashLoading /></div>
+  if (error || !data) return <div className="space-y-5">{selector}<DashError msg={(error as Error)?.message} /></div>
 
   const k = data.kpis
   const quota = k.minutes_quota || 0
-  const pct = quota ? Math.round((k.minutes_used / quota) * 100) : 0
+  const pct = quota ? Math.round((k.month_minutes_used / quota) * 100) : 0
   const barColor = !quota ? CHART.green : pct > 95 ? CHART.error : pct >= 70 ? CHART.warning : CHART.green
+  const isMonth = data.period === 'month'
+  const pl = data.period_label
 
-  // Restlaufzeit label
+  // Restlaufzeit label (always the MONTHLY contingent)
   const est = k.estimated_days_remaining
   let restLabel = 'Innerhalb des Kontingents'
   let restColor = 'text-success'
@@ -33,36 +74,37 @@ export function KiNutzungTab() {
     restColor = est <= 5 ? 'text-error' : est <= 10 ? 'text-warning' : 'text-success'
   }
 
-  // cumulative consumption with split green/red gradient at the quota line
+  // cumulative consumption over the selected window
   let cum = 0
-  const cumData = data.daily_consumption.map((d) => { cum += d.minutes; return { day: d.day, cum, minutes: d.minutes, calls: d.calls } })
+  const cumData = data.series.map((d) => { cum += d.minutes; return { label: d.label, cum, minutes: d.minutes, calls: d.calls } })
   const maxCum = Math.max(quota, cumData[cumData.length - 1]?.cum ?? 0, 1)
   const thr = Math.min(1, Math.max(0, (maxCum - quota) / maxCum))
 
   return (
     <div className="space-y-5">
+      {selector}
       <KpiRow>
         <DashKpi
-          label="KI-Minuten verbraucht (Monat)"
-          value={`${k.minutes_used} / ${quota || '∞'} Min`}
+          label={`KI-Minuten verbraucht (${pl})`}
+          value={`${k.minutes_used}${isMonth ? ` / ${quota || '∞'}` : ''} Min`}
           icon={Clock}
-          spark={data.daily_consumption.map((d) => d.minutes)}
+          spark={data.series.map((d) => d.minutes)}
           sparkColor={barColor}
-          trend={<TrendBadge delta={k.minutes_used - k.previous_month_minutes} unit="Min" goodWhenUp={false} />}
+          trend={<TrendBadge delta={k.minutes_used - k.previous_minutes} unit="Min" goodWhenUp={false} />}
         >
-          {quota > 0 && (
+          {isMonth && quota > 0 && (
             <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-alt">
               <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: barColor }} />
             </div>
           )}
         </DashKpi>
-        <DashKpi label="Anrufe abgewickelt (Monat)" value={k.calls_count} icon={Phone} spark={data.daily_consumption.map((d) => d.calls)} trend={<TrendBadge delta={k.calls_count - k.previous_month_calls} />} />
-        <DashKpi label="Durchschnittliche Anrufdauer" value={fmtDur(k.avg_duration_seconds)} icon={Timer} trend={<TrendBadge delta={k.avg_duration_seconds - k.previous_month_avg_duration} unit="Sek" goodWhenUp={false} />} />
-        <DashKpi label="Geschätzte Restlaufzeit" value={<span className={restColor}>{restLabel}</span>} icon={Hourglass} />
+        <DashKpi label={`Anrufe abgewickelt (${pl})`} value={k.calls_count} icon={Phone} spark={data.series.map((d) => d.calls)} trend={<TrendBadge delta={k.calls_count - k.previous_calls} />} />
+        <DashKpi label="Durchschnittliche Anrufdauer" value={fmtDur(k.avg_duration_seconds)} icon={Timer} trend={<TrendBadge delta={k.avg_duration_seconds - k.previous_avg_duration} unit="Sek" goodWhenUp={false} />} />
+        <DashKpi label="Geschätzte Restlaufzeit (Monat)" value={<span className={restColor}>{restLabel}</span>} icon={Hourglass} />
       </KpiRow>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <Panel title="Verbrauch im Monatsverlauf" className="lg:col-span-8">
+        <Panel title={`Verbrauchsverlauf (${pl})`} className="lg:col-span-8">
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={cumData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
@@ -75,19 +117,19 @@ export function KiNutzungTab() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--muted)' }} tickLine={false} axisLine={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--muted)' }} tickLine={false} axisLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: 'var(--muted)' }} tickLine={false} axisLine={false} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(v, n) => (n === 'cum' ? [`${v} Min kumuliert`, 'Kumuliert'] : [v, n])} labelFormatter={(l) => `Tag ${l}`} />
-                {quota > 0 && <ReferenceLine y={quota} stroke={CHART.error} strokeDasharray="4 4" label={{ value: `Kontingent: ${quota} Min`, fontSize: 11, fill: 'var(--error)', position: 'insideTopRight' }} />}
+                <Tooltip contentStyle={tooltipStyle} formatter={(v, n) => (n === 'cum' ? [`${v} Min kumuliert`, 'Kumuliert'] : [v, n])} labelFormatter={(l) => `${data.series_x_label} ${l}`} />
+                {isMonth && quota > 0 && <ReferenceLine y={quota} stroke={CHART.error} strokeDasharray="4 4" label={{ value: `Kontingent: ${quota} Min`, fontSize: 11, fill: 'var(--error)', position: 'insideTopRight' }} />}
                 <Area type="monotone" dataKey="cum" stroke={CHART.green} strokeWidth={2} fill="url(#kiCum)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </Panel>
 
-        <Panel title="Top Anrufer (Monat)" className="lg:col-span-4">
+        <Panel title={`Top Anrufer (${pl})`} className="lg:col-span-4">
           {data.top_callers.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted">Noch keine Anrufe in diesem Monat.</div>
+            <div className="py-8 text-center text-sm text-muted">Keine Anrufe in diesem Zeitraum.</div>
           ) : (
             <div className="space-y-2">
               {data.top_callers.map((c) => (

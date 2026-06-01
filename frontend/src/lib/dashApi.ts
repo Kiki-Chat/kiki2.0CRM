@@ -28,13 +28,17 @@ export interface FinanzenData {
   }[]
 }
 
+export type KiPeriod = 'day' | 'week' | 'month' | 'range'
 export interface KiNutzungData {
   kpis: {
-    minutes_used: number; minutes_quota: number; calls_count: number
+    minutes_used: number; minutes_quota: number; month_minutes_used: number; calls_count: number
     avg_duration_seconds: number; estimated_days_remaining: number | null; over_quota: boolean
-    previous_month_minutes: number; previous_month_calls: number; previous_month_avg_duration: number
+    previous_minutes: number; previous_calls: number; previous_avg_duration: number
   }
-  daily_consumption: { day: number; minutes: number; calls: number }[]
+  period: KiPeriod
+  period_label: string
+  series: { label: string; minutes: number; calls: number }[]
+  series_x_label: string
   top_callers: { customer_id: string; customer_name: string | null; total_minutes: number; call_count: number }[]
   calls_by_hour: { hour: number; count: number; minutes: number }[]
 }
