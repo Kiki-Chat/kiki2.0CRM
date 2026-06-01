@@ -33,6 +33,7 @@ import { Modal } from '../components/ui/Modal'
 import { applyAccent, isHexColor } from '../lib/accent'
 import { apiFetch, apiUpload } from '../lib/api'
 import { supabase } from '../lib/supabase'
+import { useTheme } from '../lib/theme'
 import { cn } from '../lib/utils'
 
 const STALE = 5 * 60 * 1000
@@ -118,6 +119,12 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   ] },
   { label: 'Integrationen', items: [
     { slug: 'pds-software', label: 'PDS-Software', icon: Plug },
+  ] },
+  // Konto sits LAST, immediately before the Danger Zone. The admin = the company
+  // login; password lives here (Company Settings) now that the personal-settings
+  // surface is employee-only.
+  { label: 'Konto', items: [
+    { slug: 'passwort', label: 'Passwort', icon: Lock },
   ] },
 ]
 const DANGER: NavItem = { slug: 'gefahrenzone', label: 'Gefahrenzone', icon: AlertTriangle }
@@ -271,6 +278,7 @@ function SectionContent({ section, data, flash }: { section: string; data: Setti
     case 'kalender-sync': return <KalenderSyncSection flash={flash} />
     case 'google-reviews': return <GoogleReviewsSection org={data.organization} />
     case 'pds-software': return <PdsSection config={data.pds_config} flash={flash} />
+    case 'passwort': return <PasswortSection flash={flash} />
     case 'gefahrenzone': return <GefahrenzoneSection org={data.organization} flash={flash} />
     default: return null
   }
@@ -408,6 +416,7 @@ const fontStack = (f: string) => (f === 'System-UI' ? 'system-ui, sans-serif' : 
 
 function DesignSection({ org }: { org: Org }) {
   const qc = useQueryClient()
+  const { theme, toggle } = useTheme()
   const fileRef = useRef<HTMLInputElement>(null)
   const [accent, setAccent] = useState(org.accent_color || '#16A34A')
   const [font, setFont] = useState(org.font_preference || 'Montserrat')
@@ -495,6 +504,16 @@ function DesignSection({ org }: { org: Org }) {
         <div className="text-2xl font-bold text-text">Dashboard</div>
         <div className="text-base font-semibold text-body">Rechnungen & Kostenvoranschläge</div>
       </div>
+
+      {/* Darstellung — per-device preference (localStorage), applies live, no save
+          needed. Lives here so the company login keeps the dark-mode control now
+          that the personal-settings surface is employee-only. */}
+      <div className="my-6 border-t border-border" />
+      <GroupLabel>Darstellung</GroupLabel>
+      <label className="flex items-center justify-between rounded-lg bg-alt p-4">
+        <span className="text-sm font-medium text-text">Dunkles Design</span>
+        <Toggle on={theme === 'dark'} onChange={() => toggle()} />
+      </label>
 
       <SaveBar onReset={reset} onSave={() => save.mutate()} saving={save.isPending} />
     </Card>
@@ -1082,6 +1101,52 @@ function PdsSection({ config, flash }: { config: PdsConfig | null; flash: (m: st
       <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
         <button onClick={() => syncNow.mutate()} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt">Jetzt synchronisieren</button>
         <button onClick={() => save.mutate()} disabled={save.isPending} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{save.isPending ? 'Speichert…' : 'Speichern'}</button>
+      </div>
+    </Card>
+  )
+}
+
+// ─── Passwort ─────────────────────────────────────────────────────────────────
+function PwField({ label, value, onChange, show, onToggle }: { label: string; value: string; onChange: (v: string) => void; show: boolean; onToggle: () => void }) {
+  return (
+    <Field label={label}>
+      <div className="relative">
+        <input type={show ? 'text' : 'password'} value={value} onChange={(e) => onChange(e.target.value)} className={cn(inputCls, 'pr-10')} />
+        <button type="button" onClick={onToggle} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted">{show ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+      </div>
+    </Field>
+  )
+}
+function PasswortSection({ flash }: { flash: (m: string) => void }) {
+  const [cur, setCur] = useState('')
+  const [nw, setNw] = useState('')
+  const [conf, setConf] = useState('')
+  const [showCur, setShowCur] = useState(false)
+  const [showNew, setShowNew] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const changePw = useMutation({
+    mutationFn: () => apiFetch('/api/users/me/change-password', { method: 'POST', body: JSON.stringify({ current_password: cur, new_password: nw }) }),
+    onSuccess: () => { setCur(''); setNw(''); setConf(''); setError(null); flash('Passwort geändert.') },
+    onError: (e: Error) => setError(e.message || 'Passwort konnte nicht geändert werden.'),
+  })
+  const submit = () => {
+    setError(null)
+    if (nw.length < 8) { setError('Neues Passwort muss mindestens 8 Zeichen haben.'); return }
+    if (nw !== conf) { setError('Die neuen Passwörter stimmen nicht überein.'); return }
+    changePw.mutate()
+  }
+  return (
+    <Card>
+      <GroupLabel>Passwort ändern</GroupLabel>
+      <p className="mb-4 text-sm text-muted">Ändern Sie das Passwort für Ihren Firmen-Login.</p>
+      <div className="max-w-md space-y-4">
+        <PwField label="Aktuelles Passwort" value={cur} onChange={setCur} show={showCur} onToggle={() => setShowCur((s) => !s)} />
+        <PwField label="Neues Passwort" value={nw} onChange={setNw} show={showNew} onToggle={() => setShowNew((s) => !s)} />
+        <PwField label="Neues Passwort bestätigen" value={conf} onChange={setConf} show={showNew} onToggle={() => setShowNew((s) => !s)} />
+        {error && <p className="text-sm font-medium text-error">{error}</p>}
+      </div>
+      <div className="mt-6 flex items-center justify-end border-t border-border pt-4">
+        <button onClick={submit} disabled={changePw.isPending || !cur || !nw || !conf} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{changePw.isPending ? 'Ändert…' : 'Passwort ändern'}</button>
       </div>
     </Card>
   )

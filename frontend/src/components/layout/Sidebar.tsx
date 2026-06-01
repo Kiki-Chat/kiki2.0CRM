@@ -65,10 +65,12 @@ export function Sidebar({
   const { me, isAdmin } = useMe()
   const companyName = me?.org_name
 
-  // Drop admin-only leaves (and now-empty groups) for employees.
+  // Drop admin-only leaves for employees, and employee-only (personal) leaves
+  // for admins — plus any group left empty as a result.
+  const hideLeaf = (l: NavLeaf) => (!!l.adminOnly && !isAdmin) || (!!l.employeeOnly && isAdmin)
   const visibleNav = NAV.flatMap<NavEntry>((entry) => {
-    if (!isGroup(entry)) return entry.adminOnly && !isAdmin ? [] : [entry]
-    const children = entry.children.filter((c) => !(c.adminOnly && !isAdmin))
+    if (!isGroup(entry)) return hideLeaf(entry) ? [] : [entry]
+    const children = entry.children.filter((c) => !hideLeaf(c))
     return children.length ? [{ ...entry, children }] : []
   })
 
@@ -178,12 +180,17 @@ export function Sidebar({
               sideOffset={8}
               className="z-50 w-56 overflow-hidden rounded-lg border border-border bg-surface p-1 shadow-e3"
             >
-              <DropdownMenu.Item
-                onSelect={() => setPersonalOpen(true)}
-                className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body outline-none data-[highlighted]:bg-alt"
-              >
-                <Settings size={14} /> Persönliche Einstellungen
-              </DropdownMenu.Item>
+              {/* Personal settings belong to the employee login (a person). The
+                  admin login represents the COMPANY → it gets Company Settings
+                  only (incl. password under Firmeneinstellungen → Passwort). */}
+              {!isAdmin && (
+                <DropdownMenu.Item
+                  onSelect={() => setPersonalOpen(true)}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body outline-none data-[highlighted]:bg-alt"
+                >
+                  <Settings size={14} /> Persönliche Einstellungen
+                </DropdownMenu.Item>
+              )}
               {isAdmin && (
                 <DropdownMenu.Item
                   onSelect={() => navigate('/settings')}

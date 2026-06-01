@@ -18,6 +18,10 @@ export interface NavLeaf {
   /** Hidden from non-admin (employee) users. Backend still enforces; this is
    * cosmetic so employees don't see a link to a page they can't use. */
   adminOnly?: boolean
+  /** Hidden from admins. The admin login represents the COMPANY, not a person,
+   * so personal surfaces (e.g. "Meine Abwesenheit") belong to employee logins
+   * only — admins manage absences via Mitarbeiter instead. */
+  employeeOnly?: boolean
 }
 
 export interface NavGroupDef {
@@ -37,7 +41,7 @@ export const NAV: NavEntry[] = [
   { to: '/calls', icon: Phone, label: 'Anrufe', badgeKey: 'calls' },
   { to: '/customers', icon: Users, label: 'Kunden' },
   { to: '/calendar', icon: Calendar, label: 'Kalender' },
-  { to: '/meine-abwesenheit', icon: CalendarClock, label: 'Meine Abwesenheit' },
+  { to: '/meine-abwesenheit', icon: CalendarClock, label: 'Meine Abwesenheit', employeeOnly: true },
   {
     icon: Briefcase,
     label: 'Aufträge',

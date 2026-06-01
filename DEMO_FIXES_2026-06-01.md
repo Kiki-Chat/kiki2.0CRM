@@ -91,4 +91,9 @@ Running notes: root cause + fix + test + commit SHA per item. State as of sessio
 
 # FIX LOG (appended as each cluster ships)
 
-_(none yet — Phase 0 diagnosis complete; proceeding to Cluster 1)_
+## Cluster 1 — Admin settings = company only ✅ (commit `60dc372`)
+- **B1** — Added `employeeOnly?: boolean` to `NavLeaf` ([nav.ts:18-25](frontend/src/components/layout/nav.ts#L18)); set `employeeOnly: true` on the Meine-Abwesenheit leaf ([nav.ts:45](frontend/src/components/layout/nav.ts#L45)); extended the sidebar filter with a `hideLeaf` helper so `employeeOnly` leaves drop for admins (and `adminOnly` still drop for employees) ([Sidebar.tsx:68-76](frontend/src/components/layout/Sidebar.tsx#L68)). Admins now manage absences only via Mitarbeiter; the employee self-service page is untouched.
+- **B7** — Gated the "Persönliche Einstellungen" dropdown item on `!isAdmin` ([Sidebar.tsx:181-192](frontend/src/components/layout/Sidebar.tsx#L181)); employees keep it, admins don't. Dark-mode (the only non-identity control in that modal) **relocated** to Company Settings → Design → "Darstellung / Dunkles Design" ([SettingsPage.tsx DesignSection](frontend/src/pages/SettingsPage.tsx)) so admins don't lose it (localStorage-backed, applies live). **Flagged decision** — say the word to drop dark-mode for admins instead.
+- **B8** — New "Konto → Passwort" nav group rendered LAST, immediately before Gefahrenzone ([SettingsPage.tsx NAV_GROUPS](frontend/src/pages/SettingsPage.tsx)); `PasswortSection` reuses `POST /api/users/me/change-password` (current/new/confirm, ≥8 chars, match check). No backend change.
+- **Test:** `npm run build` (tsc -b + vite) clean; preview boots with **0 console errors**. Live admin render proof (sidebar without Meine-Abwesenheit + Persönliche Einstellungen; Settings Passwort section) **pending Amber's login** — password held by her, I won't type it.
+- **Files:** `frontend/src/components/layout/nav.ts`, `frontend/src/components/layout/Sidebar.tsx`, `frontend/src/pages/SettingsPage.tsx`.
