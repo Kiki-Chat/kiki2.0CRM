@@ -305,3 +305,65 @@ frontend-only. Reverting A also neutralises B/C's email chokepoint (becomes harm
 3. **Scope-guard flip** (`OUTBOUND_TEST_SCOPE_ONLY=0`) — only when real customers should be reached.
 4. **Deploy go** for backend + frontend (runbook above).
 5. Decide whether to clear the test fixtures (cleanup SQL above) or keep them.
+
+---
+
+# DEPLOYED + LIVE-TESTED on prod (2026-06-02)
+
+Per Amber's "deploy + test everything, keep only the per-org toggle" directive (prod = staging
+replica, no real customers, prod writes authorized).
+
+### Deployed
+- `git push origin main` (`d2a6155..c5c6c72`), then `railway up backend` + `railway up frontend`
+  (`--path-as-root --service … --ci`). Backend `/health` 200; all 5 appointment routes +
+  `/api/outbound/send` live in prod `/openapi.json`; frontend serves the new bundle. Brevo
+  (`BREVO_API_KEY`+`BREVO_SMTP_KEY`) + `ELEVENLABS_API_KEY` confirmed present (names only).
+
+### Single per-org toggle (global guard removed from the path)
+- Set on prod backend: **`OUTBOUND_TEST_SCOPE_ONLY=0`** (guard now pass-through — no
+  forcing/intercepting) + **`OUTBOUND_OCCASION_EMAILS_ENABLED=1`**.
+- Confirmed by read: per-org `agent_configs.outbound_enabled` is the ONLY gate; it's independent
+  of the (now-off) guard (the guard only computes the destination AFTER the gate passes). **New orgs
+  default `outbound_enabled=false`** (migration 0015 default + `DEFAULT_AGENT_CONFIG` doesn't set it →
+  onboarding never auto-calls).
+- Test org `c4dbf596` enabled (`outbound_enabled=true`, occasions `appointment_reminder`+`kva_followup`);
+  every other org left OFF.
+
+### Fixtures (kiki-test-007 / c4dbf596)
+- Customer `a17438f0` (phone **+917879997839**, email **agrawalamber01@gmail.com**).
+- Appointment `812434ab` — after the reschedule test it is now `confirmed` @ 2026-06-13T14:00Z.
+- Cost estimate (KVA) `07fb9d56` (`KVA-TEST-APPT-EPIC`, sent, 8 days old).
+- Cleanup: `delete from cost_estimates where id='07fb9d56-...'; delete from appointments where
+  id='812434ab-...'; delete from customers where id='a17438f0-...';`
+
+### Live test results — ALL PASS (6 real calls to +917879997839 + 6 Brevo emails to agrawalamber01)
+| Occasion | conversation_id | call_sid (head) | email |
+|---|---|---|---|
+| appointment_confirmation | conv_4301kt3qdhn5f6sr0szzrnc2k833 | CA2f49ec24 | brevo_smtp ✓ |
+| appointment_cancellation | conv_5801kt3qerp1em39pzp6ew5h8hks | CAde4a963b | brevo_smtp ✓ |
+| appointment_reminder (existing-7) | conv_4901kt3qevdqe29vp4r5m20m39nr | CAef418772 | brevo_smtp ✓ |
+| kva_followup (existing-7) | conv_3001kt3qexp8fc89e3p0b63wawq6 | CA1b9d6fe7 | brevo_smtp ✓ |
+| reschedule → propose-alternative | conv_3801kt3qfr07e429m55x1m5r380r | CA9440f0a5 | brevo_smtp ✓ |
+| reschedule → approve-proposal (confirmation) | conv_2101kt3qgvfjfxwbptefxbp3tpf8 | CA08efd97b | brevo_smtp ✓ |
+
+- Calls corroborated in `outbound_calls` (the 4 `/send` rows `status=placed`); the 2 reschedule-loop
+  calls used the override path (no ledger row, by design) and are proven by their API responses.
+- Emails corroborated in prod logs: `email_send org=c4dbf596 tier=brevo_smtp to=agrawalamber01@gmail.com
+  status=success` ×6 (each a Brevo `HTTP 201 Created`). Inbox arrival is Amber's to eyeball.
+- Reschedule loop verified end-to-end: propose-alternative (call) → `customer_proposed_*` stamped
+  (simulating the agent's mid-call counter via `change_appointment`) → approve-proposal applied the
+  counter (`scheduled_at`→2026-06-13T14:00Z, status `confirmed`, proposal cleared) + fired the
+  confirmation call+email.
+
+### Flags / residual
+- **Item 4 already live:** `REDIS_URL`+`OBSERVABILITY_ENABLED` were already set on prod (enabled
+  2026-06-01). Left untouched (NOT unset — it's a working verified feature; the "keep inert" line was
+  read non-destructively as "don't activate via this deploy", which holds).
+- **Cron/sweep:** with the test org enabled + guard off, if the external cron hits `run-due-reminders`
+  it will batch-dial/email the test org's qualifying records (appts ~1d out, sent KVAs ≥7d), not just
+  the fixture. Fine on a staging replica; pause the cron if undesired. (The test KVA already has a
+  placed ledger row → won't re-fire.)
+- **Auth for testing:** used the `kikitest01` test-admin Supabase login (Amber authorized after the
+  auto-classifier flagged agent-supplied credentials). Token was transient; not persisted in repo.
+- **Prod URLs:** frontend https://frontend-production-4bdf.up.railway.app · backend
+  https://backend-production-3f88a.up.railway.app
