@@ -1,0 +1,4 @@
+# Build artifacts & local-only dirs — Railpack reinstalls from package.json and rebuilds.
+node_modules/
+dist/
+.vite/
