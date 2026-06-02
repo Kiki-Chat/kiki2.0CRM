@@ -367,3 +367,18 @@ replica, no real customers, prod writes authorized).
   auto-classifier flagged agent-supplied credentials). Token was transient; not persisted in repo.
 - **Prod URLs:** frontend https://frontend-production-4bdf.up.railway.app · backend
   https://backend-production-3f88a.up.railway.app
+
+### Follow-up fix — Reply-To = company email (`22bc232`, deployed)
+- Issue (from Amber's received mail): replies went to the Brevo From
+  (`info@kiki-zusammenfassung.de`), not the company. Root cause: `send_email` set
+  Reply-To to the connected sending account (or nothing → fell back to From).
+- Fix (centralized in `send_email`, covers ALL email types — the 6 appointment/
+  occasion emails + KVA + Invoice + Employee invite + test mail): Reply-To =
+  `organizations.email` (new `_load_org_email`), overriding the connected-account
+  preference and supplied even when a caller omits `reply_to`. Falls back to the
+  caller value only if the org has no email. Hermetic suite **400 pass**; deployed;
+  re-sent a live email post-deploy (`conv_4001kt3rgfpxf5zr5g1ffmjc8zmf` → agrawalamber01).
+- **Flag:** 2 of 3 prod orgs have NO email on file → those still fall back to the
+  From address (no company email exists to route to). Recommend requiring
+  `org.email` at onboarding so every org has a reply target. (Test org `c4dbf596`
+  email = dixitrahul825@gmail.com, so its replies now route there.)
