@@ -100,16 +100,15 @@ def send_email(
     config = _load_email_config(org_id_str)
     org_name = _load_org_name(org_id_str)
 
-    # Reply-To resolves to the org's CONNECTED sending account (the inbox the
-    # tradesperson linked) so a recipient's reply lands with them — not the
-    # generic org address or HeyKiki. Applied uniformly to every tier (so even a
-    # Brevo-fallback send still replies to the connected account). Falls back to
-    # the caller-supplied reply_to (typically the org email) when nothing is
-    # connected. Empty-string config values are treated as "not set".
-    sending_account = None
-    if config:
-        sending_account = config.get("oauth_account_email") or config.get("smtp_sender_email")
-    reply_to = sending_account or reply_to
+    # Reply-To is ALWAYS the company's own email (the org's contact address), so
+    # every recipient reply lands with the COMPANY — never the Brevo relay /
+    # HeyKiki "via" address, and never a per-connection sending account. HeyKiki
+    # only triggers the mail; we deliberately do NOT route replies per sending
+    # account (one consistent reply target across every email type: appointment
+    # calls/emails, KVA, invoice, employee invite, test mail). Falls back to the
+    # caller-supplied reply_to only when the org has no email on file.
+    org_email = _load_org_email(org_id_str)
+    reply_to = org_email or (reply_to or "").strip() or None
 
     # ── Tier 1: OAuth (Gmail / Microsoft) ─────────────────────────────────
     if config and config.get("oauth_provider") and config.get(
@@ -264,6 +263,26 @@ def _load_org_name(org_id: str) -> str | None:
         return rows[0].get("name") if rows else None
     except Exception as exc:  # noqa: BLE001
         log.warning("email_send org=%s org_lookup_failed err=%s", org_id, exc)
+        return None
+
+
+def _load_org_email(org_id: str) -> str | None:
+    """Fetch the org's own contact email — the canonical Reply-To so replies
+    always reach the COMPANY (never the Brevo relay or a per-connection account)."""
+    try:
+        client = get_service_client()
+        rows = (
+            client.table("organizations")
+            .select("email")
+            .eq("id", org_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return ((rows[0].get("email") if rows else None) or "").strip() or None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("email_send org=%s org_email_lookup_failed err=%s", org_id, exc)
         return None
 
 

@@ -479,26 +479,28 @@ def test_brevo_failure_modes_handled_not_unhandled_crash(monkeypatch, mode):
 
 
 # ─── Reply-To resolves to the CONNECTED sending account (not the org email) ──
-def test_reply_to_defaults_to_connected_oauth_account(monkeypatch):
-    """Gmail connected → Reply-To is the connected account (oauth_account_email),
-    NOT the caller-supplied org email — so a recipient's reply reaches the
-    tradesperson's own inbox."""
+def test_reply_to_is_org_email_even_with_oauth_connected(monkeypatch):
+    """Reply-To is the COMPANY's email even when Gmail is connected — replies reach
+    the company, NOT the connected sending account (changed 2026-06-02: one
+    consistent reply target; HeyKiki only triggers the mail)."""
     _patch_db(monkeypatch, email_config=_config_oauth_google())
     _patch_oauth_creds(monkeypatch)
+    monkeypatch.setattr(es, "_load_org_email", lambda oid: "firma@muster.de")
     captured: dict = {}
     monkeypatch.setattr(es, "_gmail_api_send", lambda **kw: captured.update(kw) or "msg-1")
 
     res = send_email(
         org_id=ORG_ID, to_email=TO_EMAIL, subject="S", body_html="<p>x</p>",
-        reply_to="info@kikichat.de",  # caller's org email — must be overridden
+        reply_to="info@kikichat.de",
     )
-    assert res.provider_used == "gmail_oauth"
-    assert captured["reply_to"] == "agrawalamber01@gmail.com"
+    assert res.provider_used == "gmail_oauth"  # still SENDS via the connected account…
+    assert captured["reply_to"] == "firma@muster.de"  # …but REPLIES go to the company
 
 
-def test_reply_to_uses_smtp_sender_when_only_smtp(monkeypatch):
-    """SMTP-only org → Reply-To is the configured SMTP sender address."""
+def test_reply_to_is_org_email_even_with_smtp(monkeypatch):
+    """Reply-To is the COMPANY's email even on an SMTP-only org (not the SMTP sender)."""
     _patch_db(monkeypatch, email_config=_config_smtp())
+    monkeypatch.setattr(es, "_load_org_email", lambda oid: "firma@muster.de")
     captured: dict = {}
     monkeypatch.setattr(es, "_send_via_customer_smtp", lambda **kw: captured.update(kw) or "m")
 
@@ -507,7 +509,7 @@ def test_reply_to_uses_smtp_sender_when_only_smtp(monkeypatch):
         reply_to="info@kikichat.de",
     )
     assert res.provider_used == "customer_smtp"
-    assert captured["reply_to"] == "amber@example.com"
+    assert captured["reply_to"] == "firma@muster.de"
 
 
 def test_reply_to_falls_back_to_caller_when_nothing_connected(monkeypatch):
