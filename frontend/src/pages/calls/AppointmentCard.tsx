@@ -284,7 +284,7 @@ export function AppointmentCard({
       <div>
         <div className="mb-1.5 flex items-center justify-between">
           <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
-            Gebuchter Termin
+            Offene Aktionen
           </span>
         </div>
         <div className="rounded-xl border border-green-tint-200 bg-surface p-3.5 shadow-sm ring-1 ring-green-tint-100">
