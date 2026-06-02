@@ -418,19 +418,17 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
             "customer_proposed_end_time, customer_proposed_at, customer_proposal_source"
         )
         .eq("org_id", org_id)
-        .in_("status", ["pending", "confirmed"])
+        .eq("status", "pending")
         .or_(",".join(ors))
         .order("scheduled_at")
         .execute()
         .data
         or []
     )
-    # Prefer a pending appointment (needs a decision); otherwise surface the
-    # booked (confirmed) one so the card shows "Gebuchter Termin" + view/cancel
-    # actions instead of leaving only "Termin erstellen".
-    pending = [a for a in appt_rows if a.get("status") == "pending"]
-    chosen = pending[0] if pending else (appt_rows[0] if appt_rows else None)
-    return {"appointment": chosen}
+    # Only PENDING shows in the card — a request awaiting a human decision. Once
+    # confirmed it leaves the card and appears on the calendar (and confirming
+    # there fires the outbound call+email).
+    return {"appointment": appt_rows[0] if appt_rows else None}
 
 
 @router.get("/by-call/{call_id}/pending")

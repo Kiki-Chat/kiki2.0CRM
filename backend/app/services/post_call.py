@@ -6,49 +6,11 @@ API. Idempotent on conversation_id. Org resolves from agent_id in the payload.
 Returns a debug-friendly result envelope per conversation (always a list).
 """
 
-import logging
-import threading
 import time
 from datetime import datetime, timezone
 
 from app.db.realtime import broadcast_new_call
 from app.db.supabase_client import get_service_client
-
-_log = logging.getLogger(__name__)
-
-
-def _fire_booking_confirmations(org_id: str, conversation_id: str) -> None:
-    """After a call ends, fire the confirmation call+email for any appointment the
-    agent booked during THIS conversation (matched via source_conversation_id).
-    Runs in a background thread (non-blocking for the post-call response); gated by
-    the org's Appointment-Reminders toggle + the outbound scope guard inside
-    notify; best-effort. The post-call dedup (already_processed) keeps this from
-    re-firing on webhook retries, and the ~seconds-after-call-end timing means the
-    confirmation never collides with the (now-ended) booking call."""
-
-    def _run() -> None:
-        try:
-            client = get_service_client()
-            appts = (
-                client.table("appointments")
-                .select("id")
-                .eq("org_id", org_id)
-                .eq("source_conversation_id", conversation_id)
-                .eq("status", "confirmed")
-                .execute()
-                .data
-                or []
-            )
-            if not appts:
-                return
-            from app.services.appointment_notify import notify_appointment_outcome
-
-            for a in appts:
-                notify_appointment_outcome(org_id, a["id"], "confirm")
-        except Exception:  # pragma: no cover — never affect post-call ingest
-            _log.warning("post-call booking confirmation failed for conv %s", conversation_id, exc_info=True)
-
-    threading.Thread(target=_run, daemon=True).start()
 
 
 def _now_iso_ms() -> str:
@@ -315,12 +277,6 @@ def _process_one(data: dict | None, fmt: str) -> dict:
             "summary_title": analysis.get("call_summary_title"),
         },
     )
-
-    # Fire the confirmation call+email for any appointment the agent booked during
-    # this conversation, now that the call has ended (post-call timing — within
-    # seconds of the call end, never colliding with the live call).
-    if conversation_id:
-        _fire_booking_confirmations(org_id, conversation_id)
 
     return _result(
         "processed", conversation_id, agent_id, fmt, started,

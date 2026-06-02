@@ -286,7 +286,11 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
                 "duration_minutes": 60,
                 "location": location,
                 "category": payload.category,
-                "status": "confirmed",
+                # Land as 'pending' (a reservation) so it shows in the call's
+                # "Offene Aktionen" card for a human to review/confirm. Confirming
+                # there moves it to the calendar AND fires the confirmation
+                # call+email — no automatic confirmation without a human.
+                "status": "pending",
                 "notes": notes.strip(),
                 # Correlate back to the call so the call-detail card can surface
                 # this agent-booked appointment (it lives on a separate inquiry).

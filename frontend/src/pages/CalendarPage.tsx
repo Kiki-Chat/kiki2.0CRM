@@ -157,7 +157,10 @@ export function CalendarPage() {
     () =>
       appointments
         .filter((a) => {
-          if (!a.scheduled_at || a.status === 'cancelled') return false
+          // Pending appointments are requests awaiting confirmation — they live in
+          // the call's "Offene Aktionen" card, not the calendar. Only confirmed
+          // (and imported) appointments appear here.
+          if (!a.scheduled_at || a.status === 'cancelled' || a.status === 'pending') return false
           // Google-imported events are external "blocked time" — always shown,
           // independent of the employee filter (they block everyone).
           if (a.source === 'google_import') return true
