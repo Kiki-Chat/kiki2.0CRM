@@ -30,6 +30,8 @@ import {
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
+import { useNavigate } from 'react-router-dom'
+
 import { apiFetch } from '../../lib/api'
 import { cn } from '../../lib/utils'
 
@@ -117,6 +119,7 @@ export function AppointmentCard({
   onDismiss: () => void
 }) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
   const [altPickerOpen, setAltPickerOpen] = useState(false)
   const [altStart, setAltStart] = useState(() => isoToDtLocal(appointment.scheduled_at))
@@ -237,12 +240,23 @@ export function AppointmentCard({
     onError: (e: Error) => setActionError(e.message || 'Ablehnen fehlgeschlagen.'),
   })
 
+  const cancelBooked = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/appointments/${appointment.id}/cancel`, { method: 'POST' }),
+    onSuccess: invalidate,
+    onError: (e: Error) => setActionError(e.message || 'Stornierung fehlgeschlagen.'),
+  })
+
   const busy =
     confirm.isPending ||
     reject.isPending ||
     proposeAlt.isPending ||
     approveProposal.isPending ||
-    declineProposal.isPending
+    declineProposal.isPending ||
+    cancelBooked.isPending
+  // A confirmed appointment is BOOKED — show the booked card (view in calendar /
+  // cancel / hide) instead of the pending confirm/reject/reschedule actions.
+  const isBooked = appointment.status === 'confirmed'
   const altAlreadySent = !!appointment.alternative_proposed_at
   // A customer counter-proposal supersedes the "Alternative gesendet" state —
   // it's the next thing needing a human decision (approve → confirm + call).
@@ -260,6 +274,78 @@ export function AppointmentCard({
     if (def && def > 0) set.add(def)
     return [...set].sort((a, b) => a - b)
   }, [selectedCategory])
+
+  if (isBooked) {
+    const d = appointment.scheduled_at ? new Date(appointment.scheduled_at) : null
+    const ymd = d
+      ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      : ''
+    return (
+      <div>
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
+            Gebuchter Termin
+          </span>
+        </div>
+        <div className="rounded-xl border border-green-tint-200 bg-surface p-3.5 shadow-sm ring-1 ring-green-tint-100">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-bold leading-snug text-text">
+                {fmtFullDate(appointment.scheduled_at)}
+              </div>
+              <div className="mt-1 text-xs text-muted">{appointment.title ?? 'Termin'}</div>
+              {location && (
+                <div className="mt-1.5 flex items-start gap-1.5 text-xs text-muted">
+                  <MapPin size={12} className="mt-0.5 flex-shrink-0" />
+                  <span>{location}</span>
+                </div>
+              )}
+            </div>
+            <span className="flex flex-shrink-0 items-center gap-1.5 rounded-full bg-green-tint-100 px-2.5 py-1 text-[11px] font-semibold text-green-deep">
+              <CheckCircle2 size={11} /> Gebucht
+            </span>
+          </div>
+
+          {actionError && (
+            <div className="mt-3 rounded-md bg-error-bg px-3 py-2 text-xs text-error">
+              {actionError}
+            </div>
+          )}
+
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() =>
+                navigate(`/calendar?appointment=${appointment.id}${ymd ? `&date=${ymd}` : ''}`)
+              }
+              className="inline-flex items-center gap-1 rounded-md bg-green-tint-200 px-2.5 py-1.5 text-xs font-semibold text-green-deep transition-colors hover:brightness-105"
+            >
+              <CalendarClock size={13} /> Im Kalender ansehen
+            </button>
+            <button
+              onClick={() => {
+                setActionError(null)
+                cancelBooked.mutate()
+              }}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-md bg-faint px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:brightness-110 disabled:opacity-50"
+            >
+              <X size={13} /> {cancelBooked.isPending ? 'Storniert…' : 'Stornieren'}
+            </button>
+            <button
+              onClick={() => {
+                setActionError(null)
+                onDismiss()
+              }}
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-body transition-colors hover:bg-alt disabled:opacity-50"
+            >
+              <EyeOff size={13} /> Ausblenden
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>

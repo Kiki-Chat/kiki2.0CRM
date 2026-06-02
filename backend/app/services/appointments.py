@@ -1,5 +1,7 @@
 """Appointment tools: get_available_slots, book, cancel, change."""
 
+import logging
+import threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +16,7 @@ from app.services.common import (
     BERLIN,
     fmt_date,
     fmt_time,
+    format_address,
     gen_inquiry_number,
     now_berlin,
     parse_when,
@@ -184,6 +187,27 @@ def _book_success(appt_id, customer_id, inquiry_id, dt, emp_name) -> dict:
     }
 
 
+_log = logging.getLogger(__name__)
+
+
+def _fire_booking_confirmation(org_id: str, appointment_id: str) -> None:
+    """Fire the confirmation call+email for a freshly-booked appointment in a
+    BACKGROUND thread — non-blocking, because book_appointment runs inside the
+    agent's live call and the ElevenLabs outbound-call round-trip must not stall
+    the tool response. The send itself is gated by the org's Appointment-Reminders
+    toggle + the outbound scope guard, and is best-effort."""
+
+    def _run() -> None:
+        try:
+            from app.services.appointment_notify import notify_appointment_outcome
+
+            notify_appointment_outcome(org_id, appointment_id, "confirm")
+        except Exception:  # pragma: no cover — never affect the booking
+            _log.warning("booking confirmation outbound failed for %s", appointment_id, exc_info=True)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
     client = get_service_client()
     dt = parse_when(payload.date, payload.time)
@@ -258,6 +282,20 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
         .data[0]
     )
 
+    # Address on the appointment itself (so it shows on the calendar / detail card).
+    # Prefer the address the agent collected this call; else fall back to the
+    # customer's stored address (returning callers where the agent skipped
+    # re-collecting it).
+    loc_addr = payload.address
+    if not loc_addr:
+        crow = (
+            client.table("customers").select("address")
+            .eq("id", customer["id"]).limit(1).execute().data
+        )
+        if crow and crow[0].get("address"):
+            loc_addr = format_address(crow[0]["address"])
+    location = {"raw": loc_addr} if loc_addr else None
+
     appt = (
         client.table("appointments")
         .insert(
@@ -269,6 +307,7 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
                 "title": payload.inquiry_title or payload.description or "Termin",
                 "scheduled_at": dt.isoformat(),
                 "duration_minutes": 60,
+                "location": location,
                 "category": payload.category,
                 "status": "confirmed",
                 "notes": notes.strip(),
@@ -277,6 +316,10 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
         .execute()
         .data[0]
     )
+    # A booked appointment lands on the calendar as 'confirmed' — fire the
+    # confirmation call+email (gated by the org's Appointment-Reminders toggle +
+    # scope guard). Background thread so the agent's tool response isn't blocked.
+    _fire_booking_confirmation(org_id, appt["id"])
     return _book_success(
         appt["id"], customer["id"], inquiry["id"], dt, emp["display_name"] if emp else "Team"
     )

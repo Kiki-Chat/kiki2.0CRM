@@ -407,13 +407,18 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
         )
         .eq("org_id", org_id)
         .eq("inquiry_id", inquiry_id)
-        .eq("status", "pending")
+        .in_("status", ["pending", "confirmed"])
         .order("scheduled_at")
-        .limit(1)
         .execute()
         .data
+        or []
     )
-    return {"appointment": appt_rows[0] if appt_rows else None}
+    # Prefer a pending appointment (needs a decision); otherwise surface the
+    # booked (confirmed) one so the card shows "Gebuchter Termin" + view/cancel
+    # actions instead of leaving only "Termin erstellen".
+    pending = [a for a in appt_rows if a.get("status") == "pending"]
+    chosen = pending[0] if pending else (appt_rows[0] if appt_rows else None)
+    return {"appointment": chosen}
 
 
 @router.get("/by-call/{call_id}/pending")
@@ -592,6 +597,10 @@ async def cancel_appointment_route(
     appt = await run_in_threadpool(_cancel, user.org_id, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    # Best-effort cancellation call+email (gated by the master toggle, scope-guarded).
+    appt["_outbound"] = await run_in_threadpool(
+        notify_appointment_outcome, user.org_id, appointment_id, "cancel"
+    )
     return appt
 
 
