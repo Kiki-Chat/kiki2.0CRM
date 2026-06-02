@@ -1,7 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AtSign,
+  ChevronLeft,
+  ChevronRight,
   Download,
+  Loader2,
   MapPin,
   Phone,
   Plus,
@@ -11,7 +14,7 @@ import {
   User,
   Users,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { CsvImportModal } from '../components/CsvImportModal'
@@ -52,6 +55,20 @@ const FILTERS: { key: string; label: string; type?: string }[] = [
   { key: 'property_management', label: 'Hausverwaltungen', type: 'property_management' },
 ]
 
+// Records-per-page choices for the selector.
+const PAGE_SIZE_OPTIONS = [24, 48, 96, 200]
+
+// Responsive default page size: estimate the visible columns (from width) × rows
+// (from height) so the first page roughly fills the viewport, then snap up to a
+// page-size option. Computed once on mount; the user can override via the selector.
+function defaultPageSize(): number {
+  if (typeof window === 'undefined') return 48
+  const cols = window.innerWidth >= 1280 ? 3 : window.innerWidth >= 768 ? 2 : 1
+  const rows = Math.max(2, Math.floor((window.innerHeight - 300) / 230))
+  const fit = cols * (rows + 1)
+  return PAGE_SIZE_OPTIONS.find((o) => o >= fit) ?? PAGE_SIZE_OPTIONS[PAGE_SIZE_OPTIONS.length - 1]
+}
+
 function addr(a: CustomerCard['address']): string {
   if (!a) return '—'
   return typeof a === 'string' ? a : a.raw ?? '—'
@@ -65,25 +82,43 @@ export function CustomersPage() {
   const [newOpen, setNewOpen] = useState(false)
   const [csvOpen, setCsvOpen] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(() => defaultPageSize())
 
-  const { data } = useQuery({
-    queryKey: ['customers', filter, search],
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['customers', filter, search, page, pageSize],
     queryFn: () => {
       const params = new URLSearchParams()
       if (search.trim()) params.set('q', search.trim())
       const f = FILTERS.find((x) => x.key === filter)
       if (f?.type) params.set('customer_type', f.type)
+      params.set('limit', String(pageSize))
+      params.set('offset', String(page * pageSize))
       return apiFetch<CustomerListResponse>(`/api/customers?${params.toString()}`)
     },
+    // Keep the previous page visible (dimmed) while the next one loads — smooth
+    // buffering instead of an empty flash.
+    placeholderData: keepPreviousData,
   })
   const customers = data?.customers ?? []
   const counts = data?.type_counts ?? {}
+  const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const startIdx = total === 0 ? 0 : page * pageSize + 1
+  const endIdx = Math.min(total, (page + 1) * pageSize)
+  const fmtN = (n: number) => n.toLocaleString('de-DE')
 
   // Selection (checkbox multi-select + bulk remove). Cleared whenever the visible
   // set changes so a hidden row can never be silently included in a delete.
+  // Back to page 1 whenever the query shape changes.
+  useEffect(() => {
+    setPage(0)
+  }, [filter, search, pageSize])
+  // Clear selection whenever the visible set changes (so a hidden row can never
+  // be silently included in a bulk delete).
   useEffect(() => {
     setSelected(new Set())
-  }, [filter, search])
+  }, [filter, search, page, pageSize])
 
   const allSelected = customers.length > 0 && customers.every((c) => selected.has(c.id))
   const someSelected = selected.size > 0 && !allSelected
@@ -211,7 +246,18 @@ export function CustomersPage() {
       )}
 
       {/* Grid */}
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+      {isLoading ? (
+        <div className="flex items-center justify-center py-24 text-muted">
+          <Loader2 size={22} className="mr-2 animate-spin" /> Kunden werden geladen…
+        </div>
+      ) : (
+      <div
+        aria-busy={isFetching}
+        className={cn(
+          'grid grid-cols-1 gap-5 transition-opacity md:grid-cols-2 xl:grid-cols-3',
+          isFetching && 'pointer-events-none opacity-50',
+        )}
+      >
         {customers.map((c) => {
           const meta = TYPE_META[c.customer_type ?? 'new'] ?? TYPE_META.new
           const isSel = selected.has(c.id)
@@ -268,9 +314,60 @@ export function CustomersPage() {
           )
         })}
       </div>
+      )}
 
-      {!customers.length && (
+      {!isLoading && !customers.length && (
         <div className="py-16 text-center text-muted">Keine Kunden gefunden.</div>
+      )}
+
+      {/* Pagination */}
+      {total > 0 && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4">
+          <div className="flex flex-wrap items-center gap-4 text-sm text-muted">
+            <span>
+              {fmtN(startIdx)}–{fmtN(endIdx)} von {fmtN(total)}
+            </span>
+            <label className="flex items-center gap-1.5">
+              <span>Pro Seite</span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-body outline-none focus:border-green-primary"
+              >
+                {PAGE_SIZE_OPTIONS.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {isFetching && (
+              <span className="flex items-center gap-1 text-faint">
+                <Loader2 size={13} className="animate-spin" /> Lädt…
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <PageBtn onClick={() => setPage(0)} disabled={page === 0}>
+              Erste
+            </PageBtn>
+            <PageBtn onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
+              <ChevronLeft size={15} />
+            </PageBtn>
+            <span className="px-2 text-sm font-medium text-body">
+              Seite {page + 1} / {totalPages}
+            </span>
+            <PageBtn
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+            >
+              <ChevronRight size={15} />
+            </PageBtn>
+            <PageBtn onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1}>
+              Letzte
+            </PageBtn>
+          </div>
+        </div>
       )}
 
       <CustomerFormModal
@@ -321,6 +418,26 @@ function HeaderBtn({
       className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50"
     >
       <Icon size={15} /> {label}
+    </button>
+  )
+}
+
+function PageBtn({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: ReactNode
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex items-center gap-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body transition-colors hover:bg-alt disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
     </button>
   )
 }

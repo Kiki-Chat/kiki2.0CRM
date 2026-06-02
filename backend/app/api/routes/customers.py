@@ -77,13 +77,25 @@ def _list(org_id: str, q: str | None, limit: int, offset: int, customer_type: st
         c["photo_count"] = photo_counts.get(c["id"], 0)
         c["document_count"] = doc_counts.get(c["id"], 0)
 
-    # Type counts for the filter badges (across all non-deleted customers).
-    all_types = (
-        client.table("customers").select("customer_type").eq("org_id", org_id)
-        .neq("status", "deleted").execute().data or []
-    )
-    tc = Counter(r.get("customer_type") or "new" for r in all_types)
-    type_counts = {"all": len(all_types), **{t: tc.get(t, 0) for t in _CUSTOMER_TYPES}}
+    # Type counts for the filter badges. Uses count="exact" (the exact total is
+    # returned in the Content-Range header) so it is NOT capped by PostgREST's
+    # default 1000-row read limit — a plain select(...).execute() silently caps at
+    # 1000 and under-reports on large orgs. NULL customer_type buckets as "new"
+    # (mirrors the prior behaviour).
+    def _type_count(ctype: str | None) -> int:
+        qb = (
+            client.table("customers")
+            .select("id", count="exact")
+            .eq("org_id", org_id)
+            .neq("status", "deleted")
+        )
+        if ctype == "new":
+            qb = qb.or_("customer_type.is.null,customer_type.eq.new")
+        elif ctype:
+            qb = qb.eq("customer_type", ctype)
+        return qb.limit(1).execute().count or 0
+
+    type_counts = {"all": _type_count(None), **{t: _type_count(t) for t in _CUSTOMER_TYPES}}
 
     return {"customers": customers, "total": res.count or 0, "type_counts": type_counts}
 
