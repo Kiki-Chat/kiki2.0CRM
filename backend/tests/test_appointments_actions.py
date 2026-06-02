@@ -59,6 +59,7 @@ def _make_chain(rows: list[dict]) -> MagicMock:
     chain.in_.return_value = chain
     chain.gte.return_value = chain
     chain.lt.return_value = chain
+    chain.or_.return_value = chain
     chain.order.return_value = chain
     chain.limit.return_value = chain
     chain.range.return_value = chain
@@ -83,7 +84,7 @@ class _FakeClient:
 
     def table(self, name: str) -> MagicMock:
         chain = MagicMock()
-        for method in ("select", "eq", "neq", "in_", "gte", "lt", "order", "limit"):
+        for method in ("select", "eq", "neq", "in_", "gte", "lt", "or_", "order", "limit"):
             getattr(chain, method).return_value = chain
 
         def _record_update(payload):

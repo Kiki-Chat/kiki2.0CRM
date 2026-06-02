@@ -370,7 +370,7 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
     # silently returning null (matches the existing 404 semantic on /api/calls/{id}).
     call_rows = (
         client.table("calls")
-        .select("id")
+        .select("id, elevenlabs_conversation_id")
         .eq("org_id", org_id)
         .eq("id", call_id)
         .limit(1)
@@ -379,7 +379,9 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
     )
     if not call_rows:
         return {"_not_found": True}
+    conv_id = call_rows[0].get("elevenlabs_conversation_id")
 
+    # The call's own inquiry (created at post-call ingest).
     inquiry_rows = (
         client.table("inquiries")
         .select("id")
@@ -391,10 +393,20 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
         .execute()
         .data
     )
-    if not inquiry_rows:
+    inquiry_id = inquiry_rows[0]["id"] if inquiry_rows else None
+
+    # An appointment belongs to "this call" if it's on the call's inquiry OR the
+    # agent booked it during this conversation (source_conversation_id) —
+    # hk_bookAppointment creates a SEPARATE inquiry, so the conversation link is
+    # what surfaces an agent-booked appointment on its call.
+    ors = []
+    if inquiry_id:
+        ors.append(f"inquiry_id.eq.{inquiry_id}")
+    if conv_id:
+        ors.append(f"source_conversation_id.eq.{conv_id}")
+    if not ors:
         return {"appointment": None}
 
-    inquiry_id = inquiry_rows[0]["id"]
     appt_rows = (
         client.table("appointments")
         .select(
@@ -406,8 +418,8 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
             "customer_proposed_end_time, customer_proposed_at, customer_proposal_source"
         )
         .eq("org_id", org_id)
-        .eq("inquiry_id", inquiry_id)
         .in_("status", ["pending", "confirmed"])
+        .or_(",".join(ors))
         .order("scheduled_at")
         .execute()
         .data

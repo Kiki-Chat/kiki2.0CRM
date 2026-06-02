@@ -311,6 +311,9 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
                 "category": payload.category,
                 "status": "confirmed",
                 "notes": notes.strip(),
+                # Correlate back to the call so the call-detail card can surface
+                # this agent-booked appointment (it lives on a separate inquiry).
+                "source_conversation_id": payload.conversation_id,
             }
         )
         .execute()
