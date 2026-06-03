@@ -113,6 +113,35 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
         or 0
     )
 
+    # Hero bubble — "heute X Anrufe und Y Anfragen empfangen". Today = Berlin-local
+    # midnight, converted to UTC for the (UTC-stored) created_at comparison.
+    today_start_iso = (
+        _now().replace(hour=0, minute=0, second=0, microsecond=0)
+        .astimezone(timezone.utc)
+        .isoformat()
+    )
+    calls_today = (
+        client.table("calls")
+        .select("id", count="exact")
+        .eq("org_id", org_id)
+        .gte("created_at", today_start_iso)
+        .execute()
+        .count
+        or 0
+    )
+    inquiries_today = (
+        client.table("inquiries")
+        .select("id", count="exact")
+        .eq("org_id", org_id)
+        .gte("created_at", today_start_iso)
+        .execute()
+        .count
+        or 0
+    )
+    # KVA-pending KPI card — cost estimates sent but not yet accepted/rejected
+    # (mirrors /finanzen's kvas_pending definition: status == "sent").
+    kva_pending = _count(client, "cost_estimates", org_id, status="sent")
+
     appts_res = (
         client.table("appointments")
         .select("id, title, scheduled_at, status, customer_id")
@@ -141,6 +170,9 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
             "total_customers": total_customers,
             "upcoming_appointments": len(upcoming),
             "unread_calls": unread_calls,
+            "calls_today": calls_today,
+            "inquiries_today": inquiries_today,
+            "kva_pending": kva_pending,
         },
         "open_tasks": open_tasks,
         "upcoming_appointments": upcoming,

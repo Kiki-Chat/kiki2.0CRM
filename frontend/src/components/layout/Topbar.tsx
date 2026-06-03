@@ -6,9 +6,11 @@ import { cn } from '../../lib/utils'
 export function Topbar({
   collapsed,
   onToggleCollapse,
+  onOpenSearch,
 }: {
   collapsed: boolean
   onToggleCollapse: () => void
+  onOpenSearch: () => void
 }) {
   const { theme, toggle } = useTheme()
 
@@ -25,19 +27,18 @@ export function Topbar({
         />
       </button>
 
-      <div className="relative max-w-md flex-1">
-        <Search
-          size={14}
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-faint"
-        />
-        <input
-          type="search"
-          name="global-search"
-          autoComplete="off"
-          placeholder="Kunden, Anrufe, Aufträge suchen…"
-          className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
-        />
-      </div>
+      <button
+        type="button"
+        onClick={onOpenSearch}
+        aria-label="Kiki fragen — Menüs durchsuchen"
+        className="relative flex max-w-md flex-1 items-center rounded-md border border-border bg-alt py-2 pl-9 pr-2 text-sm text-faint outline-none transition hover:border-green-primary/40 hover:text-muted"
+      >
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+        <span className="flex-1 text-left">Kiki fragen…</span>
+        <kbd className="hidden rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] font-bold text-muted sm:inline">
+          ⌘K
+        </kbd>
+      </button>
 
       <div className="ml-auto flex items-center gap-2">
         <button

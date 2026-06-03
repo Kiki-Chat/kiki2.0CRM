@@ -109,6 +109,46 @@ body {
   }
 }
 
+/* ─── Dashboard hero — live 3D Kiki avatar (float + glow) ─────────────────── */
+@keyframes kikiLive {
+  0% {
+    transform: perspective(1000px) translateY(0) rotateY(-2deg) rotateZ(-0.6deg) scale(1);
+  }
+  50% {
+    transform: perspective(1000px) translateY(-10px) rotateY(2deg) rotateZ(0.6deg) scale(1.016);
+  }
+  100% {
+    transform: perspective(1000px) translateY(0) rotateY(-2deg) rotateZ(-0.6deg) scale(1);
+  }
+}
+@keyframes kikiGlow {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+}
+.kiki-live {
+  animation: kikiLive 6.5s ease-in-out infinite;
+  transform-origin: 50% 100%;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.kiki-glow {
+  animation: kikiGlow 6.5s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kiki-live,
+  .kiki-glow {
+    animation: none;
+  }
+}
+
 /* ─── FullCalendar theming (mapped to app design tokens) ───────────────────── */
 .fc {
   --fc-border-color: var(--border-faint);

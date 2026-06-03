@@ -3,7 +3,9 @@ import {
   Calendar,
   Clock,
   Euro,
+  FileText,
   LayoutDashboard,
+  ListChecks,
   Phone,
   Sparkles,
   Users2,
@@ -18,12 +20,21 @@ import { KiNutzungTab } from '../components/dashboard/KiNutzungTab'
 import { Card } from '../components/ui/Card'
 import { KpiCard } from '../components/ui/KpiCard'
 import { Tag } from '../components/ui/Tag'
+import kikiAvatar from '../assets/kiki-avatar.png'
 import { apiFetch } from '../lib/api'
 import { isSupabaseConfigured } from '../lib/env'
+import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 interface OverviewData {
-  kpis: { open_inquiries: number; total_customers: number; upcoming_appointments: number }
+  kpis: {
+    open_inquiries: number
+    total_customers: number
+    upcoming_appointments: number
+    calls_today: number
+    inquiries_today: number
+    kva_pending: number
+  }
   open_tasks: Array<{
     id: string
     title: string | null
@@ -47,21 +58,33 @@ const TABS = [
   { id: 'ki-insights', label: 'KI-Insights', icon: Sparkles },
 ] as const
 
+function greetingFor(hour: number): string {
+  if (hour < 11) return 'Guten Morgen'
+  if (hour < 18) return 'Guten Tag'
+  return 'Guten Abend'
+}
+
 export function DashboardPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('overview')
+  const { me } = useMe()
+  // Per Amber: the prominent greeting name = the real COMPANY name (org_name),
+  // not a hardcoded person. Falls back to the user's own name, then a generic.
+  const company = me?.org_name ?? me?.full_name ?? 'Willkommen'
+  const now = new Date()
+  const greeting = greetingFor(now.getHours())
+  const today = now.toLocaleDateString('de-DE', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
 
   return (
     <div className="p-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-text">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted">
-          {new Date().toLocaleDateString('de-DE', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-          })}
-        </p>
+        <p className="text-[15px] font-semibold text-muted">{greeting},</p>
+        <h1 className="text-3xl font-extrabold tracking-tight text-text">{company}</h1>
+        <p className="mt-1 text-sm text-muted">{today}</p>
       </div>
 
       <div className="mb-6 flex w-fit gap-0.5 rounded-lg border border-border bg-alt p-1">
@@ -86,7 +109,7 @@ export function DashboardPage() {
       </div>
 
       <div key={tab} style={{ animation: 'fadeUp 220ms ease' }}>
-        {tab === 'overview' && <OverviewTab />}
+        {tab === 'overview' && <OverviewTab company={company} />}
         {tab === 'anrufe' && <AnrufeTab />}
         {tab === 'finanzen' && <FinanzenTab />}
         {tab === 'ki-nutzung' && <KiNutzungTab />}
@@ -96,7 +119,7 @@ export function DashboardPage() {
   )
 }
 
-function OverviewTab() {
+function OverviewTab({ company }: { company: string }) {
   const navigate = useNavigate()
   // Each open task is an open inquiry tied to a customer → open that customer
   // (its activity timeline shows the inquiry). Fall back to the Anrufe list
@@ -133,19 +156,105 @@ function OverviewTab() {
     )
 
   const kpis = data?.kpis
+  const callsToday = kpis?.calls_today ?? 0
+  const inquiriesToday = kpis?.inquiries_today ?? 0
+
   return (
     <div className="space-y-5">
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-green-tint-50 via-surface to-surface shadow-e1">
+        {/* soft glow behind the avatar */}
+        <div
+          aria-hidden
+          className="kiki-glow pointer-events-none absolute right-[130px] top-1/2 hidden h-[340px] w-[340px] rounded-full bg-green-primary/20 blur-3xl lg:block"
+        />
+        <div className="relative z-10 max-w-[600px] p-7 sm:p-9">
+          <div className="inline-flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.08em] text-green-deep">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-primary shadow-[0_0_0_4px_var(--green-tint-100)]" />
+            HeyKiki
+          </div>
+          <h2 className="mt-3 text-2xl font-extrabold leading-tight tracking-tight text-text sm:text-[28px]">
+            Kiki, die erste KI‑Bürokraft für{' '}
+            <span className="text-green-primary">Handwerksbetriebe</span>
+          </h2>
+
+          <div className="mt-4 rounded-2xl border border-border bg-surface/85 p-4 shadow-e1 backdrop-blur">
+            <p className="text-[15px] leading-relaxed text-body">
+              Hey <strong className="font-bold text-text">{company}</strong>, ich habe heute{' '}
+              <span className="font-extrabold text-info">
+                {callsToday} {callsToday === 1 ? 'Anruf' : 'Anrufe'}
+              </span>{' '}
+              und{' '}
+              <span className="font-extrabold text-green-primary">
+                {inquiriesToday} {inquiriesToday === 1 ? 'Anfrage' : 'Anfragen'}
+              </span>{' '}
+              empfangen. Wie soll ich fortfahren?
+            </p>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              onClick={() => navigate('/calls')}
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-alt px-4 py-2.5 text-sm font-bold text-text transition hover:border-green-tint-200 hover:bg-green-tint-50"
+            >
+              <Phone size={15} /> {callsToday} Anrufe ansehen
+            </button>
+            <button
+              onClick={() => navigate('/calls?status=open&tab=anfragen')}
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-alt px-4 py-2.5 text-sm font-bold text-text transition hover:border-green-tint-200 hover:bg-green-tint-50"
+            >
+              <Sparkles size={15} /> {inquiriesToday} Anfragen ansehen
+            </button>
+          </div>
+        </div>
+
+        {/* avatar bleeding off the right edge (clipped by overflow-hidden) */}
+        <img
+          src={kikiAvatar}
+          alt="Kiki"
+          className="kiki-live pointer-events-none absolute bottom-0 right-[-24px] hidden h-[300px] w-auto select-none lg:block xl:right-2"
+        />
+      </section>
+
+      {/* ── KPI row ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <KpiCard label="Offene Anfragen" value={kpis?.open_inquiries ?? 0} icon={Sparkles} sub="warten auf Bearbeitung" onClick={() => navigate('/calls')} />
-        <KpiCard label="Kunden gesamt" value={kpis?.total_customers ?? 0} icon={Users2} sub="in dieser Organisation" onClick={() => navigate('/customers')} />
-        <KpiCard label="Anstehende Termine" value={kpis?.upcoming_appointments ?? 0} icon={Calendar} sub="nächste 5 geplant" onClick={() => navigate('/calendar')} />
+        <KpiCard
+          label="Offene Anfragen"
+          value={kpis?.open_inquiries ?? 0}
+          icon={Sparkles}
+          sub="warten auf Bearbeitung"
+          onClick={() => navigate('/calls?status=open&tab=anfragen')}
+        />
+        <KpiCard
+          label="Kunden gesamt"
+          value={kpis?.total_customers ?? 0}
+          icon={Users2}
+          sub="in dieser Organisation"
+          onClick={() => navigate('/customers')}
+        />
+        <KpiCard
+          label="KVA pending"
+          value={kpis?.kva_pending ?? 0}
+          icon={FileText}
+          sub="Kostenvoranschläge offen"
+          onClick={() => navigate('/cost-estimates')}
+        />
       </div>
 
+      {/* ── Panels ───────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
-          <h2 className="mb-3 text-sm font-bold text-text">Offene Aufgaben</h2>
+          <div className="mb-2 flex items-center gap-3">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-green-tint-100 text-green-deep">
+              <ListChecks size={17} />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-base font-bold text-text">Offene Aufgaben</h2>
+              <p className="text-xs text-muted">Von Kiki erkannt · warten auf Freigabe</p>
+            </div>
+          </div>
           {data?.open_tasks.length ? (
-            <ul className="space-y-2">
+            <ul className="space-y-0.5">
               {data.open_tasks.map((t) => (
                 <li
                   key={t.id}
@@ -172,9 +281,17 @@ function OverviewTab() {
         </Card>
 
         <Card>
-          <h2 className="mb-3 text-sm font-bold text-text">Anstehende Termine</h2>
+          <div className="mb-2 flex items-center gap-3">
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-green-tint-100 text-green-deep">
+              <Calendar size={17} />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-base font-bold text-text">Anstehende Termine</h2>
+              <p className="text-xs text-muted">Nächste 5 geplant</p>
+            </div>
+          </div>
           {data?.upcoming_appointments.length ? (
-            <ul className="space-y-2">
+            <ul className="space-y-0.5">
               {data.upcoming_appointments.map((a) => (
                 <li
                   key={a.id}

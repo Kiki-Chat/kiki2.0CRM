@@ -31,7 +31,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
 import { Tag } from '../components/ui/Tag'
@@ -261,15 +261,25 @@ function NotdienstBadge({ className }: { className?: string }) {
 export function CallLogsPage() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  // Deep-link support: the Dashboard hero "Anfragen ansehen" CTA + the "Offene
+  // Anfragen" KPI link here as `/calls?status=open&tab=anfragen`. Read once on
+  // mount to seed the initial filter; manual changes thereafter own the state.
+  const [searchParams] = useSearchParams()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   // Direction + status filters (client-side over the already-fetched list).
   const [dirFilter, setDirFilter] = useState<'all' | 'inbound' | 'outbound'>('all')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'in_progress' | 'completed'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'in_progress' | 'completed'>(
+    () => {
+      const s = searchParams.get('status')
+      return s === 'open' || s === 'in_progress' || s === 'completed' ? s : 'all'
+    },
+  )
   // Wave 2 / Agent 2.2 — LEFT sidebar tab switcher: Anfragen | Aktionen.
-  // Simple local state (not a router query param) keeps this self-contained;
-  // deep-linking to the Aktionen tab is a follow-up if the team wants it.
-  const [tab, setTab] = useState<'anfragen' | 'aktionen'>('anfragen')
+  // Seeded from `?tab=` for dashboard deep-links; otherwise defaults to Anfragen.
+  const [tab, setTab] = useState<'anfragen' | 'aktionen'>(() =>
+    searchParams.get('tab') === 'aktionen' ? 'aktionen' : 'anfragen',
+  )
 
   const me = useQuery({
     queryKey: ['me'],

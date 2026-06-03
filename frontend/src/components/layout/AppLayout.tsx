@@ -5,11 +5,25 @@ import { Outlet } from 'react-router-dom'
 import { applyAccent } from '../../lib/accent'
 import { apiFetch } from '../../lib/api'
 import { useMe } from '../../lib/useMe'
+import { CommandPalette } from './CommandPalette'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 
 export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false)
+  // Global ⌘K / Ctrl-K command palette ("Kiki fragen") — searches the nav
+  // menus + submenus and jumps to a page.
+  const [searchOpen, setSearchOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        setSearchOpen((o) => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   const { data: settings } = useQuery({
     queryKey: ['settings'],
     queryFn: () => apiFetch<{ organization: { accent_color: string | null } }>('/api/settings'),
@@ -44,7 +58,11 @@ export function AppLayout() {
     <div className="flex h-screen overflow-hidden bg-bg text-body">
       <Sidebar collapsed={collapsed} badges={{ calls: unreadCalls }} />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Topbar collapsed={collapsed} onToggleCollapse={() => setCollapsed((c) => !c)} />
+        <Topbar
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((c) => !c)}
+          onOpenSearch={() => setSearchOpen(true)}
+        />
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>
@@ -62,6 +80,7 @@ export function AppLayout() {
           </footer>
         )}
       </div>
+      <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   )
 }
