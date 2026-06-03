@@ -28,7 +28,7 @@ const OCCASIONS: [string, string][] = [
 
 // Frontend-only trade templates for the Notdienst keyword list (2D). Clicking a
 // template appends its keywords to emergency_keywords (deduped); no API change.
-const EMERGENCY_KEYWORD_TEMPLATES: { label: string; keywords: string[] }[] = [
+export const EMERGENCY_KEYWORD_TEMPLATES: { label: string; keywords: string[] }[] = [
   { label: 'SHK / Sanitär-Heizung-Klima', keywords: ['Rohrbruch', 'Wasserschaden', 'kein Warmwasser', 'Heizungsausfall', 'Gasgeruch', 'Rohrverstopfung', 'Wasser läuft aus', 'Warmwasserausfall'] },
   { label: 'Elektro', keywords: ['Stromausfall', 'Kabelbrand', 'Brandgeruch', 'Funkenflug', 'Sicherung fliegt', 'Stromschlag', 'Kurzschluss'] },
   { label: 'Schlüsseldienst', keywords: ['ausgesperrt', 'Tür zugefallen', 'Schlüssel abgebrochen', 'Einbruch', 'Schloss defekt', 'Person eingeschlossen'] },
@@ -41,6 +41,44 @@ interface Employee {
   id: string
   display_name: string | null
   has_login?: boolean
+}
+
+// ─── Pure helpers (exported for unit tests) ──────────────────────────────────
+
+// Append a batch of keywords to the existing list, skipping any already
+// present. Order is preserved (existing first, then new-in-batch in batch
+// order) and a keyword already in `existing` is never duplicated, which also
+// makes appending the same batch twice idempotent. Used by NotdienstSection's
+// "Gewerk-Vorlagen" buttons (2D).
+export function mergeKeywords(existing: string[], batch: string[]): string[] {
+  return [...existing, ...batch.filter((k) => !existing.includes(k))]
+}
+
+// Dropdown option shape for the Standard-Mitarbeiter <select> (2B): the value
+// is the employee id, the label is the display_name (with a fallback when the
+// row has no name).
+export interface EmployeeOption {
+  value: string
+  label: string
+}
+export function employeeToOption(e: Employee): EmployeeOption {
+  return { value: e.id, label: e.display_name ?? '(ohne Name)' }
+}
+
+// Resolve a category's default_employee_id to the matching employee's
+// display_name, or null when unset / not found.
+export function resolveEmployeeName(
+  employees: Employee[],
+  id: string | null | undefined,
+): string | null {
+  return id ? employees.find((e) => e.id === id)?.display_name ?? null : null
+}
+
+// Derive the field_key for a new required field (Pflichtfelder, "Neues Feld").
+// When the user supplied an explicit key it wins; otherwise the key is slugged
+// from the label (lower-cased, whitespace → underscore).
+export function deriveFieldKey(explicitKey: string, label: string): string {
+  return explicitKey || label.toLowerCase().replace(/\s+/g, '_')
 }
 
 // Appended to save toasts so the user knows the (slow) agent sync continues in
@@ -83,7 +121,7 @@ export function PflichtfelderSection({ data: overview, flash }: Props) {
   const dragIdx = useRef<number | null>(null)
 
   const create = useMutation({
-    mutationFn: () => apiFetch(`${KZ}/required-fields`, { method: 'POST', body: JSON.stringify({ field_key: newKey || newLabel.toLowerCase().replace(/\s+/g, '_'), label: newLabel, description: newDesc || null }) }),
+    mutationFn: () => apiFetch(`${KZ}/required-fields`, { method: 'POST', body: JSON.stringify({ field_key: deriveFieldKey(newKey, newLabel), label: newLabel, description: newDesc || null }) }),
     onSuccess: () => { setNewKey(''); setNewLabel(''); setNewDesc(''); qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }) },
   })
   const del = useMutation({
@@ -357,8 +395,7 @@ export function TerminkategorienSection({ flash }: Props) {
   const { data: employees = [] } = useQuery({ queryKey: ['employees'], queryFn: () => apiFetch<Employee[]>('/api/employees') })
   // default_employee_id now targets employees.id directly. Show ALL employees in
   // the dropdown (no login filter) and resolve the list-row name by id.
-  const empName = (id: string | null | undefined) =>
-    id ? employees.find((e) => e.id === id)?.display_name ?? null : null
+  const empName = (id: string | null | undefined) => resolveEmployeeName(employees, id)
   const [edit, setEdit] = useState<Partial<KzCategory> | null>(null)
   const inv = () => qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'categories'] })
 
@@ -415,7 +452,7 @@ export function TerminkategorienSection({ flash }: Props) {
             <Field label="Standard-Mitarbeiter (informativ — beeinflusst die Buchung nicht)">
               <select value={edit.default_employee_id ?? ''} onChange={(e) => setEdit({ ...edit, default_employee_id: e.target.value || null })} className={inputCls}>
                 <option value="">— kein Mitarbeiter —</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.display_name ?? '(ohne Name)'}</option>)}
+                {employees.map(employeeToOption).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </Field>
           </div>
@@ -557,7 +594,7 @@ export function NotdienstSection({ data, flash }: Props) {
   const set = (k: keyof typeof f, v: unknown) => setF((p) => ({ ...p, [k]: v }))
   const addKw = () => { if (kw.trim()) { set('emergency_keywords', [...f.emergency_keywords, kw.trim()]); setKw('') } }
   // Append a template's keywords, skipping any already present (dedupe).
-  const addTemplate = (keywords: string[]) => set('emergency_keywords', [...f.emergency_keywords, ...keywords.filter((k) => !f.emergency_keywords.includes(k))])
+  const addTemplate = (keywords: string[]) => set('emergency_keywords', mergeKeywords(f.emergency_keywords, keywords))
   const setWindow = (i: number, patchWin: { from?: string; to?: string; label?: string }) =>
     set('emergency_extra_windows', f.emergency_extra_windows.map((w, j) => (j === i ? { ...w, ...patchWin } : w)))
 
