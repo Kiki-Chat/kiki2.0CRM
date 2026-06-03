@@ -58,10 +58,22 @@ const TABS = [
   { id: 'ki-insights', label: 'KI-Insights', icon: Sparkles },
 ] as const
 
+// Current hour in Europe/Berlin, regardless of the viewer's own timezone — so
+// the greeting + date always reflect German business time.
+function berlinHour(date: Date): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Berlin',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  return Number(parts.find((p) => p.type === 'hour')?.value ?? '0') % 24
+}
+
 function greetingFor(hour: number): string {
-  if (hour < 11) return 'Guten Morgen'
-  if (hour < 18) return 'Guten Tag'
-  return 'Guten Abend'
+  if (hour >= 5 && hour < 11) return 'Guten Morgen'
+  if (hour >= 11 && hour < 18) return 'Guten Tag'
+  if (hour >= 18 && hour < 22) return 'Guten Abend'
+  return 'Gute Nacht'
 }
 
 export function DashboardPage() {
@@ -71,12 +83,13 @@ export function DashboardPage() {
   // not a hardcoded person. Falls back to the user's own name, then a generic.
   const company = me?.org_name ?? me?.full_name ?? 'Willkommen'
   const now = new Date()
-  const greeting = greetingFor(now.getHours())
+  const greeting = greetingFor(berlinHour(now))
   const today = now.toLocaleDateString('de-DE', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
     year: 'numeric',
+    timeZone: 'Europe/Berlin',
   })
 
   return (
