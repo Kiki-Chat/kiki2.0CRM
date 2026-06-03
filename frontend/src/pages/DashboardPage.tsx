@@ -80,7 +80,7 @@ export function DashboardPage() {
   })
 
   return (
-    <div className="p-8">
+    <div className="p-8 font-poster">
       <div className="mb-6">
         <p className="text-[15px] font-semibold text-muted">{greeting},</p>
         <h1 className="text-3xl font-extrabold tracking-tight text-text">{company}</h1>
@@ -178,7 +178,7 @@ function OverviewTab({ company }: { company: string }) {
             <span className="text-green-primary">Handwerksbetriebe</span>
           </h2>
 
-          <div className="mt-4 rounded-2xl border border-border bg-surface/85 p-4 shadow-e1 backdrop-blur">
+          <div className="speech-bubble relative mt-5 max-w-[480px] rounded-2xl rounded-bl-md border border-border bg-surface p-4 shadow-e1">
             <p className="text-[15px] leading-relaxed text-body">
               Hey <strong className="font-bold text-text">{company}</strong>, ich habe heute{' '}
               <span className="font-extrabold text-info">
@@ -192,18 +192,18 @@ function OverviewTab({ company }: { company: string }) {
             </p>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-3">
+          <div className="mt-6 flex flex-wrap gap-3">
             <button
-              onClick={() => navigate('/calls')}
+              onClick={() => navigate('/calls?direction=inbound&status=open&tab=anfragen')}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-alt px-4 py-2.5 text-sm font-bold text-text transition hover:border-green-tint-200 hover:bg-green-tint-50"
             >
-              <Phone size={15} /> {callsToday} Anrufe ansehen
+              <Phone size={15} /> {callsToday} {callsToday === 1 ? 'Anruf' : 'Anrufe'} ansehen
             </button>
             <button
-              onClick={() => navigate('/calls?status=open&tab=anfragen')}
+              onClick={() => navigate('/calls?status=open&tab=aktionen')}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-alt px-4 py-2.5 text-sm font-bold text-text transition hover:border-green-tint-200 hover:bg-green-tint-50"
             >
-              <Sparkles size={15} /> {inquiriesToday} Anfragen ansehen
+              <Sparkles size={15} /> {inquiriesToday} {inquiriesToday === 1 ? 'Anfrage' : 'Anfragen'} ansehen
             </button>
           </div>
         </div>

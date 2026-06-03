@@ -115,6 +115,8 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
 
     # Hero bubble — "heute X Anrufe und Y Anfragen empfangen". Today = Berlin-local
     # midnight, converted to UTC for the (UTC-stored) created_at comparison.
+    # "Anrufe empfangen" = received = INBOUND only (matches the "Anrufe ansehen"
+    # CTA, which deep-links to /calls?direction=inbound&status=open).
     today_start_iso = (
         _now().replace(hour=0, minute=0, second=0, microsecond=0)
         .astimezone(timezone.utc)
@@ -124,6 +126,7 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
         client.table("calls")
         .select("id", count="exact")
         .eq("org_id", org_id)
+        .eq("direction", "inbound")
         .gte("created_at", today_start_iso)
         .execute()
         .count

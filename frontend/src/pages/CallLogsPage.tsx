@@ -268,7 +268,12 @@ export function CallLogsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   // Direction + status filters (client-side over the already-fetched list).
-  const [dirFilter, setDirFilter] = useState<'all' | 'inbound' | 'outbound'>('all')
+  // Direction is seeded from `?direction=` so the dashboard "Anrufe ansehen"
+  // CTA can deep-link to inbound (received) calls.
+  const [dirFilter, setDirFilter] = useState<'all' | 'inbound' | 'outbound'>(() => {
+    const d = searchParams.get('direction')
+    return d === 'inbound' || d === 'outbound' ? d : 'all'
+  })
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'in_progress' | 'completed'>(
     () => {
       const s = searchParams.get('status')

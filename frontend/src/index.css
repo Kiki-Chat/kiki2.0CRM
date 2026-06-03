@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Montserrat:wght@400;600;700&family=Playfair+Display:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Montserrat:wght@400;600;700&family=Playfair+Display:wght@500;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -147,6 +147,29 @@ body {
   .kiki-glow {
     animation: none;
   }
+}
+
+/* ─── Dashboard poster typography (Manrope, matches the mockup) ───────────── */
+.font-poster {
+  font-family: 'Manrope', 'Inter', system-ui, sans-serif;
+}
+
+/* ─── Hero speech bubble — chat tail so it reads as a message from Kiki ────── */
+.speech-bubble {
+  position: relative;
+}
+.speech-bubble::after {
+  content: '';
+  position: absolute;
+  left: 30px;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-bottom-right-radius: 3px;
+  transform: rotate(45deg);
 }
 
 /* ─── Dark-green brand sidebar (rail) — poster design ─────────────────────── */
