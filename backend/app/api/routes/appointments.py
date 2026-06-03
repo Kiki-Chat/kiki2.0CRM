@@ -370,7 +370,7 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
     # silently returning null (matches the existing 404 semantic on /api/calls/{id}).
     call_rows = (
         client.table("calls")
-        .select("id, elevenlabs_conversation_id")
+        .select("id, elevenlabs_conversation_id, summary")
         .eq("org_id", org_id)
         .eq("id", call_id)
         .limit(1)
@@ -380,6 +380,7 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
     if not call_rows:
         return {"_not_found": True}
     conv_id = call_rows[0].get("elevenlabs_conversation_id")
+    call_summary = call_rows[0].get("summary")
 
     # The call's own inquiry (created at post-call ingest).
     inquiry_rows = (
@@ -428,7 +429,11 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
     # Only PENDING shows in the card — a request awaiting a human decision. Once
     # confirmed it leaves the card and appears on the calendar (and confirming
     # there fires the outbound call+email).
-    return {"appointment": appt_rows[0] if appt_rows else None}
+    appt = appt_rows[0] if appt_rows else None
+    if appt is not None:
+        # Surface the call's summary as the (up-to-)2-line issue description.
+        appt["issue_summary"] = call_summary
+    return {"appointment": appt}
 
 
 @router.get("/by-call/{call_id}/pending")

@@ -58,6 +58,8 @@ export interface PendingAppointment {
   customer_proposed_end_time: string | null
   customer_proposed_at: string | null
   customer_proposal_source: string | null
+  // 2-line issue summary from the call (calls.summary) — shown under the date.
+  issue_summary: string | null
 }
 
 export interface PendingAppointmentResponse {
@@ -272,25 +274,12 @@ export function AppointmentCard({
       </div>
 
       <div className="rounded-xl border border-green-tint-200 bg-surface p-3.5 shadow-sm ring-1 ring-green-tint-100">
-        {/* Header: date/time + "Wartet auf Bestätigung" or "Alternative gesendet" pill */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-sm font-bold leading-snug text-text">
-              Termin-Anfrage: {fmtFullDate(appointment.scheduled_at)}
-            </div>
-            <div className="mt-1 text-xs text-muted">
-              {appointment.title ?? 'Termin nach Telefonat'}
-            </div>
-            {location && (
-              <div className="mt-1.5 flex items-start gap-1.5 text-xs text-muted">
-                <MapPin size={12} className="mt-0.5 flex-shrink-0" />
-                <span>{location}</span>
-              </div>
-            )}
-          </div>
+        {/* Status pill on its OWN row (comfortable padding) so it never squeezes
+            the heading into two lines. */}
+        <div className="mb-2">
           <span
             className={cn(
-              'flex flex-shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold',
+              'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold',
               customerProposed
                 ? 'bg-amber-100 text-amber-700'
                 : altAlreadySent
@@ -298,7 +287,7 @@ export function AppointmentCard({
                   : 'bg-green-tint-100 text-green-deep',
             )}
           >
-            <Clock size={11} />
+            <Clock size={12} className="flex-shrink-0" />
             {customerProposed
               ? 'Kundenvorschlag'
               : altAlreadySent
@@ -306,6 +295,30 @@ export function AppointmentCard({
                 : 'Wartet auf Bestätigung'}
           </span>
         </div>
+
+        {/* Subject is the bold heading; the date/time sits just below it (bold,
+            clock icon) so it grabs attention without being the main title. */}
+        <div className="text-sm font-bold leading-snug text-text">
+          {appointment.title ?? 'Termin nach Telefonat'}
+        </div>
+        <div className="mt-1.5 flex items-center gap-1.5 text-sm font-semibold text-green-deep">
+          <Clock size={13} className="flex-shrink-0" />
+          <span>{fmtFullDate(appointment.scheduled_at)}</span>
+        </div>
+
+        {/* Up-to-two-line issue summary from the call (calls.summary). */}
+        {appointment.issue_summary && (
+          <div className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted">
+            {appointment.issue_summary}
+          </div>
+        )}
+
+        {location && (
+          <div className="mt-1.5 flex items-start gap-1.5 text-xs text-muted">
+            <MapPin size={12} className="mt-0.5 flex-shrink-0" />
+            <span>{location}</span>
+          </div>
+        )}
 
         {/* Expandable "Kategorie, Dauer & Zuweisung" toggle */}
         <button
