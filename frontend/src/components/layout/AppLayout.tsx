@@ -4,7 +4,9 @@ import { Outlet } from 'react-router-dom'
 
 import { applyAccent } from '../../lib/accent'
 import { apiFetch } from '../../lib/api'
+import { env } from '../../lib/env'
 import { useMe } from '../../lib/useMe'
+import { CopilotWidget } from '../copilot/CopilotWidget'
 import { CommandPalette } from './CommandPalette'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -81,6 +83,7 @@ export function AppLayout() {
         )}
       </div>
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
+      {env.copilotEnabled && <CopilotWidget />}
     </div>
   )
 }

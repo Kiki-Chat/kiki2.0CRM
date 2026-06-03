@@ -18,6 +18,28 @@ class Settings(BaseSettings):
 
     elevenlabs_api_key: str = ""
 
+    # ── OpenAI copilot ("Kiki Assistent") — Phase 0, dormant by default ────
+    # The centralized AI service (app/services/ai) + the in-app copilot. Ships
+    # INERT: with no OPENAI_API_KEY the AI client is disabled (every call is a
+    # clean no-op / "not configured"), and the copilot router is only mounted
+    # when COPILOT_ENABLED=1 — so a fresh deploy behaves exactly as today until
+    # it is switched on. The key already exists in Railway prod (dormant).
+    openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
+    # Master on/off for the whole copilot surface (router + UI). Off by default.
+    copilot_enabled: bool = Field(default=False, validation_alias="COPILOT_ENABLED")
+    # Small / fast model (4o-mini-class) — decided 2026-06-04: no flagship needed
+    # for CRM tasks; cheaper + lower latency. The copilot AND the shared
+    # classifiers (emergency / employee auto-assign) use this tier. Override per env.
+    openai_copilot_model: str = Field(default="gpt-4o-mini", validation_alias="OPENAI_COPILOT_MODEL")
+    openai_classifier_model: str = Field(default="gpt-4o-mini", validation_alias="OPENAI_CLASSIFIER_MODEL")
+    # Network timeout (seconds) for OpenAI calls.
+    openai_timeout_seconds: float = Field(default=30.0, validation_alias="OPENAI_TIMEOUT_SECONDS")
+    # Soft per-org monthly spend cap (USD) across all AI features, enforced via the
+    # ai_usage_log ledger. 0 = no cap. Surfaced later in KI-Nutzung.
+    copilot_monthly_cost_cap_usd: float = Field(
+        default=25.0, validation_alias="COPILOT_MONTHLY_COST_CAP_USD"
+    )
+
     # Symmetric key (Fernet) for encrypting stored third-party credentials.
     settings_enc_key: str = ""
 

@@ -112,6 +112,13 @@ app.include_router(conversation_init.router)
 # Post-call webhook (forwarded from N8N after the call ends).
 app.include_router(post_call.router)
 
+# Kiki copilot ("Kiki Assistent") — mounted ONLY when COPILOT_ENABLED=1.
+# Phase 0 ships it OFF/inert, so the app behaves exactly as before by default.
+if settings.copilot_enabled:
+    from app.api.routes import copilot
+
+    app.include_router(copilot.router)
+
 
 @app.get("/")
 async def root() -> dict:

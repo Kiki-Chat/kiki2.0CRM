@@ -10,6 +10,10 @@ cryptography==48.0.0
 python-multipart==0.0.20
 tzdata==2025.2
 fpdf2==2.8.7
+# Centralized AI service (app/services/ai) — the copilot + shared classifiers.
+# Lazy-imported by app/services/ai/client.py ONLY when OPENAI_API_KEY is set, so
+# it's an unused dependency until the copilot is enabled under supervision.
+openai==2.40.0
 # Item 4 (caching). Lazy-imported by app/core/cache.py ONLY when REDIS_URL is set,
 # so it's an unused dependency until caching is enabled under supervision.
 redis==5.2.1
