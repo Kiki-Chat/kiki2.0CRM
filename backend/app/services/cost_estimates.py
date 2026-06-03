@@ -377,3 +377,175 @@ def fetch_customer(client, org_id: str, customer_id: str | None) -> dict | None:
 
 def valid_until_for(validity_days: int) -> str:
     return (now_berlin().date() + timedelta(days=int(validity_days or 30))).isoformat()
+
+
+# ─── hk_draftCostEstimate (the 11th tool) ────────────────────────────────────
+def _normalize_position(p: dict) -> dict:
+    """Coerce a raw agent-supplied position dict into the shape compute_totals /
+    build_pdf expect. Tolerant: missing keys fall back to the same defaults the
+    CostEstimatePosition pydantic model uses."""
+    p = p if isinstance(p, dict) else {}
+    return {
+        "kind": p.get("kind") or "item",
+        "description": p.get("description"),
+        "quantity": p.get("quantity", 1),
+        "unit": p.get("unit") or "Stk",
+        "price": p.get("price", 0),
+        "vat": p.get("vat", 19),
+        "discount_pct": p.get("discount_pct", 0),
+        "is_labor": bool(p.get("is_labor", False)),
+    }
+
+
+def _ce_pdf_view(row: dict) -> dict:
+    """Minimal cost_estimates row → build_pdf 'ce' dict (mirrors the route's
+    _ce_for_pdf, kept here so the service can render without importing the route)."""
+    return {
+        "type": row.get("type") or "kva",
+        "number": row.get("number"),
+        "subject": row.get("subject"),
+        "is_binding": row.get("is_binding"),
+        "tolerance_pct": row.get("tolerance_pct", 20),
+        "valid_until": row.get("valid_until"),
+        "date": row.get("created_at"),
+        "positions": row.get("line_items") or [],
+        "intro_text": row.get("intro_text"),
+        "closing_text": row.get("closing_text"),
+        "payment_terms": row.get("payment_terms"),
+        "surcharge": row.get("surcharge") or 0,
+        "surcharge_description": row.get("surcharge_description"),
+        "total_discount_pct": row.get("total_discount_pct") or 0,
+    }
+
+
+def _send_draft_kva(client, org_id: str, row: dict) -> bool:
+    """Best-effort email send of a freshly-drafted KVA (used by L3). Self-contained
+    so the service doesn't import the route. Resolves the recipient from the
+    customer's stored email, renders the PDF, sends a default German email, and
+    stamps status='sent' + sent_at on success. Returns True iff actually sent;
+    any failure (no recipient, render/send error) → returns False, leaves the row
+    as a draft, and NEVER raises."""
+    try:
+        from app.services import email_templates
+        from app.services.email_send import Attachment, send_email
+
+        customer = fetch_customer(client, org_id, row.get("customer_id"))
+        to_email = ((customer or {}).get("email") or "").strip()
+        # Skip @temp.local placeholders — never a real inbox.
+        if not to_email or to_email.endswith("@temp.local"):
+            return False
+
+        org = fetch_org(client, org_id)
+        ce = _ce_pdf_view(row)
+        totals = {
+            "net": row.get("subtotal") or 0,
+            "vat": row.get("vat_amount") or 0,
+            "gross": row.get("total") or 0,
+        }
+        pdf_bytes = build_pdf(org, customer, ce, totals)
+
+        org_name = org.get("name") or "HeyKiki"
+        number = row.get("number") or "—"
+        cust_name = (customer or {}).get("full_name") or ""
+        subject = f"Kostenvoranschlag {number} von {org_name}"
+        greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
+        body_text = (
+            f"{greeting}\n\n"
+            f"anbei senden wir Ihnen den Kostenvoranschlag {number}.\n\n"
+            f"Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.\n\n"
+            f"Mit freundlichen Grüßen\n{org_name}"
+        )
+        body_html = email_templates.render_message_email(
+            company_name=org_name, message_text=body_text,
+            contact_email=org.get("email"),
+            address=email_templates.addr_line(org.get("address")),
+        )
+        filename = f"KVA-{number}.pdf"
+        send_email(
+            org_id=org_id,
+            to_email=to_email,
+            subject=subject,
+            body_html=body_html,
+            attachments=[Attachment(filename=filename, content=pdf_bytes)],
+            reply_to=(org.get("email") or None),
+        )
+        # Only stamp 'sent' after a successful send.
+        client.table("cost_estimates").update(
+            {"status": "sent", "sent_at": datetime.now().astimezone().isoformat()}
+        ).eq("org_id", org_id).eq("id", row["id"]).execute()
+        return True
+    except Exception:  # noqa: BLE001 — sending is best-effort; leave as draft on failure
+        return False
+
+
+def draft_cost_estimate(org_id: str, payload) -> dict:
+    """hk_draftCostEstimate handler: create a DRAFT Kostenvoranschlag from the
+    agent's collected positions/subject, gated on the org's KVA-Automatisierung
+    toggle.
+
+    - KVA-Automatisierung off → no-op, returns success=False with a German note.
+    - Otherwise: build + insert a draft (type='kva', status='draft'), linking the
+      customer + inquiry the agent passed.
+    - At autonomy level 3: best-effort email-send via the existing send path; if
+      it fails, the KVA stays a draft (no raise). At L1/L2 it stays a draft for
+      the team to review.
+
+    Returns {success, id, number, status, message}."""
+    client = get_service_client()
+
+    cfg = (
+        client.table("agent_configs")
+        .select("kva_automation_enabled, kiki_level")
+        .eq("org_id", org_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    cfg_row = cfg[0] if cfg else {}
+    if not cfg_row.get("kva_automation_enabled"):
+        return {"success": False, "message": "KVA-Automatisierung ist nicht aktiviert."}
+
+    positions = [_normalize_position(p) for p in (payload.positions or [])]
+    totals = compute_totals(positions, 0, 0)
+    row = {
+        "org_id": org_id,
+        "customer_id": payload.customer_id,
+        "inquiry_id": payload.inquiry_id,
+        "type": "kva",
+        "status": "draft",
+        "subject": payload.subject,
+        "line_items": positions,
+        # Free-text notes the agent gathered land in intro_text so they surface
+        # on the PDF + in the team's review view.
+        "intro_text": payload.notes,
+        "validity_days": 30,
+        "valid_until": valid_until_for(30),
+        "subtotal": totals["net"],
+        "vat_amount": totals["vat"],
+        "total": totals["gross"],
+        "number": gen_number(client, org_id, "kva"),
+    }
+    created = client.table("cost_estimates").insert(row).execute().data[0]
+
+    # Autonomy level 3: try to send immediately; otherwise leave as a draft.
+    level = cfg_row.get("kiki_level")
+    try:
+        level = int(level) if level is not None else 2
+    except (TypeError, ValueError):
+        level = 2
+
+    sent = False
+    if level == 3:
+        sent = _send_draft_kva(client, org_id, created)
+
+    status = "sent" if sent else "draft"
+    message = "Kostenvoranschlag wurde erstellt."
+    if sent:
+        message += " und versendet."
+    return {
+        "success": True,
+        "id": created["id"],
+        "number": created.get("number"),
+        "status": status,
+        "message": message,
+    }

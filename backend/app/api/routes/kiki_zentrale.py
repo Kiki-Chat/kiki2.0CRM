@@ -7,10 +7,11 @@ PATCH here.
 """
 
 import difflib
+import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -18,6 +19,8 @@ from app.api.deps import CurrentUser, require_org, require_super_admin
 from app.db.supabase_client import get_service_client
 from app.services import agent_config as ac
 from app.services import elevenlabs_agent as ea
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/kiki-zentrale", tags=["kiki-zentrale"])
 
@@ -59,19 +62,24 @@ def _upsert_config(org_id: str, fields: dict) -> dict:
     )[0]
 
 
-def _repush(user: CurrentUser, endpoint_label: str) -> None:
+def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str) -> None:
     """Best-effort re-render + push of the org's prompt after a config save.
 
-    Wrapped so a push failure (un-provisioned org, EL outage, manual override)
-    NEVER fails the config save the user just made. Runs synchronously inside the
-    handler's threadpool body — the prompt reflects the change on the agent by the
-    time the request returns when the push succeeds."""
+    Runs as a FastAPI BackgroundTask AFTER the HTTP response is sent, so the
+    ~2-3s ElevenLabs round-trip no longer blocks the request. The DB write still
+    happens synchronously in the handler, so the returned row reflects the saved
+    state; only the EL push is deferred. Wrapped so a push failure (un-provisioned
+    org, EL outage, manual override) NEVER surfaces — rerender_and_push_for_org
+    already swallows its own errors; this is belt-and-braces + a log line."""
     try:
         ac.rerender_and_push_for_org(
-            org_id=user.org_id, actor_id=user.id, endpoint_label=endpoint_label
+            org_id=org_id, actor_id=user_id, endpoint_label=endpoint_label
         )
-    except Exception:  # noqa: BLE001 — defensive: rerender already swallows, this is belt-and-braces
-        pass
+    except Exception as exc:  # noqa: BLE001 — never let a background push crash
+        logger.warning(
+            "background prompt re-push failed (org=%s, label=%s): %s",
+            org_id, endpoint_label, str(exc)[:200],
+        )
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -472,7 +480,9 @@ async def list_required_fields(user: CurrentUser = Depends(require_org)) -> dict
 
 
 @router.post("/required-fields")
-async def create_required_field(payload: RequiredFieldCreate, user: CurrentUser = Depends(require_org)) -> dict:
+async def create_required_field(
+    payload: RequiredFieldCreate, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
 
     def _do() -> dict:
@@ -483,15 +493,18 @@ async def create_required_field(payload: RequiredFieldCreate, user: CurrentUser 
         )
         nxt = (existing[0]["sort_order"] + 1) if existing else 0
         row = {**payload.model_dump(), "org_id": user.org_id, "is_locked": False, "sort_order": nxt}
-        created = client.table("agent_required_fields").insert(row).execute().data[0]
-        _repush(user, "kz_required_fields")
-        return created
+        return client.table("agent_required_fields").insert(row).execute().data[0]
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    return result
 
 
 @router.patch("/required-fields/{field_id}")
-async def update_required_field(field_id: str, payload: RequiredFieldUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_required_field(
+    field_id: str, payload: RequiredFieldUpdate, background: BackgroundTasks,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
     _require_admin(user)
     fields = payload.model_dump(exclude_unset=True)
 
@@ -500,18 +513,20 @@ async def update_required_field(field_id: str, payload: RequiredFieldUpdate, use
         client.table("agent_required_fields").update(fields).eq("id", field_id).eq(
             "org_id", user.org_id
         ).execute()
-        updated = (
+        return (
             client.table("agent_required_fields").select("*").eq("id", field_id)
             .eq("org_id", user.org_id).limit(1).execute().data or [{}]
         )[0]
-        _repush(user, "kz_required_fields")
-        return updated
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    return result
 
 
 @router.delete("/required-fields/{field_id}")
-async def delete_required_field(field_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+async def delete_required_field(
+    field_id: str, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
 
     def _do() -> str:
@@ -527,7 +542,6 @@ async def delete_required_field(field_id: str, user: CurrentUser = Depends(requi
         client.table("agent_required_fields").delete().eq("id", field_id).eq(
             "org_id", user.org_id
         ).execute()
-        _repush(user, "kz_required_fields")
         return "ok"
 
     res = await run_in_threadpool(_do)
@@ -535,11 +549,15 @@ async def delete_required_field(field_id: str, user: CurrentUser = Depends(requi
         raise HTTPException(status_code=404, detail="Feld nicht gefunden.")
     if res == "locked":
         raise HTTPException(status_code=400, detail="Pflichtfeld ist gesperrt und kann nicht gelöscht werden.")
+    # Only re-push after a real delete (not on missing/locked no-ops).
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
     return {"success": True}
 
 
 @router.post("/required-fields/reorder")
-async def reorder_required_fields(payload: ReorderRequest, user: CurrentUser = Depends(require_org)) -> dict:
+async def reorder_required_fields(
+    payload: ReorderRequest, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
 
     def _do() -> dict:
@@ -548,41 +566,46 @@ async def reorder_required_fields(payload: ReorderRequest, user: CurrentUser = D
             client.table("agent_required_fields").update({"sort_order": idx}).eq(
                 "id", fid
             ).eq("org_id", user.org_id).execute()
-        _repush(user, "kz_required_fields")
         return {"success": True}
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    return result
 
 
 # ─── Branche & Kontext ───────────────────────────────────────────────────────
 @router.patch("/context")
-async def update_context(payload: ContextUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_context(
+    payload: ContextUpdate, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
     fields = payload.model_dump(exclude_unset=True)
 
     def _do() -> dict:
-        cfg = _upsert_config(user.org_id, fields)
-        _repush(user, "kz_identity")
-        return cfg
+        return _upsert_config(user.org_id, fields)
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_identity")
+    return result
 
 
 @router.patch("/problem-description")
 async def update_problem_description(
-    payload: ProblemDescriptionUpdate, user: CurrentUser = Depends(require_org)
+    payload: ProblemDescriptionUpdate, background: BackgroundTasks,
+    user: CurrentUser = Depends(require_org),
 ) -> dict:
     """Upsert the org's free-text 'what to capture per typical problem' instruction
-    (agent_configs.problem_description), then re-push the prompt."""
+    (agent_configs.problem_description), then re-push the prompt (deferred to a
+    background task so the EL round-trip doesn't block the response)."""
     _require_admin(user)
     fields = payload.model_dump(exclude_unset=True)
 
     def _do() -> dict:
-        cfg = _upsert_config(user.org_id, fields)
-        _repush(user, "kz_problem_description")
-        return cfg
+        return _upsert_config(user.org_id, fields)
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_problem_description")
+    return result
 
 
 @router.get("/knowledge-resources")
@@ -711,16 +734,19 @@ async def reindex_knowledge_resource(resource_id: str, user: CurrentUser = Depen
 
 # ─── Terminregeln ────────────────────────────────────────────────────────────
 @router.patch("/scheduling-rules")
-async def update_scheduling_rules(payload: SchedulingRulesUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_scheduling_rules(
+    payload: SchedulingRulesUpdate, background: BackgroundTasks,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
     _require_admin(user)
     fields = payload.model_dump(exclude_unset=True)
 
     def _do() -> dict:
-        cfg = _upsert_config(user.org_id, fields)
-        _repush(user, "kz_scheduling")
-        return cfg
+        return _upsert_config(user.org_id, fields)
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_scheduling")
+    return result
 
 
 # ─── Terminkategorien ────────────────────────────────────────────────────────
@@ -737,7 +763,9 @@ async def list_categories(user: CurrentUser = Depends(require_org)) -> dict:
 
 
 @router.post("/appointment-categories")
-async def create_category(payload: CategoryCreate, user: CurrentUser = Depends(require_org)) -> dict:
+async def create_category(
+    payload: CategoryCreate, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
 
     def _do() -> dict:
@@ -748,15 +776,18 @@ async def create_category(payload: CategoryCreate, user: CurrentUser = Depends(r
         )
         nxt = (existing[0]["sort_order"] + 1) if existing else 0
         row = {**payload.model_dump(), "org_id": user.org_id, "sort_order": nxt}
-        created = client.table("appointment_categories").insert(row).execute().data[0]
-        _repush(user, "kz_categories")
-        return created
+        return client.table("appointment_categories").insert(row).execute().data[0]
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_categories")
+    return result
 
 
 @router.patch("/appointment-categories/{category_id}")
-async def update_category(category_id: str, payload: CategoryUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_category(
+    category_id: str, payload: CategoryUpdate, background: BackgroundTasks,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
     _require_admin(user)
     fields = payload.model_dump(exclude_unset=True)
 
@@ -765,28 +796,31 @@ async def update_category(category_id: str, payload: CategoryUpdate, user: Curre
         client.table("appointment_categories").update(fields).eq("id", category_id).eq(
             "org_id", user.org_id
         ).execute()
-        updated = (
+        return (
             client.table("appointment_categories").select("*").eq("id", category_id)
             .eq("org_id", user.org_id).limit(1).execute().data or [{}]
         )[0]
-        _repush(user, "kz_categories")
-        return updated
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_categories")
+    return result
 
 
 @router.delete("/appointment-categories/{category_id}")
-async def delete_category(category_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+async def delete_category(
+    category_id: str, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
 
     def _do() -> dict:
         get_service_client().table("appointment_categories").delete().eq(
             "id", category_id
         ).eq("org_id", user.org_id).execute()
-        _repush(user, "kz_categories")
         return {"success": True}
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_categories")
+    return result
 
 
 # ─── KVA-Automatisierung / Preisauskunft ─────────────────────────────────────
@@ -859,16 +893,18 @@ async def delete_service(service_id: str, user: CurrentUser = Depends(require_or
 
 # ─── Notdienst ───────────────────────────────────────────────────────────────
 @router.patch("/emergency")
-async def update_emergency(payload: EmergencyUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_emergency(
+    payload: EmergencyUpdate, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
     fields = payload.model_dump(exclude_unset=True)
 
     def _do() -> dict:
-        cfg = _upsert_config(user.org_id, fields)
-        _repush(user, "kz_emergency")
-        return cfg
+        return _upsert_config(user.org_id, fields)
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    background.add_task(_repush_bg, user.org_id, user.id, "kz_emergency")
+    return result
 
 
 # ─── Telefon ─────────────────────────────────────────────────────────────────

@@ -35,7 +35,7 @@ def test_resolve_returns_all_when_workspace_complete(monkeypatch):
 
 
 def test_resolve_raises_with_missing_tool_names(monkeypatch):
-    # workspace has only 9 of 10
+    # workspace is missing one required tool (the first name)
     _stub_workspace_tools(monkeypatch, ac.HK_TOOL_NAMES[1:])
     with pytest.raises(HTTPException) as exc:
         ac._resolve_hk_tool_ids()
@@ -233,8 +233,8 @@ def test_configure_agent_fresh_full_path(monkeypatch):
 
     # Phone stored
     assert summary["phone_number"] == "+4925197593899"
-    # All 10 tools added
-    assert len(summary["tools_attached"]) == 10
+    # All hk_* tools added
+    assert len(summary["tools_attached"]) == len(ac.HK_TOOL_NAMES)
     # Prompt applied (first run)
     assert summary["prompt_applied"] is True
     assert summary["prompt_skipped_reason"] is None

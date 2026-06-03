@@ -62,6 +62,29 @@ def _scheduling(client, org_id: str) -> dict:
     return (rows[0].get("scheduling") if rows and rows[0].get("scheduling") else {}) or {}
 
 
+def _get_kiki_level(client, org_id: str) -> int:
+    """The org's autonomy level (agent_configs.kiki_level), default 2.
+
+    1 = take inquiries only (no appointment rows booked).
+    2 = book as a reservation (status='pending'); team confirms afterwards.
+    3 = book + auto-confirm POST-call (post_call._fire_level3_confirmations).
+    Mirrors _scheduling: single-column read, graceful default on a missing row."""
+    rows = (
+        client.table("agent_configs")
+        .select("kiki_level")
+        .eq("org_id", org_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if rows and rows[0].get("kiki_level") is not None:
+        try:
+            return int(rows[0]["kiki_level"])
+        except (TypeError, ValueError):
+            return 2
+    return 2
+
+
 def _first_employee(client, org_id: str) -> dict | None:
     rows = (
         client.table("employees")
@@ -187,6 +210,13 @@ def _book_success(appt_id, customer_id, inquiry_id, dt, emp_name) -> dict:
 
 def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
     client = get_service_client()
+    # Autonomy level gates whether we actually create an appointment row:
+    #   L1 → inquiry only, NO appointment (the team books it manually).
+    #   L2 → appointment lands as 'pending' (a reservation the team confirms).
+    #   L3 → also 'pending' here; post_call._fire_level3_confirmations flips it
+    #        to 'confirmed' AFTER the call so the confirmation never collides with
+    #        the still-active booking call.
+    level = _get_kiki_level(client, org_id)
     dt = parse_when(payload.date, payload.time)
     if dt is None:
         return {
@@ -259,6 +289,21 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
         .data[0]
     )
 
+    # ── Level 1: inquiry-only. Do NOT create an appointment row. ──
+    # At autonomy level 1 the agent merely records the request; the team books
+    # the actual appointment later. The inquiry above already captured the
+    # request (incl. the desired slot in its notes), so we return success WITHOUT
+    # an appointment — appointmentId=None signals "noted, no booking made".
+    if level == 1:
+        return {
+            "success": True,
+            "appointmentId": None,
+            "customerId": customer["id"],
+            "inquiryId": inquiry["id"],
+            "message": "Ihr Anliegen wurde notiert — das Team meldet sich bei Ihnen.",
+        }
+
+    # ── Levels 2 & 3: create the appointment as a reservation (status='pending'). ──
     # Address on the appointment itself (so it shows on the calendar / detail card).
     # Prefer the address the agent collected this call; else fall back to the
     # customer's stored address (returning callers where the agent skipped

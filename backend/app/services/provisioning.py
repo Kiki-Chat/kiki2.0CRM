@@ -18,6 +18,51 @@ DEFAULT_AGENT_CONFIG = {
     },
 }
 
+# The 3 mandatory identification fields every newly-provisioned org receives.
+# Locked + duty so the tradesperson can't delete them (they're how Kiki ties a
+# caller to a customer record). Mirrors migration 0015's test-org seed minus the
+# 'concern' field (the agent always captures the concern; it's not a stored field
+# the way name/phone/address are). Tuple order: (field_key, label, description,
+# is_locked, is_duty, identification_role, sort_order).
+_DEFAULT_REQUIRED_FIELDS = [
+    ("name", "Name", "Vor- und Nachname", True, True, None, 0),
+    ("phone", "Telefonnummer", "Rückrufnummer", True, True, "caller_id", 1),
+    ("address", "Adresse", "Anschrift des Kunden / Einsatzorts", True, True, "address", 2),
+]
+
+
+def _seed_required_fields(client, org_id: str) -> None:
+    """Insert the default agent_required_fields for a fresh org — idempotent.
+
+    No-op when the org already has any required fields (so a provisioning retry
+    or a re-sync never duplicates them). Matches the existing insert style
+    (one .insert([...]) call via the service client)."""
+    existing = (
+        client.table("agent_required_fields")
+        .select("id")
+        .eq("org_id", org_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if existing:
+        return
+    rows = [
+        {
+            "org_id": org_id,
+            "field_key": field_key,
+            "label": label,
+            "description": description,
+            "is_locked": is_locked,
+            "is_duty": is_duty,
+            "identification_role": identification_role,
+            "sort_order": sort_order,
+        }
+        for (field_key, label, description, is_locked, is_duty, identification_role, sort_order)
+        in _DEFAULT_REQUIRED_FIELDS
+    ]
+    client.table("agent_required_fields").insert(rows).execute()
+
 
 def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
     """Create org + admin user + default agent_config, then wire the
@@ -125,6 +170,11 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
         client.table("agent_configs").insert(
             {"org_id": org_id, **DEFAULT_AGENT_CONFIG}
         ).execute()
+
+        # Seed the 3 mandatory identification fields so every newly-provisioned
+        # org has its required-field set from day one (migration 0015 only seeded
+        # the test org). Idempotent: only insert when the org has none yet.
+        _seed_required_fields(client, org_id)
 
         # ─── Step B — finalize the ElevenLabs agent ──────────────────────────
         # Runs synchronously inside provision_org so a hard failure (e.g.

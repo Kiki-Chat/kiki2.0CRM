@@ -14,7 +14,7 @@ What it does, in order:
        With multiple phones bound it picks the first and logs a warning
        rather than failing.
 
-  B.2  Look up the 10 ``hk_*`` workspace tools by name, then ADDITIVELY
+  B.2  Look up the ``hk_*`` workspace tools by name, then ADDITIVELY
        merge their ``tool_id``s onto the agent's ``prompt.tool_ids`` via
        ``patch_agent_safely`` (snapshot → assert audio → PATCH → verify →
        auto-rollback → audit). Any missing tools fail loudly — they're a
@@ -82,7 +82,7 @@ logger = logging.getLogger(__name__)
 EL_BASE = "https://api.elevenlabs.io"
 _TIMEOUT = 30.0
 
-# The 10 hk_* tool names that every HeyKiki-wired agent must carry.
+# The hk_* tool names that every HeyKiki-wired agent must carry.
 HK_TOOL_NAMES: list[str] = [
     "hk_identifyCustomer",
     "hk_updateCustomerData",
@@ -94,6 +94,7 @@ HK_TOOL_NAMES: list[str] = [
     "hk_searchCustomerInquiries",
     "hk_queryKnowledgeBase",
     "hk_transferCall",
+    "hk_draftCostEstimate",
 ]
 
 # Conversation-initiation client-data webhook route on this backend.
@@ -119,7 +120,7 @@ _PROMPT_TOKENS = [
     "COMPANY_NAME", "COMPANY_TRADE", "COMPANY_CONTACT", "COMPANY_PROFILE",
     "SERVICE_AREA", "BUSINESS_HOURS",
     "KZ_REQUIRED_FIELDS", "KZ_PROBLEM_DESCRIPTION", "KZ_APPOINTMENT_CATEGORIES",
-    "KZ_SCHEDULING_RULES", "KZ_EMERGENCY",
+    "KZ_SCHEDULING_RULES", "KZ_EMERGENCY", "KZ_AUTONOMY",
 ]
 
 
@@ -154,7 +155,7 @@ def _fetch_workspace_tools() -> dict[str, str]:
 
 
 def _resolve_hk_tool_ids(required: list[str] | None = None) -> dict[str, str]:
-    """Return ``{name: tool_id}`` for all 10 required hk_* names.
+    """Return ``{name: tool_id}`` for all required hk_* names.
 
     Fails with HTTPException(400) listing the missing names if any of the
     required tools aren't found in the workspace — operations are expected
@@ -321,18 +322,20 @@ def _fetch_appointment_categories(org_id: str | UUID) -> list[dict]:
         .data
         or []
     )
+    # default_employee_id now references employees(id) (FK retargeted from
+    # users.id), so resolve the name from employees.display_name.
     emp_ids = [c["default_employee_id"] for c in cats if c.get("default_employee_id")]
     names: dict[str, str] = {}
     if emp_ids:
-        users = (
-            db.table("users")
-            .select("id, full_name")
+        employees = (
+            db.table("employees")
+            .select("id, display_name")
             .in_("id", list(set(emp_ids)))
             .execute()
             .data
             or []
         )
-        names = {u["id"]: (u.get("full_name") or "").strip() for u in users}
+        names = {e["id"]: (e.get("display_name") or "").strip() for e in employees}
     for c in cats:
         eid = c.get("default_employee_id")
         c["employee_name"] = names.get(eid) or None
@@ -346,7 +349,7 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
     rows = (
         db.table("agent_configs")
         .select(
-            "problem_description, prompt_manual_override, trade, scheduling, "
+            "kiki_level, problem_description, prompt_manual_override, trade, scheduling, "
             "scheduling_enabled, buffer_minutes, max_appointments_per_day, "
             "parallel_slots, lead_time_days, lead_time_only_weekdays, "
             "lead_time_earliest_clock, emergency_enabled, emergency_number, "
@@ -633,6 +636,31 @@ def render_emergency_block(cfg: dict) -> str:
     return "\n".join(lines)
 
 
+def render_autonomy_block(level: int) -> str:
+    """German behaviour guidance for the ``{{KZ_AUTONOMY}}`` token, by autonomy
+    level (agent_configs.kiki_level). Drives what the agent tells the caller about
+    booking/confirmation. Unknown levels fall back to L2 (the conservative
+    reservation behaviour that matches the standard 'pending' booking flow)."""
+    try:
+        lvl = int(level)
+    except (TypeError, ValueError):
+        lvl = 2
+    if lvl == 1:
+        return (
+            "Du nimmst Anliegen nur auf (hk_createInquiry) und buchst KEINE "
+            "Termine — das Team meldet sich beim Kunden."
+        )
+    if lvl == 3:
+        return (
+            "Du buchst Termine verbindlich und bestätigst sie dem Anrufer direkt "
+            "im Gespräch."
+        )
+    return (
+        "Du buchst Termine als Reservierung (hk_bookAppointment); das Team "
+        "bestätigt sie anschließend — sag dem Anrufer, dass die Bestätigung folgt."
+    )
+
+
 def _clock_str(value: Any) -> str:
     """Normalise a time value (``datetime.time``, ``"13:00:00"``, ``"13:00"``) to
     ``"HH:MM"``; empty/unparseable → ""."""
@@ -725,6 +753,7 @@ def render_prompt_for_org(
         "KZ_APPOINTMENT_CATEGORIES": render_appointment_categories_block(categories),
         "KZ_SCHEDULING_RULES": render_scheduling_rules_block(kz_cfg),
         "KZ_EMERGENCY": render_emergency_block(kz_cfg),
+        "KZ_AUTONOMY": render_autonomy_block(kz_cfg.get("kiki_level", 2)),
     }
     for key, value in tokens.items():
         text = text.replace("{{" + key + "}}", value)

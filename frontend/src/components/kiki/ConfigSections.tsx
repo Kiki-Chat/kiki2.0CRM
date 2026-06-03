@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowUpDown, Clock, FileText, Globe, Info, Lock, Phone, Plus, RefreshCw,
+  ArrowUpDown, Clock, FileText, Globe, Info, Loader2, Lock, Phone, Plus, RefreshCw,
   Siren, Trash2, X,
 } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { apiFetch, apiUpload } from '../../lib/api'
 import {
@@ -35,19 +35,23 @@ const EMERGENCY_KEYWORD_TEMPLATES: { label: string; keywords: string[] }[] = [
   { label: 'Dachdecker / Garten / Sturmschäden', keywords: ['Sturmschaden', 'Dach undicht', 'Ziegel lose', 'umgestürzter Baum', 'Ast droht zu fallen', 'Hagelschaden'] },
 ]
 
-// /api/employees row shape (subset). user_id is the FK target users(id) used as
-// the option value for a category's default employee (2B).
+// /api/employees row shape (subset). employees.id is the FK target for a
+// category's default_employee_id (2B) — there is no raw user_id in this payload.
 interface Employee {
   id: string
-  user_id: string | null
   display_name: string | null
+  has_login?: boolean
 }
+
+// Appended to save toasts so the user knows the (slow) agent sync continues in
+// the background after the row is persisted.
+const AGENT_SYNC_SUFFIX = ' — Änderungen werden an den Agenten übertragen.'
 
 function useConfigPatch(path: string, flash: (m: string) => void) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => apiFetch(`${KZ}${path}`, { method: 'PATCH', body: JSON.stringify(body) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale'] }); flash('Gespeichert.') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale'] }); flash('Gespeichert.' + AGENT_SYNC_SUFFIX) },
     onError: (e: Error) => flash(e.message || 'Speichern fehlgeschlagen.'),
   })
 }
@@ -147,12 +151,12 @@ export function PflichtfelderSection({ data: overview, flash }: Props) {
                 <FieldDescriptionInput field={f} onSave={(description) => patchDesc.mutate({ id: f.id, description })} />
               </div>
               <button
-                disabled={f.is_locked}
+                disabled={f.is_locked || del.isPending}
                 onClick={() => del.mutate(f.id)}
                 title={f.is_locked ? 'Gesperrtes Feld' : 'Entfernen'}
                 className="mt-2 text-muted hover:text-error disabled:opacity-30"
               >
-                <Trash2 size={15} />
+                {del.isPending && del.variables === f.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
               </button>
             </div>
           ))}
@@ -161,8 +165,9 @@ export function PflichtfelderSection({ data: overview, flash }: Props) {
           <Field label="Neues Feld"><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. E-Mail-Adresse" className={inputCls} /></Field>
           <Field label="Beschreibung (optional)"><input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Wofür dient das Feld? (wird dem KI-Agenten erklärt)" className={inputCls} /></Field>
           <div className="flex justify-end">
-            <button onClick={() => newLabel.trim() && create.mutate()} disabled={!newLabel.trim() || create.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
-              Hinzufügen
+            <button onClick={() => newLabel.trim() && create.mutate()} disabled={!newLabel.trim() || create.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+              {create.isPending && <Loader2 size={14} className="animate-spin" />}
+              {create.isPending ? 'Speichert…' : 'Hinzufügen'}
             </button>
           </div>
         </div>
@@ -224,14 +229,18 @@ export function BrancheKontextSection({ data, flash }: Props) {
     <div className="space-y-4">
       <Card>
         <GroupLabel>Branche</GroupLabel>
-        <select
-          value={trade}
-          onChange={(e) => { setTrade(e.target.value); patch.mutate({ trade: e.target.value }) }}
-          className={cn(inputCls, 'max-w-sm')}
-        >
-          <option value="">— Branche wählen —</option>
-          {TRADES.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={trade}
+            disabled={patch.isPending}
+            onChange={(e) => { setTrade(e.target.value); patch.mutate({ trade: e.target.value }) }}
+            className={cn(inputCls, 'max-w-sm disabled:opacity-50')}
+          >
+            <option value="">— Branche wählen —</option>
+            {TRADES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          {patch.isPending && <Loader2 size={16} className="animate-spin text-muted" />}
+        </div>
       </Card>
 
       <Card>
@@ -240,8 +249,9 @@ export function BrancheKontextSection({ data, flash }: Props) {
         <textarea value={knowledge} maxLength={15000} onChange={(e) => setKnowledge(e.target.value)} className={cn(inputCls, 'min-h-[160px]')} />
         <div className="mt-2 flex items-center justify-between">
           <span className="text-xs text-muted">{knowledge.length}/15.000 Zeichen</span>
-          <button onClick={() => patch.mutate({ knowledge_text: knowledge })} disabled={patch.isPending} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">
-            Text speichern
+          <button onClick={() => patch.mutate({ knowledge_text: knowledge })} disabled={patch.isPending} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">
+            {patch.isPending && <Loader2 size={14} className="animate-spin" />}
+            {patch.isPending ? 'Speichert…' : 'Text speichern'}
           </button>
         </div>
       </Card>
@@ -278,7 +288,10 @@ export function BrancheKontextSection({ data, flash }: Props) {
       <Modal open={urlOpen} onOpenChange={setUrlOpen} title="URL als Wissens-Quelle" footer={
         <div className="flex gap-3">
           <button onClick={() => setUrlOpen(false)} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body">Abbrechen</button>
-          <button disabled={!url.trim() || addUrl.isPending} onClick={() => addUrl.mutate()} className="flex-1 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">Hinzufügen</button>
+          <button disabled={!url.trim() || addUrl.isPending} onClick={() => addUrl.mutate()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+            {addUrl.isPending && <Loader2 size={14} className="animate-spin" />}
+            {addUrl.isPending ? 'Speichert…' : 'Hinzufügen'}
+          </button>
         </div>
       }>
         <div className="space-y-3">
@@ -342,11 +355,10 @@ export function TerminkategorienSection({ flash }: Props) {
   const { data } = useQuery({ queryKey: ['kiki-zentrale', 'categories'], queryFn: () => apiFetch<{ categories: KzCategory[] }>(`${KZ}/appointment-categories`) })
   const cats = data?.categories ?? []
   const { data: employees = [] } = useQuery({ queryKey: ['employees'], queryFn: () => apiFetch<Employee[]>('/api/employees') })
-  // The category FK targets users(id); only employees with a login (user_id) can
-  // be assigned. Map user_id → display_name for the list rows + select options.
-  const assignable = employees.filter((e) => e.user_id)
-  const empName = (userId: string | null | undefined) =>
-    userId ? assignable.find((e) => e.user_id === userId)?.display_name ?? null : null
+  // default_employee_id now targets employees.id directly. Show ALL employees in
+  // the dropdown (no login filter) and resolve the list-row name by id.
+  const empName = (id: string | null | undefined) =>
+    id ? employees.find((e) => e.id === id)?.display_name ?? null : null
   const [edit, setEdit] = useState<Partial<KzCategory> | null>(null)
   const inv = () => qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'categories'] })
 
@@ -354,9 +366,14 @@ export function TerminkategorienSection({ flash }: Props) {
     mutationFn: (cat: Partial<KzCategory>) => cat.id
       ? apiFetch(`${KZ}/appointment-categories/${cat.id}`, { method: 'PATCH', body: JSON.stringify(cat) })
       : apiFetch(`${KZ}/appointment-categories`, { method: 'POST', body: JSON.stringify(cat) }),
-    onSuccess: () => { setEdit(null); inv(); flash('Gespeichert.') },
+    onSuccess: () => { setEdit(null); inv(); flash('Gespeichert.' + AGENT_SYNC_SUFFIX) },
+    onError: (e: Error) => flash(e.message || 'Speichern fehlgeschlagen.'),
   })
-  const delCat = useMutation({ mutationFn: (id: string) => apiFetch(`${KZ}/appointment-categories/${id}`, { method: 'DELETE' }), onSuccess: inv })
+  const delCat = useMutation({
+    mutationFn: (id: string) => apiFetch(`${KZ}/appointment-categories/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { setEdit(null); inv(); flash('Gelöscht.' + AGENT_SYNC_SUFFIX) },
+    onError: (e: Error) => flash(e.message || 'Löschen fehlgeschlagen.'),
+  })
 
   return (
     <Card>
@@ -383,11 +400,11 @@ export function TerminkategorienSection({ flash }: Props) {
           ))}
         </div>
       )}
-      <Modal open={!!edit} onOpenChange={(v) => !v && setEdit(null)} title={edit?.id ? 'Kategorie bearbeiten' : 'Neue Kategorie'} footer={
+      <Modal open={!!edit} onOpenChange={(v) => !v && !saveCat.isPending && !delCat.isPending && setEdit(null)} title={edit?.id ? 'Kategorie bearbeiten' : 'Neue Kategorie'} footer={
         <div className="flex gap-3">
-          {edit?.id && <button onClick={() => { delCat.mutate(edit.id!); setEdit(null) }} className="rounded-md border border-error px-4 py-2.5 text-sm font-medium text-error">Löschen</button>}
-          <button onClick={() => setEdit(null)} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body">Abbrechen</button>
-          <button disabled={!edit?.name?.trim()} onClick={() => saveCat.mutate(edit!)} className="flex-1 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">Speichern</button>
+          {edit?.id && <button disabled={delCat.isPending || saveCat.isPending} onClick={() => delCat.mutate(edit.id!)} className="inline-flex items-center gap-1.5 rounded-md border border-error px-4 py-2.5 text-sm font-medium text-error disabled:opacity-50">{delCat.isPending && <Loader2 size={14} className="animate-spin" />}{delCat.isPending ? 'Löscht…' : 'Löschen'}</button>}
+          <button disabled={saveCat.isPending || delCat.isPending} onClick={() => setEdit(null)} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body disabled:opacity-50">Abbrechen</button>
+          <button disabled={!edit?.name?.trim() || saveCat.isPending || delCat.isPending} onClick={() => saveCat.mutate(edit!)} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saveCat.isPending && <Loader2 size={14} className="animate-spin" />}{saveCat.isPending ? 'Speichert…' : 'Speichern'}</button>
         </div>
       }>
         {edit && (
@@ -398,7 +415,7 @@ export function TerminkategorienSection({ flash }: Props) {
             <Field label="Standard-Mitarbeiter (informativ — beeinflusst die Buchung nicht)">
               <select value={edit.default_employee_id ?? ''} onChange={(e) => setEdit({ ...edit, default_employee_id: e.target.value || null })} className={inputCls}>
                 <option value="">— kein Mitarbeiter —</option>
-                {assignable.map((e) => <option key={e.user_id} value={e.user_id!}>{e.display_name ?? '(ohne Name)'}</option>)}
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.display_name ?? '(ohne Name)'}</option>)}
               </select>
             </Field>
           </div>
@@ -415,7 +432,8 @@ export function KvaAutomationSection({ data, flash }: Props) {
   const [on, setOn] = useState(data.config.kva_automation_enabled)
   const toggle = useMutation({
     mutationFn: (v: boolean) => apiFetch(`${KZ}/kva-automation`, { method: 'PATCH', body: JSON.stringify({ enabled: v }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale'] }); flash('Gespeichert.') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale'] }); flash('Gespeichert.' + AGENT_SYNC_SUFFIX) },
+    onError: (e: Error) => { setOn((p) => !p); flash(e.message || 'Speichern fehlgeschlagen.') },
   })
   const rows = [['Stufe 1', 'KVA wird nicht automatisch erstellt'], ['Stufe 2', 'Entwurf wird zur Freigabe vorbereitet'], ['Stufe 3', 'KVA wird direkt an den Kunden gesendet']]
   return (
@@ -423,7 +441,10 @@ export function KvaAutomationSection({ data, flash }: Props) {
       <Card>
         <div className="flex items-center justify-between">
           <div><div className="text-sm font-bold text-text">KVA-Automatisierung</div><div className="text-xs text-muted">Kiki erstellt nach Anrufen passende Kostenvoranschläge.</div></div>
-          <Toggle on={on} onChange={(v) => { setOn(v); toggle.mutate(v) }} />
+          <div className="flex items-center gap-2">
+            {toggle.isPending && <Loader2 size={16} className="animate-spin text-muted" />}
+            <Toggle on={on} disabled={toggle.isPending} onChange={(v) => { setOn(v); toggle.mutate(v) }} />
+          </div>
         </div>
       </Card>
       <Card>
@@ -448,14 +469,18 @@ export function PreisauskunftSection({ data, flash }: Props) {
   const [on, setOn] = useState(data.config.price_info_enabled)
   const toggle = useMutation({
     mutationFn: (v: boolean) => apiFetch(`${KZ}/price-info`, { method: 'PATCH', body: JSON.stringify({ enabled: v }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale'] }); flash('Gespeichert.') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale'] }); flash('Gespeichert.' + AGENT_SYNC_SUFFIX) },
+    onError: (e: Error) => { setOn((p) => !p); flash(e.message || 'Speichern fehlgeschlagen.') },
   })
   return (
     <div className="space-y-4">
       <Card>
         <div className="flex items-center justify-between">
           <div><div className="text-sm font-bold text-text">Preisauskunft am Telefon</div><div className="text-xs text-muted">Kiki nennt Richtpreise. Standardmäßig deaktiviert.</div></div>
-          <Toggle on={on} onChange={(v) => { setOn(v); toggle.mutate(v) }} />
+          <div className="flex items-center gap-2">
+            {toggle.isPending && <Loader2 size={16} className="animate-spin text-muted" />}
+            <Toggle on={on} disabled={toggle.isPending} onChange={(v) => { setOn(v); toggle.mutate(v) }} />
+          </div>
         </div>
       </Card>
       <div className={cn('flex items-start gap-3 rounded-xl border p-4 text-sm', on ? 'border-warning/30 bg-warning-bg/40 text-body' : 'border-border bg-alt text-muted')}>
@@ -487,12 +512,15 @@ export function LeistungsangebotSection({ flash }: Props) {
       <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">{title}</div>
       <div className="flex flex-wrap gap-2">
         {items.length === 0 && <span className="text-sm text-faint">—</span>}
-        {items.map((s) => (
-          <span key={s.id} className={cn('group inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm', green ? 'bg-green-tint-100 text-green-deep' : 'bg-alt text-muted')}>
-            <button onClick={() => toggle.mutate(s)} title="Umschalten">{s.name}</button>
-            <button onClick={() => del.mutate(s.id)} className="opacity-50 hover:opacity-100"><X size={12} /></button>
-          </span>
-        ))}
+        {items.map((s) => {
+          const busy = (toggle.isPending && toggle.variables?.id === s.id) || (del.isPending && del.variables === s.id)
+          return (
+            <span key={s.id} className={cn('group inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm', busy && 'opacity-60', green ? 'bg-green-tint-100 text-green-deep' : 'bg-alt text-muted')}>
+              <button onClick={() => toggle.mutate(s)} disabled={busy} title="Umschalten" className="disabled:cursor-wait">{s.name}</button>
+              <button onClick={() => del.mutate(s.id)} disabled={busy} className="opacity-50 hover:opacity-100 disabled:cursor-wait">{busy ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}</button>
+            </span>
+          )
+        })}
       </div>
     </div>
   )
@@ -506,8 +534,8 @@ export function LeistungsangebotSection({ flash }: Props) {
       </div>
       <div className="mt-5 flex flex-wrap items-end gap-2 border-t border-border pt-4">
         <div className="flex-1 min-w-[240px]"><Field label="Leistung hinzufügen"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="z. B. Badsanierung" className={inputCls} /></Field></div>
-        <button onClick={() => name.trim() && add.mutate(true)} disabled={!name.trim() || add.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">+ Zu Angebot hinzufügen</button>
-        <button onClick={() => name.trim() && add.mutate(false)} disabled={!name.trim() || add.isPending} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">+ Zu Nicht-Angebot hinzufügen</button>
+        <button onClick={() => name.trim() && add.mutate(true)} disabled={!name.trim() || add.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{add.isPending && add.variables === true && <Loader2 size={14} className="animate-spin" />}+ Zu Angebot hinzufügen</button>
+        <button onClick={() => name.trim() && add.mutate(false)} disabled={!name.trim() || add.isPending} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">{add.isPending && add.variables === false && <Loader2 size={14} className="animate-spin" />}+ Zu Nicht-Angebot hinzufügen</button>
       </div>
     </Card>
   )
@@ -630,14 +658,14 @@ export function TelefonSection({ data, flash }: Props) {
         </Field>
         <p className="mt-1 text-xs text-muted">
           Stellen Sie die Rufweiterleitung Ihres Telefonanbieters auf Ihre HeyKiki-Nummer ein, um Kiki Ihre Anrufe entgegennehmen zu lassen.{' '}
-          <a
-            href="/docs/call-forwarding-setup"
+          <Link
+            to="/docs/rufumleitung"
             target="_blank"
             rel="noopener noreferrer"
             className="text-green-primary underline hover:opacity-80"
           >
             Anleitung
-          </a>
+          </Link>
         </p>
       </div>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">

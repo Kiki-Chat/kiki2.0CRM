@@ -118,6 +118,15 @@ class TransferCallRequest(ToolRequestBase):
     reason: str | None = None
 
 
+# 11. draftCostEstimate
+class DraftCostEstimateRequest(ToolRequestBase):
+    customer_id: str | None = Field(default=None, alias="customerId")
+    inquiry_id: str | None = Field(default=None, alias="inquiryId")
+    subject: str | None = None
+    positions: list[dict] | None = None
+    notes: str | None = None
+
+
 # Conversation Initiation Webhook (fires when the call connects, before the agent
 # speaks). ElevenLabs sends Twilio-style fields.
 class ConversationInitRequest(BaseModel):

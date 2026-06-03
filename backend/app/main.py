@@ -36,6 +36,7 @@ from app.api.routes.tools import (
     cancel_appointment,
     change_appointment,
     create_inquiry,
+    draft_cost_estimate,
     get_available_slots,
     identify_customer,
     query_knowledge_base,
@@ -103,6 +104,7 @@ app.include_router(change_appointment.router)
 app.include_router(search_inquiries.router)
 app.include_router(query_knowledge_base.router)
 app.include_router(transfer_call.router)
+app.include_router(draft_cost_estimate.router)
 
 # Conversation Initiation Webhook (fires on call connect, before the agent speaks).
 app.include_router(conversation_init.router)

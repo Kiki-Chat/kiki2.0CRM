@@ -23,6 +23,7 @@ import { Placeholder } from './pages/Placeholder'
 import { ProjectFormPage } from './pages/ProjectFormPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectWorkspacePage } from './pages/ProjectWorkspacePage'
+import { RufumleitungGuidePage } from './pages/RufumleitungGuidePage'
 import { SetPasswordPage } from './pages/SetPasswordPage'
 import { SettingsPage } from './pages/SettingsPage'
 
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="kiki" element={<Navigate to="/kiki-zentrale/verhalten" replace />} />
           <Route path="kiki-zentrale" element={<Navigate to="/kiki-zentrale/verhalten" replace />} />
           <Route path="kiki-zentrale/:section" element={<KikiZentralePage />} />
+          <Route path="docs/rufumleitung" element={<RufumleitungGuidePage />} />
           <Route path="settings" element={<Navigate to="/settings/stammdaten" replace />} />
           <Route path="settings/:section" element={<SettingsPage />} />
           <Route path="settings/personal" element={<Placeholder title="Personal Settings" />} />

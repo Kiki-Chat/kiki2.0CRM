@@ -6,15 +6,95 @@ API. Idempotent on conversation_id. Org resolves from agent_id in the payload.
 Returns a debug-friendly result envelope per conversation (always a list).
 """
 
+import logging
+import threading
 import time
 from datetime import datetime, timezone
 
 from app.db.realtime import broadcast_new_call
 from app.db.supabase_client import get_service_client
 
+logger = logging.getLogger(__name__)
+
 
 def _now_iso_ms() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None:
+    """At autonomy level 3, auto-confirm the appointments this call just booked.
+
+    Spawns a daemon thread so the confirmation call+email never block post-call
+    ingest. The work: read agent_configs.kiki_level; return immediately if != 3;
+    find this org's pending appointments correlated to THIS conversation
+    (source_conversation_id) and, for each, flip status→'confirmed' + stamp
+    confirmed_at, then fire notify_appointment_outcome(..., 'confirm').
+
+    Why POST-call: book_appointment lands L3 bookings as 'pending' too, and the
+    confirmation only fires here — so the outbound confirmation call never
+    collides with the still-active inbound booking call. The _process_one
+    `already_processed` dedup guarantees this runs at most once per conversation,
+    so retries don't double-confirm. Wrapped in try/except end-to-end: a failure
+    here must NEVER break post-call ingest."""
+    if not conversation_id:
+        return
+
+    def _run() -> None:
+        try:
+            client = get_service_client()
+            cfg = (
+                client.table("agent_configs")
+                .select("kiki_level")
+                .eq("org_id", org_id)
+                .limit(1)
+                .execute()
+                .data
+            )
+            level = cfg[0].get("kiki_level") if cfg else None
+            try:
+                level = int(level) if level is not None else 2
+            except (TypeError, ValueError):
+                level = 2
+            if level != 3:
+                return
+
+            pending = (
+                client.table("appointments")
+                .select("id, status")
+                .eq("org_id", org_id)
+                .eq("source_conversation_id", conversation_id)
+                .eq("status", "pending")
+                .execute()
+                .data
+                or []
+            )
+            if not pending:
+                return
+
+            from app.services.appointment_notify import notify_appointment_outcome
+
+            for appt in pending:
+                appt_id = appt["id"]
+                try:
+                    client.table("appointments").update(
+                        {
+                            "status": "confirmed",
+                            "confirmed_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    ).eq("org_id", org_id).eq("id", appt_id).execute()
+                    notify_appointment_outcome(org_id, appt_id, "confirm")
+                except Exception:  # noqa: BLE001 — one bad appt must not stop the rest
+                    logger.exception(
+                        "L3 auto-confirm failed for appointment %s (conv %s)",
+                        appt_id, conversation_id,
+                    )
+        except Exception:  # noqa: BLE001 — never break post-call ingest
+            logger.exception(
+                "L3 auto-confirm sweep failed (org %s, conv %s)",
+                org_id, conversation_id,
+            )
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _extract(item) -> tuple[dict | None, str]:
@@ -267,6 +347,12 @@ def _process_one(data: dict | None, fmt: str) -> dict:
         from app.services.inquiries import ensure_call_inquiry
 
         ensure_call_inquiry(client, org_id, upserted[0])
+
+    # Level-3 auto-confirmation fires POST-call (in a background thread) so the
+    # outbound confirmation call never collides with the still-active booking
+    # call. No-op unless the org is at autonomy level 3. The `already_processed`
+    # dedup above prevents this from re-firing on N8N/ElevenLabs retries.
+    _fire_level3_confirmations(org_id, conversation_id)
 
     broadcast_new_call(
         org_id,
