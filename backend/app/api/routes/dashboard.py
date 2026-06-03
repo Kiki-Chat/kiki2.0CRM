@@ -271,11 +271,14 @@ async def anrufe(
 
 
 # ─── Finanzen ────────────────────────────────────────────────────────────────
-def _finanzen(org_id: str) -> dict:
+def _finanzen(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None) -> dict:
     client = get_service_client()
     now = _now()
+    # Same rolling window as the other tabs. The flow KPIs (Umsatz/Bezahlt) +
+    # Top-Kunden are scoped to it, with the preceding window for the delta.
+    start, end, prev_start, prev_end, label, _x, _byh = _period_window(period, from_date, to_date, now)
+    is_range = bool(from_date and to_date)
     cur_start = _month_start(now)
-    quarter_start = _add_months(cur_start, -2)
     six_start = _add_months(cur_start, -5)
 
     invoices = (
@@ -291,14 +294,35 @@ def _finanzen(org_id: str) -> dict:
     def inv_dt(i):
         return _parse(i.get("created_at"))
 
-    umsatz_month = sum(float(i.get("total") or 0) for i in invoices
-                       if i.get("status") != "cancelled" and (inv_dt(i) or now) >= cur_start)
+    def umsatz_in(s, e):
+        tot = 0.0
+        for i in invoices:
+            if i.get("status") == "cancelled":
+                continue
+            d = inv_dt(i)
+            if d and s <= d < e:
+                tot += float(i.get("total") or 0)
+        return tot
+
+    def paid_in(s, e):
+        tot = 0.0
+        for i in invoices:
+            if i.get("status") != "paid":
+                continue
+            d = _parse(i.get("paid_at"))
+            if d and s <= d < e:
+                tot += float(i.get("total") or 0)
+        return tot
+
+    umsatz_period = umsatz_in(start, end)
+    prev_umsatz = umsatz_in(prev_start, prev_end)
+    paid_period = paid_in(start, end)
+    prev_paid = paid_in(prev_start, prev_end)
+    # Outstanding = current state, independent of the selected window.
     open_inv = [i for i in invoices if i.get("status") in ("sent", "overdue")]
-    paid_month = sum(float(i.get("total") or 0) for i in invoices
-                     if i.get("status") == "paid" and (_parse(i.get("paid_at")) or datetime.min.replace(tzinfo=BERLIN)) >= cur_start)
     kvas_pending = [e for e in estimates if e.get("status") == "sent"]
 
-    # revenue series — last 6 months by paid_at
+    # revenue series — last 6 months by paid_at (long-run trend context)
     months = [_add_months(cur_start, -n) for n in range(5, -1, -1)]
     rev_by_month = {m.strftime("%Y-%m"): 0.0 for m in months}
     for i in invoices:
@@ -311,11 +335,11 @@ def _finanzen(org_id: str) -> dict:
                 rev_by_month[key] += float(i.get("total") or 0)
     revenue_series = [{"month": m.strftime("%Y-%m"), "label": m.strftime("%b"), "revenue": round(rev_by_month[m.strftime("%Y-%m")], 2)} for m in months]
 
-    # top customers this quarter (by invoice total)
+    # top customers in the selected window (by invoice total)
     by_cust = defaultdict(float)
     for i in invoices:
         d = inv_dt(i)
-        if d and d >= quarter_start and i.get("status") != "cancelled" and i.get("customer_id"):
+        if d and start <= d < end and i.get("status") != "cancelled" and i.get("customer_id"):
             by_cust[i["customer_id"]] += float(i.get("total") or 0)
     top_ids = sorted(by_cust, key=lambda c: by_cust[c], reverse=True)[:5]
     names = _customer_names(client, org_id, top_ids)
@@ -333,13 +357,17 @@ def _finanzen(org_id: str) -> dict:
 
     return {
         "kpis": {
-            "umsatz_month": round(umsatz_month, 2),
+            "umsatz_month": round(umsatz_period, 2),
+            "prev_umsatz": round(prev_umsatz, 2),
             "open_invoices_count": len(open_inv),
             "open_invoices_sum": round(sum(float(i.get("total") or 0) for i in open_inv), 2),
             "kvas_pending_count": len(kvas_pending),
             "kvas_pending_sum": round(sum(float(e.get("total") or 0) for e in kvas_pending), 2),
-            "paid_month": round(paid_month, 2),
+            "paid_month": round(paid_period, 2),
+            "prev_paid": round(prev_paid, 2),
         },
+        "period": "range" if is_range else period,
+        "period_label": label,
         "revenue_series": revenue_series,
         "top_customers": top_customers,
         "recent_invoices": recent_invoices,
@@ -347,8 +375,15 @@ def _finanzen(org_id: str) -> dict:
 
 
 @router.get("/finanzen")
-async def finanzen(user: CurrentUser = Depends(require_org)) -> dict:
-    return await run_in_threadpool(_finanzen, user.org_id)
+async def finanzen(
+    period: str = "month",
+    from_date: str | None = None,
+    to_date: str | None = None,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    if period not in ("day", "week", "month", "range"):
+        period = "month"
+    return await run_in_threadpool(_finanzen, user.org_id, period, from_date, to_date)
 
 
 # ─── KI-Nutzung (AI quota transparency + Tag/Woche/Monat/Zeitraum filter) ─────

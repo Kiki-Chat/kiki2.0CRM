@@ -7,27 +7,30 @@ import { apiFetch } from '../../lib/api'
 import { type FinanzenData, fmtEur, invoiceStatusLabel, invoiceStatusVariant } from '../../lib/dashApi'
 import { cn, initials } from '../../lib/utils'
 import { Tag } from '../ui/Tag'
-import { CHART, DashError, DashKpi, DashLoading, KpiRow, Panel, tooltipStyle } from './shared'
+import { CHART, DashError, DashKpi, DashLoading, KpiRow, Panel, tooltipStyle, TrendBadge, usePeriodFilter } from './shared'
 
 export function FinanzenTab() {
   const navigate = useNavigate()
+  const { qs, queryKey, element } = usePeriodFilter()
   const { data, isLoading, error } = useQuery({
-    queryKey: ['dash', 'finanzen'],
-    queryFn: () => apiFetch<FinanzenData>('/api/dashboard/finanzen'),
+    queryKey: ['dash', 'finanzen', ...queryKey],
+    queryFn: () => apiFetch<FinanzenData>(`/api/dashboard/finanzen${qs}`),
     staleTime: 5 * 60 * 1000,
   })
-  if (isLoading) return <DashLoading />
-  if (error || !data) return <DashError msg={(error as Error)?.message} />
+  if (isLoading) return <div className="space-y-5">{element}<DashLoading /></div>
+  if (error || !data) return <div className="space-y-5">{element}<DashError msg={(error as Error)?.message} /></div>
 
   const k = data.kpis
+  const pl = data.period_label
 
   return (
     <div className="space-y-5">
+      {element}
       <KpiRow>
-        <DashKpi label="Umsatz dieser Monat" value={fmtEur(k.umsatz_month)} icon={Euro} />
+        <DashKpi label={`Umsatz (${pl})`} value={fmtEur(k.umsatz_month)} icon={Euro} trend={<TrendBadge delta={Math.round(k.umsatz_month - k.prev_umsatz)} unit="€" />} />
         <DashKpi label="Offene Rechnungen" value={k.open_invoices_count} sub={fmtEur(k.open_invoices_sum)} icon={Receipt} />
         <DashKpi label="KVAs ausstehend" value={k.kvas_pending_count} sub={fmtEur(k.kvas_pending_sum)} icon={FileText} />
-        <DashKpi label="Bezahlt diesen Monat" value={fmtEur(k.paid_month)} icon={BadgeEuro} />
+        <DashKpi label={`Bezahlt (${pl})`} value={fmtEur(k.paid_month)} icon={BadgeEuro} trend={<TrendBadge delta={Math.round(k.paid_month - k.prev_paid)} unit="€" />} />
       </KpiRow>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
@@ -53,7 +56,7 @@ export function FinanzenTab() {
 
         <Panel title="Top-Kunden" className="lg:col-span-4">
           {data.top_customers.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted">Noch keine Umsätze in diesem Quartal.</div>
+            <div className="py-8 text-center text-sm text-muted">Noch keine Umsätze in diesem Zeitraum.</div>
           ) : (
             <div className="space-y-2">
               {data.top_customers.map((c) => (

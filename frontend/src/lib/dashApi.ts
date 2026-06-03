@@ -20,9 +20,11 @@ export interface AnrufeData {
 
 export interface FinanzenData {
   kpis: {
-    umsatz_month: number; open_invoices_count: number; open_invoices_sum: number
-    kvas_pending_count: number; kvas_pending_sum: number; paid_month: number
+    umsatz_month: number; prev_umsatz: number; open_invoices_count: number; open_invoices_sum: number
+    kvas_pending_count: number; kvas_pending_sum: number; paid_month: number; prev_paid: number
   }
+  period: KiPeriod
+  period_label: string
   revenue_series: { month: string; label: string; revenue: number }[]
   top_customers: { customer_id: string; customer_name: string | null; amount: number }[]
   recent_invoices: {
