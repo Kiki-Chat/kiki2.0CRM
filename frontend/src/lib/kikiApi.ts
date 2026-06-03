@@ -19,6 +19,7 @@ export interface KzConfig {
   lead_time_earliest_clock: string | null
   price_info_enabled: boolean
   kva_automation_enabled: boolean
+  problem_description: string | null
   emergency_enabled: boolean
   emergency_number: string | null
   emergency_only_outside_business_hours: boolean

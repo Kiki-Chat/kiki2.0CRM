@@ -61,6 +61,7 @@ from fastapi import HTTPException, status
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.services.common import format_address
+from app.services.scheduling import WEEKDAY_KEYS, normalize_business_hours
 from app.services.elevenlabs_agent import (
     CLIENT_EVENTS_PATH,
     OVERRIDES_WHITELIST_AGENT_PATH,
@@ -106,25 +107,19 @@ _HK_TOOL_ID_CACHE: dict[str, str] = {}
 
 # Path to the German master prompt template (committed at this path so
 # provisioning is self-contained — not loaded from Amber's Downloads dir).
+# The template carries PLACEHOLDER TOKENS ({{COMPANY_NAME}}, {{KZ_EMERGENCY}},
+# …) that ``render_prompt_for_org`` fills from the org record + Kiki-Zentrale
+# config. There are no more hardcoded company literals to substitute.
 _PROMPT_TEMPLATE_PATH = Path(__file__).parent / "agent_prompt_template.txt"
 
-# Strings in the template that are replaced per-org at runtime. Order matters:
-# the GmbH-suffixed form must come BEFORE the bare "Husmann & Dreier" so the
-# longer match wins and the GmbH suffix doesn't survive as orphaned text after
-# the bare match swallows everything to its left. The "Husmann und Dreier"
-# variant is its own separate string (different connector — no shadowing risk).
-# The "Herr Husmann"/"Herr Dreier" director-name lines (lines 919-920 of the
-# template) are deliberately NOT substituted here — they're bespoke template
-# content that would need its own per-org field. Flagged as a deferred follow-up.
-#
-# 2026-05-27 fix (Wave 3 V.2 finding): the bare "Husmann & Dreier" form was
-# initially omitted from this list, leaving 4 unsubstituted company-name
-# references in the rendered prompt for kiki-customer-009 (lines 93, 161, 164,
-# 214 of the template — parenthetical headings + prose). Added below.
-_TEMPLATE_COMPANY_NAMES = [
-    "Husmann & Dreier GmbH",
-    "Husmann und Dreier",
-    "Husmann & Dreier",
+# The complete token contract the template must satisfy. ``render_prompt_for_org``
+# fills every one of these; after filling, an assertion guarantees no ``{{…}}``
+# survives. Company-identity tokens + Kiki-Zentrale-config tokens.
+_PROMPT_TOKENS = [
+    "COMPANY_NAME", "COMPANY_TRADE", "COMPANY_CONTACT", "COMPANY_PROFILE",
+    "SERVICE_AREA", "BUSINESS_HOURS",
+    "KZ_REQUIRED_FIELDS", "KZ_PROBLEM_DESCRIPTION", "KZ_APPOINTMENT_CATEGORIES",
+    "KZ_SCHEDULING_RULES", "KZ_EMERGENCY",
 ]
 
 
@@ -260,44 +255,30 @@ def _load_prompt_template() -> str:
         return f.read()
 
 
-# ─── Company-neutral generic blocks (replace Husmann-specific hours / area) ──
-_GENERIC_HOURS = (
-    "=== Geschäftszeiten ===\n"
-    "Die genauen Geschäftszeiten sind im System hinterlegt. Außerhalb der "
-    "Geschäftszeiten werden Anliegen aufgenommen und das Team meldet sich am "
-    "nächsten Werktag zurück."
-)
-_GENERIC_TAGESZEIT = (
-    "# Geschäftszeiten-Modus\n\n"
-    "  Innerhalb der Geschäftszeiten gilt der normale Leitfaden — Termine sind buchbar.\n"
-    "  Außerhalb der Geschäftszeiten oder wenn das Team nicht erreichbar ist, buchst du\n"
-    "  keinen festen Termin, sondern nimmst das Anliegen mit `hk_createInquiry`\n"
-    "  (`rueckrufGewuenscht=true`) auf — das Team meldet sich am nächsten Werktag.\n"
-    "  Bei einem echten Notfall greift der Notdienst (siehe Notfall-Definition unten).\n\n"
-    "  "
-)
-_GENERIC_EINSATZ = (
-    "# Einsatzgebiet\n"
-    "  Nimm Anliegen aus dem üblichen Einzugsgebiet regulär auf. Liegt der Einsatzort\n"
-    "  möglicherweise außerhalb, nimm das Anliegen trotzdem auf und sage dem Anrufer,\n"
-    "  dass das Team prüft, ob die Anfahrt machbar ist, und sich zurückmeldet — nicht\n"
-    "  direkt absagen."
-)
-_GENERIC_ERREICH = (
-    "# Erreichbarkeit\n"
-    "  Die genauen Geschäftszeiten sind im System hinterlegt. Außerhalb der\n"
-    "  Geschäftszeiten werden Anliegen aufgenommen; das Team meldet sich am nächsten\n"
-    "  Werktag. Bei echten Notfällen greift der Notdienst (siehe Notfall-Definition).\n\n"
-    "  "
-)
-# Identity literals that must NOT survive rendering for a non-Husmann org.
+# Company-identity literals that must NEVER survive rendering for any non-Husmann
+# org. The renderer fills tokens (it no longer substitutes literals), so these are
+# a defense-in-depth guard against a template regression that re-introduces them.
 _IDENTITY_RESIDUE = [
     "Husmann", "Dreier", "Buxtehude", "Stader", "04161", "husmann-dreier",
-    "Jork", "Neu Wulmstorf", "Apensen", "Moisburg", "Horneburg",
-    "Nottensdorf", "Bliedersdorf", "Neuenkirchen",
+]
+
+# German weekday labels for business-hours rendering (Monday-first; index aligns
+# with scheduling.WEEKDAY_KEYS / datetime.weekday()).
+_WEEKDAY_DE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag",
+               "Samstag", "Sonntag"]
+
+# Fallback emergency keywords — used ONLY when the org configured none. Kept
+# trade-neutral-ish but practical for the SHK launch customer; an org with its
+# own list always overrides this.
+_DEFAULT_EMERGENCY_KEYWORDS = [
+    "Rohrbruch / unkontrolliert austretendes Wasser",
+    "Kompletter Heizungsausfall",
+    "Kompletter Warmwasserausfall",
+    "Gasgeruch",
 ]
 
 
+# ─── Config fetchers (all via the service client) ────────────────────────────
 def _fetch_org_identity(org_id: str | UUID) -> dict:
     """Name + address + phone + email + trade + management for prompt rendering."""
     db = get_service_client()
@@ -313,7 +294,79 @@ def _fetch_org_identity(org_id: str | UUID) -> dict:
     return rows[0] if rows else {}
 
 
-def _company_contact_block(address: str, phone: str, email: str) -> str:
+def _fetch_required_fields(org_id: str | UUID) -> list[dict]:
+    """The org's agent_required_fields rows, ordered by sort_order."""
+    db = get_service_client()
+    return (
+        db.table("agent_required_fields")
+        .select("field_key, label, description, is_duty, identification_role, sort_order")
+        .eq("org_id", str(org_id))
+        .order("sort_order")
+        .execute()
+        .data
+        or []
+    )
+
+
+def _fetch_appointment_categories(org_id: str | UUID) -> list[dict]:
+    """The org's appointment_categories, ordered by sort_order, with each
+    ``default_employee_id`` resolved to a display name (best-effort)."""
+    db = get_service_client()
+    cats = (
+        db.table("appointment_categories")
+        .select("name, description, duration_minutes, default_employee_id, sort_order")
+        .eq("org_id", str(org_id))
+        .order("sort_order")
+        .execute()
+        .data
+        or []
+    )
+    emp_ids = [c["default_employee_id"] for c in cats if c.get("default_employee_id")]
+    names: dict[str, str] = {}
+    if emp_ids:
+        users = (
+            db.table("users")
+            .select("id, full_name")
+            .in_("id", list(set(emp_ids)))
+            .execute()
+            .data
+            or []
+        )
+        names = {u["id"]: (u.get("full_name") or "").strip() for u in users}
+    for c in cats:
+        eid = c.get("default_employee_id")
+        c["employee_name"] = names.get(eid) or None
+    return cats
+
+
+def _fetch_kz_config(org_id: str | UUID) -> dict:
+    """The org's Kiki-Zentrale agent_configs row (the columns that drive the
+    prompt). Missing row → empty dict (renderers degrade gracefully)."""
+    db = get_service_client()
+    rows = (
+        db.table("agent_configs")
+        .select(
+            "problem_description, prompt_manual_override, trade, scheduling, "
+            "scheduling_enabled, buffer_minutes, max_appointments_per_day, "
+            "parallel_slots, lead_time_days, lead_time_only_weekdays, "
+            "lead_time_earliest_clock, emergency_enabled, emergency_number, "
+            "emergency_only_outside_business_hours, emergency_keywords, "
+            "emergency_extra_windows, emergency_surcharge_notice_enabled, "
+            "emergency_surcharge_text"
+        )
+        .eq("org_id", str(org_id))
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0] if rows else {}
+
+
+# ─── Company-identity render helpers (German prose, empty-safe) ──────────────
+def _render_company_contact(address: str, phone: str, email: str) -> str:
+    """Body for the ``=== Firmeninformationen ===`` block (heading lives in the
+    template). Omits any empty field; never invents data."""
     lines = []
     if address:
         lines.append(f"Adresse: {address}")
@@ -321,11 +374,14 @@ def _company_contact_block(address: str, phone: str, email: str) -> str:
         lines.append(f"Telefon: {phone}")
     if email:
         lines.append(f"E-Mail: {email}")
-    body = "\n".join(lines) if lines else "Die Kontaktdaten sind im System hinterlegt."
-    return f"=== Firmeninformationen ===\n{body}"
+    return "\n".join(lines) if lines else "Die Kontaktdaten sind im System hinterlegt."
 
 
-def _company_profile_block(name: str, address: str, phone: str, trade: str, directors: str) -> str:
+def _render_company_profile(
+    name: str, trade: str, address: str, phone: str, mgmt_name: str
+) -> str:
+    """Body for the Wissensbasis ``# Unternehmen`` block (heading in template).
+    Two-space indented to match the surrounding Wissensbasis indentation."""
     first = f"{name} — {trade}." if trade else f"{name}."
     lines = [first]
     contact = []
@@ -335,57 +391,355 @@ def _company_profile_block(name: str, address: str, phone: str, trade: str, dire
         contact.append(f"Telefon {phone}")
     if contact:
         lines.append(". ".join(contact) + ".")
-    if directors:  # single-person field today — cannot represent two co-directors
-        lines.append(f"Geschäftsführung: {directors}.")
-    return "# Unternehmen\n" + "\n".join("  " + ln for ln in lines)
+    if mgmt_name:
+        lines.append(f"Geschäftsführung: {mgmt_name}.")
+    return "\n".join("  " + ln for ln in lines)
 
 
-def render_prompt_for_org(org_name: str, org: dict | None = None) -> str:
-    """Master inbound prompt with ALL company identity sourced per org.
+def _render_service_area() -> str:
+    """Generic service-area instruction (body for the ``# Einsatzgebiet`` block).
+    No per-org town list exists today — keep it intake-friendly."""
+    return (
+        "  Nimm Anliegen aus dem üblichen Einzugsgebiet regulär auf; liegt der "
+        "Einsatzort\n"
+        "  möglicherweise außerhalb, nimm das Anliegen trotzdem auf und sage, dass "
+        "das Team\n"
+        "  die Anfahrt prüft."
+    )
 
-    Company name is substituted everywhere; address / phone / email / trade /
-    directors come from the org record (conditional-omit when empty — never
-    invented). Business-hours + service-area language is genericized to be
-    company-neutral (no hardcoded hours/towns); a real business_hours config is a
-    tracked follow-up. Trade-specific persona/emergency content is deliberately
-    left as-is this pass (separate genericization, to be sourced from
-    Kiki-Zentrale later). Hard-fails on any identity residue or stale
-    ``wkp_shared_`` token.
+
+def _render_business_hours(scheduling: dict | None) -> str:
+    """Per-weekday business-hours prose (Mo–So) from scheduling['business_hours'].
+    Falls back to a neutral sentence when no hours are configured."""
+    sched = scheduling if isinstance(scheduling, dict) else {}
+    raw = sched.get("business_hours")
+    if not isinstance(raw, dict) or not raw:
+        return "  Die genauen Geschäftszeiten sind im System hinterlegt."
+    hours = normalize_business_hours(raw)
+    lines = []
+    for idx, key in enumerate(WEEKDAY_KEYS):
+        day = hours.get(key) or {}
+        label = _WEEKDAY_DE[idx]
+        if not day.get("open"):
+            lines.append(f"  {label}: geschlossen")
+            continue
+        start, end = day.get("start"), day.get("end")
+        if day.get("break_start") and day.get("break_end"):
+            span = (
+                f"{start}–{day['break_start']} und {day['break_end']}–{end}"
+            )
+        else:
+            span = f"{start}–{end}"
+        lines.append(f"  {label}: {span} Uhr")
+    return "\n".join(lines)
+
+
+# ─── Kiki-Zentrale config render helpers (German prose, empty-safe) ──────────
+def render_required_fields_block(fields: list[dict]) -> str:
+    """Pflicht/optional field list for the ``## Pflichtfelder`` body.
+
+    Each field → ``- **{label}**{' (optional)'} — {description}``. Fields with an
+    identification_role are noted as auto-recognised. Empty config → a sensible
+    default field set so the agent never loses its data-capture instruction."""
+    if not fields:
+        return (
+            "PFLICHTFELDER: Name, Telefonnummer, Adresse, Anliegen. "
+            "OPTIONALE FELDER: Kundennummer."
+        )
+    lines = []
+    for f in fields:
+        label = (f.get("label") or f.get("field_key") or "").strip()
+        if not label:
+            continue
+        opt = "" if f.get("is_duty", True) else " (optional)"
+        desc = (f.get("description") or "").strip()
+        line = f"- **{label}**{opt}"
+        if desc:
+            line += f" — {desc}"
+        if f.get("identification_role"):
+            line += " (wird automatisch erkannt, falls verfügbar)"
+        lines.append(line)
+    if not lines:
+        return (
+            "PFLICHTFELDER: Name, Telefonnummer, Adresse, Anliegen. "
+            "OPTIONALE FELDER: Kundennummer."
+        )
+    return "\n".join(lines)
+
+
+def render_problem_description_block(text: str | None) -> str:
+    """Short instruction paragraph telling Kiki what to capture for this org's
+    typical problems. Empty config → empty string (the token just disappears)."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    return (
+        "  Erfasse bei den typischen Anliegen dieses Betriebs gezielt die "
+        "folgenden Details,\n"
+        "  bevor du zu Schritt 2 übergehst:\n"
+        f"  {text}"
+    )
+
+
+def render_appointment_categories_block(categories: list[dict]) -> str:
+    """Bookable-category list for the ``## Termin-Kategorien`` body.
+
+    ``- **„{name}"** ({duration} Min)[ — Standard-Ansprechpartner: {emp}][: {desc}]``.
+    Empty config → a fallback that tells the agent to pick the closest category or
+    omit the parameter."""
+    if not categories:
+        return (
+            "Beim Buchen die naheliegendste Kategorie wählen; im Zweifel den "
+            "Parameter weglassen."
+        )
+    lines = []
+    for c in categories:
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        dur = c.get("duration_minutes")
+        dur_txt = f" ({dur} Min)" if dur else ""
+        line = f"- **„{name}“**{dur_txt}"
+        emp = (c.get("employee_name") or "").strip()
+        if emp:
+            line += f" — Standard-Ansprechpartner: {emp}"
+        desc = (c.get("description") or "").strip()
+        if desc:
+            line += f": {desc}"
+        lines.append(line)
+    if not lines:
+        return (
+            "Beim Buchen die naheliegendste Kategorie wählen; im Zweifel den "
+            "Parameter weglassen."
+        )
+    lines.append(
+        "Wenn keine Kategorie eindeutig passt, wähle die naheliegendste."
+    )
+    return "\n".join(lines)
+
+
+def render_scheduling_rules_block(cfg: dict) -> str:
+    """Prose scheduling rules for the ``{{KZ_SCHEDULING_RULES}}`` token: lead time,
+    earliest clock, buffer/parallel/max-per-day. If scheduling is disabled, instruct
+    the agent NOT to book and to take a message instead."""
+    if cfg.get("scheduling_enabled") is False:
+        return (
+            "**Keine Online-Terminbuchung:** Buche in diesem Betrieb KEINE festen "
+            "Termine.\n"
+            "Nimm den Terminwunsch stattdessen mit `hk_createInquiry` "
+            "(`rueckrufGewuenscht=true`)\n"
+            "auf — das Team stimmt den Termin telefonisch ab. Rufe weder "
+            "`hk_getAvailableAppointments`\n"
+            "noch `hk_bookAppointment` auf."
+        )
+
+    lines = []
+    days = cfg.get("lead_time_days")
+    if isinstance(days, int) and days > 0:
+        unit = "Werktage" if cfg.get("lead_time_only_weekdays") else "Tage"
+        sentence = (
+            f"**Vorlauf:** Termine sind frühestens {days} {unit} im Voraus buchbar; "
+            "Same-Day-Termine bietest du NICHT an."
+        )
+        clock = _clock_str(cfg.get("lead_time_earliest_clock"))
+        if clock:
+            sentence += (
+                f" Am frühestmöglichen Tag sind Termine frühestens ab {clock} Uhr "
+                "möglich — biete dort keine früheren Zeiten an."
+            )
+        lines.append(sentence)
+    else:
+        lines.append(
+            "**Vorlauf:** Verlasse dich auf das Tool-Result von "
+            "`hk_getAvailableAppointments` — biete genau die zurückgegebenen Slots "
+            "an und erfinde keine früheren Zeiten."
+        )
+
+    parallel = cfg.get("parallel_slots")
+    if isinstance(parallel, int) and parallel > 1:
+        lines.append(
+            f"Es können bis zu {parallel} Termine parallel stattfinden."
+        )
+    max_day = cfg.get("max_appointments_per_day")
+    if isinstance(max_day, int) and max_day > 0:
+        lines.append(
+            f"Pro Tag sind höchstens {max_day} Termine möglich."
+        )
+    lines.append(
+        "Verlasse dich beim Anbieten von Slots immer auf das Tool-Result; erfinde "
+        "keine Zeiten."
+    )
+    return "\n".join(lines)
+
+
+def render_emergency_block(cfg: dict) -> str:
+    """Notfall-Definition + when-active + surcharge prose for ``{{KZ_EMERGENCY}}``.
+
+    Disabled → a short 'no emergency service' instruction. Enabled → the configured
+    keyword list (fallback set only if empty), the active-window clause, and the
+    optional surcharge notice. Transfer is always via hk_transferCall notfall=true."""
+    if not cfg.get("emergency_enabled"):
+        return (
+            "  Kein Notdienst aktiv: außerhalb der Geschäftszeiten Anliegen "
+            "aufnehmen, nicht weiterleiten."
+        )
+
+    kws = cfg.get("emergency_keywords")
+    kws = [str(k).strip() for k in kws if str(k).strip()] if isinstance(kws, list) else []
+    if not kws:
+        kws = list(_DEFAULT_EMERGENCY_KEYWORDS)
+
+    lines = ["  Ein NOTFALL liegt nur bei einem dieser Fälle vor:"]
+    lines += [f"  - {k}" for k in kws]
+    lines.append(
+        "  Tropfender Wasserhahn, gelegentliches Gluckern, geplante Wartung oder "
+        "Beratung"
+    )
+    lines.append(
+        "  sind KEINE Notfälle — auch wenn der Anrufer es so nennt. Bei "
+        "Unsicherheit GENAU"
+    )
+    lines.append("  EINMAL gezielt nachfragen und nur bei klarer Bestätigung weiterleiten.")
+
+    # When is the emergency path active?
+    windows = cfg.get("emergency_extra_windows")
+    window_txt = _emergency_windows_str(windows)
+    if cfg.get("emergency_only_outside_business_hours"):
+        active = (
+            "  Der Notdienst greift NUR außerhalb der Geschäftszeiten (siehe "
+            "Abschnitt „=== Geschäftszeiten ===“)."
+        )
+    else:
+        active = "  Der Notdienst greift bei einem bestätigten Notfall jederzeit."
+    if window_txt:
+        active += f" Zusätzliche Notdienst-Zeiten: {window_txt}."
+    lines.append(active)
+
+    # Optional surcharge notice.
+    if cfg.get("emergency_surcharge_notice_enabled"):
+        surcharge = (cfg.get("emergency_surcharge_text") or "").strip()
+        if surcharge:
+            lines.append(f"  Weise vor der Weiterleitung auf den Notdienst-Zuschlag hin: {surcharge}")
+        else:
+            lines.append(
+                "  Weise vor der Weiterleitung darauf hin, dass für den Notdienst "
+                "ein Zuschlag anfallen kann."
+            )
+
+    lines.append(
+        "  Leite bei bestätigtem Notfall über `hk_transferCall` mit `notfall=true` "
+        "weiter."
+    )
+    return "\n".join(lines)
+
+
+def _clock_str(value: Any) -> str:
+    """Normalise a time value (``datetime.time``, ``"13:00:00"``, ``"13:00"``) to
+    ``"HH:MM"``; empty/unparseable → ""."""
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if not s:
+        return ""
+    m = re.match(r"^(\d{1,2}):(\d{2})", s)
+    if not m:
+        return ""
+    try:
+        return f"{int(m[1]):02d}:{int(m[2]):02d}"
+    except ValueError:
+        return ""
+
+
+def _emergency_windows_str(windows: Any) -> str:
+    """Render the emergency_extra_windows list (``[{from,to,label?}, …]``) into a
+    short German phrase. Best-effort — skips malformed entries."""
+    if not isinstance(windows, list):
+        return ""
+    parts = []
+    for w in windows:
+        if not isinstance(w, dict):
+            continue
+        frm = _clock_str(w.get("from"))
+        to = _clock_str(w.get("to"))
+        if not (frm and to):
+            continue
+        label = (w.get("label") or "").strip()
+        seg = f"{frm}–{to} Uhr"
+        if label:
+            seg = f"{label} ({seg})"
+        parts.append(seg)
+    return ", ".join(parts)
+
+
+def render_prompt_for_org(
+    org_name: str, org: dict | None = None, org_id: str | UUID | None = None
+) -> str:
+    """Master inbound prompt: fill every PLACEHOLDER TOKEN in the template.
+
+    Company-identity tokens come from the ``org`` record (name + address + phone +
+    email + trade + management.name). Kiki-Zentrale-config tokens (required fields,
+    problem description, categories, scheduling rules, emergency) come from the
+    per-org config tables — fetched only when ``org_id`` is given; otherwise the
+    config tokens render with empty/fallback content so the function still works
+    name-only (e.g. provisioning before any config exists).
+
+    After filling, the function asserts NO ``{{…}}`` survives, keeps the company-
+    identity residue guard, and keeps the legacy ``wkp_shared_`` tool-token guard.
     """
     org = org or {}
     text = _load_prompt_template()
 
-    # 1) Company name — every inline mention.
-    for placeholder in _TEMPLATE_COMPANY_NAMES:
-        text = text.replace(placeholder, org_name)
-
-    # 2) Identity from the org record (omit when empty — never invent).
+    # ── Company identity (omit empty fields — never invent). ──
     address = format_address(org.get("address")) or ""
     phone = (org.get("phone_number") or "").strip()
     email = (org.get("email") or "").strip()
-    trade = (org.get("trade") or "").strip()
     mgmt = org.get("management") if isinstance(org.get("management"), dict) else {}
-    directors = (mgmt.get("name") or "").strip()
+    mgmt_name = (mgmt.get("name") or "").strip()
 
-    # 3) Structured identity blocks → org-sourced (lambda replacements: no re escaping).
-    contact = _company_contact_block(address, phone, email)
-    profile = _company_profile_block(org_name, address, phone, trade, directors)
-    text = re.sub(r"=== Firmeninformationen ===.*?E-Mail: info@husmann-dreier\.de",
-                  lambda _m: contact, text, flags=re.DOTALL)
-    text = re.sub(r"# Unternehmen\n.*?Zahlwort\.",
-                  lambda _m: profile, text, flags=re.DOTALL)
+    # ── Kiki-Zentrale config (only when we have an org_id to read it). ──
+    kz_cfg: dict = {}
+    required_fields: list[dict] = []
+    categories: list[dict] = []
+    if org_id is not None:
+        kz_cfg = _fetch_kz_config(org_id)
+        required_fields = _fetch_required_fields(org_id)
+        categories = _fetch_appointment_categories(org_id)
 
-    # 4) Genericize hours + service area (no company-specific times/towns).
-    text = re.sub(r"=== Geschäftszeiten ===.*?(?=\n=== Systeminformationen ===)",
-                  lambda _m: _GENERIC_HOURS, text, flags=re.DOTALL)
-    text = re.sub(r"# Tageszeit-Modus.*?(?=## Notfall-Definition)",
-                  lambda _m: _GENERIC_TAGESZEIT, text, flags=re.DOTALL)
-    text = re.sub(r"# Einsatzgebiet.*?nicht direkt absagen\.",
-                  lambda _m: _GENERIC_EINSATZ, text, flags=re.DOTALL)
-    text = re.sub(r"# Erreichbarkeit.*?(?=# Notfall-Definition \(verbindlich\))",
-                  lambda _m: _GENERIC_ERREICH, text, flags=re.DOTALL)
+    # Trade: prefer the Kiki-Zentrale config trade, fall back to the org record,
+    # finally a neutral default so the persona sentence never reads oddly.
+    trade = (kz_cfg.get("trade") or org.get("trade") or "").strip() or "Handwerk"
 
-    # 5) Guards.
+    tokens = {
+        "COMPANY_NAME": org_name,
+        "COMPANY_TRADE": trade,
+        "COMPANY_CONTACT": _render_company_contact(address, phone, email),
+        "COMPANY_PROFILE": _render_company_profile(
+            org_name, trade, address, phone, mgmt_name
+        ),
+        "SERVICE_AREA": _render_service_area(),
+        "BUSINESS_HOURS": _render_business_hours(kz_cfg.get("scheduling")),
+        "KZ_REQUIRED_FIELDS": render_required_fields_block(required_fields),
+        "KZ_PROBLEM_DESCRIPTION": render_problem_description_block(
+            kz_cfg.get("problem_description")
+        ),
+        "KZ_APPOINTMENT_CATEGORIES": render_appointment_categories_block(categories),
+        "KZ_SCHEDULING_RULES": render_scheduling_rules_block(kz_cfg),
+        "KZ_EMERGENCY": render_emergency_block(kz_cfg),
+    }
+    for key, value in tokens.items():
+        text = text.replace("{{" + key + "}}", value)
+
+    # ── Guards. ──
+    # ElevenLabs fills its own {{system__*}} dynamic vars at call time — those are
+    # intentional and must remain. Any OTHER {{…}} means a token went unfilled.
+    leftover = sorted(
+        t for t in set(re.findall(r"\{\{[^}]+\}\}", text))
+        if not t.startswith("{{system__")
+    )
+    if leftover:
+        raise RuntimeError(
+            f"unfilled prompt token(s) after render: {leftover}"
+        )
     if "wkp_shared_" in text:
         raise RuntimeError(
             "agent_prompt_template.txt still contains 'wkp_shared_' tokens — "
@@ -500,7 +854,9 @@ def configure_agent(
 
     # ─── B.3 Prompt (FIRST run only) ─────────────────────────────────────────
     if is_first_run:
-        prompt_text = render_prompt_for_org(org_name, org=_fetch_org_identity(org_id))
+        prompt_text = render_prompt_for_org(
+            org_name, org=_fetch_org_identity(org_id), org_id=org_id
+        )
         # Read current after the tool merge so we don't false-positive on a stale GET.
         current = get_agent_config(agent_id)
         existing_prompt = (_get_path(current, PROMPT_PATH) or "").strip()
@@ -620,3 +976,85 @@ def configure_agent(
         _stamp_agent_provisioned(org_id)
 
     return summary
+
+
+# ─── Live re-render + push (Kiki-Zentrale config changes) ────────────────────
+def rerender_and_push_for_org(
+    *, org_id: str | UUID, actor_id: str | UUID | None = None, endpoint_label: str
+) -> dict:
+    """Re-render the org's prompt from the live template + config and push it to
+    the agent. Best-effort: NEVER raises to the caller.
+
+    - If ``agent_configs.prompt_manual_override`` is True → no-op
+      ``{"updated": False, "reason": "manual_override"}`` (the tradesperson edited
+      the prompt by hand; auto-regeneration would clobber it).
+    - If the org has no ``elevenlabs_agent_id`` →
+      ``{"updated": False, "reason": "no_agent"}``.
+    - On an ElevenLabs write error → ``{"updated": False, "reason": str(e)}``.
+    - On success → ``{"updated": True}``.
+
+    The actual write routes through ``patch_agent_safely`` (snapshot → assert
+    audio → PATCH → verify → auto-rollback → audit), so the per-call safety net is
+    identical to provisioning.
+    """
+    db = get_service_client()
+
+    # Manual-override gate: read the flag straight off the config row.
+    cfg_rows = (
+        db.table("agent_configs")
+        .select("prompt_manual_override")
+        .eq("org_id", str(org_id))
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if cfg_rows and cfg_rows[0].get("prompt_manual_override"):
+        return {"updated": False, "reason": "manual_override"}
+
+    # Resolve the agent id (do NOT use get_org_agent_id — it raises; we want a
+    # soft no-op for un-provisioned orgs).
+    org_rows = (
+        db.table("organizations")
+        .select("name, elevenlabs_agent_id")
+        .eq("id", str(org_id))
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    org = org_rows[0] if org_rows else {}
+    agent_id = org.get("elevenlabs_agent_id")
+    if not agent_id:
+        return {"updated": False, "reason": "no_agent"}
+
+    try:
+        identity = _fetch_org_identity(org_id)
+        prompt_text = render_prompt_for_org(
+            org.get("name") or identity.get("name") or "",
+            org=identity,
+            org_id=org_id,
+        )
+        patch_agent_safely(
+            agent_id=agent_id,
+            field_patches={
+                "conversation_config": {"agent": {"prompt": {"prompt": prompt_text}}}
+            },
+            merge_arrays=[],
+            actor_id=actor_id,
+            org_id=org_id,
+            endpoint_label=endpoint_label,
+        )
+    except ElevenLabsWriteError as exc:
+        return {"updated": False, "reason": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        # Best-effort contract: a verify/cross-org/silent-agent failure (or any
+        # other ElevenLabs-side error) must not break the config save that
+        # triggered the re-push. patch_agent_safely already rolled back the EL
+        # side on a verify failure; the audit row carries the detail.
+        logger.warning(
+            "rerender_and_push_for_org(%s, %s) failed: %s",
+            org_id, endpoint_label, str(exc)[:200],
+        )
+        return {"updated": False, "reason": str(exc)}
+    return {"updated": True}

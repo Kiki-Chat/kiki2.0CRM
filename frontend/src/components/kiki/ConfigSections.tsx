@@ -26,6 +26,23 @@ const OCCASIONS: [string, string][] = [
   ['review_request', 'Bewertungsanfrage'],
 ]
 
+// Frontend-only trade templates for the Notdienst keyword list (2D). Clicking a
+// template appends its keywords to emergency_keywords (deduped); no API change.
+const EMERGENCY_KEYWORD_TEMPLATES: { label: string; keywords: string[] }[] = [
+  { label: 'SHK / Sanitär-Heizung-Klima', keywords: ['Rohrbruch', 'Wasserschaden', 'kein Warmwasser', 'Heizungsausfall', 'Gasgeruch', 'Rohrverstopfung', 'Wasser läuft aus', 'Warmwasserausfall'] },
+  { label: 'Elektro', keywords: ['Stromausfall', 'Kabelbrand', 'Brandgeruch', 'Funkenflug', 'Sicherung fliegt', 'Stromschlag', 'Kurzschluss'] },
+  { label: 'Schlüsseldienst', keywords: ['ausgesperrt', 'Tür zugefallen', 'Schlüssel abgebrochen', 'Einbruch', 'Schloss defekt', 'Person eingeschlossen'] },
+  { label: 'Dachdecker / Garten / Sturmschäden', keywords: ['Sturmschaden', 'Dach undicht', 'Ziegel lose', 'umgestürzter Baum', 'Ast droht zu fallen', 'Hagelschaden'] },
+]
+
+// /api/employees row shape (subset). user_id is the FK target users(id) used as
+// the option value for a category's default employee (2B).
+interface Employee {
+  id: string
+  user_id: string | null
+  display_name: string | null
+}
+
 function useConfigPatch(path: string, flash: (m: string) => void) {
   const qc = useQueryClient()
   return useMutation({
@@ -35,23 +52,45 @@ function useConfigPatch(path: string, flash: (m: string) => void) {
   })
 }
 
+// Inline-editable description for a single required field. Seeds local state
+// from the field's stored description and saves onBlur only when it changed,
+// so locked fields can still have their description edited (2A.1).
+function FieldDescriptionInput({ field, onSave }: { field: KzRequiredField; onSave: (description: string) => void }) {
+  const [val, setVal] = useState(field.description ?? '')
+  return (
+    <input
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={() => { if (val !== (field.description ?? '')) onSave(val) }}
+      placeholder="Beschreibung für den KI-Agenten (optional)"
+      className={cn(inputCls, 'mt-1 text-xs')}
+    />
+  )
+}
+
 // ─── Pflichtfelder ───────────────────────────────────────────────────────────
-export function PflichtfelderSection({ flash }: Props) {
+export function PflichtfelderSection({ data: overview, flash }: Props) {
   const qc = useQueryClient()
   const { data } = useQuery({ queryKey: ['kiki-zentrale', 'required-fields'], queryFn: () => apiFetch<{ fields: KzRequiredField[] }>(`${KZ}/required-fields`) })
   const fields = data?.fields ?? []
   const [newKey, setNewKey] = useState('')
   const [newLabel, setNewLabel] = useState('')
+  const [newDesc, setNewDesc] = useState('')
   const dragIdx = useRef<number | null>(null)
 
   const create = useMutation({
-    mutationFn: () => apiFetch(`${KZ}/required-fields`, { method: 'POST', body: JSON.stringify({ field_key: newKey || newLabel.toLowerCase().replace(/\s+/g, '_'), label: newLabel }) }),
-    onSuccess: () => { setNewKey(''); setNewLabel(''); qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }) },
+    mutationFn: () => apiFetch(`${KZ}/required-fields`, { method: 'POST', body: JSON.stringify({ field_key: newKey || newLabel.toLowerCase().replace(/\s+/g, '_'), label: newLabel, description: newDesc || null }) }),
+    onSuccess: () => { setNewKey(''); setNewLabel(''); setNewDesc(''); qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }) },
   })
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`${KZ}/required-fields/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }),
     onError: (e: Error) => flash(e.message || 'Löschen fehlgeschlagen.'),
+  })
+  const patchDesc = useMutation({
+    mutationFn: ({ id, description }: { id: string; description: string }) => apiFetch(`${KZ}/required-fields/${id}`, { method: 'PATCH', body: JSON.stringify({ description: description || null }) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }); flash('Gespeichert.') },
+    onError: (e: Error) => flash(e.message || 'Speichern fehlgeschlagen.'),
   })
   const reorder = useMutation({
     mutationFn: (ids: string[]) => apiFetch(`${KZ}/required-fields/reorder`, { method: 'POST', body: JSON.stringify({ ordered_ids: ids }) }),
@@ -83,10 +122,11 @@ export function PflichtfelderSection({ flash }: Props) {
       </Card>
 
       <Card>
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-1 flex items-center justify-between">
           <GroupLabel>Immer abgefragte Felder</GroupLabel>
           <span className="text-xs text-muted">Ziehen zum Sortieren</span>
         </div>
+        <p className="mb-3 text-xs text-muted">Die Beschreibungen werden dem KI-Agenten erklärt, wofür das Feld dient.</p>
         <div className="space-y-2">
           {fields.map((f, i) => (
             <div
@@ -95,38 +135,60 @@ export function PflichtfelderSection({ flash }: Props) {
               onDragStart={() => (dragIdx.current = i)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => onDrop(i)}
-              className="flex items-center gap-3 rounded-lg border border-border bg-alt px-3 py-2"
+              className="flex items-start gap-3 rounded-lg border border-border bg-alt px-3 py-2"
             >
-              <ArrowUpDown size={15} className="cursor-grab text-faint" />
+              <ArrowUpDown size={15} className="mt-2 cursor-grab text-faint" />
               <div className="flex-1">
                 <div className="flex items-center gap-2 text-sm font-medium text-text">
                   {f.label}
                   {f.is_locked && <Lock size={12} className="text-faint" />}
                   {f.is_duty && <Tag variant="green">Pflicht</Tag>}
                 </div>
-                {f.description && <div className="text-xs text-muted">{f.description}</div>}
+                <FieldDescriptionInput field={f} onSave={(description) => patchDesc.mutate({ id: f.id, description })} />
               </div>
               <button
                 disabled={f.is_locked}
                 onClick={() => del.mutate(f.id)}
                 title={f.is_locked ? 'Gesperrtes Feld' : 'Entfernen'}
-                className="text-muted hover:text-error disabled:opacity-30"
+                className="mt-2 text-muted hover:text-error disabled:opacity-30"
               >
                 <Trash2 size={15} />
               </button>
             </div>
           ))}
         </div>
-        <div className="mt-4 flex items-end gap-2 border-t border-border pt-4">
-          <div className="flex-1">
-            <Field label="Neues Feld"><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. E-Mail-Adresse" className={inputCls} /></Field>
+        <div className="mt-4 space-y-2 border-t border-border pt-4">
+          <Field label="Neues Feld"><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. E-Mail-Adresse" className={inputCls} /></Field>
+          <Field label="Beschreibung (optional)"><input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Wofür dient das Feld? (wird dem KI-Agenten erklärt)" className={inputCls} /></Field>
+          <div className="flex justify-end">
+            <button onClick={() => newLabel.trim() && create.mutate()} disabled={!newLabel.trim() || create.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+              Hinzufügen
+            </button>
           </div>
-          <button onClick={() => newLabel.trim() && create.mutate()} disabled={!newLabel.trim() || create.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
-            Hinzufügen
-          </button>
         </div>
       </Card>
+
+      <ProblemDescriptionCard config={overview.config} flash={flash} />
     </div>
+  )
+}
+
+// Separate card for the free-text "Anliegen / Problembeschreibung" that flows
+// into the agent prompt (2A.3). Saved via PATCH /problem-description.
+function ProblemDescriptionCard({ config, flash }: { config: KzOverview['config']; flash: (m: string) => void }) {
+  const patch = useConfigPatch('/problem-description', flash)
+  const [text, setText] = useState(config.problem_description ?? '')
+  return (
+    <Card>
+      <GroupLabel>Anliegen / Problembeschreibung</GroupLabel>
+      <p className="mb-2 text-sm text-muted">Hier definierst du, welche Problem-Details Kiki bei typischen Anliegen erfassen soll — dieser Text fließt in den Agenten-Prompt ein.</p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="z. B. Bei Heizungsausfall: Baujahr der Anlage, Fehlermeldung am Display, ob noch Warmwasser vorhanden ist …" className={cn(inputCls, 'min-h-[120px]')} />
+      <div className="mt-2 flex justify-end">
+        <button onClick={() => patch.mutate({ problem_description: text || null })} disabled={patch.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+          {patch.isPending ? 'Speichert…' : 'Speichern'}
+        </button>
+      </div>
+    </Card>
   )
 }
 
@@ -249,15 +311,21 @@ export function TerminregelnSection({ data, flash }: Props) {
         </div>
       </Card>
       <Card>
-        <GroupLabel>Regeln</GroupLabel>
+        <GroupLabel>Kapazität & Pufferzeiten</GroupLabel>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Pufferzeit zwischen Terminen (Min.)"><input type="number" value={f.buffer_minutes} onChange={(e) => set('buffer_minutes', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Max. Termine pro Tag"><input type="number" value={f.max_appointments_per_day} onChange={(e) => set('max_appointments_per_day', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Parallele Termine"><input type="number" value={f.parallel_slots} onChange={(e) => set('parallel_slots', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Vorlaufzeit (Tage)"><input type="number" value={f.lead_time_days} onChange={(e) => set('lead_time_days', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Frühester Termin (Uhrzeit)"><input type="time" value={f.lead_time_earliest_clock} onChange={(e) => set('lead_time_earliest_clock', e.target.value)} className={inputCls} /></Field>
+          <Field label="Pufferzeit zwischen Terminen (Min.)" hint="Kiki hält zwischen zwei Terminen so viele Minuten frei — z. B. für An- und Abfahrt."><input type="number" value={f.buffer_minutes} onChange={(e) => set('buffer_minutes', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Max. Termine pro Tag" hint="Ist diese Zahl erreicht, bietet Kiki am Telefon keine weiteren Termine an diesem Tag an."><input type="number" value={f.max_appointments_per_day} onChange={(e) => set('max_appointments_per_day', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Parallele Termine" hint="Wie viele Termine zur selben Zeit möglich sind, z. B. bei mehreren Teams."><input type="number" value={f.parallel_slots} onChange={(e) => set('parallel_slots', Number(e.target.value))} className={inputCls} /></Field>
+        </div>
+      </Card>
+      <Card>
+        <GroupLabel>Vorlaufzeit & frühester Termin</GroupLabel>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Vorlaufzeit (Tage)" hint="Frühestens nach so vielen Tagen vergibt Kiki einen Termin — keine kurzfristigen Buchungen."><input type="number" value={f.lead_time_days} onChange={(e) => set('lead_time_days', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Frühester Termin (Uhrzeit)" hint="Vor dieser Uhrzeit bietet Kiki keine Termine an (z. B. nicht vor 08:00)."><input type="time" value={f.lead_time_earliest_clock} onChange={(e) => set('lead_time_earliest_clock', e.target.value)} className={inputCls} /></Field>
         </div>
         <label className="mt-4 flex items-center gap-2 text-sm text-text"><Toggle on={f.lead_time_only_weekdays} onChange={(v) => set('lead_time_only_weekdays', v)} /> Vorlaufzeit nur an Werktagen zählen</label>
+        <p className="mt-1 text-xs text-muted">Wochenenden werden bei der Vorlaufzeit übersprungen — eine Anfrage am Freitag landet so nicht schon am Wochenende.</p>
         <SaveBar onReset={() => setF({ scheduling_enabled: c.scheduling_enabled, buffer_minutes: c.buffer_minutes, max_appointments_per_day: c.max_appointments_per_day, parallel_slots: c.parallel_slots, lead_time_days: c.lead_time_days, lead_time_only_weekdays: c.lead_time_only_weekdays, lead_time_earliest_clock: c.lead_time_earliest_clock ?? '' })} onSave={() => patch.mutate({ ...f, lead_time_earliest_clock: f.lead_time_earliest_clock || null })} saving={patch.isPending} />
       </Card>
       <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
@@ -273,6 +341,12 @@ export function TerminkategorienSection({ flash }: Props) {
   const qc = useQueryClient()
   const { data } = useQuery({ queryKey: ['kiki-zentrale', 'categories'], queryFn: () => apiFetch<{ categories: KzCategory[] }>(`${KZ}/appointment-categories`) })
   const cats = data?.categories ?? []
+  const { data: employees = [] } = useQuery({ queryKey: ['employees'], queryFn: () => apiFetch<Employee[]>('/api/employees') })
+  // The category FK targets users(id); only employees with a login (user_id) can
+  // be assigned. Map user_id → display_name for the list rows + select options.
+  const assignable = employees.filter((e) => e.user_id)
+  const empName = (userId: string | null | undefined) =>
+    userId ? assignable.find((e) => e.user_id === userId)?.display_name ?? null : null
   const [edit, setEdit] = useState<Partial<KzCategory> | null>(null)
   const inv = () => qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'categories'] })
 
@@ -299,7 +373,11 @@ export function TerminkategorienSection({ flash }: Props) {
         <div className="space-y-2">
           {cats.map((cat) => (
             <button key={cat.id} onClick={() => setEdit(cat)} className="flex w-full items-center justify-between rounded-lg border border-border px-3 py-2 text-left hover:bg-alt">
-              <div><div className="text-sm font-medium text-text">{cat.name}</div>{cat.description && <div className="text-xs text-muted">{cat.description}</div>}</div>
+              <div>
+                <div className="text-sm font-medium text-text">{cat.name}</div>
+                {cat.description && <div className="text-xs text-muted">{cat.description}</div>}
+                {empName(cat.default_employee_id) && <div className="text-xs text-muted">Standard-Mitarbeiter: {empName(cat.default_employee_id)}</div>}
+              </div>
               <span className="text-xs text-muted">{cat.duration_minutes} Min.</span>
             </button>
           ))}
@@ -317,6 +395,12 @@ export function TerminkategorienSection({ flash }: Props) {
             <Field label="Name"><input value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value })} className={inputCls} /></Field>
             <Field label="Beschreibung"><input value={edit.description ?? ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} className={inputCls} /></Field>
             <Field label="Dauer (Minuten)"><input type="number" value={edit.duration_minutes ?? 60} onChange={(e) => setEdit({ ...edit, duration_minutes: Number(e.target.value) })} className={inputCls} /></Field>
+            <Field label="Standard-Mitarbeiter (informativ — beeinflusst die Buchung nicht)">
+              <select value={edit.default_employee_id ?? ''} onChange={(e) => setEdit({ ...edit, default_employee_id: e.target.value || null })} className={inputCls}>
+                <option value="">— kein Mitarbeiter —</option>
+                {assignable.map((e) => <option key={e.user_id} value={e.user_id!}>{e.display_name ?? '(ohne Name)'}</option>)}
+              </select>
+            </Field>
           </div>
         )}
       </Modal>
@@ -437,12 +521,17 @@ export function NotdienstSection({ data, flash }: Props) {
     emergency_enabled: c.emergency_enabled, emergency_number: c.emergency_number ?? '',
     emergency_only_outside_business_hours: c.emergency_only_outside_business_hours,
     emergency_keywords: c.emergency_keywords ?? [],
+    emergency_extra_windows: c.emergency_extra_windows ?? [],
     emergency_surcharge_notice_enabled: c.emergency_surcharge_notice_enabled,
     emergency_surcharge_text: c.emergency_surcharge_text ?? '',
   })
   const [kw, setKw] = useState('')
   const set = (k: keyof typeof f, v: unknown) => setF((p) => ({ ...p, [k]: v }))
   const addKw = () => { if (kw.trim()) { set('emergency_keywords', [...f.emergency_keywords, kw.trim()]); setKw('') } }
+  // Append a template's keywords, skipping any already present (dedupe).
+  const addTemplate = (keywords: string[]) => set('emergency_keywords', [...f.emergency_keywords, ...keywords.filter((k) => !f.emergency_keywords.includes(k))])
+  const setWindow = (i: number, patchWin: { from?: string; to?: string; label?: string }) =>
+    set('emergency_extra_windows', f.emergency_extra_windows.map((w, j) => (j === i ? { ...w, ...patchWin } : w)))
 
   return (
     <div className="space-y-4">
@@ -459,6 +548,23 @@ export function NotdienstSection({ data, flash }: Props) {
         <p className="mt-2 text-xs text-muted">Geschäftszeiten werden im <a href="/calendar/business-hours" className="font-medium text-green-deep hover:underline">Kalender</a> verwaltet.</p>
       </Card>
       <Card>
+        <GroupLabel>Zusätzliche Zeitfenster (optional)</GroupLabel>
+        <p className="mb-3 text-xs text-muted">Standardmäßig gilt der Notdienst außerhalb der Geschäftszeiten; hier optional zusätzliche Fenster (z. B. Mittwochnachmittag).</p>
+        <div className="space-y-2">
+          {f.emergency_extra_windows.length === 0 && <p className="text-sm text-faint">Keine zusätzlichen Zeitfenster.</p>}
+          {f.emergency_extra_windows.map((w, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-alt px-3 py-2">
+              <input type="time" value={w.from ?? ''} onChange={(e) => setWindow(i, { from: e.target.value })} className={cn(inputCls, 'w-auto')} />
+              <span className="text-sm text-muted">bis</span>
+              <input type="time" value={w.to ?? ''} onChange={(e) => setWindow(i, { to: e.target.value })} className={cn(inputCls, 'w-auto')} />
+              <input type="text" value={w.label ?? ''} onChange={(e) => setWindow(i, { label: e.target.value })} placeholder="Bezeichnung (optional)" className={cn(inputCls, 'min-w-[160px] flex-1')} />
+              <button onClick={() => set('emergency_extra_windows', f.emergency_extra_windows.filter((_, j) => j !== i))} title="Entfernen" className="text-muted hover:text-error"><X size={15} /></button>
+            </div>
+          ))}
+        </div>
+        <button onClick={() => set('emergency_extra_windows', [...f.emergency_extra_windows, { from: '', to: '' }])} className="mt-3 flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"><Plus size={14} /> Zeitfenster</button>
+      </Card>
+      <Card>
         <GroupLabel>Stichwörter</GroupLabel>
         <div className="flex flex-wrap gap-2">
           {f.emergency_keywords.map((k, i) => (
@@ -471,6 +577,15 @@ export function NotdienstSection({ data, flash }: Props) {
           <input value={kw} onChange={(e) => setKw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addKw()} placeholder="z. B. Wasserrohrbruch" className={cn(inputCls, 'max-w-xs')} />
           <button onClick={addKw} className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt">Hinzufügen</button>
         </div>
+        <div className="mt-4 border-t border-border pt-4">
+          <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Gewerk-Vorlagen</div>
+          <p className="mb-2 text-xs text-muted">Vorlage hinzufügen — die Stichwörter werden ergänzt, einzelne kannst du danach entfernen.</p>
+          <div className="flex flex-wrap gap-2">
+            {EMERGENCY_KEYWORD_TEMPLATES.map((t) => (
+              <button key={t.label} onClick={() => addTemplate(t.keywords)} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt">+ {t.label}</button>
+            ))}
+          </div>
+        </div>
       </Card>
       <Card>
         <div className="flex items-center justify-between">
@@ -480,7 +595,7 @@ export function NotdienstSection({ data, flash }: Props) {
         <textarea value={f.emergency_surcharge_text} onChange={(e) => set('emergency_surcharge_text', e.target.value)} placeholder="z. B. Für Notdiensteinsätze außerhalb der Geschäftszeiten fällt ein Zuschlag an." className={cn(inputCls, 'min-h-[80px]')} />
       </Card>
       <div className="rounded-xl border border-border bg-surface px-6 py-4 text-right">
-        <button onClick={() => patch.mutate({ ...f, emergency_number: f.emergency_number || null, emergency_surcharge_text: f.emergency_surcharge_text || null })} disabled={patch.isPending} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{patch.isPending ? 'Speichert…' : 'Speichern'}</button>
+        <button onClick={() => patch.mutate({ ...f, emergency_number: f.emergency_number || null, emergency_surcharge_text: f.emergency_surcharge_text || null, emergency_extra_windows: f.emergency_extra_windows.filter((w) => w.from || w.to) })} disabled={patch.isPending} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{patch.isPending ? 'Speichert…' : 'Speichern'}</button>
       </div>
     </div>
   )

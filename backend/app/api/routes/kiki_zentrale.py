@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, require_super_admin
 from app.db.supabase_client import get_service_client
+from app.services import agent_config as ac
 from app.services import elevenlabs_agent as ea
 
 router = APIRouter(prefix="/api/kiki-zentrale", tags=["kiki-zentrale"])
@@ -25,7 +26,8 @@ MAX_PDF_BYTES = 20 * 1024 * 1024
 
 # agent_configs columns owned by Kiki-Zentrale (returned in the GET aggregator).
 _CONFIG_COLS = (
-    "kiki_level, welcome_message, trade, knowledge_text, forwarding_number, "
+    "kiki_level, welcome_message, trade, knowledge_text, problem_description, "
+    "prompt_manual_override, forwarding_number, "
     "incoming_forwarding_number, scheduling_enabled, buffer_minutes, "
     "max_appointments_per_day, parallel_slots, lead_time_days, lead_time_only_weekdays, "
     "lead_time_earliest_clock, price_info_enabled, kva_automation_enabled, "
@@ -55,6 +57,21 @@ def _upsert_config(org_id: str, fields: dict) -> dict:
         client.table("agent_configs").select(_CONFIG_COLS).eq("org_id", org_id).limit(1)
         .execute().data or [{}]
     )[0]
+
+
+def _repush(user: CurrentUser, endpoint_label: str) -> None:
+    """Best-effort re-render + push of the org's prompt after a config save.
+
+    Wrapped so a push failure (un-provisioned org, EL outage, manual override)
+    NEVER fails the config save the user just made. Runs synchronously inside the
+    handler's threadpool body — the prompt reflects the change on the agent by the
+    time the request returns when the push succeeds."""
+    try:
+        ac.rerender_and_push_for_org(
+            org_id=user.org_id, actor_id=user.id, endpoint_label=endpoint_label
+        )
+    except Exception:  # noqa: BLE001 — defensive: rerender already swallows, this is belt-and-braces
+        pass
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -100,6 +117,11 @@ class ReorderRequest(BaseModel):
 class ContextUpdate(BaseModel):
     trade: str | None = None
     knowledge_text: str | None = None
+    model_config = {"extra": "ignore"}
+
+
+class ProblemDescriptionUpdate(BaseModel):
+    problem_description: str | None = None
     model_config = {"extra": "ignore"}
 
 
@@ -406,6 +428,9 @@ async def update_prompt(payload: PromptUpdate, user: CurrentUser = Depends(requi
             org_id=user.org_id,
             endpoint_label="prompt-editor",
         )
+        # A manual prompt edit takes ownership of the prompt: flag the org so the
+        # config-driven re-render no longer overwrites these hand-made changes.
+        _upsert_config(user.org_id, {"prompt_manual_override": True})
         new_prompt = ea._get_path(ea.get_agent_config(agent_id), ea.PROMPT_PATH) or ""
         return {"success": True, "prompt": new_prompt}
 
@@ -458,7 +483,9 @@ async def create_required_field(payload: RequiredFieldCreate, user: CurrentUser 
         )
         nxt = (existing[0]["sort_order"] + 1) if existing else 0
         row = {**payload.model_dump(), "org_id": user.org_id, "is_locked": False, "sort_order": nxt}
-        return client.table("agent_required_fields").insert(row).execute().data[0]
+        created = client.table("agent_required_fields").insert(row).execute().data[0]
+        _repush(user, "kz_required_fields")
+        return created
 
     return await run_in_threadpool(_do)
 
@@ -473,10 +500,12 @@ async def update_required_field(field_id: str, payload: RequiredFieldUpdate, use
         client.table("agent_required_fields").update(fields).eq("id", field_id).eq(
             "org_id", user.org_id
         ).execute()
-        return (
+        updated = (
             client.table("agent_required_fields").select("*").eq("id", field_id)
             .eq("org_id", user.org_id).limit(1).execute().data or [{}]
         )[0]
+        _repush(user, "kz_required_fields")
+        return updated
 
     return await run_in_threadpool(_do)
 
@@ -498,6 +527,7 @@ async def delete_required_field(field_id: str, user: CurrentUser = Depends(requi
         client.table("agent_required_fields").delete().eq("id", field_id).eq(
             "org_id", user.org_id
         ).execute()
+        _repush(user, "kz_required_fields")
         return "ok"
 
     res = await run_in_threadpool(_do)
@@ -518,6 +548,7 @@ async def reorder_required_fields(payload: ReorderRequest, user: CurrentUser = D
             client.table("agent_required_fields").update({"sort_order": idx}).eq(
                 "id", fid
             ).eq("org_id", user.org_id).execute()
+        _repush(user, "kz_required_fields")
         return {"success": True}
 
     return await run_in_threadpool(_do)
@@ -528,7 +559,30 @@ async def reorder_required_fields(payload: ReorderRequest, user: CurrentUser = D
 async def update_context(payload: ContextUpdate, user: CurrentUser = Depends(require_org)) -> dict:
     _require_admin(user)
     fields = payload.model_dump(exclude_unset=True)
-    return await run_in_threadpool(_upsert_config, user.org_id, fields)
+
+    def _do() -> dict:
+        cfg = _upsert_config(user.org_id, fields)
+        _repush(user, "kz_identity")
+        return cfg
+
+    return await run_in_threadpool(_do)
+
+
+@router.patch("/problem-description")
+async def update_problem_description(
+    payload: ProblemDescriptionUpdate, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Upsert the org's free-text 'what to capture per typical problem' instruction
+    (agent_configs.problem_description), then re-push the prompt."""
+    _require_admin(user)
+    fields = payload.model_dump(exclude_unset=True)
+
+    def _do() -> dict:
+        cfg = _upsert_config(user.org_id, fields)
+        _repush(user, "kz_problem_description")
+        return cfg
+
+    return await run_in_threadpool(_do)
 
 
 @router.get("/knowledge-resources")
@@ -659,7 +713,14 @@ async def reindex_knowledge_resource(resource_id: str, user: CurrentUser = Depen
 @router.patch("/scheduling-rules")
 async def update_scheduling_rules(payload: SchedulingRulesUpdate, user: CurrentUser = Depends(require_org)) -> dict:
     _require_admin(user)
-    return await run_in_threadpool(_upsert_config, user.org_id, payload.model_dump(exclude_unset=True))
+    fields = payload.model_dump(exclude_unset=True)
+
+    def _do() -> dict:
+        cfg = _upsert_config(user.org_id, fields)
+        _repush(user, "kz_scheduling")
+        return cfg
+
+    return await run_in_threadpool(_do)
 
 
 # ─── Terminkategorien ────────────────────────────────────────────────────────
@@ -687,7 +748,9 @@ async def create_category(payload: CategoryCreate, user: CurrentUser = Depends(r
         )
         nxt = (existing[0]["sort_order"] + 1) if existing else 0
         row = {**payload.model_dump(), "org_id": user.org_id, "sort_order": nxt}
-        return client.table("appointment_categories").insert(row).execute().data[0]
+        created = client.table("appointment_categories").insert(row).execute().data[0]
+        _repush(user, "kz_categories")
+        return created
 
     return await run_in_threadpool(_do)
 
@@ -702,10 +765,12 @@ async def update_category(category_id: str, payload: CategoryUpdate, user: Curre
         client.table("appointment_categories").update(fields).eq("id", category_id).eq(
             "org_id", user.org_id
         ).execute()
-        return (
+        updated = (
             client.table("appointment_categories").select("*").eq("id", category_id)
             .eq("org_id", user.org_id).limit(1).execute().data or [{}]
         )[0]
+        _repush(user, "kz_categories")
+        return updated
 
     return await run_in_threadpool(_do)
 
@@ -718,6 +783,7 @@ async def delete_category(category_id: str, user: CurrentUser = Depends(require_
         get_service_client().table("appointment_categories").delete().eq(
             "id", category_id
         ).eq("org_id", user.org_id).execute()
+        _repush(user, "kz_categories")
         return {"success": True}
 
     return await run_in_threadpool(_do)
@@ -795,7 +861,14 @@ async def delete_service(service_id: str, user: CurrentUser = Depends(require_or
 @router.patch("/emergency")
 async def update_emergency(payload: EmergencyUpdate, user: CurrentUser = Depends(require_org)) -> dict:
     _require_admin(user)
-    return await run_in_threadpool(_upsert_config, user.org_id, payload.model_dump(exclude_unset=True))
+    fields = payload.model_dump(exclude_unset=True)
+
+    def _do() -> dict:
+        cfg = _upsert_config(user.org_id, fields)
+        _repush(user, "kz_emergency")
+        return cfg
+
+    return await run_in_threadpool(_do)
 
 
 # ─── Telefon ─────────────────────────────────────────────────────────────────
