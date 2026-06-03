@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   LogOut,
+  Search,
   Settings,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -15,14 +16,6 @@ import { useMe } from '../../lib/useMe'
 import { cn, initials } from '../../lib/utils'
 import { PersonalSettingsModal } from '../PersonalSettingsModal'
 import { isGroup, NAV, type NavEntry, type NavLeaf } from './nav'
-
-const leafClass = ({ isActive }: { isActive: boolean }) =>
-  cn(
-    'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
-    isActive
-      ? 'bg-green-tint-100 font-semibold text-green-deep'
-      : 'text-body hover:bg-alt',
-  )
 
 function Leaf({
   leaf,
@@ -36,14 +29,19 @@ function Leaf({
   const Icon = leaf.icon
   const badge = leaf.badgeKey ? badges[leaf.badgeKey] : undefined
   return (
-    <NavLink to={leaf.to} end={leaf.to === '/'} className={leafClass} title={leaf.label}>
-      {Icon && <Icon size={16} className="flex-shrink-0" />}
-      {!collapsed && <span className="flex-1 truncate">{leaf.label}</span>}
-      {!collapsed && badge ? (
-        <span className="rounded-full bg-error-bg px-1.5 text-xs font-bold text-error">
-          {badge}
+    <NavLink
+      to={leaf.to}
+      end={leaf.to === '/'}
+      className={({ isActive }) => cn('nav-item', isActive && 'active', collapsed && 'justify-center')}
+      title={leaf.label}
+    >
+      {Icon && (
+        <span className="nav-ico">
+          <Icon size={18} />
         </span>
-      ) : null}
+      )}
+      {!collapsed && <span className="flex-1 truncate">{leaf.label}</span>}
+      {!collapsed && badge ? <span className="nav-count">{badge}</span> : null}
     </NavLink>
   )
 }
@@ -51,14 +49,22 @@ function Leaf({
 export function Sidebar({
   collapsed,
   badges = {},
+  onOpenSearch,
 }: {
   collapsed: boolean
   badges?: Record<string, number>
+  onOpenSearch: () => void
 }) {
   const { session, signOut } = useAuth()
   const navigate = useNavigate()
   const [personalOpen, setPersonalOpen] = useState(false)
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  // Nav groups default to OPEN so the nested submenus read like the poster
+  // design out of the box (the user can still collapse them).
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {}
+    for (const e of NAV) if (isGroup(e)) init[e.label] = true
+    return init
+  })
   // White-label company name + role come from /api/me (ProtectedRoute primes the
   // ['me'] cache, so this is instant). isAdmin drives cosmetic hiding of
   // admin-only nav entries — the backend still enforces every action.
@@ -84,36 +90,36 @@ export function Sidebar({
   const badgeName = isAdmin ? (companyName ?? 'Unternehmen') : userName
   const badgeEmail = isAdmin ? (companyEmail ?? email) : email
   const badgeLogo = isAdmin ? companyLogo : null
-  // NOTE: Super-admin no longer enters via the customer-facing sidebar. The
-  // admin surface lives at /admin/* (standalone tree, own login, own layout).
 
   return (
     <aside
-      className="sticky top-0 z-20 flex h-screen flex-shrink-0 flex-col border-r border-border bg-sidebar transition-[width] duration-200"
-      style={{ width: collapsed ? 64 : 240 }}
+      className="rail sticky top-0 z-20 flex h-screen flex-shrink-0 flex-col gap-0.5 transition-[width] duration-200"
+      style={{ width: collapsed ? 64 : 240, padding: '18px 14px 14px' }}
     >
-      {/* Brand / white-label company header — shows WHOSE CRM this is. No HeyKiki
-          branding in customer chrome: company logo (if uploaded) + company name. */}
-      <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
-        {companyLogo ? (
-          <img src={companyLogo} alt={companyName ?? 'Logo'} className="h-9 w-9 flex-shrink-0 rounded-lg object-contain" />
-        ) : (
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-green-brand to-green-primary text-base font-extrabold text-white">
-            {companyName ? companyName.charAt(0).toUpperCase() : <Building2 size={18} />}
-          </div>
-        )}
-        {!collapsed && (
-          <div className="min-w-0">
-            <div className="truncate text-base font-bold leading-tight text-text" title={companyName ?? undefined}>
-              {companyName ?? 'CRM Portal'}
-            </div>
-            {companyName && <div className="text-xs text-muted">CRM Portal</div>}
-          </div>
-        )}
+      {/* Brand — HeyKiki product mark (company identity lives in the bottom badge). */}
+      <div className={cn('mb-3 flex items-center gap-2.5 px-1', collapsed && 'justify-center')}>
+        <span className="rail-mark">K</span>
+        {!collapsed && <span className="rail-word">HeyKiki</span>}
       </div>
 
+      {/* Kiki fragen — ⌘K command palette over the nav menus + submenus. */}
+      <button
+        type="button"
+        onClick={onOpenSearch}
+        className={cn('rail-search mb-2', collapsed && 'justify-center')}
+        title="Kiki fragen"
+      >
+        <Search size={15} className="flex-shrink-0" />
+        {!collapsed && (
+          <>
+            <span>Kiki fragen</span>
+            <span className="rail-search-kbd">⌘K</span>
+          </>
+        )}
+      </button>
+
       {/* Nav */}
-      <nav className="flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden px-2.5 py-3">
+      <nav className="-mx-1 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden px-1">
         {visibleNav.map((entry) => {
           if (!isGroup(entry)) {
             return <Leaf key={entry.to} leaf={entry} collapsed={collapsed} badges={badges} />
@@ -125,24 +131,33 @@ export function Sidebar({
             <div key={key}>
               <button
                 onClick={() => setOpenGroups((g) => ({ ...g, [key]: !g[key] }))}
-                className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm text-body transition-colors hover:bg-alt"
+                className={cn('nav-item', collapsed && 'justify-center')}
                 title={entry.label}
               >
-                <Icon size={16} className="flex-shrink-0" />
+                <span className="nav-ico">
+                  <Icon size={18} />
+                </span>
                 {!collapsed && (
                   <>
                     <span className="flex-1 text-left">{entry.label}</span>
-                    <ChevronRight
-                      size={12}
-                      className={cn('text-faint transition-transform', open && 'rotate-90')}
-                    />
+                    <span className={cn('nav-caret', open && 'open')}>
+                      <ChevronRight size={14} />
+                    </span>
                   </>
                 )}
               </button>
               {open && !collapsed && (
-                <div className="space-y-0.5 py-0.5 pl-7">
+                <div className="nav-sub">
                   {entry.children.map((child) => (
-                    <Leaf key={child.to} leaf={child} collapsed={false} badges={badges} />
+                    <NavLink
+                      key={child.to}
+                      to={child.to}
+                      className={({ isActive }) => cn('nav-subitem', isActive && 'active')}
+                      title={child.label}
+                    >
+                      <span className="dot" />
+                      <span className="flex-1 truncate">{child.label}</span>
+                    </NavLink>
                   ))}
                 </div>
               )}
@@ -154,14 +169,19 @@ export function Sidebar({
             employee); hide the whole section for non-admins. */}
         {isAdmin && (
           <>
-            <div className="my-3 h-px bg-border" />
-            {!collapsed && (
-              <div className="px-2 pb-2 text-xs font-bold uppercase tracking-wide text-faint">
-                KI-Konfiguration
-              </div>
+            {!collapsed ? (
+              <div className="rail-group">KI-Konfiguration</div>
+            ) : (
+              <div className="my-2 h-px bg-white/10" />
             )}
-            <NavLink to="/kiki-zentrale" className={leafClass} title="Kiki-Zentrale">
-              <Bot size={16} className="flex-shrink-0 text-ai" />
+            <NavLink
+              to="/kiki-zentrale"
+              className={({ isActive }) => cn('nav-item', isActive && 'active', collapsed && 'justify-center')}
+              title="Kiki-Zentrale"
+            >
+              <span className="nav-ico kiki">
+                <Bot size={18} />
+              </span>
               {!collapsed && <span className="flex-1">Kiki-Zentrale</span>}
             </NavLink>
           </>
@@ -169,27 +189,25 @@ export function Sidebar({
       </nav>
 
       {/* Profile menu */}
-      <div className="border-t border-border p-2.5">
+      <div className="mt-2">
         <DropdownMenu.Root>
-          <DropdownMenu.Trigger className="flex w-full items-center gap-2.5 rounded-md p-2 transition-colors hover:bg-alt">
-            {badgeLogo ? (
-              <img src={badgeLogo} alt="" className="h-8 w-8 flex-shrink-0 rounded-md object-contain" />
-            ) : (
-              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-green-tint-200 text-xs font-bold text-green-deep">
-                {initials(badgeName)}
-              </div>
-            )}
-            {!collapsed && (
-              <>
-                <div className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-sm font-semibold leading-tight text-text">
-                    {badgeName}
+          <DropdownMenu.Trigger asChild>
+            <button className={cn('rail-account', collapsed && 'justify-center')}>
+              {badgeLogo ? (
+                <img src={badgeLogo} alt="" className="rail-ava" />
+              ) : (
+                <span className="rail-ava">{initials(badgeName)}</span>
+              )}
+              {!collapsed && (
+                <>
+                  <div className="min-w-0 flex-1 text-left">
+                    <div className="rail-nm truncate">{badgeName}</div>
+                    <div className="rail-rl truncate">{badgeEmail}</div>
                   </div>
-                  <div className="truncate text-xs text-muted">{badgeEmail}</div>
-                </div>
-                <ChevronDown size={13} className="text-muted" />
-              </>
-            )}
+                  <ChevronDown size={13} className="text-white/50" />
+                </>
+              )}
+            </button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content
