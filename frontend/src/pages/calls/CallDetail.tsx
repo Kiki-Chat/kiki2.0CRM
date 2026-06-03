@@ -1,0 +1,154 @@
+// Center + right orchestrator. Owns the detail queries/mutations/modals/timeline
+// (identical wiring to the original CallDetail) and composes Transcript + Workspace.
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+
+import { apiFetch } from '../../lib/api'
+import { AppointmentCard, usePendingAppointment } from './AppointmentCard'
+import { CreateAppointmentModal, ProcessRequestModal } from './Modals'
+import { ResizeHandle, useColumnResize } from './resize'
+import { Transcript } from './Transcript'
+import { Workspace } from './Workspace'
+import type { CallDetailData, Employee, Inquiry, TimelineEvent } from './shared'
+
+export function CallDetail({
+  callId,
+  isSuperAdmin,
+  emergency,
+  rightOpen,
+  onToggleRight,
+}: {
+  callId: string
+  isSuperAdmin: boolean
+  emergency: boolean
+  rightOpen: boolean
+  onToggleRight: () => void
+}) {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const [tab, setTab] = useState<'actions' | 'details' | 'course'>('actions')
+  const [modal, setModal] = useState<'process' | 'appointment' | null>(null)
+
+  const { data: call } = useQuery({
+    queryKey: ['call', callId],
+    queryFn: () => apiFetch<CallDetailData>(`/api/calls/${callId}`),
+  })
+  const { data: inquiry } = useQuery({
+    queryKey: ['callInquiry', callId],
+    queryFn: () => apiFetch<Inquiry>(`/api/calls/${callId}/inquiry`, { method: 'POST' }),
+  })
+  const { data: employees = [] } = useQuery({
+    queryKey: ['employees'],
+    queryFn: () => apiFetch<Employee[]>('/api/employees'),
+  })
+
+  const patchInquiry = useMutation({
+    mutationFn: (body: Partial<Inquiry>) =>
+      apiFetch<Inquiry>(`/api/inquiries/${inquiry!.id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['callInquiry', callId] })
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
+    },
+  })
+
+  const pendingAppt = usePendingAppointment(callId)
+  const [dismissedApptIds, setDismissedApptIds] = useState<Set<string>>(new Set())
+  const pendingAppointment = pendingAppt.data?.appointment ?? null
+  const showAppointmentCard = !!pendingAppointment && !dismissedApptIds.has(pendingAppointment.id)
+
+  // Timeline is lazy — only fetched when the Verlauf tab is open (as before).
+  const timeline = useQuery({
+    queryKey: ['callTimeline', callId],
+    queryFn: () => apiFetch<TimelineEvent[]>(`/api/calls/${callId}/timeline`),
+    enabled: !!call && tab === 'course',
+  })
+
+  const rightResize = useColumnResize('hk-calls-right-w', 360, { min: 300, max: 600, side: 'right' })
+
+  if (!call) {
+    return <div className="flex flex-1 items-center justify-center text-muted">Lädt…</div>
+  }
+
+  const appointmentSlot =
+    showAppointmentCard && pendingAppointment ? (
+      <AppointmentCard
+        appointment={pendingAppointment}
+        callId={callId}
+        onDismiss={() => setDismissedApptIds((prev) => new Set(prev).add(pendingAppointment.id))}
+      />
+    ) : null
+
+  return (
+    <>
+      <Transcript
+        call={call}
+        isSuperAdmin={isSuperAdmin}
+        onOpenSummary={() => setTab('details')}
+        onToggleRight={onToggleRight}
+        rightOpen={rightOpen}
+      />
+
+      {rightOpen && (
+        <>
+          <ResizeHandle onMouseDown={rightResize.onMouseDown} />
+          <aside
+            style={{ width: rightResize.width }}
+            className="flex h-full flex-shrink-0 flex-col border-l border-border bg-surface"
+          >
+            <Workspace
+              call={call}
+              inquiry={inquiry}
+              employees={employees}
+              busy={patchInquiry.isPending}
+              emergency={emergency}
+              tab={tab}
+              setTab={setTab}
+              timeline={timeline.data ?? []}
+              timelineLoading={timeline.isLoading}
+              appointmentSlot={appointmentSlot}
+              onStatus={(s) => patchInquiry.mutate({ status: s })}
+              onAssign={(id) => patchInquiry.mutate({ assigned_employee_id: id })}
+              onEdit={() => setModal('process')}
+              onAppointment={() => setModal('appointment')}
+              onKva={
+                call.customer_id
+                  ? () =>
+                      navigate(
+                        `/cost-estimates/new?customer_id=${call.customer_id}` +
+                          (inquiry?.id ? `&inquiry_id=${inquiry.id}` : ''),
+                      )
+                  : undefined
+              }
+              onOpenCustomer={() => call.customer_id && navigate(`/customers/${call.customer_id}`)}
+            />
+          </aside>
+        </>
+      )}
+
+      {inquiry && (
+        <ProcessRequestModal
+          open={modal === 'process'}
+          onClose={() => setModal(null)}
+          inquiry={inquiry}
+          onSave={(body) => {
+            patchInquiry.mutate(body)
+            setModal(null)
+          }}
+        />
+      )}
+      <CreateAppointmentModal
+        open={modal === 'appointment'}
+        onClose={() => setModal(null)}
+        call={call}
+        inquiryId={inquiry?.id}
+        employees={employees}
+        onCreated={() => {
+          setModal(null)
+          qc.invalidateQueries({ queryKey: ['callInquiry', callId] })
+        }}
+      />
+    </>
+  )
+}

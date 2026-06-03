@@ -34,6 +34,9 @@ export default {
         'info-bg': 'var(--info-bg)',
         ai: 'var(--ai)',
         'ai-bg': 'var(--ai-bg)',
+        // Call-logs direction accents (teal inbound / amber outbound)
+        inbound: 'var(--inbound)',
+        outbound: 'var(--outbound)',
       },
       fontFamily: {
         heading: ['Söhne', 'Inter', 'system-ui', 'sans-serif'],
