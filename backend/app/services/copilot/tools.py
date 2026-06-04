@@ -143,7 +143,7 @@ _ORG_PROFILE_FIELDS = ("name", "trade", "phone_number", "fax", "email", "website
 # key -> (German trigger terms, explanation). Powers explain_setting.
 _SETTINGS_DICT: dict[str, tuple[tuple[str, ...], str]] = {
     "autonomy": (("autonom", "kiki-stufe", "stufe", "eigenständig", "kiki level"),
-        "Die Kiki-Stufe (kiki_level) steuert, wie eigenständig die Telefon-KI handelt: Stufe 1 = nimmt nur das Anliegen auf, Stufe 2 = bucht Termine vorläufig (du bestätigst), Stufe 3 = bucht & bestätigt selbst. Unter Kiki-Zentrale → Verhalten."),
+        "Die Autonomie wird pro Bereich (Termine, KVA, Projekte, Rechnungen) als Stufe 1–3 eingestellt: Stufe 1 = nimmt nur das Anliegen auf, Stufe 2 = erstellt Entwürfe / bucht vorläufig (du bestätigst), Stufe 3 = erledigt es eigenständig. Jeder Bereich hat einen eigenen Schalter. Unter Kiki-Zentrale → Verhalten."),
     "ai_suggestions": (("vorschläge", "vorschlag", "erinnerung", "nachfassen"),
         "KI-Vorschläge erinnern dich automatisch (KVA nachfassen, offene Rechnungen, Wartung). Die Schwellen in Tagen stellst du unter Einstellungen → KI-Vorschläge ein."),
     "emergency": (("notdienst", "notfall", "dringend"),

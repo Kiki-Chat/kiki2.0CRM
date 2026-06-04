@@ -4,7 +4,15 @@ export const KZ = '/api/kiki-zentrale'
 export const KZ_STALE = 5 * 60 * 1000
 
 export interface KzConfig {
-  kiki_level: number
+  kiki_level: number // legacy (dormant) — replaced by the per-capability fields below
+  appointments_enabled: boolean
+  appointments_level: number
+  kva_enabled: boolean
+  kva_level: number
+  projects_enabled: boolean
+  projects_level: number
+  invoices_enabled: boolean
+  invoices_level: number
   welcome_message: string | null
   trade: string | null
   knowledge_text: string
@@ -24,7 +32,7 @@ export interface KzConfig {
   emergency_number: string | null
   emergency_only_outside_business_hours: boolean
   emergency_keywords: string[]
-  emergency_extra_windows: { from?: string; to?: string; label?: string }[]
+  emergency_extra_windows: { from?: string; to?: string; label?: string; weekdays?: string[] }[]
   emergency_surcharge_notice_enabled: boolean
   emergency_surcharge_text: string | null
   outbound_enabled: boolean
@@ -32,6 +40,17 @@ export interface KzConfig {
   outbound_time_from: string
   outbound_time_to: string
   outbound_weekdays: string[]
+  // 17 — appointment outbound sub-options
+  outbound_appt_confirm_enabled: boolean
+  outbound_appt_cancel_enabled: boolean
+  outbound_appt_reschedule_enabled: boolean
+  // 18 — outbound retry
+  outbound_retry_max_attempts: number
+  outbound_retry_interval_minutes: number
+  outbound_recall_on_short_hangup: boolean
+  outbound_short_hangup_seconds: number
+  // 20 — time-based welcome variants
+  welcome_messages: { from?: string; to?: string; message?: string }[]
 }
 
 export interface KzAgentState {

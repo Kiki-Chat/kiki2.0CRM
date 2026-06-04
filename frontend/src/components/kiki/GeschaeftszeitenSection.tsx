@@ -1,10 +1,13 @@
+// Geschäftszeiten (business hours) as a Kiki-Zentrale section. Moved here from
+// the standalone Calendar page (/calendar/business-hours) per UAT: business
+// hours now live in Kiki-Zentrale under their own menu item. Same data + API
+// (agent_configs.scheduling.business_hours via /api/calendar/business-hours).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Clock, Coffee, Copy, Info } from 'lucide-react'
+import { Clock, Coffee, Copy, Info } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 
-import { apiFetch } from '../lib/api'
-import { cn } from '../lib/utils'
+import { apiFetch } from '../../lib/api'
+import { cn } from '../../lib/utils'
 
 interface DayHours {
   open: boolean
@@ -34,37 +37,20 @@ const day = (over: Partial<DayHours> = {}): DayHours => ({
   ...over,
 })
 
-const PRESETS: { key: string; label: string; build: () => Hours }[] = [
-  {
-    key: 'standard',
-    label: 'Standard (Mo–Fr 8–17)',
-    build: () => mk((i) => day({ open: i < 5 })),
-  },
-  {
-    key: 'lunch',
-    label: 'Mit Mittagspause',
-    build: () => mk((i) => day({ open: i < 5, break_start: '12:00', break_end: '13:00' })),
-  },
-  {
-    key: 'fulltime',
-    label: 'Vollzeit (inkl. Samstag)',
-    build: () => mk((i) => day({ open: i < 6 })),
-  },
-  {
-    key: 'parttime',
-    label: 'Teilzeit (Mo–Fr 8–13)',
-    build: () => mk((i) => day({ open: i < 5, end: '13:00' })),
-  },
-]
-
 function mk(fn: (i: number) => DayHours): Hours {
   const out: Hours = {}
   DAYS.forEach((d, i) => (out[d.key] = fn(i)))
   return out
 }
 
-export function BusinessHoursPage() {
-  const navigate = useNavigate()
+const PRESETS: { key: string; label: string; build: () => Hours }[] = [
+  { key: 'standard', label: 'Standard (Mo–Fr 8–17)', build: () => mk((i) => day({ open: i < 5 })) },
+  { key: 'lunch', label: 'Mit Mittagspause', build: () => mk((i) => day({ open: i < 5, break_start: '12:00', break_end: '13:00' })) },
+  { key: 'fulltime', label: 'Vollzeit (inkl. Samstag)', build: () => mk((i) => day({ open: i < 6 })) },
+  { key: 'parttime', label: 'Teilzeit (Mo–Fr 8–13)', build: () => mk((i) => day({ open: i < 5, end: '13:00' })) },
+]
+
+export function GeschaeftszeitenSection() {
   const qc = useQueryClient()
   const [hours, setHours] = useState<Hours>(() => mk((i) => day({ open: i < 5 })))
   const [saved, setSaved] = useState(false)
@@ -111,28 +97,29 @@ export function BusinessHoursPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl p-8">
-      <div className="mb-6 flex items-center gap-3">
-        <button onClick={() => navigate('/calendar')} className="rounded-md p-1.5 text-muted hover:bg-alt">
-          <ArrowLeft size={20} />
-        </button>
-        <Clock size={26} className="text-green-primary" />
-        <h1 className="text-2xl font-bold text-text">Geschäftszeiten</h1>
+    <div className="space-y-5">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-green-tint-100"><Clock size={20} className="text-green-deep" /></div>
+        <div>
+          <h2 className="text-lg font-bold text-text">Geschäftszeiten</h2>
+          <p className="text-sm text-muted">Öffnungszeiten für Terminbuchungen, KI-Terminvorschläge und den Notdienst.</p>
+        </div>
       </div>
 
-      <div className="mb-6 flex gap-3 rounded-lg border border-info/30 bg-info-bg px-4 py-3 text-sm text-info">
+      <div className="flex gap-3 rounded-lg border border-info/30 bg-info-bg px-4 py-3 text-sm text-info">
         <Info size={18} className="mt-0.5 shrink-0" />
         <div>
           Diese Zeiten werden verwendet für:
           <ul className="ml-4 mt-1 list-disc">
             <li>Terminbuchungen im Kalender</li>
             <li>Terminvorschläge der KI an Kunden</li>
+            <li>Notdienst-Erkennung außerhalb der Geschäftszeiten</li>
           </ul>
           <span className="mt-1 block">Änderungen werden automatisch mit der KI synchronisiert.</span>
         </div>
       </div>
 
-      <div className="mb-5">
+      <div>
         <div className="mb-2 text-sm font-semibold text-body">Schnellauswahl:</div>
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((p) => (
@@ -164,9 +151,7 @@ export function BusinessHoursPage() {
                       onClick={() => toggleBreak(d.key)}
                       className={cn(
                         'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-2 text-sm font-medium',
-                        h.break_start
-                          ? 'border-warning/40 bg-warning-bg text-warning'
-                          : 'border-border text-muted hover:bg-alt',
+                        h.break_start ? 'border-warning/40 bg-warning-bg text-warning' : 'border-border text-muted hover:bg-alt',
                       )}
                     >
                       <Coffee size={14} /> Pause
@@ -197,12 +182,12 @@ export function BusinessHoursPage() {
         })}
       </div>
 
-      <p className="mt-3 text-sm text-muted">
+      <p className="text-sm text-muted">
         <strong>Tipp:</strong> Klicke auf „Pause", um eine Mittagspause für den Tag zu aktivieren. Mit dem
         Kopier-Symbol überträgst du die Zeiten auf alle Wochentage.
       </p>
 
-      <div className="mt-6 flex items-center gap-3">
+      <div className="flex items-center gap-3">
         <button
           onClick={() => save.mutate()}
           disabled={save.isPending}
@@ -220,30 +205,14 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   return (
     <button
       onClick={() => onChange(!checked)}
-      className={cn(
-        'relative h-6 w-11 shrink-0 rounded-full transition-colors',
-        checked ? 'bg-green-primary' : 'bg-border',
-      )}
+      className={cn('relative h-6 w-11 shrink-0 rounded-full transition-colors', checked ? 'bg-green-primary' : 'bg-border')}
     >
-      <span
-        className={cn(
-          'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform',
-          checked ? 'left-0.5 translate-x-5' : 'left-0.5',
-        )}
-      />
+      <span className={cn('absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform', checked ? 'left-0.5 translate-x-5' : 'left-0.5')} />
     </button>
   )
 }
 
-function TimeInput({
-  value,
-  onChange,
-  amber,
-}: {
-  value: string
-  onChange: (v: string) => void
-  amber?: boolean
-}) {
+function TimeInput({ value, onChange, amber }: { value: string; onChange: (v: string) => void; amber?: boolean }) {
   return (
     <input
       type="time"

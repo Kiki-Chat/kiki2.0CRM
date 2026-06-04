@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { apiFetch } from '../../lib/api'
-import { AppointmentCard, usePendingAppointment } from './AppointmentCard'
+import { AppointmentCard, usePendingAppointment, type PendingAppointment } from './AppointmentCard'
 import { CreateAppointmentModal, ProcessRequestModal } from './Modals'
 import { ResizeHandle, useColumnResize } from './resize'
 import { Transcript } from './Transcript'
@@ -68,8 +68,15 @@ export function CallDetail({
 
   const pendingAppt = usePendingAppointment(callId)
   const [dismissedApptIds, setDismissedApptIds] = useState<Set<string>>(new Set())
-  const pendingAppointment = pendingAppt.data?.appointment ?? null
-  const showAppointmentCard = !!pendingAppointment && !dismissedApptIds.has(pendingAppointment.id)
+  // After Bestätigen/Ablehnen the appointment leaves the "pending" set and the
+  // server stops returning it — but we keep the card on screen (as a reminder /
+  // proof the action happened) from this local snapshot until the user removes
+  // it with ✕. Reschedule already persists server-side as "Alternative gesendet".
+  const [actioned, setActioned] = useState<{ appt: PendingAppointment; result: 'confirmed' | 'rejected' } | null>(null)
+  const livePending = pendingAppt.data?.appointment ?? null
+  const shownAppt = livePending ?? actioned?.appt ?? null
+  const shownResult = actioned && shownAppt?.id === actioned.appt.id ? actioned.result : undefined
+  const showAppointmentCard = !!shownAppt && !dismissedApptIds.has(shownAppt.id)
 
   // Timeline is lazy — only fetched when the Verlauf tab is open (as before).
   const timeline = useQuery({
@@ -85,11 +92,14 @@ export function CallDetail({
   }
 
   const appointmentSlot =
-    showAppointmentCard && pendingAppointment ? (
+    showAppointmentCard && shownAppt ? (
       <AppointmentCard
-        appointment={pendingAppointment}
+        appointment={shownAppt}
         callId={callId}
-        onDismiss={() => setDismissedApptIds((prev) => new Set(prev).add(pendingAppointment.id))}
+        result={shownResult}
+        onConfirmed={() => setActioned({ appt: shownAppt, result: 'confirmed' })}
+        onRejected={() => setActioned({ appt: shownAppt, result: 'rejected' })}
+        onRemove={() => setDismissedApptIds((prev) => new Set(prev).add(shownAppt.id))}
       />
     ) : null
 

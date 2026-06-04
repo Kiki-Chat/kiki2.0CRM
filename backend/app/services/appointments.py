@@ -64,26 +64,34 @@ def _scheduling(client, org_id: str) -> dict:
 
 
 def _get_kiki_level(client, org_id: str) -> int:
-    """The org's autonomy level (agent_configs.kiki_level), default 2.
+    """The appointments autonomy level (agent_configs.appointments_level), default 2.
+
+    Disabled appointments behave as level 1 (inquiries only). Falls back to the
+    legacy single kiki_level when the per-capability column is unset.
 
     1 = take inquiries only (no appointment rows booked).
     2 = book as a reservation (status='pending'); team confirms afterwards.
-    3 = book + auto-confirm POST-call (post_call._fire_level3_confirmations).
-    Mirrors _scheduling: single-column read, graceful default on a missing row."""
+    3 = book + auto-confirm POST-call (post_call._fire_level3_confirmations)."""
     rows = (
         client.table("agent_configs")
-        .select("kiki_level")
+        .select("appointments_enabled, appointments_level, kiki_level")
         .eq("org_id", org_id)
         .limit(1)
         .execute()
         .data
     )
-    if rows and rows[0].get("kiki_level") is not None:
-        try:
-            return int(rows[0]["kiki_level"])
-        except (TypeError, ValueError):
-            return 2
-    return 2
+    if not rows:
+        return 2
+    row = rows[0]
+    if row.get("appointments_enabled") is False:
+        return 1
+    val = row.get("appointments_level")
+    if val is None:
+        val = row.get("kiki_level")
+    try:
+        return int(val) if val is not None else 2
+    except (TypeError, ValueError):
+        return 2
 
 
 def _first_employee(client, org_id: str) -> dict | None:

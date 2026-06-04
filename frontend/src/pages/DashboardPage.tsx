@@ -70,10 +70,11 @@ function berlinHour(date: Date): number {
 }
 
 function greetingFor(hour: number): string {
-  if (hour >= 5 && hour < 11) return 'Guten Morgen'
-  if (hour >= 11 && hour < 18) return 'Guten Tag'
-  if (hour >= 18 && hour < 22) return 'Guten Abend'
-  return 'Gute Nacht'
+  if (hour >= 5 && hour < 12) return 'Guten Morgen' // 05:00–12:00
+  if (hour >= 12 && hour < 15) return 'Guten Mittag' // 12:00–15:00
+  if (hour >= 15 && hour < 18) return 'Guten Tag' // 15:00–18:00
+  if (hour >= 18 && hour < 21) return 'Guten Abend' // 18:00–21:00
+  return 'Gute Nacht' // 21:00–05:00
 }
 
 export function DashboardPage() {

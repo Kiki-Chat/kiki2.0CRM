@@ -4,7 +4,7 @@ import {
   Siren, Trash2, X,
 } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 
 import { apiFetch, apiUpload } from '../../lib/api'
 import {
@@ -32,7 +32,8 @@ export const EMERGENCY_KEYWORD_TEMPLATES: { label: string; keywords: string[] }[
   { label: 'SHK / Sanitär-Heizung-Klima', keywords: ['Rohrbruch', 'Wasserschaden', 'kein Warmwasser', 'Heizungsausfall', 'Gasgeruch', 'Rohrverstopfung', 'Wasser läuft aus', 'Warmwasserausfall'] },
   { label: 'Elektro', keywords: ['Stromausfall', 'Kabelbrand', 'Brandgeruch', 'Funkenflug', 'Sicherung fliegt', 'Stromschlag', 'Kurzschluss'] },
   { label: 'Schlüsseldienst', keywords: ['ausgesperrt', 'Tür zugefallen', 'Schlüssel abgebrochen', 'Einbruch', 'Schloss defekt', 'Person eingeschlossen'] },
-  { label: 'Dachdecker / Garten / Sturmschäden', keywords: ['Sturmschaden', 'Dach undicht', 'Ziegel lose', 'umgestürzter Baum', 'Ast droht zu fallen', 'Hagelschaden'] },
+  { label: 'Dachdecker', keywords: ['Dach undicht', 'Ziegel lose', 'Hagelschaden'] },
+  { label: 'Garten', keywords: ['umgestürzter Baum', 'Ast droht zu fallen'] },
 ]
 
 // /api/employees row shape (subset). employees.id is the FK target for a
@@ -381,7 +382,7 @@ export function TerminregelnSection({ data, flash }: Props) {
       </Card>
       <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
         <Info size={16} className="mt-0.5 shrink-0 text-info" />
-        <span>Geschäftszeiten werden im <a href="/calendar/business-hours" className="font-medium text-green-deep hover:underline">Kalender</a> verwaltet und hier nicht dupliziert.</span>
+        <span>Geschäftszeiten werden in der Kiki-Zentrale unter <a href="/kiki-zentrale/geschaeftszeiten" className="font-medium text-green-deep hover:underline">Geschäftszeiten</a> verwaltet und hier nicht dupliziert.</span>
       </div>
     </div>
   )
@@ -459,44 +460,6 @@ export function TerminkategorienSection({ flash }: Props) {
         )}
       </Modal>
     </Card>
-  )
-}
-
-// ─── KVA-Automatisierung ─────────────────────────────────────────────────────
-export function KvaAutomationSection({ data, flash }: Props) {
-  const navigate = useNavigate()
-  const qc = useQueryClient()
-  const [on, setOn] = useState(data.config.kva_automation_enabled)
-  const toggle = useMutation({
-    mutationFn: (v: boolean) => apiFetch(`${KZ}/kva-automation`, { method: 'PATCH', body: JSON.stringify({ enabled: v }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale'] }); flash('Gespeichert.' + AGENT_SYNC_SUFFIX) },
-    onError: (e: Error) => { setOn((p) => !p); flash(e.message || 'Speichern fehlgeschlagen.') },
-  })
-  const rows = [['Stufe 1', 'KVA wird nicht automatisch erstellt'], ['Stufe 2', 'Entwurf wird zur Freigabe vorbereitet'], ['Stufe 3', 'KVA wird direkt an den Kunden gesendet']]
-  return (
-    <div className="space-y-4">
-      <Card>
-        <div className="flex items-center justify-between">
-          <div><div className="text-sm font-bold text-text">KVA-Automatisierung</div><div className="text-xs text-muted">Kiki erstellt nach Anrufen passende Kostenvoranschläge.</div></div>
-          <div className="flex items-center gap-2">
-            {toggle.isPending && <Loader2 size={16} className="animate-spin text-muted" />}
-            <Toggle on={on} disabled={toggle.isPending} onChange={(v) => { setOn(v); toggle.mutate(v) }} />
-          </div>
-        </div>
-      </Card>
-      <Card>
-        <GroupLabel>Verhalten je Autonomie-Stufe</GroupLabel>
-        <div className="space-y-2">
-          {rows.map(([s, d]) => (
-            <div key={s} className={cn('flex items-center gap-3 rounded-lg border border-border px-3 py-2', data.config.kiki_level === Number(s.slice(-1)) && 'border-green-primary bg-green-tint-50')}>
-              <Tag variant={data.config.kiki_level === Number(s.slice(-1)) ? 'green' : 'neutral'}>{s}</Tag>
-              <span className="text-sm text-body">{d}</span>
-            </div>
-          ))}
-        </div>
-        <button onClick={() => navigate('/kiki-zentrale/verhalten')} className="mt-4 text-sm font-medium text-green-deep hover:underline">Autonomie-Stufe ändern →</button>
-      </Card>
-    </div>
   )
 }
 
@@ -593,10 +556,28 @@ export function NotdienstSection({ data, flash }: Props) {
   const [kw, setKw] = useState('')
   const set = (k: keyof typeof f, v: unknown) => setF((p) => ({ ...p, [k]: v }))
   const addKw = () => { if (kw.trim()) { set('emergency_keywords', [...f.emergency_keywords, kw.trim()]); setKw('') } }
-  // Append a template's keywords, skipping any already present (dedupe).
-  const addTemplate = (keywords: string[]) => set('emergency_keywords', mergeKeywords(f.emergency_keywords, keywords))
+  // A template is "active" when all its keywords are already present. Clicking an
+  // active template removes them again; an inactive one adds them (deduped).
+  const isTemplateActive = (keywords: string[]) => keywords.every((k) => f.emergency_keywords.includes(k))
+  const toggleTemplate = (keywords: string[]) =>
+    set(
+      'emergency_keywords',
+      isTemplateActive(keywords)
+        ? f.emergency_keywords.filter((k) => !keywords.includes(k))
+        : mergeKeywords(f.emergency_keywords, keywords),
+    )
   const setWindow = (i: number, patchWin: { from?: string; to?: string; label?: string }) =>
     set('emergency_extra_windows', f.emergency_extra_windows.map((w, j) => (j === i ? { ...w, ...patchWin } : w)))
+  // Toggle a weekday on a window. No weekdays selected → the window applies every day.
+  const toggleWindowDay = (i: number, dayKey: string) =>
+    set(
+      'emergency_extra_windows',
+      f.emergency_extra_windows.map((w, j) => {
+        if (j !== i) return w
+        const cur = w.weekdays ?? []
+        return { ...w, weekdays: cur.includes(dayKey) ? cur.filter((d) => d !== dayKey) : [...cur, dayKey] }
+      }),
+    )
 
   return (
     <div className="space-y-4">
@@ -610,20 +591,41 @@ export function NotdienstSection({ data, flash }: Props) {
       <Card>
         <GroupLabel>Wann ist der Notdienst aktiv?</GroupLabel>
         <label className="flex items-center gap-2 text-sm text-text"><Toggle on={f.emergency_only_outside_business_hours} onChange={(v) => set('emergency_only_outside_business_hours', v)} /> Nur außerhalb der Geschäftszeiten</label>
-        <p className="mt-2 text-xs text-muted">Geschäftszeiten werden im <a href="/calendar/business-hours" className="font-medium text-green-deep hover:underline">Kalender</a> verwaltet.</p>
+        <p className="mt-2 text-xs text-muted">Geschäftszeiten werden unter <a href="/kiki-zentrale/geschaeftszeiten" className="font-medium text-green-deep hover:underline">Geschäftszeiten</a> verwaltet.</p>
       </Card>
       <Card>
         <GroupLabel>Zusätzliche Zeitfenster (optional)</GroupLabel>
-        <p className="mb-3 text-xs text-muted">Standardmäßig gilt der Notdienst außerhalb der Geschäftszeiten; hier optional zusätzliche Fenster (z. B. Mittwochnachmittag).</p>
+        <p className="mb-3 text-xs text-muted">Standardmäßig gilt der Notdienst außerhalb der Geschäftszeiten; hier optional zusätzliche Fenster mit Uhrzeit und Wochentagen (z. B. Mi 14–18 Uhr).</p>
         <div className="space-y-2">
           {f.emergency_extra_windows.length === 0 && <p className="text-sm text-faint">Keine zusätzlichen Zeitfenster.</p>}
           {f.emergency_extra_windows.map((w, i) => (
-            <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-alt px-3 py-2">
-              <input type="time" value={w.from ?? ''} onChange={(e) => setWindow(i, { from: e.target.value })} className={cn(inputCls, 'w-auto')} />
-              <span className="text-sm text-muted">bis</span>
-              <input type="time" value={w.to ?? ''} onChange={(e) => setWindow(i, { to: e.target.value })} className={cn(inputCls, 'w-auto')} />
-              <input type="text" value={w.label ?? ''} onChange={(e) => setWindow(i, { label: e.target.value })} placeholder="Bezeichnung (optional)" className={cn(inputCls, 'min-w-[160px] flex-1')} />
-              <button onClick={() => set('emergency_extra_windows', f.emergency_extra_windows.filter((_, j) => j !== i))} title="Entfernen" className="text-muted hover:text-error"><X size={15} /></button>
+            <div key={i} className="rounded-lg border border-border bg-alt px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="time" value={w.from ?? ''} onChange={(e) => setWindow(i, { from: e.target.value })} className={cn(inputCls, 'w-auto')} />
+                <span className="text-sm text-muted">bis</span>
+                <input type="time" value={w.to ?? ''} onChange={(e) => setWindow(i, { to: e.target.value })} className={cn(inputCls, 'w-auto')} />
+                <input type="text" value={w.label ?? ''} onChange={(e) => setWindow(i, { label: e.target.value })} placeholder="Bezeichnung (optional)" className={cn(inputCls, 'min-w-[160px] flex-1')} />
+                <button onClick={() => set('emergency_extra_windows', f.emergency_extra_windows.filter((_, j) => j !== i))} title="Entfernen" className="text-muted hover:text-error"><X size={15} /></button>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-xs text-muted">Tage:</span>
+                {WEEKDAYS.map(([key, lbl]) => {
+                  const on = (w.weekdays ?? []).includes(key)
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => toggleWindowDay(i, key)}
+                      className={cn(
+                        'rounded-md border px-2 py-1 text-xs font-medium transition-colors',
+                        on ? 'border-green-primary bg-green-primary text-white' : 'border-border bg-surface text-body hover:bg-alt',
+                      )}
+                    >
+                      {lbl}
+                    </button>
+                  )
+                })}
+                {(w.weekdays?.length ?? 0) === 0 && <span className="text-[11px] text-muted">(gilt an allen Tagen)</span>}
+              </div>
             </div>
           ))}
         </div>
@@ -644,11 +646,23 @@ export function NotdienstSection({ data, flash }: Props) {
         </div>
         <div className="mt-4 border-t border-border pt-4">
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Gewerk-Vorlagen</div>
-          <p className="mb-2 text-xs text-muted">Vorlage hinzufügen — die Stichwörter werden ergänzt, einzelne kannst du danach entfernen.</p>
+          <p className="mb-2 text-xs text-muted">Vorlage an- oder abwählen — grün markierte Vorlagen sind aktiv; erneutes Klicken entfernt ihre Stichwörter wieder.</p>
           <div className="flex flex-wrap gap-2">
-            {EMERGENCY_KEYWORD_TEMPLATES.map((t) => (
-              <button key={t.label} onClick={() => addTemplate(t.keywords)} className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt">+ {t.label}</button>
-            ))}
+            {EMERGENCY_KEYWORD_TEMPLATES.map((t) => {
+              const on = isTemplateActive(t.keywords)
+              return (
+                <button
+                  key={t.label}
+                  onClick={() => toggleTemplate(t.keywords)}
+                  className={cn(
+                    'rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                    on ? 'border-green-primary bg-green-primary text-white' : 'border-border bg-surface text-body hover:bg-alt',
+                  )}
+                >
+                  {on ? '✓' : '+'} {t.label}
+                </button>
+              )
+            })}
           </div>
         </div>
       </Card>
@@ -731,11 +745,19 @@ export function TelefonSection({ data, flash }: Props) {
 export function AusgehendeSection({ data, flash }: Props) {
   const c = data.config
   const patch = useConfigPatch('/outbound', flash)
-  const [f, setF] = useState({
+  const initialF = {
     outbound_enabled: c.outbound_enabled, outbound_occasions: { ...(c.outbound_occasions || {}) } as Record<string, boolean>,
     outbound_time_from: (c.outbound_time_from || '09:00').slice(0, 5), outbound_time_to: (c.outbound_time_to || '20:00').slice(0, 5),
     outbound_weekdays: c.outbound_weekdays ?? [],
-  })
+    outbound_appt_confirm_enabled: c.outbound_appt_confirm_enabled ?? true,
+    outbound_appt_cancel_enabled: c.outbound_appt_cancel_enabled ?? true,
+    outbound_appt_reschedule_enabled: c.outbound_appt_reschedule_enabled ?? true,
+    outbound_retry_max_attempts: c.outbound_retry_max_attempts ?? 0,
+    outbound_retry_interval_minutes: c.outbound_retry_interval_minutes ?? 5,
+    outbound_recall_on_short_hangup: c.outbound_recall_on_short_hangup ?? false,
+    outbound_short_hangup_seconds: c.outbound_short_hangup_seconds ?? 20,
+  }
+  const [f, setF] = useState(initialF)
   const set = (k: keyof typeof f, v: unknown) => setF((p) => ({ ...p, [k]: v }))
   const enabledCount = Object.values(f.outbound_occasions).filter(Boolean).length
   const estMinutes = enabledCount * 10 * 3 // ~10 calls/occasion/month × 3 min
@@ -761,14 +783,20 @@ export function AusgehendeSection({ data, flash }: Props) {
             </label>
           ))}
         </div>
-        <p className="mt-3 text-xs text-muted">
-          Hinweis: Ist „Terminerinnerung" aktiv, löst ein Klick auf
-          <span className="font-medium text-body"> Bestätigen</span>,
-          <span className="font-medium text-body"> Absagen</span> oder
-          <span className="font-medium text-body"> Verschieben</span> in den
-          Anrufen automatisch den passenden Ausgangsanruf samt E-Mail an den
-          Kunden aus. Ist der Schalter aus, bleibt der Klick ohne Anruf.
-        </p>
+        {f.outbound_occasions['appointment_reminder'] && (
+          <div className="mt-3 rounded-lg border border-border bg-alt/40 p-3">
+            <div className="mb-2 text-xs font-semibold text-body">Termin-Anrufe — welche Aktionen lösen einen Anruf aus?</div>
+            <div className="flex flex-col gap-2">
+              {([['outbound_appt_confirm_enabled', 'Bestätigen'], ['outbound_appt_cancel_enabled', 'Absagen'], ['outbound_appt_reschedule_enabled', 'Verschieben']] as const).map(([k, l]) => (
+                <label key={k} className="flex items-center justify-between text-sm text-text">
+                  <span>{l}</span>
+                  <Toggle on={f[k]} onChange={(v) => set(k, v)} />
+                </label>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-muted">Ein Klick auf die jeweilige Aktion in den Anrufen löst nur dann einen Ausgangsanruf (+ E-Mail) aus, wenn sie hier aktiv ist.</p>
+          </div>
+        )}
       </Card>
       <Card className={cn(over && 'border-error/50')}>
         <GroupLabel>Geschätzte Belastung</GroupLabel>
@@ -782,6 +810,24 @@ export function AusgehendeSection({ data, flash }: Props) {
           </div>
         )}
         {over && <p className="mt-2 text-xs font-medium text-error">Warnung: Die Schätzung übersteigt Ihr monatliches Kontingent.</p>}
+      </Card>
+      <Card>
+        <GroupLabel>Wiederholung & Rückruf</GroupLabel>
+        <p className="mb-3 text-xs text-muted">Nicht angenommene Ausgangsanrufe erneut versuchen und sehr kurze Anrufe (früh aufgelegt) automatisch wiederholen.</p>
+        <div className="flex flex-wrap items-end gap-4">
+          <Field label="Wiederholungen (max.)"><input type="number" min={0} max={10} value={f.outbound_retry_max_attempts} onChange={(e) => set('outbound_retry_max_attempts', Number(e.target.value))} className={cn(inputCls, 'w-24')} /></Field>
+          <Field label="Abstand (Min.)"><input type="number" min={1} max={1440} value={f.outbound_retry_interval_minutes} onChange={(e) => set('outbound_retry_interval_minutes', Number(e.target.value))} className={cn(inputCls, 'w-24')} /></Field>
+        </div>
+        <label className="mt-3 flex items-center justify-between text-sm text-text">
+          <span>Erneut anrufen, wenn der Kunde sehr früh auflegt</span>
+          <Toggle on={f.outbound_recall_on_short_hangup} onChange={(v) => set('outbound_recall_on_short_hangup', v)} />
+        </label>
+        {f.outbound_recall_on_short_hangup && (
+          <div className="mt-3">
+            <Field label="Schwelle „früh aufgelegt&quot; (Sek.)"><input type="number" min={5} max={120} value={f.outbound_short_hangup_seconds} onChange={(e) => set('outbound_short_hangup_seconds', Number(e.target.value))} className={cn(inputCls, 'w-24')} /></Field>
+          </div>
+        )}
+        <p className="mt-2 text-[11px] text-muted">Hinweis: Wiederholungen werden vom geplanten Ausgangsanruf-Lauf ausgelöst (Taktung extern). „0 Wiederholungen&quot; = aus.</p>
       </Card>
       <Card>
         <GroupLabel>Zeitfenster</GroupLabel>
@@ -798,7 +844,7 @@ export function AusgehendeSection({ data, flash }: Props) {
             })}
           </div>
         </div>
-        <SaveBar onReset={() => setF({ outbound_enabled: c.outbound_enabled, outbound_occasions: { ...(c.outbound_occasions || {}) }, outbound_time_from: (c.outbound_time_from || '09:00').slice(0, 5), outbound_time_to: (c.outbound_time_to || '20:00').slice(0, 5), outbound_weekdays: c.outbound_weekdays ?? [] })} onSave={() => patch.mutate(f)} saving={patch.isPending} />
+        <SaveBar onReset={() => setF(initialF)} onSave={() => patch.mutate(f)} saving={patch.isPending} />
       </Card>
     </div>
   )

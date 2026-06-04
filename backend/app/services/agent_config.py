@@ -349,7 +349,8 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
     rows = (
         db.table("agent_configs")
         .select(
-            "kiki_level, problem_description, prompt_manual_override, trade, scheduling, "
+            "kiki_level, appointments_enabled, appointments_level, kva_enabled, kva_level, "
+            "problem_description, prompt_manual_override, trade, scheduling, "
             "scheduling_enabled, buffer_minutes, max_appointments_per_day, "
             "parallel_slots, lead_time_days, lead_time_only_weekdays, "
             "lead_time_earliest_clock, emergency_enabled, emergency_number, "
@@ -467,7 +468,14 @@ def render_required_fields_block(fields: list[dict]) -> str:
             "PFLICHTFELDER: Name, Telefonnummer, Adresse, Anliegen. "
             "OPTIONALE FELDER: Kundennummer."
         )
-    return "\n".join(lines)
+    # Topic 8: fields arrive in the org's configured priority order
+    # (agent_required_fields.sort_order) — ask + confirm them in exactly that
+    # order, top field first / highest priority.
+    lead = (
+        "Erfasse und bestätige die folgenden Felder in DIESER Reihenfolge — das "
+        "oberste Feld hat die höchste Priorität und wird zuerst erfragt und bestätigt:"
+    )
+    return lead + "\n" + "\n".join(lines)
 
 
 def render_problem_description_block(text: str | None) -> str:
@@ -636,29 +644,69 @@ def render_emergency_block(cfg: dict) -> str:
     return "\n".join(lines)
 
 
-def render_autonomy_block(level: int) -> str:
-    """German behaviour guidance for the ``{{KZ_AUTONOMY}}`` token, by autonomy
-    level (agent_configs.kiki_level). Drives what the agent tells the caller about
-    booking/confirmation. Unknown levels fall back to L2 (the conservative
-    reservation behaviour that matches the standard 'pending' booking flow)."""
-    try:
-        lvl = int(level)
-    except (TypeError, ValueError):
-        lvl = 2
-    if lvl == 1:
-        return (
-            "Du nimmst Anliegen nur auf (hk_createInquiry) und buchst KEINE "
-            "Termine — das Team meldet sich beim Kunden."
+def render_autonomy_block(cfg: dict) -> str:
+    """Per-capability autonomy guidance for the ``{{KZ_AUTONOMY}}`` token.
+
+    Emits a Termine sub-block and a KVA sub-block, each gated by its own enable
+    toggle + level (1/2/3) on agent_configs (appointments_enabled/_level,
+    kva_enabled/_level). Falls back to the legacy single kiki_level when a
+    per-capability level is unset. Projekte + Rechnungen are back-office
+    automations and contribute nothing to the prompt."""
+    def _legacy() -> int:
+        try:
+            return int(cfg.get("kiki_level", 2) or 2)
+        except (TypeError, ValueError):
+            return 2
+
+    def _level(key: str) -> int:
+        v = cfg.get(key)
+        if v is None:
+            return _legacy()
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 2
+
+    lines: list[str] = []
+
+    # ── Termine ──
+    appt_enabled = cfg.get("appointments_enabled")
+    appt_enabled = True if appt_enabled is None else bool(appt_enabled)
+    if not appt_enabled or _level("appointments_level") == 1:
+        lines.append(
+            "  Termine: Du nimmst Terminwünsche nur auf (hk_createInquiry) und buchst "
+            "KEINE Termine — das Team meldet sich beim Kunden."
         )
-    if lvl == 3:
-        return (
-            "Du buchst Termine verbindlich und bestätigst sie dem Anrufer direkt "
-            "im Gespräch."
+    elif _level("appointments_level") == 3:
+        lines.append(
+            "  Termine: Du buchst Termine verbindlich (hk_bookAppointment) und "
+            "bestätigst sie dem Anrufer direkt im Gespräch."
         )
-    return (
-        "Du buchst Termine als Reservierung (hk_bookAppointment); das Team "
-        "bestätigt sie anschließend — sag dem Anrufer, dass die Bestätigung folgt."
-    )
+    else:
+        lines.append(
+            "  Termine: Du buchst Termine als Reservierung (hk_bookAppointment); das "
+            "Team bestätigt sie anschließend — sag dem Anrufer, dass die Bestätigung folgt."
+        )
+
+    # ── Kostenvoranschläge (KVA) ──
+    if not bool(cfg.get("kva_enabled")) or _level("kva_level") == 1:
+        lines.append(
+            "  Kostenvoranschläge: Du erstellst KEINE Kostenvoranschläge und schlägst "
+            "auch keine vor — nimm einen entsprechenden Wunsch nur als Anliegen auf."
+        )
+    elif _level("kva_level") == 3:
+        lines.append(
+            "  Kostenvoranschläge: Erstelle aus den besprochenen Positionen einen "
+            "KVA-Entwurf (hk_draftCostEstimate); er wird — sofern eine E-Mail-Adresse "
+            "vorliegt — direkt an den Kunden versendet."
+        )
+    else:
+        lines.append(
+            "  Kostenvoranschläge: Erstelle aus den besprochenen Positionen einen "
+            "KVA-Entwurf (hk_draftCostEstimate); das TEAM prüft und versendet ihn."
+        )
+
+    return "\n".join(lines)
 
 
 def _clock_str(value: Any) -> str:
@@ -678,9 +726,27 @@ def _clock_str(value: Any) -> str:
         return ""
 
 
+_WEEKDAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_WEEKDAY_DE = {
+    "mon": "Mo", "tue": "Di", "wed": "Mi", "thu": "Do",
+    "fri": "Fr", "sat": "Sa", "sun": "So",
+}
+
+
+def _weekdays_str(days: Any) -> str:
+    """Render a window's weekday keys (``["mon","wed"]``) into ``"Mo, Mi"`` in
+    canonical order; empty/missing → "" (meaning: the window applies every day)."""
+    if not isinstance(days, list):
+        return ""
+    keys = {str(d).strip().lower() for d in days}
+    return ", ".join(_WEEKDAY_DE[k] for k in _WEEKDAY_ORDER if k in keys)
+
+
 def _emergency_windows_str(windows: Any) -> str:
-    """Render the emergency_extra_windows list (``[{from,to,label?}, …]``) into a
-    short German phrase. Best-effort — skips malformed entries."""
+    """Render the emergency_extra_windows list (``[{from,to,label?,weekdays?}, …]``)
+    into a short German phrase. Best-effort — skips malformed entries. Selected
+    weekdays prefix the time range (e.g. ``Mo, Mi 18:00–22:00 Uhr``); no weekdays
+    → the window applies on every day."""
     if not isinstance(windows, list):
         return ""
     parts = []
@@ -691,8 +757,11 @@ def _emergency_windows_str(windows: Any) -> str:
         to = _clock_str(w.get("to"))
         if not (frm and to):
             continue
-        label = (w.get("label") or "").strip()
         seg = f"{frm}–{to} Uhr"
+        days = _weekdays_str(w.get("weekdays"))
+        if days:
+            seg = f"{days} {seg}"
+        label = (w.get("label") or "").strip()
         if label:
             seg = f"{label} ({seg})"
         parts.append(seg)
@@ -753,7 +822,7 @@ def render_prompt_for_org(
         "KZ_APPOINTMENT_CATEGORIES": render_appointment_categories_block(categories),
         "KZ_SCHEDULING_RULES": render_scheduling_rules_block(kz_cfg),
         "KZ_EMERGENCY": render_emergency_block(kz_cfg),
-        "KZ_AUTONOMY": render_autonomy_block(kz_cfg.get("kiki_level", 2)),
+        "KZ_AUTONOMY": render_autonomy_block(kz_cfg),
     }
     for key, value in tokens.items():
         text = text.replace("{{" + key + "}}", value)

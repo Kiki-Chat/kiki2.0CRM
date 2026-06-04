@@ -64,10 +64,19 @@ export function CallRow({
           : 'bg-surface shadow-[inset_0_0_0_1px_var(--border)] hover:bg-alt',
       )}
     >
-      {/* direction accent rail (teal inbound / amber outbound) */}
+      {/* status accent rail: blue = offen · amber = in Bearbeitung · green = erledigt
+          (direction is conveyed by the badge, not the colour) */}
       <span
-        className="absolute bottom-0 left-0 top-0 w-1"
-        style={{ background: call.direction === 'outbound' ? 'var(--outbound)' : 'var(--inbound)' }}
+        className={cn(
+          'absolute bottom-0 left-0 top-0 w-1',
+          call.inquiry_status === 'completed'
+            ? 'bg-success'
+            : call.inquiry_status === 'in_progress'
+              ? 'bg-warning'
+              : call.inquiry_status === 'open'
+                ? 'bg-info'
+                : 'bg-faint',
+        )}
       />
       {/* unread dot */}
       {isUnread && <span className="absolute left-[9px] top-[15px] h-[7px] w-[7px] rounded-full bg-green-primary" />}
@@ -97,13 +106,15 @@ export function CallRow({
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
+          {/* Subject/reason is the headline — the caller name often isn't known,
+              so it must never be the primary line. */}
           <span className={cn('truncate text-[14.5px]', isUnread ? 'font-extrabold text-text' : 'font-semibold text-body')}>
-            {displayName(call)}
+            {call.summary_title ?? 'Anruf'}
           </span>
           <DirBadge dir={call.direction} />
         </div>
         <div className={cn('mt-0.5 truncate text-[12.5px]', isUnread ? 'text-body' : 'text-muted')}>
-          {call.summary_title ?? 'Anruf'}
+          {displayName(call)}
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <StatusPill status={call.inquiry_status} dot />

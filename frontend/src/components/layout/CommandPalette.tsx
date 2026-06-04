@@ -19,7 +19,7 @@ interface Cmd {
 const EXTRA: Cmd[] = [
   { label: 'Kiki-Zentrale', to: '/kiki-zentrale', group: 'KI-Konfiguration', adminOnly: true },
   { label: 'Firmeneinstellungen', to: '/settings', group: 'Einstellungen', adminOnly: true },
-  { label: 'Geschäftszeiten', to: '/calendar/business-hours', group: 'Kalender' },
+  { label: 'Geschäftszeiten', to: '/kiki-zentrale/geschaeftszeiten', group: 'KI-Konfiguration', adminOnly: true },
 ]
 
 function buildIndex(): Cmd[] {

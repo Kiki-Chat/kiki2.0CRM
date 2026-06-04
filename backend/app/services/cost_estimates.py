@@ -495,15 +495,19 @@ def draft_cost_estimate(org_id: str, payload) -> dict:
 
     cfg = (
         client.table("agent_configs")
-        .select("kva_automation_enabled, kiki_level")
+        .select("kva_enabled, kva_level, kva_automation_enabled, kiki_level")
         .eq("org_id", org_id)
         .limit(1)
         .execute()
         .data
     )
     cfg_row = cfg[0] if cfg else {}
-    if not cfg_row.get("kva_automation_enabled"):
-        return {"success": False, "message": "KVA-Automatisierung ist nicht aktiviert."}
+    # Per-capability toggle, with a legacy fallback to the old automation flag.
+    kva_on = cfg_row.get("kva_enabled")
+    if kva_on is None:
+        kva_on = cfg_row.get("kva_automation_enabled")
+    if not kva_on:
+        return {"success": False, "message": "KVA-Erstellung ist nicht aktiviert."}
 
     positions = [_normalize_position(p) for p in (payload.positions or [])]
     totals = compute_totals(positions, 0, 0)
@@ -527,8 +531,10 @@ def draft_cost_estimate(org_id: str, payload) -> dict:
     }
     created = client.table("cost_estimates").insert(row).execute().data[0]
 
-    # Autonomy level 3: try to send immediately; otherwise leave as a draft.
-    level = cfg_row.get("kiki_level")
+    # KVA level 3: try to send immediately; otherwise leave as a draft.
+    level = cfg_row.get("kva_level")
+    if level is None:
+        level = cfg_row.get("kiki_level")
     try:
         level = int(level) if level is not None else 2
     except (TypeError, ValueError):

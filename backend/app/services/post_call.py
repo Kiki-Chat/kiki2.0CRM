@@ -44,13 +44,18 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
             client = get_service_client()
             cfg = (
                 client.table("agent_configs")
-                .select("kiki_level")
+                .select("appointments_enabled, appointments_level, kiki_level")
                 .eq("org_id", org_id)
                 .limit(1)
                 .execute()
                 .data
             )
-            level = cfg[0].get("kiki_level") if cfg else None
+            row = cfg[0] if cfg else {}
+            if row.get("appointments_enabled") is False:
+                return
+            level = row.get("appointments_level")
+            if level is None:
+                level = row.get("kiki_level")
             try:
                 level = int(level) if level is not None else 2
             except (TypeError, ValueError):
@@ -60,7 +65,7 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
 
             pending = (
                 client.table("appointments")
-                .select("id, status")
+                .select("id, status, customer_id, title, project_id")
                 .eq("org_id", org_id)
                 .eq("source_conversation_id", conversation_id)
                 .eq("status", "pending")
@@ -72,6 +77,7 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
                 return
 
             from app.services.appointment_notify import notify_appointment_outcome
+            from app.services.projects import maybe_create_project_for_appointment
 
             for appt in pending:
                 appt_id = appt["id"]
@@ -83,6 +89,7 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
                         }
                     ).eq("org_id", org_id).eq("id", appt_id).execute()
                     notify_appointment_outcome(org_id, appt_id, "confirm")
+                    maybe_create_project_for_appointment(org_id, appt, None, client)
                 except Exception:  # noqa: BLE001 — one bad appt must not stop the rest
                     logger.exception(
                         "L3 auto-confirm failed for appointment %s (conv %s)",
@@ -353,6 +360,18 @@ def _process_one(data: dict | None, fmt: str) -> dict:
     # call. No-op unless the org is at autonomy level 3. The `already_processed`
     # dedup above prevents this from re-firing on N8N/ElevenLabs retries.
     _fire_level3_confirmations(org_id, conversation_id)
+
+    # Topic 18: re-call if an OUTBOUND call hung up within the org's short-hangup
+    # window (best-effort; no-op unless the org enabled short-hangup recall).
+    if direction == "outbound" and conversation_id:
+        try:
+            from app.services.outbound_dispatch import schedule_short_hangup_retry
+
+            schedule_short_hangup_retry(
+                client, org_id, conversation_id, row.get("duration_seconds")
+            )
+        except Exception:  # noqa: BLE001 — never break post-call ingest
+            logger.warning("short-hangup retry scheduling failed (conv %s)", conversation_id)
 
     broadcast_new_call(
         org_id,

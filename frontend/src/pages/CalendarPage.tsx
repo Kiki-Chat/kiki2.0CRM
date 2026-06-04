@@ -6,7 +6,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin from '@fullcalendar/list'
 import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
-import { Check, ChevronDown, Clock, Plus, RefreshCw, Upload } from 'lucide-react'
+import { Check, ChevronDown, Plus, RefreshCw, Upload } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
@@ -354,12 +354,6 @@ export function CalendarPage() {
             className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"
           >
             <Upload size={15} /> ICS-Import
-          </button>
-          <button
-            onClick={() => navigate('/calendar/business-hours')}
-            className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"
-          >
-            <Clock size={15} /> Geschäftszeiten
           </button>
           <input
             ref={fileRef}

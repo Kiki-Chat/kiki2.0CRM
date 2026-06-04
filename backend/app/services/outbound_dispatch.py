@@ -366,6 +366,8 @@ def run_due_outbound(
         "skipped": [],
         "errors": [],
     }
+    # Topic 18: process any due short-hangup re-dials on the same sweep tick.
+    summary["retries"] = run_due_retries(now=now, dry_run=dry_run)
 
     q = (
         db.table("agent_configs")
@@ -553,3 +555,95 @@ def send_single_outbound(
             "customer has no phone and no to_number override was provided"
         )
     return res
+
+
+# ─── Topic 18: retry on short hangup ─────────────────────────────────────────
+def schedule_short_hangup_retry(client, org_id, conversation_id, duration_seconds, now=None) -> None:
+    """If an OUTBOUND call hung up within the org's short-hangup window and recall
+    is enabled (and attempts remain), stamp ``next_retry_at`` on the ledger row so
+    the next sweep re-dials. Best-effort; never raises. No-op unless configured."""
+    try:
+        if duration_seconds is None:
+            return
+        dur = int(duration_seconds)
+        cfg = (
+            client.table("agent_configs")
+            .select(
+                "outbound_recall_on_short_hangup, outbound_short_hangup_seconds, "
+                "outbound_retry_max_attempts, outbound_retry_interval_minutes"
+            )
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        row = cfg[0] if cfg else {}
+        if not row.get("outbound_recall_on_short_hangup"):
+            return
+        threshold = int(row.get("outbound_short_hangup_seconds") or 20)
+        max_attempts = int(row.get("outbound_retry_max_attempts") or 0)
+        interval = int(row.get("outbound_retry_interval_minutes") or 5)
+        if dur >= threshold or max_attempts <= 0:
+            return
+        led = (
+            client.table("outbound_calls")
+            .select("id, cycle_no, retry_count")
+            .eq("org_id", org_id)
+            .eq("conversation_id", conversation_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if not led:
+            return
+        lrow = led[0]
+        # cycle_no = attempt number of this call (1 = original). Allow a retry
+        # while attempts so far <= the configured max (so we make `max` retries).
+        if int(lrow.get("cycle_no") or 1) > max_attempts:
+            return
+        now = now or datetime.now(timezone.utc)
+        nxt = (now + timedelta(minutes=interval)).astimezone(timezone.utc).isoformat()
+        client.table("outbound_calls").update(
+            {
+                "next_retry_at": nxt,
+                "retry_reason": "short_hangup",
+                "retry_count": int(lrow.get("retry_count") or 0) + 1,
+            }
+        ).eq("org_id", org_id).eq("id", lrow["id"]).execute()
+    except Exception:  # noqa: BLE001 — never break post-call ingest
+        logger.warning("schedule_short_hangup_retry failed (org %s, conv %s)", org_id, conversation_id)
+
+
+def run_due_retries(now: datetime | None = None, dry_run: bool = False) -> dict:
+    """Re-dial outbound calls whose ``next_retry_at`` has elapsed (topic 18). Each
+    is re-fired via ``send_single_outbound`` (which advances cycle_no), then its
+    marker is cleared. Driven by the same external sweep as ``run_due_outbound``."""
+    now = now or datetime.now(timezone.utc)
+    db = get_service_client()
+    due = (
+        db.table("outbound_calls")
+        .select("id, org_id, occasion, referenz_id")
+        .lte("next_retry_at", now.astimezone(timezone.utc).isoformat())
+        .limit(200)
+        .execute()
+        .data
+        or []
+    )
+    fired, errors = 0, []
+    for r in due:
+        rid = r["id"]
+        org_id, occasion, referenz_id = r.get("org_id"), r.get("occasion"), r.get("referenz_id")
+        if not dry_run:
+            # Clear first so a concurrent sweep can't double-fire this row.
+            db.table("outbound_calls").update({"next_retry_at": None}).eq("id", rid).execute()
+        if not (org_id and occasion and referenz_id):
+            continue
+        try:
+            send_single_outbound(
+                org_id=org_id, occasion=occasion, record_id=referenz_id, dry_run=dry_run, now=now
+            )
+            fired += 1
+        except Exception as e:  # noqa: BLE001 — one failed retry must not stop the rest
+            errors.append({"id": rid, "error": str(e)[:200]})
+            logger.warning("retry re-dial failed (%s/%s): %s", occasion, referenz_id, e)
+    return {"due": len(due), "fired": fired, "errors": errors}

@@ -1,8 +1,11 @@
+import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, ExternalLink, Info, PhoneForwarded, Smartphone } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { Card, GroupLabel } from '../components/kiki/shared'
+import { apiFetch } from '../lib/api'
+import { KZ, KZ_STALE, type KzOverview } from '../lib/kikiApi'
 
 // Static German guide for setting up call forwarding from the customer's
 // existing business number to their HeyKiki number. Linked from
@@ -35,6 +38,17 @@ const PROVIDERS: { label: string; href: string }[] = [
 
 export function RufumleitungGuidePage() {
   const navigate = useNavigate()
+  // Pull the org's assigned HeyKiki number so the codes show the real target
+  // instead of an "IHRE-HEYKIKI-NUMMER" placeholder. Shares the cache key with
+  // Kiki-Zentrale so it's usually already loaded.
+  const { data } = useQuery({
+    queryKey: ['kiki-zentrale'],
+    queryFn: () => apiFetch<KzOverview>(KZ),
+    staleTime: KZ_STALE,
+  })
+  const heyKiki = data?.phone_number?.trim() || null
+  const dial = heyKiki ? heyKiki.replace(/\s+/g, '') : 'IHRE-HEYKIKI-NUMMER'
+  const numHint = heyKiki ? <> (<Code>{heyKiki}</Code>)</> : null
 
   return (
     <div className="mx-auto max-w-3xl p-8">
@@ -55,40 +69,28 @@ export function RufumleitungGuidePage() {
       <div className="mb-6 flex gap-3 rounded-lg border border-info/30 bg-info-bg px-4 py-3 text-sm text-info">
         <Info size={18} className="mt-0.5 shrink-0" />
         <span>
-          Ihre HeyKiki-Nummer finden Sie in{' '}
-          <Link to="/kiki-zentrale/telefon" className="font-semibold underline hover:opacity-80">
-            Kiki-Zentrale → Telefon
-          </Link>
-          .
+          {heyKiki ? (
+            <>
+              Ihre HeyKiki-Nummer: <span className="font-semibold">{heyKiki}</span> — sie ist unten bereits in die
+              Codes eingesetzt.
+            </>
+          ) : (
+            <>
+              Ihre HeyKiki-Nummer finden Sie in{' '}
+              <Link to="/kiki-zentrale/telefon" className="font-semibold underline hover:opacity-80">
+                Kiki-Zentrale → Telefon
+              </Link>
+              .
+            </>
+          )}
         </span>
       </div>
 
       <div className="space-y-4">
-        <Card>
-          <GroupLabel>Universal-Codes (GSM)</GroupLabel>
-          <p className="mb-3 text-sm text-muted">
-            Diese Tastenkombinationen funktionieren auf den meisten Mobiltelefonen direkt über die
-            Telefon-App. Ersetzen Sie <Code>IHRE-HEYKIKI-NUMMER</Code> durch Ihre HeyKiki-Nummer.
-          </p>
-          <ul className="space-y-2 text-sm text-body">
-            <li>
-              <span className="font-semibold text-text">Alle Anrufe umleiten:</span>{' '}
-              <Code>*21*IHRE-HEYKIKI-NUMMER#</Code> wählen und die Anruf-Taste drücken.
-            </li>
-            <li>
-              <span className="font-semibold text-text">Umleitung deaktivieren:</span>{' '}
-              <Code>#21#</Code> wählen.
-            </li>
-            <li>
-              <span className="font-semibold text-text">Nur bei besetzt:</span>{' '}
-              <Code>*67*IHRE-HEYKIKI-NUMMER#</Code>
-            </li>
-            <li>
-              <span className="font-semibold text-text">Nur bei Nichtannahme:</span>{' '}
-              <Code>*61*IHRE-HEYKIKI-NUMMER#</Code>
-            </li>
-          </ul>
-        </Card>
+        <p className="text-sm text-muted">
+          Am einfachsten richten Sie die Rufumleitung direkt in den Einstellungen Ihres Telefons ein
+          („Immer weiterleiten"). Klappt das bei Ihrem Gerät nicht, nutzen Sie die Codes weiter unten.
+        </p>
 
         <Card>
           <div className="mb-3 flex items-center gap-2">
@@ -97,9 +99,9 @@ export function RufumleitungGuidePage() {
           </div>
           <ol className="space-y-3 text-sm text-body">
             <Step n={1}>Öffnen Sie die <span className="font-semibold text-text">Einstellungen</span>.</Step>
-            <Step n={2}>Tippen Sie auf <span className="font-semibold text-text">Telefon</span>.</Step>
+            <Step n={2}>Tippen Sie auf <span className="font-semibold text-text">Telefon</span> (bei manchen Tarifen darunter noch <span className="font-semibold text-text">Anrufe</span>).</Step>
             <Step n={3}>Wählen Sie <span className="font-semibold text-text">Rufweiterleitung</span> und aktivieren Sie den Schalter.</Step>
-            <Step n={4}>Tippen Sie auf <span className="font-semibold text-text">Weiterleiten an</span> und tragen Sie Ihre HeyKiki-Nummer ein.</Step>
+            <Step n={4}>Tippen Sie auf <span className="font-semibold text-text">Weiterleiten an</span> und tragen Sie Ihre HeyKiki-Nummer{numHint} ein.</Step>
           </ol>
         </Card>
 
@@ -111,12 +113,49 @@ export function RufumleitungGuidePage() {
           <ol className="space-y-3 text-sm text-body">
             <Step n={1}>Öffnen Sie die <span className="font-semibold text-text">Telefon-App</span>.</Step>
             <Step n={2}>Tippen Sie oben rechts auf das <span className="font-semibold text-text">Menü (⋮)</span> und dann auf <span className="font-semibold text-text">Einstellungen</span>.</Step>
-            <Step n={3}>Wählen Sie <span className="font-semibold text-text">Anrufkonten</span> bzw. <span className="font-semibold text-text">Anrufe</span> und dann <span className="font-semibold text-text">Rufweiterleitung</span>.</Step>
-            <Step n={4}>Wählen Sie <span className="font-semibold text-text">Immer weiterleiten</span> und tragen Sie Ihre HeyKiki-Nummer ein.</Step>
+            <Step n={3}>Wählen Sie <span className="font-semibold text-text">Anrufe</span> bzw. <span className="font-semibold text-text">Anrufkonten</span> und dann <span className="font-semibold text-text">Rufweiterleitung</span>. Bei Samsung: <span className="font-semibold text-text">Einstellungen → Zusätzliche Einstellungen → Rufweiterleitung</span>.</Step>
+            <Step n={4}>Wählen Sie <span className="font-semibold text-text">Immer weiterleiten</span> und tragen Sie Ihre HeyKiki-Nummer{numHint} ein.</Step>
           </ol>
           <p className="mt-3 text-xs text-muted">
             Die Bezeichnungen können je nach Hersteller (Samsung, Google, Xiaomi …) leicht abweichen.
           </p>
+        </Card>
+
+        <Card>
+          <GroupLabel>Falls die Einstellungen keine Rufumleitung anbieten: Codes wählen</GroupLabel>
+          <p className="mb-3 text-sm text-muted">
+            Diese Tastenkombinationen funktionieren auf den meisten Mobiltelefonen direkt über die Telefon-App —
+            eintippen und die Anruf-Taste drücken.{' '}
+            {heyKiki
+              ? 'Die Codes sind bereits mit Ihrer HeyKiki-Nummer ausgefüllt.'
+              : 'Sobald Ihnen eine HeyKiki-Nummer zugewiesen ist, erscheint sie hier automatisch.'}
+          </p>
+          <ul className="space-y-2 text-sm text-body">
+            <li>
+              <span className="font-semibold text-text">Alle Anrufe weiterleiten (empfohlen):</span>{' '}
+              <Code>**21*{dial}#</Code>
+            </li>
+            <li>
+              <span className="font-semibold text-text">Status prüfen:</span> <Code>*#21#</Code>
+            </li>
+            <li>
+              <span className="font-semibold text-text">Weiterleitung ausschalten:</span>{' '}
+              <Code>##21#</Code> — oder alle Weiterleitungen auf einmal: <Code>##002#</Code>.
+            </li>
+          </ul>
+          <p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted">Nur in bestimmten Fällen weiterleiten</p>
+          <ul className="space-y-2 text-sm text-body">
+            <li>
+              <span className="font-semibold text-text">Wenn besetzt:</span> <Code>**67*{dial}#</Code>
+            </li>
+            <li>
+              <span className="font-semibold text-text">Wenn nicht angenommen:</span>{' '}
+              <Code>**61*{dial}**20#</Code> <span className="text-muted">(nach 20 Sek.; 5–30 möglich)</span>
+            </li>
+            <li>
+              <span className="font-semibold text-text">Wenn nicht erreichbar:</span> <Code>**62*{dial}#</Code>
+            </li>
+          </ul>
         </Card>
 
         <Card>

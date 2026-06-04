@@ -7,12 +7,14 @@
  *   - Bestätigen → POST /api/appointments/{id}/confirm
  *   - Alternative vorschlagen → opens inline date/time picker → POST /propose-alternative
  *   - Ablehnen → POST /api/appointments/{id}/reject
- *   - Ausblenden → client-side dismiss (no server write; persists per-session in TanStack cache)
+ *   - Ausblenden → collapses the card to a one-line summary (re-expandable)
+ *   - ✕ (header) → removes the card from the list for the session
  *
- * The card is itself a *visual surface* — the parent decides whether to
- * render it based on the GET /api/appointments/by-call/{call_id}/pending
- * lookup. If `appointment.alternative_proposed_at` is non-null, the card
- * shows "Alternative gesendet" state (locked) instead of action buttons.
+ * After Bestätigen/Ablehnen the card STAYS visible with a "Bestätigt/Abgelehnt"
+ * banner (a reminder, so the appointment isn't created twice) — the parent keeps
+ * it on screen from a snapshot even though the row leaves the pending set. If
+ * `appointment.alternative_proposed_at` is non-null, the card shows the
+ * "Alternative gesendet" state (locked) instead of action buttons.
  *
  * Compact NOTIFICATION-style card (no calendar grid). The only expandable
  * surface is "Kategorie, Dauer & Zuweisung"; Bestätigen books immediately
@@ -111,15 +113,25 @@ const dateToDtLocal = (d: Date): string => {
 export function AppointmentCard({
   appointment,
   callId,
-  onDismiss,
+  result,
+  onConfirmed,
+  onRejected,
+  onRemove,
 }: {
   appointment: PendingAppointment
   callId: string
-  /** Client-side hide — sets `ui_dismissed_at` locally in TanStack cache. */
-  onDismiss: () => void
+  /** Set by the parent once a completed action was snapshotted (Bestätigt/Abgelehnt). */
+  result?: 'confirmed' | 'rejected'
+  /** Notify the parent so the card stays on screen after the row leaves "pending". */
+  onConfirmed: () => void
+  onRejected: () => void
+  /** Full removal (✕) — drops the card for the session. */
+  onRemove: () => void
 }) {
   const qc = useQueryClient()
   const [expanded, setExpanded] = useState(false)
+  // Ausblenden minimises the card to a one-line summary rather than removing it.
+  const [collapsed, setCollapsed] = useState(false)
   const [altPickerOpen, setAltPickerOpen] = useState(false)
   const [altStart, setAltStart] = useState(() => isoToDtLocal(appointment.scheduled_at))
   const [altEnd, setAltEnd] = useState(() =>
@@ -190,7 +202,10 @@ export function AppointmentCard({
       apiFetch(`/api/appointments/${appointment.id}/confirm`, {
         method: 'POST',
       }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate()
+      onConfirmed()
+    },
     onError: (e: Error) => setActionError(e.message || 'Bestätigung fehlgeschlagen.'),
   })
 
@@ -200,7 +215,10 @@ export function AppointmentCard({
         method: 'POST',
         body: JSON.stringify({}),
       }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate()
+      onRejected()
+    },
     onError: (e: Error) => setActionError(e.message || 'Ablehnen fehlgeschlagen.'),
   })
 
@@ -263,37 +281,63 @@ export function AppointmentCard({
     return [...set].sort((a, b) => a - b)
   }, [selectedCategory])
 
+  // Completed-action state: after Bestätigen/Ablehnen the row leaves the pending
+  // set, but the card stays (parent passes `result`; the row may also carry
+  // confirmed_at/rejected_at) as a reminder until removed with ✕.
+  const confirmedDone = result === 'confirmed' || !!appointment.confirmed_at
+  const rejectedDone = result === 'rejected' || !!appointment.rejected_at
+  const isDone = confirmedDone || rejectedDone
+  const statusPill = confirmedDone
+    ? { label: 'Bestätigt', cls: 'bg-green-tint-100 text-green-deep' }
+    : rejectedDone
+      ? { label: 'Abgelehnt', cls: 'bg-alt text-muted' }
+      : customerProposed
+        ? { label: 'Kundenvorschlag', cls: 'bg-amber-100 text-amber-700' }
+        : altAlreadySent
+          ? { label: 'Alternative gesendet', cls: 'bg-info-bg text-info' }
+          : { label: 'Wartet auf Bestätigung', cls: 'bg-green-tint-100 text-green-deep' }
+
+  // Collapsed (Ausblenden): one-line summary, click to re-expand.
+  if (collapsed) {
+    return (
+      <div>
+        <button
+          onClick={() => setCollapsed(false)}
+          className="flex w-full items-center justify-between gap-2 rounded-xl border border-green-tint-200 bg-surface px-3.5 py-2.5 text-left hover:bg-alt"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <CalendarClock size={14} className="flex-shrink-0 text-green-deep" />
+            <span className="truncate text-sm font-semibold text-text">{appointment.title ?? 'Termin nach Telefonat'}</span>
+            <span className="flex-shrink-0 text-xs text-muted">· {fmtFullDate(appointment.scheduled_at)}</span>
+          </span>
+          <span className="flex flex-shrink-0 items-center gap-1.5">
+            <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-semibold', statusPill.cls)}>{statusPill.label}</span>
+            <ChevronDown size={14} className="text-muted" />
+          </span>
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div>
-      {/* Section label — matches "OFFENE AKTIONEN" caps in the reference, and
-          aligns with the sibling "Zugewiesen an" / "Status-Aktionen" headers. */}
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-[11px] font-bold uppercase tracking-wide text-muted">
-          Offene Aktionen
-        </span>
-      </div>
-
+      {/* The "Offene Aktion" section label is rendered once by the parent
+          Workspace; this card no longer repeats its own header. */}
       <div className="rounded-xl border border-green-tint-200 bg-surface p-3.5 shadow-sm ring-1 ring-green-tint-100">
-        {/* Status pill on its OWN row (comfortable padding) so it never squeezes
-            the heading into two lines. */}
-        <div className="mb-2">
-          <span
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold',
-              customerProposed
-                ? 'bg-amber-100 text-amber-700'
-                : altAlreadySent
-                  ? 'bg-info-bg text-info'
-                  : 'bg-green-tint-100 text-green-deep',
-            )}
-          >
-            <Clock size={12} className="flex-shrink-0" />
-            {customerProposed
-              ? 'Kundenvorschlag'
-              : altAlreadySent
-                ? 'Alternative gesendet'
-                : 'Wartet auf Bestätigung'}
+        {/* Status pill + remove (✕) on one row. The pill reflects the lifecycle
+            (incl. Bestätigt/Abgelehnt); ✕ drops the card from the list. */}
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className={cn('inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold', statusPill.cls)}>
+            {confirmedDone ? <CheckCircle2 size={12} className="flex-shrink-0" /> : <Clock size={12} className="flex-shrink-0" />}
+            {statusPill.label}
           </span>
+          <button
+            onClick={onRemove}
+            title="Aus der Liste entfernen"
+            className="rounded p-1 text-muted transition-colors hover:bg-alt hover:text-error"
+          >
+            <X size={14} />
+          </button>
         </div>
 
         {/* Subject is the bold heading; the date/time sits just below it (bold,
@@ -403,14 +447,14 @@ export function AppointmentCard({
                     type="number"
                     min={5}
                     max={480}
-                    placeholder="Benutzerdefiniert"
+                    placeholder="z. B. 45"
                     value={customDuration ?? ''}
                     onChange={(e) => {
                       const v = e.target.value ? Number(e.target.value) : null
                       setCustomDuration(v && v > 0 ? v : null)
                     }}
                     disabled={busy || altAlreadySent}
-                    className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text outline-none focus:border-green-primary disabled:opacity-60"
+                    className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text outline-none focus:border-green-primary disabled:opacity-60"
                   />
                   <span className="text-[11px] text-muted">Min</span>
                   {customDuration !== null && (
@@ -557,6 +601,18 @@ export function AppointmentCard({
           </div>
         )}
 
+        {isDone && (
+          <div
+            className={cn(
+              'mt-3 rounded-md border p-3 text-xs',
+              confirmedDone ? 'border-green-tint-200 bg-green-tint-50 text-green-deep' : 'border-border bg-alt text-muted',
+            )}
+          >
+            <div className="font-semibold">{confirmedDone ? 'Termin bestätigt' : 'Termin abgelehnt'}</div>
+            <div className="mt-0.5">Bleibt als Erinnerung sichtbar — mit ✕ entfernen.</div>
+          </div>
+        )}
+
         {actionError && (
           <div className="mt-3 rounded-md bg-error-bg px-3 py-2 text-xs text-error">
             {actionError}
@@ -569,7 +625,7 @@ export function AppointmentCard({
             is dragged narrower than the row needs. Hidden once an alternative
             has been sent (the appointment is locked pending the reply). Also
             hidden while a customer counter-proposal awaits approval. */}
-        {!altAlreadySent && !customerProposed && (
+        {!altAlreadySent && !customerProposed && !isDone && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => {
@@ -607,9 +663,10 @@ export function AppointmentCard({
             <button
               onClick={() => {
                 setActionError(null)
-                onDismiss()
+                setCollapsed(true)
               }}
               disabled={busy}
+              title="Karte einklappen (bleibt als kurze Zeile sichtbar)"
               className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-body transition-colors hover:bg-alt disabled:opacity-50"
             >
               <EyeOff size={13} />

@@ -28,7 +28,7 @@ import {
   UserPlus,
   Wrench,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
@@ -374,7 +374,7 @@ export function PlanningBoardPage() {
         <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
           <Section icon={<Truck size={16} />} title="FAHRZEUGE" hint="Termin in die Fahrzeugspalte ziehen" addLabel="Fahrzeug hinzufügen" onAdd={() => setNewVehicle(true)}>
             <Column id={`veh|${UNASSIGNED}`} title="Nicht zugewiesen" subtitle="Termine ohne Fahrzeug" count={appts.filter((a) => !a.vehicle_id).length}>
-              {appts.filter((a) => !a.vehicle_id).map((a) => <ApptCard key={a.id} dragId={`veh|${a.id}`} appt={a} />)}
+              {appts.filter((a) => !a.vehicle_id).map((a) => <ApptCard key={a.id} dragId={`veh|${a.id}`} appt={a} onView={() => setDetailAppt(a)} />)}
             </Column>
             {vehicles.map((v) => (
               <Column
@@ -397,14 +397,14 @@ export function PlanningBoardPage() {
                   />
                 }
               >
-                {appts.filter((a) => a.vehicle_id === v.id).map((a) => <ApptCard key={a.id} dragId={`veh|${a.id}`} appt={a} />)}
+                {appts.filter((a) => a.vehicle_id === v.id).map((a) => <ApptCard key={a.id} dragId={`veh|${a.id}`} appt={a} onView={() => setDetailAppt(a)} />)}
               </Column>
             ))}
           </Section>
 
           <Section icon={<Wrench size={16} />} title="WERKZEUG" hint="Termin in die Werkzeugspalte ziehen" addLabel="Werkzeug hinzufügen" onAdd={() => setNewTool(true)}>
             <Column id={`tool|${UNASSIGNED}`} title="Kein Werkzeug erforderlich" subtitle="Termine ohne Werkzeugzuweisung" count={appts.filter((a) => !a.tool_id).length}>
-              {appts.filter((a) => !a.tool_id).map((a) => <ApptCard key={a.id} dragId={`tool|${a.id}`} appt={a} />)}
+              {appts.filter((a) => !a.tool_id).map((a) => <ApptCard key={a.id} dragId={`tool|${a.id}`} appt={a} onView={() => setDetailAppt(a)} />)}
             </Column>
             {tools.map((t) => (
               <Column
@@ -425,7 +425,7 @@ export function PlanningBoardPage() {
                   />
                 }
               >
-                {appts.filter((a) => a.tool_id === t.id).map((a) => <ApptCard key={a.id} dragId={`tool|${a.id}`} appt={a} />)}
+                {appts.filter((a) => a.tool_id === t.id).map((a) => <ApptCard key={a.id} dragId={`tool|${a.id}`} appt={a} onView={() => setDetailAppt(a)} />)}
               </Column>
             ))}
           </Section>
@@ -570,10 +570,33 @@ function Column({ id, title, subtitle, count, capacity, color, assignee, menu, c
 }
 
 // ─── Appointment card (draggable) ────────────────────────────────────────────
-function ApptCard({ dragId, appt }: { dragId: string; appt: Appt }) {
+function ApptCard({ dragId, appt, onView }: { dragId: string; appt: Appt; onView?: () => void }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: dragId })
+  // Distinguish a click (open details) from a drag (assign): capture the
+  // pointer-down position in the capture phase so we don't clobber dnd-kit's own
+  // onPointerDown, then treat pointer-up as a click only if it barely moved.
+  const downPos = useRef<{ x: number; y: number } | null>(null)
   return (
-    <div ref={setNodeRef} {...listeners} {...attributes} className={cn('cursor-grab touch-none', isDragging && 'opacity-40')}>
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      onPointerDownCapture={(e) => {
+        downPos.current = { x: e.clientX, y: e.clientY }
+      }}
+      onClick={(e) => {
+        const d = downPos.current
+        if (d && Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y) > 6) return
+        onView?.()
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onView?.()
+        }
+      }}
+      className={cn('cursor-grab touch-none', isDragging && 'opacity-40')}
+    >
       <ApptCardBody appt={appt} />
     </div>
   )

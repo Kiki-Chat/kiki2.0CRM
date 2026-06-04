@@ -1,14 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Activity, BadgeEuro, BookOpen, Bot, CalendarClock, FileSpreadsheet,
+  Activity, BadgeEuro, BookOpen, Bot, CalendarClock, Clock,
   History, ListChecks, Lock, Phone, PhoneOutgoing, RotateCcw, Siren, Sparkles, Tags, Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 
-import { AusgehendeSection, BrancheKontextSection, KvaAutomationSection, LeistungsangebotSection, NotdienstSection, PflichtfelderSection, PreisauskunftSection, TelefonSection, TerminkategorienSection, TerminregelnSection } from '../components/kiki/ConfigSections'
+import { AusgehendeSection, BrancheKontextSection, LeistungsangebotSection, NotdienstSection, PflichtfelderSection, PreisauskunftSection, TelefonSection, TerminkategorienSection, TerminregelnSection } from '../components/kiki/ConfigSections'
 import { ConfirmDialog } from '../components/kiki/shared'
+import { GeschaeftszeitenSection } from '../components/kiki/GeschaeftszeitenSection'
 import { VerhaltenSection } from '../components/kiki/VerhaltenSection'
 import { VerlaufSection } from '../components/kiki/VerlaufSection'
 import { Modal } from '../components/ui/Modal'
@@ -25,11 +26,11 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { slug: 'branche-kontext', label: 'Branche & Kontext', icon: BookOpen },
   ] },
   { label: 'Terminplanung', items: [
+    { slug: 'geschaeftszeiten', label: 'Geschäftszeiten', icon: Clock },
     { slug: 'terminregeln', label: 'Terminregeln', icon: CalendarClock },
     { slug: 'terminkategorien', label: 'Terminkategorien', icon: Tags },
   ] },
   { label: 'Automatisierung', items: [
-    { slug: 'kva-automatisierung', label: 'KVA-Automatisierung', icon: FileSpreadsheet },
     { slug: 'preisauskunft', label: 'Preisauskunft', icon: BadgeEuro },
     { slug: 'leistungsangebot', label: 'Leistungsangebot', icon: Wrench },
   ] },
@@ -183,9 +184,9 @@ function SectionContent({ section, data, flash }: { section: string; data: KzOve
     case 'verhalten': return <VerhaltenSection data={data} flash={flash} />
     case 'pflichtfelder': return <PflichtfelderSection data={data} flash={flash} />
     case 'branche-kontext': return <BrancheKontextSection data={data} flash={flash} />
+    case 'geschaeftszeiten': return <GeschaeftszeitenSection />
     case 'terminregeln': return <TerminregelnSection data={data} flash={flash} />
     case 'terminkategorien': return <TerminkategorienSection data={data} flash={flash} />
-    case 'kva-automatisierung': return <KvaAutomationSection data={data} flash={flash} />
     case 'preisauskunft': return <PreisauskunftSection data={data} flash={flash} />
     case 'leistungsangebot': return <LeistungsangebotSection data={data} flash={flash} />
     case 'notdienst': return <NotdienstSection data={data} flash={flash} />

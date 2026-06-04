@@ -29,7 +29,9 @@ MAX_PDF_BYTES = 20 * 1024 * 1024
 
 # agent_configs columns owned by Kiki-Zentrale (returned in the GET aggregator).
 _CONFIG_COLS = (
-    "kiki_level, welcome_message, trade, knowledge_text, problem_description, "
+    "kiki_level, appointments_enabled, appointments_level, kva_enabled, kva_level, "
+    "projects_enabled, projects_level, invoices_enabled, invoices_level, "
+    "welcome_message, trade, knowledge_text, problem_description, "
     "prompt_manual_override, forwarding_number, "
     "incoming_forwarding_number, scheduling_enabled, buffer_minutes, "
     "max_appointments_per_day, parallel_slots, lead_time_days, lead_time_only_weekdays, "
@@ -37,7 +39,10 @@ _CONFIG_COLS = (
     "emergency_enabled, emergency_number, emergency_only_outside_business_hours, "
     "emergency_keywords, emergency_extra_windows, emergency_surcharge_notice_enabled, "
     "emergency_surcharge_text, outbound_enabled, outbound_occasions, outbound_time_from, "
-    "outbound_time_to, outbound_weekdays"
+    "outbound_time_to, outbound_weekdays, outbound_appt_confirm_enabled, "
+    "outbound_appt_cancel_enabled, outbound_appt_reschedule_enabled, "
+    "outbound_retry_max_attempts, outbound_retry_interval_minutes, "
+    "outbound_recall_on_short_hangup, outbound_short_hangup_seconds, welcome_messages"
 )
 
 
@@ -84,8 +89,18 @@ def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str) -> None:
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
 class VerhaltenUpdate(BaseModel):
-    kiki_level: int | None = None
+    kiki_level: int | None = None       # legacy (dormant)
+    # Per-capability autonomy (topics 19/21/22)
+    appointments_enabled: bool | None = None
+    appointments_level: int | None = None
+    kva_enabled: bool | None = None
+    kva_level: int | None = None
+    projects_enabled: bool | None = None
+    projects_level: int | None = None
+    invoices_enabled: bool | None = None
+    invoices_level: int | None = None
     welcome_message: str | None = None
+    welcome_messages: list[dict] | None = None  # 20 — time-based variants [{from,to,message}]
     persona_name: str | None = None     # ElevenLabs `name`
     first_message: str | None = None    # ElevenLabs
     voice_id: str | None = None         # ElevenLabs
@@ -194,6 +209,15 @@ class OutboundUpdate(BaseModel):
     outbound_time_from: str | None = None
     outbound_time_to: str | None = None
     outbound_weekdays: list[str] | None = None
+    # 17 — appointment outbound sub-options
+    outbound_appt_confirm_enabled: bool | None = None
+    outbound_appt_cancel_enabled: bool | None = None
+    outbound_appt_reschedule_enabled: bool | None = None
+    # 18 — outbound retry config
+    outbound_retry_max_attempts: int | None = None
+    outbound_retry_interval_minutes: int | None = None
+    outbound_recall_on_short_hangup: bool | None = None
+    outbound_short_hangup_seconds: int | None = None
     model_config = {"extra": "ignore"}
 
 
@@ -355,10 +379,22 @@ async def list_voices(user: CurrentUser = Depends(require_org)) -> dict:
 
 # ─── Verhalten (Supabase + ElevenLabs) ───────────────────────────────────────
 @router.patch("/verhalten")
-async def update_verhalten(payload: VerhaltenUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_verhalten(
+    payload: VerhaltenUpdate, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
     data = payload.model_dump(exclude_unset=True)
-    supa = {k: data[k] for k in ("kiki_level", "welcome_message") if k in data}
+    supa = {
+        k: data[k]
+        for k in (
+            "kiki_level", "welcome_message", "welcome_messages",
+            "appointments_enabled", "appointments_level",
+            "kva_enabled", "kva_level",
+            "projects_enabled", "projects_level",
+            "invoices_enabled", "invoices_level",
+        )
+        if k in data
+    }
     el_patch = _el_patch(
         persona_name=data.get("persona_name"),
         first_message=data.get("first_message"),
@@ -387,7 +423,12 @@ async def update_verhalten(payload: VerhaltenUpdate, user: CurrentUser = Depends
             )[0]
         return {"success": True, "config": cfg, "agent": agent_state}
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    # The per-capability autonomy (and welcome) feed the agent prompt → re-render
+    # and push to ElevenLabs in the background, like the other config sections.
+    if supa:
+        background.add_task(_repush_bg, user.org_id, user.id, "kz_verhalten")
+    return result
 
 
 # ─── Prompt-Editor (ElevenLabs) ──────────────────────────────────────────────

@@ -39,14 +39,27 @@ APPOINTMENT_OCCASIONS = {
 MASTER_OCCASION_KEY = "appointment_reminder"
 
 
-def appointment_outbound_enabled(org_id: str) -> bool:
-    """True iff the org's master toggle authorises appointment outbound calls:
-    ``outbound_enabled`` AND ``outbound_occasions['appointment_reminder']``."""
+# Per-action toggle columns (topic 17): master gate + an independent
+# Confirm / Cancel / Reschedule switch.
+_ACTION_TOGGLE_COL = {
+    "confirm": "outbound_appt_confirm_enabled",
+    "cancel": "outbound_appt_cancel_enabled",
+    "reschedule": "outbound_appt_reschedule_enabled",
+}
+
+
+def appointment_outbound_enabled(org_id: str, action: str | None = None) -> bool:
+    """True iff the org authorises this appointment outbound call: master
+    (``outbound_enabled`` AND ``outbound_occasions['appointment_reminder']``) AND,
+    when ``action`` is given, the per-action toggle (topic 17)."""
     try:
         rows = (
             get_service_client()
             .table("agent_configs")
-            .select("outbound_enabled, outbound_occasions")
+            .select(
+                "outbound_enabled, outbound_occasions, outbound_appt_confirm_enabled, "
+                "outbound_appt_cancel_enabled, outbound_appt_reschedule_enabled"
+            )
             .eq("org_id", org_id)
             .limit(1)
             .execute()
@@ -58,8 +71,15 @@ def appointment_outbound_enabled(org_id: str) -> bool:
         return False
     if not rows or not rows[0].get("outbound_enabled"):
         return False
-    occ = rows[0].get("outbound_occasions") or {}
-    return bool(occ.get(MASTER_OCCASION_KEY))
+    row = rows[0]
+    occ = row.get("outbound_occasions") or {}
+    if not occ.get(MASTER_OCCASION_KEY):
+        return False
+    if action:
+        col = _ACTION_TOGGLE_COL.get(action)
+        if col and row.get(col) is False:
+            return False
+    return True
 
 
 def _customer_phone(org_id: str, appointment_id: str) -> str | None:
@@ -94,8 +114,8 @@ def notify_appointment_outcome(
     if occasion is None:
         return {"fired": False, "reason": f"unknown_action:{action}"}
 
-    if not appointment_outbound_enabled(org_id):
-        return {"fired": False, "reason": "appointment_reminders_disabled"}
+    if not appointment_outbound_enabled(org_id, action):
+        return {"fired": False, "reason": "appointment_outbound_disabled"}
 
     try:
         to_number = enforce_call_scope(org_id, _customer_phone(org_id, appointment_id))

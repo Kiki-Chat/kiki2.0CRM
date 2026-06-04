@@ -3,7 +3,6 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AdminApp } from './admin/AdminApp'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { AppLayout } from './components/layout/AppLayout'
-import { BusinessHoursPage } from './pages/BusinessHoursPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { CallLogsPage } from './pages/CallLogsPage'
 import { CatalogPage } from './pages/CatalogPage'
@@ -45,7 +44,8 @@ export default function App() {
           <Route path="customers" element={<CustomersPage />} />
           <Route path="customers/:id" element={<CustomerDetailPage />} />
           <Route path="calendar" element={<CalendarPage />} />
-          <Route path="calendar/business-hours" element={<BusinessHoursPage />} />
+          {/* Business hours moved into Kiki-Zentrale (UAT); keep the old path as a redirect. */}
+          <Route path="calendar/business-hours" element={<Navigate to="/kiki-zentrale/geschaeftszeiten" replace />} />
           <Route path="meine-abwesenheit" element={<MyAbsencePage />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="projects/new" element={<ProjectFormPage />} />

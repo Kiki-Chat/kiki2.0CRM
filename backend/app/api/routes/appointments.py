@@ -11,6 +11,7 @@ from app.services import calendar_sync
 from app.services.appointment_notify import notify_appointment_outcome
 from app.services.appointments import import_ics
 from app.services.common import enforce_self_assignment, validate_fk_in_org
+from app.services.projects import maybe_create_project_for_appointment
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
 
@@ -339,6 +340,13 @@ async def confirm_appointment(
     appt = await run_in_threadpool(_confirm, user.org_id, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    # Back-office automation: auto-create a project (+ planning-board presence),
+    # gated by agent_configs.projects_enabled/level. Best-effort, non-blocking.
+    project = await run_in_threadpool(
+        maybe_create_project_for_appointment, user.org_id, appt, user.id
+    )
+    if project:
+        appt["project_id"] = project["id"]
     # Best-effort outbound side-effect (call + email) — gated by the org's master
     # Appointment-Reminders toggle, scope-guarded, non-blocking (a failure never
     # rolls back the already-committed confirmation).

@@ -8,6 +8,7 @@ from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import ProjectEmployeeAdd, ProjectPatch, ProjectUpsert
 from app.services.common import now_berlin
+from app.services.invoices import maybe_create_invoice_for_project
 from app.services.projects import gen_project_number
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -291,6 +292,14 @@ async def update_project(
     row = await run_in_threadpool(_patch, user.org_id, project_id, payload)
     if not row:
         raise HTTPException(status_code=404, detail="Project not found")
+    # Back-office automation: a completed project auto-drafts an invoice from its
+    # accepted KVA, gated by invoices_enabled/level. Best-effort, non-blocking.
+    if getattr(payload, "status", None) == "completed":
+        invoice = await run_in_threadpool(
+            maybe_create_invoice_for_project, user.org_id, row, user.id
+        )
+        if invoice:
+            row["_auto_invoice_id"] = invoice["id"]
     return row
 
 
