@@ -340,6 +340,74 @@ def _update_org_profile(user: CurrentUser, args: dict) -> dict:
     return {"updated_fields": list(fields), "organization": {k: org.get(k) for k in _ORG_PROFILE_FIELDS}}
 
 
+def _positions_arg(args: dict) -> list:
+    """Coerce the model's position list into clean dicts for the upsert schema.
+    Totals/VAT are computed by the backend from these line items."""
+    out = []
+    for p in args.get("positions") or []:
+        if isinstance(p, dict) and (p.get("description") or p.get("price") is not None):
+            out.append({
+                "description": p.get("description"),
+                "quantity": p.get("quantity", 1),
+                "unit": p.get("unit") or "Stk",
+                "price": p.get("price", 0),
+                "vat": p.get("vat", 19),
+            })
+    return out
+
+
+def _create_cost_estimate(user: CurrentUser, args: dict) -> dict:
+    from app.api.routes import cost_estimates as ce_routes
+    from app.schemas.admin import CostEstimateUpsert
+
+    positions = _positions_arg(args)
+    if not positions:
+        return {"error": "Bitte mindestens eine Position (Beschreibung + Netto-Preis) angeben."}
+    customer_id = None
+    ref = (args.get("customer") or args.get("customer_id") or "").strip()
+    if ref:
+        r = _resolve_customer(user.org_id, ref)
+        if "id" not in r:
+            return r  # not found / ambiguous → ask which customer
+        customer_id = r["id"]
+    try:
+        payload = CostEstimateUpsert(
+            customer_id=customer_id, subject=args.get("subject"), positions=positions,
+            intro_text=args.get("intro_text"), closing_text=args.get("closing_text"),
+        )
+        ce = ce_routes._create(user.org_id, user.id, payload)
+        return {"cost_estimate": {k: ce.get(k) for k in
+                ("id", "number", "status", "subtotal", "vat_amount", "total", "customer_id")}}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"KVA nicht angelegt: {getattr(exc, 'detail', str(exc))}"}
+
+
+def _create_invoice(user: CurrentUser, args: dict) -> dict:
+    from app.api.routes import invoices as inv_routes
+    from app.schemas.admin import InvoiceUpsert
+
+    positions = _positions_arg(args)
+    if not positions:
+        return {"error": "Bitte mindestens eine Position (Beschreibung + Netto-Preis) angeben."}
+    customer_id = None
+    ref = (args.get("customer") or args.get("customer_id") or "").strip()
+    if ref:
+        r = _resolve_customer(user.org_id, ref)
+        if "id" not in r:
+            return r
+        customer_id = r["id"]
+    try:
+        payload = InvoiceUpsert(
+            customer_id=customer_id, subject=args.get("subject"), positions=positions,
+            intro_text=args.get("intro_text"), closing_text=args.get("closing_text"),
+        )
+        inv = inv_routes._create(user.org_id, user.id, payload)
+        return {"invoice": {k: inv.get(k) for k in
+                ("id", "number", "status", "subtotal", "vat_amount", "total", "due_date", "customer_id")}}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"Rechnung nicht angelegt: {getattr(exc, 'detail', str(exc))}"}
+
+
 # ─── registry ────────────────────────────────────────────────────────────────
 REGISTRY: list[Tool] = [
     Tool(
@@ -476,6 +544,66 @@ REGISTRY: list[Tool] = [
         },
         run=_create_appointment,
         kind="write",
+    ),
+    Tool(
+        name="create_cost_estimate",
+        description="Erstelle einen Kostenvoranschlag (KVA/Angebot) als ENTWURF. Frage vorher Kunde + Positionen (Beschreibung, Menge, Netto-Preis, MwSt) ab.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "customer": {"type": "string", "description": "Kunde: Name/Kundennummer/UUID (empfohlen)"},
+                "subject": {"type": "string", "description": "Betreff"},
+                "positions": {
+                    "type": "array",
+                    "description": "Positionen/Leistungen",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "description": {"type": "string"},
+                            "quantity": {"type": "number"},
+                            "unit": {"type": "string", "description": "z. B. Stk, h, m"},
+                            "price": {"type": "number", "description": "Netto-Einzelpreis in EUR"},
+                            "vat": {"type": "number", "description": "MwSt-Satz in % (19 oder 7)"},
+                        },
+                        "required": ["description", "price"],
+                    },
+                },
+            },
+            "required": ["positions"],
+        },
+        run=_create_cost_estimate,
+        kind="write",
+        roles=ROLES_ADMIN,
+    ),
+    Tool(
+        name="create_invoice",
+        description="Erstelle eine Rechnung als ENTWURF. Frage vorher Kunde + Positionen (Beschreibung, Menge, Netto-Preis, MwSt) ab.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "customer": {"type": "string", "description": "Kunde: Name/Kundennummer/UUID (empfohlen)"},
+                "subject": {"type": "string", "description": "Betreff"},
+                "positions": {
+                    "type": "array",
+                    "description": "Positionen/Leistungen",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "description": {"type": "string"},
+                            "quantity": {"type": "number"},
+                            "unit": {"type": "string", "description": "z. B. Stk, h, m"},
+                            "price": {"type": "number", "description": "Netto-Einzelpreis in EUR"},
+                            "vat": {"type": "number", "description": "MwSt-Satz in % (19 oder 7)"},
+                        },
+                        "required": ["description", "price"],
+                    },
+                },
+            },
+            "required": ["positions"],
+        },
+        run=_create_invoice,
+        kind="write",
+        roles=ROLES_ADMIN,
     ),
     Tool(
         name="report_problem",

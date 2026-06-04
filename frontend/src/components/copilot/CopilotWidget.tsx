@@ -79,6 +79,10 @@ function actionSummary(a: ProposedAction): string {
       const at = s('scheduled_at').replace('T', ' ').slice(0, 16)
       return `Termin anlegen${a.args.title ? ': ' + s('title') : ''}${at ? ' (' + at + ')' : ''}`
     }
+    case 'create_cost_estimate':
+      return `Kostenvoranschlag erstellen${a.args.subject ? ': ' + s('subject') : ''}`
+    case 'create_invoice':
+      return `Rechnung erstellen${a.args.subject ? ': ' + s('subject') : ''}`
     case 'report_problem':
       return `Problem melden: ${s('summary')}`
     case 'update_org_profile':
