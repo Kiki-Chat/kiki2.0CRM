@@ -84,6 +84,8 @@ export type TimelineEventKind =
   | 'kva_accepted'
   | 'kva_rejected'
   | 'assignment_changed'
+  | 'appointment_created'
+  | 'appointment_rescheduled'
 
 export interface TimelineEvent {
   id: string

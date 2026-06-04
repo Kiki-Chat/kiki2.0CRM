@@ -12,6 +12,7 @@ from app.schemas.tools import (
 )
 from app.services.common import (
     BERLIN,
+    _parse_time,
     fmt_date,
     fmt_time,
     format_address,
@@ -124,8 +125,26 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
     step = max(1, round(dur / 60))
 
     now = now_berlin()
-    start_date = (now + timedelta(days=lead_days)).date()
-    window_end = now + timedelta(days=lead_days + days + 1)
+    earliest = (now + timedelta(days=lead_days)).date()
+    # Honor the caller's requested date: anchor the search window there (never
+    # before the lead time) so a "next Tuesday" request returns Tuesday's slots
+    # instead of always the generic earliest ones.
+    pref_date = _parse_iso_date(payload.preferred_date)
+    if pref_date:
+        start_date = max(pref_date, earliest)
+        days = min(days, 5)
+        window_end = datetime.combine(start_date, datetime.min.time(), tzinfo=BERLIN) + timedelta(days=days + 1)
+    else:
+        start_date = earliest
+        window_end = now + timedelta(days=lead_days + days + 1)
+    # A preferred time-of-day biases which slots surface first (and widens
+    # collection so the requested hour isn't truncated away by the early break).
+    pref_hour = None
+    if payload.preferred_time:
+        pt = _parse_time(payload.preferred_time)
+        if pt:
+            pref_hour = pt[0]
+    collect_cap = MAX_SLOTS if pref_hour is None else 48
 
     existing = (
         client.table("appointments")
@@ -171,10 +190,15 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
                     "employeeName": emp["display_name"] if emp else "Team",
                 }
             )
-            if len(slots) >= MAX_SLOTS:
+            if len(slots) >= collect_cap:
                 break
-        if len(slots) >= MAX_SLOTS:
+        if len(slots) >= collect_cap:
             break
+
+    # Surface slots nearest the requested time-of-day first, then truncate.
+    if pref_hour is not None:
+        slots.sort(key=lambda s: (s["datetime"][:10], abs(int(s["displayTime"][:2]) - pref_hour)))
+    slots = slots[:MAX_SLOTS]
 
     if not slots:
         return {

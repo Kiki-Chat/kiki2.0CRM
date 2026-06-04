@@ -108,6 +108,18 @@ _MONTHS = {
     "dez": 12, "dec": 12, "dezember": 12, "december": 12,
 }
 
+# German clock words for natural-language times ("halb drei", "nachmittags").
+_NUM_WORDS = {
+    "eins": 1, "ein": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "fuenf": 5,
+    "sechs": 6, "sieben": 7, "acht": 8, "neun": 9, "zehn": 10, "elf": 11,
+    "zwölf": 12, "zwoelf": 12,
+}
+_DAYPART_HOURS = {
+    "morgens": 8, "früh": 8, "frueh": 8, "vormittags": 10, "vormittag": 10,
+    "mittags": 12, "mittag": 12, "nachmittags": 14, "nachmittag": 14,
+    "abends": 18, "abend": 18, "nachts": 20,
+}
+
 
 def now_berlin() -> datetime:
     return datetime.now(BERLIN)
@@ -173,12 +185,30 @@ def _parse_date(s: str, now: datetime) -> datetime | None:
     if s in ("day after tomorrow", "übermorgen", "uebermorgen"):
         return now + timedelta(days=2)
 
-    for name, idx in _WEEKDAYS.items():
-        if name in s:
-            delta = (idx - now.weekday()) % 7
-            if delta == 0:
-                delta = 7
-            return now + timedelta(days=delta)
+    # Relative weeks: "nächste/kommende Woche", "in N Wochen" (digits or words).
+    week_offset = 0
+    mw = re.search(r"in\s+(\d{1,2}|einer|zwei|drei|vier|fünf|fuenf)\s+woche", s)
+    if mw:
+        word = mw.group(1)
+        week_offset = int(word) if word.isdigit() else {
+            "einer": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "fuenf": 5,
+        }.get(word, 1)
+    elif re.search(r"n[äa]chste[nr]?\s+woche|kommende[nr]?\s+woche", s):
+        week_offset = 1
+
+    # Weekday, respecting any week offset and the "nächste/kommende" qualifier.
+    wd_idx = next((idx for name, idx in _WEEKDAYS.items() if name in s), None)
+    if wd_idx is not None:
+        if week_offset > 0:
+            base = now + timedelta(weeks=week_offset)
+            monday = base - timedelta(days=base.weekday())
+            return monday + timedelta(days=wd_idx)
+        delta = (wd_idx - now.weekday()) % 7
+        if delta == 0 and re.search(r"n[äa]chste[nr]?|kommende[nr]?", s):
+            delta = 7  # "nächsten Montag" said on a Monday = next week's
+        return now + timedelta(days=delta)
+    if week_offset > 0:
+        return now + timedelta(weeks=week_offset)
 
     # "27. mai" / "27 may"
     m = re.search(r"(\d{1,2})\.?\s*([a-zä]+)", s)
@@ -208,6 +238,41 @@ def _from_day_month(now: datetime, day: int, month: int) -> datetime | None:
     return cand
 
 
+def _parse_time(time_str: str) -> tuple[int, int] | None:
+    """Parse a German/numeric time expression to (hour, minute), or None when it
+    can't be understood. Handles 'HH:MM', 'HH.MM', 'HHhMM', 'halb drei',
+    'viertel nach/vor drei', day-parts ('nachmittags'), and bare hours ('15 Uhr')."""
+    t = time_str.strip().lower()
+    m = re.search(r"(\d{1,2})[:.h](\d{2})", t)
+    if m:
+        return int(m[1]), int(m[2])
+    m = re.search(r"halb\s+(\w+)", t)  # "halb drei" = 02:30
+    if m and m[1] in _NUM_WORDS:
+        h = _NUM_WORDS[m[1]] - 1
+        return (h if h >= 0 else 11), 30
+    m = re.search(r"viertel\s+nach\s+(\w+)", t)  # "viertel nach drei" = 03:15
+    if m and m[1] in _NUM_WORDS:
+        return _NUM_WORDS[m[1]], 15
+    m = re.search(r"(?:viertel\s+vor|dreiviertel)\s+(\w+)", t)  # = 02:45
+    if m and m[1] in _NUM_WORDS:
+        h = _NUM_WORDS[m[1]] - 1
+        return (h if h >= 0 else 11), 45
+    # Longest first so "nachmittags"/"vormittags" win over the "mittags" substring.
+    for word in sorted(_DAYPART_HOURS, key=len, reverse=True):
+        if word in t:
+            return _DAYPART_HOURS[word], 0
+    m = re.search(r"(\d{1,2})\s*(am|pm|uhr)?", t)
+    if m:
+        h = int(m[1])
+        if m[2] == "pm" and h < 12:
+            h += 12
+        return h, 0
+    for word, n in _NUM_WORDS.items():
+        if re.search(rf"\b{word}\b", t):
+            return n, 0
+    return None
+
+
 def parse_when(date_str: str | None, time_str: str | None = None) -> datetime | None:
     """Parse a natural-language date (+ optional time) into a Berlin datetime."""
     if not date_str:
@@ -217,18 +282,11 @@ def parse_when(date_str: str | None, time_str: str | None = None) -> datetime | 
     if d is None:
         return None
 
-    hour, minute = 9, 0
+    hour, minute = 9, 0  # neutral default when no/unparseable time is given
     if time_str:
-        m = re.search(r"(\d{1,2})[:.h](\d{2})", time_str)
-        if m:
-            hour, minute = int(m[1]), int(m[2])
-        else:
-            m = re.search(r"(\d{1,2})\s*(am|pm|uhr)?", time_str.lower())
-            if m:
-                hour = int(m[1])
-                if m[2] == "pm" and hour < 12:
-                    hour += 12
-                minute = 0
+        parsed = _parse_time(time_str)
+        if parsed:
+            hour, minute = parsed
     return d.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 

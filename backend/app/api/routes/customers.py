@@ -266,6 +266,20 @@ async def get_customer(
     return c
 
 
+@router.get("/{customer_id}/timeline")
+async def get_customer_timeline(
+    customer_id: str, user: CurrentUser = Depends(require_org)
+) -> list[dict]:
+    """The customer's unified activity timeline (calls, inquiries, appointments,
+    KVAs) — same event shape as the per-call Verlauf, scoped to this customer."""
+    from app.api.routes.calls import build_customer_timeline
+
+    tl = await run_in_threadpool(build_customer_timeline, user.org_id, customer_id)
+    if tl is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return tl
+
+
 def _create(org_id: str, payload: CustomerUpsert) -> dict:
     client = get_service_client()
     row = {

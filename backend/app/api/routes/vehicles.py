@@ -57,6 +57,13 @@ def _list(org_id: str) -> list[dict]:
         r["last_seen"] = last_seen.get(r["id"])
         r["next_appointment"] = next_appt.get(r["id"])
         r["in_use_today"] = r["id"] in in_use_today
+        # Derived service alerts (date vs. today). An expired TÜV / insurance or an
+        # overdue maintenance flags the vehicle so the UI can warn instead of
+        # showing it plainly "available".
+        r["tuev_expired"] = bool(r.get("tuev_until")) and str(r["tuev_until"])[:10] < today
+        r["insurance_expired"] = bool(r.get("insurance_until")) and str(r["insurance_until"])[:10] < today
+        r["maintenance_overdue"] = bool(r.get("next_maintenance")) and str(r["next_maintenance"])[:10] < today
+        r["service_alert"] = bool(r["tuev_expired"] or r["insurance_expired"] or r["maintenance_overdue"])
     return rows
 
 

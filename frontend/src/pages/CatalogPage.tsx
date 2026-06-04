@@ -47,6 +47,10 @@ interface Vehicle {
   notes: string | null
   next_appointment: string | null
   in_use_today: boolean
+  tuev_expired?: boolean
+  insurance_expired?: boolean
+  maintenance_overdue?: boolean
+  service_alert?: boolean
 }
 interface Tool {
   id: string
@@ -58,6 +62,8 @@ interface Tool {
   purchase_date: string | null
   purchase_price: number | null
   notes: string | null
+  maintenance_overdue?: boolean
+  service_alert?: boolean
 }
 interface CustomerOption { id: string; full_name: string | null }
 
@@ -324,7 +330,13 @@ function VehiclesTab({ vehicles, flash }: { vehicles: Vehicle[]; flash: (m: stri
   const qc = useQueryClient()
   const [status, setStatus] = useState('all')
   const [editing, setEditing] = useState<Vehicle | null>(null)
-  const effStatus = (v: Vehicle) => (v.in_use_today ? 'in_use' : v.status || 'available')
+  // An expired TÜV / insurance or overdue maintenance overrides the stored status
+  // so the vehicle reads as needing attention (and is filterable under "In Wartung").
+  const effStatus = (v: Vehicle) => (v.service_alert ? 'maintenance' : v.in_use_today ? 'in_use' : v.status || 'available')
+  const alertLabel = (v: Vehicle) =>
+    [v.tuev_expired && 'TÜV', v.insurance_expired && 'Versicherung', v.maintenance_overdue && 'Wartung']
+      .filter(Boolean)
+      .join(' · ')
   const filtered = vehicles.filter((v) => status === 'all' || effStatus(v) === status)
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/vehicles/${id}`, { method: 'DELETE' }),
@@ -344,7 +356,19 @@ function VehiclesTab({ vehicles, flash }: { vehicles: Vehicle[]; flash: (m: stri
                 <td className="px-5 py-3.5 font-semibold text-text">{v.license_plate || v.name}</td>
                 <td className="px-5 py-3.5 text-body">{v.model || v.name}</td>
                 <td className="px-5 py-3.5 text-body">{v.vehicle_type || '–'}</td>
-                <td className="px-5 py-3.5"><span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', s.cls)}>{s.l}</span></td>
+                <td className="px-5 py-3.5">
+                  <div className="flex flex-col items-start gap-1">
+                    <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', s.cls)}>{s.l}</span>
+                    {v.service_alert && (
+                      <span
+                        title={`Nicht einsatzbereit: ${alertLabel(v)} abgelaufen/fällig`}
+                        className="rounded-full bg-error-bg px-2.5 py-0.5 text-xs font-semibold text-error"
+                      >
+                        ⚠ {alertLabel(v)} fällig
+                      </span>
+                    )}
+                  </div>
+                </td>
                 <td className="px-5 py-3.5 text-body">{fmtDate(v.next_appointment)}</td>
                 <td className="px-5 py-3.5"><div className="flex items-center justify-end gap-1">{isAdmin && <><button title="Bearbeiten" onClick={() => setEditing(v)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button><button title="Deaktivieren" onClick={() => confirm(`${v.name} deaktivieren?`) && del.mutate(v.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button></>}</div></td>
               </tr>
@@ -384,7 +408,18 @@ function ToolsTab({ tools, flash }: { tools: Tool[]; flash: (m: string) => void 
                 <td className="px-5 py-3.5 text-body">{t.category || '–'}</td>
                 <td className="px-5 py-3.5 text-body">{t.serial_number || '–'}</td>
                 <td className="px-5 py-3.5"><span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', c.cls)}>{c.l}</span></td>
-                <td className="px-5 py-3.5 text-body">{fmtDate(t.next_maintenance)}</td>
+                <td className="px-5 py-3.5">
+                  {t.maintenance_overdue ? (
+                    <span
+                      title="Wartung überfällig — nicht einsatzbereit"
+                      className="rounded-full bg-error-bg px-2.5 py-0.5 text-xs font-semibold text-error"
+                    >
+                      ⚠ {fmtDate(t.next_maintenance)}
+                    </span>
+                  ) : (
+                    <span className="text-body">{fmtDate(t.next_maintenance)}</span>
+                  )}
+                </td>
                 <td className="px-5 py-3.5"><div className="flex items-center justify-end gap-1">{isAdmin && <><button title="Bearbeiten" onClick={() => setEditing(t)} className="rounded-md p-1.5 text-warning hover:bg-alt"><Pencil size={15} /></button><button title="Deaktivieren" onClick={() => confirm(`${t.name} deaktivieren?`) && del.mutate(t.id)} className="rounded-md p-1.5 text-error hover:bg-alt"><Trash2 size={15} /></button></>}</div></td>
               </tr>
             )})}

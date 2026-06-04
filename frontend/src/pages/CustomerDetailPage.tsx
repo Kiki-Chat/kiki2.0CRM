@@ -2,12 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   AtSign,
+  CalendarClock,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
   Euro,
   FileText,
+  History,
   Image as ImageIcon,
   MapPin,
   MessageSquare,
@@ -16,6 +18,7 @@ import {
   Plus,
   Search,
   Upload,
+  type LucideIcon,
 } from 'lucide-react'
 import { useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -25,6 +28,7 @@ import { Modal } from '../components/ui/Modal'
 import { Tag } from '../components/ui/Tag'
 import { apiFetch, apiUpload } from '../lib/api'
 import { cn } from '../lib/utils'
+import type { TimelineEvent, TimelineEventKind } from './calls/shared'
 
 interface Inquiry {
   id: string
@@ -117,6 +121,11 @@ export function CustomerDetailPage() {
     queryKey: ['customerDocs', id],
     queryFn: () => apiFetch<DocRow[]>(`/api/customers/${id}/documents`),
   })
+  const { data: timeline = [] } = useQuery({
+    queryKey: ['customerTimeline', id],
+    queryFn: () => apiFetch<TimelineEvent[]>(`/api/customers/${id}/timeline`),
+    enabled: !!id,
+  })
 
   if (isLoading || !customer) {
     return <div className="flex h-full items-center justify-center text-muted">Lädt…</div>
@@ -192,6 +201,7 @@ export function CustomerDetailPage() {
       </div>
 
       {/* ACTIVITIES */}
+      <CustomerTimeline events={timeline} />
       <ActivitiesTimeline customer={customer} docs={docs} onTranscript={() => navigate('/calls')} />
 
       {/* FILES */}
@@ -368,6 +378,56 @@ interface Activity {
   desc: string
   tag: string
   transcript?: boolean
+}
+
+const TL_ICON: Record<TimelineEventKind, { Icon: LucideIcon; cls: string }> = {
+  call_created: { Icon: Phone, cls: 'bg-success-bg text-success' },
+  inquiry_status_changed: { Icon: MessageSquare, cls: 'bg-info-bg text-info' },
+  appointment_created: { Icon: CalendarClock, cls: 'bg-green-tint-100 text-green-deep' },
+  appointment_rescheduled: { Icon: CalendarClock, cls: 'bg-warning-bg text-warning' },
+  appointment_confirmed: { Icon: CalendarClock, cls: 'bg-success-bg text-success' },
+  appointment_rejected: { Icon: CalendarClock, cls: 'bg-error-bg text-error' },
+  alternative_proposed: { Icon: CalendarClock, cls: 'bg-warning-bg text-warning' },
+  kva_sent: { Icon: Euro, cls: 'bg-ai-bg text-ai' },
+  kva_accepted: { Icon: Euro, cls: 'bg-ai-bg text-ai' },
+  kva_rejected: { Icon: Euro, cls: 'bg-ai-bg text-ai' },
+  assignment_changed: { Icon: History, cls: 'bg-info-bg text-info' },
+}
+
+// Unified customer activity timeline — the SAME event shape as the call-log
+// Verlauf tab, fed by GET /api/customers/{id}/timeline (every call, inquiry
+// status change, appointment booked/rescheduled/confirmed and KVA for this
+// customer, newest first).
+function CustomerTimeline({ events }: { events: TimelineEvent[] }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface p-5 shadow-e1">
+      <h2 className="mb-4 text-sm font-bold text-text">Verlauf ({events.length})</h2>
+      {!events.length ? (
+        <p className="py-6 text-sm text-muted">Noch keine Aktivitäten.</p>
+      ) : (
+        <div className="flex flex-col">
+          {events.map((ev, i) => {
+            const k = TL_ICON[ev.kind] ?? { Icon: History, cls: 'bg-alt text-muted' }
+            const last = i === events.length - 1
+            return (
+              <div key={ev.id} className={cn('relative flex items-start gap-3.5', !last && 'pb-5')}>
+                {!last && <span className="absolute bottom-0 left-[19px] top-[42px] w-0.5 bg-border" aria-hidden />}
+                <span className={cn('z-[1] flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full', k.cls)}>
+                  <k.Icon size={18} />
+                </span>
+                <div className="min-w-0 flex-1 pt-1">
+                  <div className="text-sm font-semibold text-text">{ev.description}</div>
+                  <div className="mt-0.5 text-xs text-muted">
+                    {fmtDay(ev.timestamp)} · {ev.actor_name}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ActivitiesTimeline({

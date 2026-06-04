@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 
@@ -40,8 +42,12 @@ def _list(org_id: str) -> list[dict]:
             tid, when = a.get("tool_id"), a.get("scheduled_at")
             if tid and when and when > last_seen.get(tid, ""):
                 last_seen[tid] = when
+    today = datetime.now(timezone.utc).isoformat()[:10]
     for r in rows:
         r["last_seen"] = last_seen.get(r["id"])
+        # Derived service alert: an overdue maintenance date flags the tool.
+        r["maintenance_overdue"] = bool(r.get("next_maintenance")) and str(r["next_maintenance"])[:10] < today
+        r["service_alert"] = bool(r["maintenance_overdue"])
     return rows
 
 

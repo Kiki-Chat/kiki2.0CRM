@@ -353,6 +353,76 @@ _STATUS_LABEL = {
 }
 
 
+# ── Shared event emitters (used by BOTH the per-call and the customer timeline) ──
+# Each maps one DB row to zero-or-more TimelineEvent dicts so the two views render
+# the exact same record of "every move".
+def _appointment_events(appt: dict) -> list[dict]:
+    title = appt.get("title") or "Termin"
+    out: list[dict] = []
+    if appt.get("created_at"):
+        out.append({
+            "id": f"appointment:{appt['id']}:created", "kind": "appointment_created",
+            "timestamp": appt["created_at"], "actor_kind": "kiki", "actor_name": "Kiki",
+            "description": f"Termin gebucht: {title}", "entity_id": appt["id"],
+            "extras": {"scheduled_at": appt.get("scheduled_at")},
+        })
+    if appt.get("customer_proposed_at"):
+        out.append({
+            "id": f"appointment:{appt['id']}:rescheduled", "kind": "appointment_rescheduled",
+            "timestamp": appt["customer_proposed_at"], "actor_kind": "system", "actor_name": "Kunde",
+            "description": f"Terminänderung angefragt: {title}", "entity_id": appt["id"],
+            "extras": {"proposed_start_time": appt.get("customer_proposed_start_time")},
+        })
+    if appt.get("confirmed_at"):
+        out.append({
+            "id": f"appointment:{appt['id']}:confirmed", "kind": "appointment_confirmed",
+            "timestamp": appt["confirmed_at"], "actor_kind": "employee", "actor_name": "Mitarbeiter",
+            "description": f"Termin bestätigt: {title}", "entity_id": appt["id"],
+            "extras": {"scheduled_at": appt.get("scheduled_at")},
+        })
+    if appt.get("rejected_at"):
+        extras: dict = {"scheduled_at": appt.get("scheduled_at")}
+        if appt.get("rejection_reason"):
+            extras["reason"] = appt["rejection_reason"]
+        out.append({
+            "id": f"appointment:{appt['id']}:rejected", "kind": "appointment_rejected",
+            "timestamp": appt["rejected_at"], "actor_kind": "employee", "actor_name": "Mitarbeiter",
+            "description": f"Termin abgelehnt: {title}", "entity_id": appt["id"], "extras": extras,
+        })
+    if appt.get("alternative_proposed_at"):
+        out.append({
+            "id": f"appointment:{appt['id']}:alt", "kind": "alternative_proposed",
+            "timestamp": appt["alternative_proposed_at"], "actor_kind": "employee", "actor_name": "Mitarbeiter",
+            "description": f"Alternativtermin vorgeschlagen: {title}", "entity_id": appt["id"],
+            "extras": {"alternative_start_time": appt.get("alternative_start_time")},
+        })
+    return out
+
+
+def _kva_events(kva: dict) -> list[dict]:
+    num = kva.get("number") or "KVA"
+    out: list[dict] = []
+    if kva.get("sent_at"):
+        out.append({
+            "id": f"kva:{kva['id']}:sent", "kind": "kva_sent", "timestamp": kva["sent_at"],
+            "actor_kind": "employee", "actor_name": "Mitarbeiter", "description": f"{num} versendet",
+            "entity_id": kva["id"], "extras": {"number": kva.get("number"), "total": kva.get("total")},
+        })
+    if kva.get("accepted_at"):
+        out.append({
+            "id": f"kva:{kva['id']}:accepted", "kind": "kva_accepted", "timestamp": kva["accepted_at"],
+            "actor_kind": "system", "actor_name": "Kunde", "description": f"{num} angenommen",
+            "entity_id": kva["id"], "extras": {"number": kva.get("number"), "total": kva.get("total")},
+        })
+    if kva.get("rejected_at"):
+        out.append({
+            "id": f"kva:{kva['id']}:rejected", "kind": "kva_rejected", "timestamp": kva["rejected_at"],
+            "actor_kind": "system", "actor_name": "Kunde", "description": f"{num} abgelehnt",
+            "entity_id": kva["id"], "extras": {"number": kva.get("number")},
+        })
+    return out
+
+
 def _build_timeline(org_id: str, call_id: str) -> list[dict] | None:
     """Single-pass aggregator. Returns None if the call doesn't belong to org.
 
@@ -435,7 +505,8 @@ def _build_timeline(org_id: str, call_id: str) -> list[dict] | None:
             .select(
                 "id, inquiry_id, title, scheduled_at, created_at, status, "
                 "confirmed_at, rejected_at, rejection_reason, "
-                "alternative_start_time, alternative_proposed_at"
+                "alternative_start_time, alternative_proposed_at, "
+                "customer_proposed_start_time, customer_proposed_at"
             )
             .eq("org_id", org_id)
             .in_("inquiry_id", inquiry_ids)
@@ -444,52 +515,7 @@ def _build_timeline(org_id: str, call_id: str) -> list[dict] | None:
             or []
         )
     for appt in appointments:
-        title = appt.get("title") or "Termin"
-        if appt.get("confirmed_at"):
-            events.append(
-                {
-                    "id": f"appointment:{appt['id']}:confirmed",
-                    "kind": "appointment_confirmed",
-                    "timestamp": appt["confirmed_at"],
-                    "actor_kind": "employee",
-                    "actor_name": "Mitarbeiter",
-                    "description": f"Termin bestätigt: {title}",
-                    "entity_id": appt["id"],
-                    "extras": {"scheduled_at": appt.get("scheduled_at")},
-                }
-            )
-        if appt.get("rejected_at"):
-            extras: dict = {"scheduled_at": appt.get("scheduled_at")}
-            reason = appt.get("rejection_reason")
-            if reason:
-                extras["reason"] = reason
-            events.append(
-                {
-                    "id": f"appointment:{appt['id']}:rejected",
-                    "kind": "appointment_rejected",
-                    "timestamp": appt["rejected_at"],
-                    "actor_kind": "employee",
-                    "actor_name": "Mitarbeiter",
-                    "description": f"Termin abgelehnt: {title}",
-                    "entity_id": appt["id"],
-                    "extras": extras,
-                }
-            )
-        if appt.get("alternative_proposed_at"):
-            events.append(
-                {
-                    "id": f"appointment:{appt['id']}:alt",
-                    "kind": "alternative_proposed",
-                    "timestamp": appt["alternative_proposed_at"],
-                    "actor_kind": "employee",
-                    "actor_name": "Mitarbeiter",
-                    "description": f"Alternativtermin vorgeschlagen: {title}",
-                    "entity_id": appt["id"],
-                    "extras": {
-                        "alternative_start_time": appt.get("alternative_start_time")
-                    },
-                }
-            )
+        events.extend(_appointment_events(appt))
 
     # 4. cost_estimates (KVA) — sent / accepted / rejected.
     cost_estimates: list[dict] = []
@@ -507,47 +533,78 @@ def _build_timeline(org_id: str, call_id: str) -> list[dict] | None:
             or []
         )
     for kva in cost_estimates:
-        num = kva.get("number") or "KVA"
-        if kva.get("sent_at"):
-            events.append(
-                {
-                    "id": f"kva:{kva['id']}:sent",
-                    "kind": "kva_sent",
-                    "timestamp": kva["sent_at"],
-                    "actor_kind": "employee",
-                    "actor_name": "Mitarbeiter",
-                    "description": f"{num} versendet",
-                    "entity_id": kva["id"],
-                    "extras": {"number": kva.get("number"), "total": kva.get("total")},
-                }
-            )
-        if kva.get("accepted_at"):
-            events.append(
-                {
-                    "id": f"kva:{kva['id']}:accepted",
-                    "kind": "kva_accepted",
-                    "timestamp": kva["accepted_at"],
-                    "actor_kind": "system",
-                    "actor_name": "Kunde",
-                    "description": f"{num} angenommen",
-                    "entity_id": kva["id"],
-                    "extras": {"number": kva.get("number"), "total": kva.get("total")},
-                }
-            )
-        if kva.get("rejected_at"):
-            events.append(
-                {
-                    "id": f"kva:{kva['id']}:rejected",
-                    "kind": "kva_rejected",
-                    "timestamp": kva["rejected_at"],
-                    "actor_kind": "system",
-                    "actor_name": "Kunde",
-                    "description": f"{num} abgelehnt",
-                    "entity_id": kva["id"],
-                    "extras": {"number": kva.get("number")},
-                }
-            )
+        events.extend(_kva_events(kva))
 
     # Sort newest-first by timestamp (ISO strings sort correctly).
+    events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)
+    return events
+
+
+def build_customer_timeline(org_id: str, customer_id: str) -> list[dict] | None:
+    """Customer-wide activity timeline — the SAME event shapes as the per-call
+    Verlauf, aggregated across ALL of the customer's calls, inquiries,
+    appointments and cost estimates. This is the 'bigger unified' timeline.
+    Returns None when the customer doesn't belong to the org."""
+    client = get_service_client()
+
+    if not (
+        client.table("customers").select("id").eq("org_id", org_id)
+        .eq("id", customer_id).limit(1).execute().data
+    ):
+        return None
+
+    events: list[dict] = []
+
+    for c in (
+        client.table("calls")
+        .select("id, summary_title, started_at, created_at")
+        .eq("org_id", org_id).eq("customer_id", customer_id)
+        .is_("deleted_at", "null").execute().data or []
+    ):
+        ts = c.get("started_at") or c.get("created_at")
+        if ts:
+            events.append({
+                "id": f"call:{c['id']}:created", "kind": "call_created", "timestamp": ts,
+                "actor_kind": "kiki", "actor_name": "Kiki",
+                "description": c.get("summary_title") or "Anruf entgegengenommen",
+                "entity_id": c["id"], "extras": {},
+            })
+
+    for inq in (
+        client.table("inquiries")
+        .select("id, status, title, created_at, updated_at")
+        .eq("org_id", org_id).eq("customer_id", customer_id)
+        .neq("status", "deleted").execute().data or []
+    ):
+        status = inq.get("status")
+        if status and status != "open":
+            ts = inq.get("updated_at") or inq.get("created_at")
+            if ts:
+                actor_kind, actor_name = _actor_for_status(status)
+                events.append({
+                    "id": f"inquiry:{inq['id']}:status:{status}", "kind": "inquiry_status_changed",
+                    "timestamp": ts, "actor_kind": actor_kind, "actor_name": actor_name,
+                    "description": f"Anfrage-Status: {_STATUS_LABEL.get(status, status)}",
+                    "entity_id": inq["id"], "extras": {"status": status, "title": inq.get("title")},
+                })
+
+    for appt in (
+        client.table("appointments")
+        .select(
+            "id, title, scheduled_at, created_at, status, confirmed_at, rejected_at, "
+            "rejection_reason, alternative_start_time, alternative_proposed_at, "
+            "customer_proposed_start_time, customer_proposed_at"
+        )
+        .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
+    ):
+        events.extend(_appointment_events(appt))
+
+    for kva in (
+        client.table("cost_estimates")
+        .select("id, number, total, sent_at, accepted_at, rejected_at")
+        .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
+    ):
+        events.extend(_kva_events(kva))
+
     events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)
     return events

@@ -1,9 +1,22 @@
 """createInquiry + searchCustomerInquiries tools."""
 
+from datetime import datetime
+
 from app.db.supabase_client import get_service_client
 from app.schemas.tools import CreateInquiryRequest, SearchCustomerInquiriesRequest
 from app.services.common import gen_inquiry_number
 from app.services.customers import get_or_create_customer
+from app.services.scheduling import is_emergency_by_hours
+
+
+def _parse_iso(value) -> datetime | None:
+    """Lenient ISO-8601 parse (accepts a trailing 'Z'); None on failure."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 _STATUS_LABEL = {
     "open": "Offen",
@@ -44,6 +57,24 @@ def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
     dc = call.get("data_collection") or {}
     title = call.get("summary_title") or dc.get("issue_summary") or "Anruf"
     notes = dc.get("ultimate_summary") or call.get("summary") or ""
+
+    # Emergency tagging: flag the inquiry when (a) the call arrived OUTSIDE
+    # business hours and the org runs a Notdienst, or (b) the agent's data
+    # collection marked it urgent. The NOTDIENST badge reads emergency_flag.
+    emergency = False
+    started = _parse_iso(call.get("started_at"))
+    if started is not None:
+        try:
+            emergency = is_emergency_by_hours(org_id, started)
+        except Exception:
+            emergency = False
+    if not emergency:
+        for key in ("is_emergency", "emergency", "notfall", "urgent"):
+            v = dc.get(key)
+            if v is True or (isinstance(v, str) and v.strip().lower() in ("true", "ja", "yes", "1")):
+                emergency = True
+                break
+
     row = {
         "org_id": org_id,
         "call_id": call["id"],
@@ -53,6 +84,7 @@ def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
         "status": "open",
         "number": gen_inquiry_number(client, org_id),
         "notes": notes,
+        "emergency_flag": emergency,
     }
     return client.table("inquiries").insert(row).execute().data[0]
 
@@ -80,6 +112,7 @@ def create_inquiry(org_id: str, payload: CreateInquiryRequest) -> dict:
                 "status": "open",
                 "number": number,
                 "notes": notes,
+                "emergency_flag": bool(payload.urgent),
             }
         )
         .execute()

@@ -379,6 +379,8 @@ function Row({ label, value }: { label: string; value: string }) {
 const TL_KIND: Record<TimelineEventKind, { Icon: LucideIcon; tile: string }> = {
   call_created: { Icon: PhoneIncoming, tile: 'bg-green-tint-100 text-green-deep' },
   inquiry_status_changed: { Icon: Clock, tile: 'bg-warning-bg text-warning' },
+  appointment_created: { Icon: CalendarPlus, tile: 'bg-green-tint-100 text-green-deep' },
+  appointment_rescheduled: { Icon: RotateCcw, tile: 'bg-warning-bg text-warning' },
   appointment_confirmed: { Icon: CheckCircle2, tile: 'bg-success-bg text-success' },
   appointment_rejected: { Icon: X, tile: 'bg-error-bg text-error' },
   alternative_proposed: { Icon: CalendarPlus, tile: 'bg-warning-bg text-warning' },

@@ -11,6 +11,20 @@ interface CustomerOption { id: string; full_name: string | null }
 const inputCls = 'w-full rounded-md border border-border bg-alt px-3 py-2 text-sm text-text outline-none focus:border-green-primary'
 const labelCls = 'mb-1 block text-sm font-semibold text-body'
 
+/** Best-effort split of a free-text German address into street / PLZ / Ort.
+ * Customers store the address as a single `{ raw }` blob, so to copy it into the
+ * project's separate fields we locate the 5-digit PLZ: everything before it is the
+ * street, the rest is the city. Falls back to street-only when no PLZ is found.
+ * Handles "Straße 12, 12345 Stadt", "Straße 12\n12345 Stadt", "Straße 12 12345 Stadt". */
+function parseGermanAddress(raw: string): { street: string; postcode: string; city: string } {
+  const text = raw.trim().replace(/\s+/g, ' ')
+  const m = text.match(/^(.*?)[,;\s]+(\d{5})\s+(.+)$/)
+  if (m) {
+    return { street: m[1].replace(/[,;]\s*$/, '').trim(), postcode: m[2], city: m[3].trim() }
+  }
+  return { street: text, postcode: '', city: '' }
+}
+
 export function ProjectFormPage() {
   const { id } = useParams()
   const isEdit = !!id
@@ -66,11 +80,23 @@ export function ProjectFormPage() {
         const a = c.address
         if (a && typeof a === 'object') {
           const o = a as Record<string, string>
-          setStreet(o.street || o.raw || '')
-          setPostcode(o.postal_code || o.zip || o.postcode || '')
-          setCity(o.city || '')
+          // Prefer structured sub-fields if a customer ever has them; otherwise
+          // parse the free-text `raw` blob (how every customer is stored today).
+          if (o.street || o.postcode || o.postal_code || o.zip || o.city) {
+            setStreet(o.street || '')
+            setPostcode(o.postcode || o.postal_code || o.zip || '')
+            setCity(o.city || '')
+          } else if (o.raw) {
+            const p = parseGermanAddress(o.raw)
+            setStreet(p.street)
+            setPostcode(p.postcode)
+            setCity(p.city)
+          }
         } else if (typeof a === 'string') {
-          setStreet(a)
+          const p = parseGermanAddress(a)
+          setStreet(p.street)
+          setPostcode(p.postcode)
+          setCity(p.city)
         }
       })
       .catch(() => {})
