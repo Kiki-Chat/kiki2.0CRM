@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 
 import { cn } from '../../lib/utils'
+import { useMe } from '../../lib/useMe'
 import { Tag } from '../../components/ui/Tag'
 import { Avatar, AssignDropdown, DirBadge, NotdienstBadge, StatusPill } from './atoms'
 import {
@@ -41,6 +42,9 @@ export function CallRow({
   assigning: boolean
 }) {
   const isUnread = call.read_at === null
+  // Only admins may (re)assign work to employees — see enforce_self_assignment
+  // on the backend. Employees get a read-only avatar.
+  const { isAdmin } = useMe()
   return (
     <div
       role="button"
@@ -72,13 +76,19 @@ export function CallRow({
         current={call.assigned_employee_id}
         employees={employees}
         onAssign={onAssign}
-        disabled={!call.inquiry_id || assigning}
+        disabled={!call.inquiry_id || assigning || !isAdmin}
       >
         <button
           type="button"
           onClick={(e) => e.stopPropagation()}
-          disabled={!call.inquiry_id || assigning}
-          title={call.inquiry_id ? 'Mitarbeiter zuweisen' : 'Noch keine Anfrage — kann nicht zugewiesen werden'}
+          disabled={!call.inquiry_id || assigning || !isAdmin}
+          title={
+            !isAdmin
+              ? 'Nur Admins können Mitarbeiter zuweisen'
+              : call.inquiry_id
+                ? 'Mitarbeiter zuweisen'
+                : 'Noch keine Anfrage — kann nicht zugewiesen werden'
+          }
           className="flex-shrink-0 rounded-full transition-transform hover:scale-110 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Avatar employeeId={call.assigned_employee_id} text={call.assigned_employee_initials ?? '?'} size={36} />

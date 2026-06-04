@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import InquiryUpdate
-from app.services.common import gen_inquiry_number, validate_fk_in_org
+from app.services.common import enforce_self_assignment, gen_inquiry_number, validate_fk_in_org
 
 router = APIRouter(prefix="/api/inquiries", tags=["inquiries"])
 
@@ -46,7 +46,8 @@ async def create_inquiry(
     return await run_in_threadpool(_create, user.org_id, payload)
 
 
-def _update(org_id: str, inquiry_id: str, payload: InquiryUpdate) -> dict | None:
+def _update(user: CurrentUser, inquiry_id: str, payload: InquiryUpdate) -> dict | None:
+    org_id = user.org_id
     client = get_service_client()
     # FK hardening: project_id / assigned_employee_id from the body must be same-org.
     # (The dedicated /assign route already validates the employee; the generic
@@ -56,6 +57,23 @@ def _update(org_id: str, inquiry_id: str, payload: InquiryUpdate) -> dict | None
         client, table="employees", fk_id=payload.assigned_employee_id,
         org_id=org_id, label="Mitarbeiter", require_active=True,
     )
+    # A plain employee may not reassign work to a colleague via the generic PATCH.
+    if payload.assigned_employee_id is not None:
+        cur = (
+            client.table("inquiries")
+            .select("assigned_employee_id")
+            .eq("org_id", org_id)
+            .eq("id", inquiry_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        enforce_self_assignment(
+            client,
+            user=user,
+            current_assignee_id=cur[0].get("assigned_employee_id") if cur else None,
+            new_assignee_id=payload.assigned_employee_id or None,
+        )
     fields: dict = {}
     if payload.status is not None:
         if payload.status not in _ALLOWED_STATUS:
@@ -91,7 +109,7 @@ async def update_inquiry(
     payload: InquiryUpdate,
     user: CurrentUser = Depends(require_org),
 ) -> dict:
-    row = await run_in_threadpool(_update, user.org_id, inquiry_id, payload)
+    row = await run_in_threadpool(_update, user, inquiry_id, payload)
     if not row:
         raise HTTPException(status_code=404, detail="Inquiry not found")
     return row
@@ -104,10 +122,11 @@ class InquiryAssignPayload(BaseModel):
     employee_id: str | None = None
 
 
-def _assign(org_id: str, inquiry_id: str, employee_id: str | None) -> dict | None:
+def _assign(user: CurrentUser, inquiry_id: str, employee_id: str | None) -> dict | None:
     """Assign (or unassign) an employee to an inquiry, validating that the
     employee belongs to the caller's org. Returns the updated row or None
     when the inquiry doesn't exist in this org."""
+    org_id = user.org_id
     client = get_service_client()
 
     # Verify the inquiry belongs to the caller's org BEFORE writing — otherwise
@@ -116,7 +135,7 @@ def _assign(org_id: str, inquiry_id: str, employee_id: str | None) -> dict | Non
     # nobody". 404 is more honest.
     existing = (
         client.table("inquiries")
-        .select("id")
+        .select("id, assigned_employee_id")
         .eq("org_id", org_id)
         .eq("id", inquiry_id)
         .limit(1)
@@ -125,6 +144,15 @@ def _assign(org_id: str, inquiry_id: str, employee_id: str | None) -> dict | Non
     )
     if not existing:
         return None
+
+    # A plain employee may only (un)assign their OWN inquiries, and only to
+    # themselves — admins may assign to anyone in the org.
+    enforce_self_assignment(
+        client,
+        user=user,
+        current_assignee_id=existing[0].get("assigned_employee_id"),
+        new_assignee_id=employee_id,
+    )
 
     if employee_id:
         # Same-org check: a malicious org_admin can't reassign an inquiry to an
@@ -168,7 +196,7 @@ async def assign_inquiry(
 ) -> dict:
     """Assign / unassign an employee on an inquiry. POST `{employee_id: null}`
     to clear the assignment. Validates same-org employee ownership."""
-    row = await run_in_threadpool(_assign, user.org_id, inquiry_id, payload.employee_id)
+    row = await run_in_threadpool(_assign, user, inquiry_id, payload.employee_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Inquiry not found")
     return row

@@ -50,6 +50,49 @@ def validate_fk_in_org(
             detail=f"{label} gehört nicht zu dieser Organisation.",
         )
 
+
+def enforce_self_assignment(
+    client,
+    *,
+    user,
+    current_assignee_id: str | None,
+    new_assignee_id: str | None,
+) -> None:
+    """Authorization: a plain employee may only manage assignments on their OWN
+    work. Admins (org_admin / super_admin) may assign to anyone in the org.
+
+    Raises 403 when a non-admin tries to (a) hand work to an employee other than
+    themselves, or (b) re-/un-assign work currently owned by a different
+    employee. Self-claim and dropping one's own assignment stay allowed.
+
+    ``user`` is a CurrentUser (duck-typed: .role, .org_id, .id). The caller's own
+    employee row is resolved by users.id → employees.user_id.
+    """
+    if getattr(user, "role", None) in ("org_admin", "super_admin"):
+        return
+    rows = (
+        client.table("employees")
+        .select("id")
+        .eq("org_id", user.org_id)
+        .eq("user_id", user.id)
+        .eq("deleted", False)
+        .limit(1)
+        .execute()
+        .data
+    )
+    my_id = rows[0]["id"] if rows else None
+    if current_assignee_id and current_assignee_id != my_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Sie können nur Ihre eigenen Aufgaben verwalten.",
+        )
+    if new_assignee_id and new_assignee_id != my_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Sie können Aufgaben nur sich selbst zuweisen.",
+        )
+
+
 _WEEKDAYS = {
     "montag": 0, "monday": 0, "dienstag": 1, "tuesday": 1, "mittwoch": 2,
     "wednesday": 2, "donnerstag": 3, "thursday": 3, "freitag": 4, "friday": 4,

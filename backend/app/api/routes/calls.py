@@ -133,6 +133,7 @@ def _list(org_id: str, limit: int, offset: int, customer_id: str | None) -> dict
         client.table("calls")
         .select(_LIST_SELECT, count="exact")
         .eq("org_id", org_id)
+        .is_("deleted_at", "null")
     )
     if customer_id:
         query = query.eq("customer_id", customer_id)
@@ -176,6 +177,43 @@ async def get_call(call_id: str, user: CurrentUser = Depends(require_org)) -> di
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
     return call
+
+
+def _delete(org_id: str, call_id: str) -> bool:
+    """Soft-delete a call (stamp deleted_at) and soft-delete its linked inquiries
+    (status='deleted'), so the call leaves the cockpit list and inquiry views.
+    Org-scoped. Returns False when no such call exists for this org."""
+    client = get_service_client()
+    now = datetime.now(timezone.utc).isoformat()
+    rows = (
+        client.table("calls")
+        .update({"deleted_at": now})
+        .eq("org_id", org_id)
+        .eq("id", call_id)
+        .execute()
+        .data
+    )
+    if not rows:
+        return False
+    (
+        client.table("inquiries")
+        .update({"status": "deleted"})
+        .eq("org_id", org_id)
+        .eq("call_id", call_id)
+        .neq("status", "deleted")
+        .execute()
+    )
+    return True
+
+
+@router.delete("/{call_id}")
+async def delete_call(call_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+    """Delete a call from the Call Logs cockpit. Soft-delete (reversible by
+    clearing deleted_at); also removes the linked inquiry."""
+    ok = await run_in_threadpool(_delete, user.org_id, call_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return {"success": True}
 
 
 def _ensure_inquiry(org_id: str, call_id: str) -> dict | None:

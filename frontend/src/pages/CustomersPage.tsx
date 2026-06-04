@@ -4,10 +4,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  LayoutGrid,
   Loader2,
   MapPin,
   Phone,
   Plus,
+  Rows3,
   Search,
   Trash2,
   Upload,
@@ -19,7 +21,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { CsvImportModal } from '../components/CsvImportModal'
 import { CustomerFormModal } from '../components/CustomerFormModal'
-import { apiFetch } from '../lib/api'
+import { apiBlobUrl, apiFetch } from '../lib/api'
 import { cn } from '../lib/utils'
 
 interface CustomerCard {
@@ -30,6 +32,7 @@ interface CustomerCard {
   address: { raw?: string } | string | null
   customer_number: string | null
   customer_type: string | null
+  identified_by: string | null
   inquiry_count: number
   appointment_count: number
   photo_count: number
@@ -46,6 +49,16 @@ const TYPE_META: Record<string, { label: string; badge: string }> = {
   regular: { label: 'Stammkunde', badge: 'bg-success-bg text-success' },
   supplier: { label: 'Lieferant', badge: 'bg-warning-bg text-warning' },
   property_management: { label: 'Hausverwaltung', badge: 'bg-ai-bg text-ai' },
+}
+// Acquisition source (customers.identified_by) → label + badge. "phone" means the
+// customer was identified during a call (AI/agent or manual phone entry).
+const SOURCE_META: Record<string, { label: string; badge: string }> = {
+  phone: { label: 'Anruf / KI', badge: 'bg-ai-bg text-ai' },
+  manual: { label: 'Manuell', badge: 'bg-alt text-body' },
+  csv_import: { label: 'Import', badge: 'bg-info-bg text-info' },
+}
+function sourceMeta(s: string | null): { label: string; badge: string } {
+  return SOURCE_META[s ?? ''] ?? { label: 'Unbekannt', badge: 'bg-alt text-muted' }
 }
 const FILTERS: { key: string; label: string; type?: string }[] = [
   { key: 'all', label: 'Alle' },
@@ -84,6 +97,13 @@ export function CustomersPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(() => defaultPageSize())
+  const [view, setView] = useState<'cards' | 'list'>(() =>
+    localStorage.getItem('kunden-view') === 'list' ? 'list' : 'cards',
+  )
+  const [exporting, setExporting] = useState(false)
+  useEffect(() => {
+    localStorage.setItem('kunden-view', view)
+  }, [view])
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['customers', filter, search, page, pageSize],
@@ -154,6 +174,29 @@ export function CustomersPage() {
     if (window.confirm(`${ids.length} ${ids.length > 1 ? 'Kunden' : 'Kunde'} wirklich entfernen?`)) del.mutate(ids)
   }
 
+  // Export the CURRENT view (search + active type filter) as a CSV download.
+  const exportCsv = async () => {
+    setExporting(true)
+    try {
+      const params = new URLSearchParams()
+      if (search.trim()) params.set('q', search.trim())
+      const f = FILTERS.find((x) => x.key === filter)
+      if (f?.type) params.set('customer_type', f.type)
+      const url = await apiBlobUrl(`/api/customers/export?${params.toString()}`)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `kunden-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Export fehlgeschlagen')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[1440px] p-8">
       {/* Header */}
@@ -166,7 +209,38 @@ export function CustomersPage() {
           <span className="mr-2 text-sm text-muted">
             {data?.total ?? 0} von {counts.all ?? 0} Kunden
           </span>
-          <HeaderBtn icon={Download} label="CSV Export" disabled />
+          <div className="flex items-center rounded-md border border-border bg-surface p-0.5">
+            <button
+              onClick={() => setView('cards')}
+              className={cn(
+                'rounded p-1.5 transition-colors',
+                view === 'cards' ? 'bg-alt text-text' : 'text-muted hover:text-body',
+              )}
+              title="Kachelansicht"
+              aria-label="Kachelansicht"
+              aria-pressed={view === 'cards'}
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              onClick={() => setView('list')}
+              className={cn(
+                'rounded p-1.5 transition-colors',
+                view === 'list' ? 'bg-alt text-text' : 'text-muted hover:text-body',
+              )}
+              title="Listenansicht"
+              aria-label="Listenansicht"
+              aria-pressed={view === 'list'}
+            >
+              <Rows3 size={15} />
+            </button>
+          </div>
+          <HeaderBtn
+            icon={Download}
+            label={exporting ? 'Export…' : 'CSV Export'}
+            onClick={exportCsv}
+            disabled={exporting}
+          />
           <HeaderBtn icon={Upload} label="CSV Import" onClick={() => setCsvOpen(true)} />
           <button
             onClick={() => setNewOpen(true)}
@@ -250,70 +324,158 @@ export function CustomersPage() {
         <div className="flex items-center justify-center py-24 text-muted">
           <Loader2 size={22} className="mr-2 animate-spin" /> Kunden werden geladen…
         </div>
-      ) : (
-      <div
-        aria-busy={isFetching}
-        className={cn(
-          'grid grid-cols-1 gap-5 transition-opacity md:grid-cols-2 xl:grid-cols-3',
-          isFetching && 'pointer-events-none opacity-50',
-        )}
-      >
-        {customers.map((c) => {
-          const meta = TYPE_META[c.customer_type ?? 'new'] ?? TYPE_META.new
-          const isSel = selected.has(c.id)
-          return (
-            <div
-              key={c.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => navigate(`/customers/${c.id}`)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') navigate(`/customers/${c.id}`)
-              }}
-              className={cn(
-                'relative flex cursor-pointer flex-col rounded-lg border bg-surface p-5 text-left shadow-e1 transition hover:bg-green-tint-50 hover:shadow-e2',
-                isSel ? 'border-green-primary ring-1 ring-green-primary' : 'border-border',
-              )}
-            >
-              <div className="mb-4 flex items-start justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2.5">
+      ) : view === 'list' ? (
+        <div
+          aria-busy={isFetching}
+          className={cn(
+            'overflow-x-auto rounded-xl border border-border bg-surface transition-opacity',
+            isFetching && 'pointer-events-none opacity-50',
+          )}
+        >
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-alt text-left text-xs uppercase tracking-wide text-muted">
+                <th className="w-10 px-3 py-2.5">
                   <input
                     type="checkbox"
-                    checked={isSel}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => toggle(c.id)}
-                    aria-label={`${c.full_name ?? 'Kunde'} auswählen`}
-                    className="h-4 w-4 shrink-0 cursor-pointer accent-green-primary"
+                    checked={allSelected}
+                    onChange={toggleAll}
+                    aria-label="Alle auswählen"
+                    className="h-4 w-4 cursor-pointer accent-green-primary"
                   />
-                  <User size={18} className="shrink-0 text-green-deep" />
-                  <span className="truncate text-base font-bold text-text">{c.full_name ?? 'Unbekannt'}</span>
+                </th>
+                <th className="px-3 py-2.5 font-semibold">Name</th>
+                <th className="px-3 py-2.5 font-semibold">Kundennr.</th>
+                <th className="px-3 py-2.5 font-semibold">Typ</th>
+                <th className="px-3 py-2.5 font-semibold">Quelle</th>
+                <th className="px-3 py-2.5 font-semibold">E-Mail</th>
+                <th className="px-3 py-2.5 font-semibold">Telefon</th>
+                <th className="px-3 py-2.5 font-semibold">Adresse</th>
+                <th
+                  className="px-3 py-2.5 text-right font-semibold"
+                  title="Anfragen · Termine · Dokumente/Fotos"
+                >
+                  A · T · D
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {customers.map((c) => {
+                const meta = TYPE_META[c.customer_type ?? 'new'] ?? TYPE_META.new
+                const sm = sourceMeta(c.identified_by)
+                const isSel = selected.has(c.id)
+                return (
+                  <tr
+                    key={c.id}
+                    onClick={() => navigate(`/customers/${c.id}`)}
+                    className={cn(
+                      'cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-green-tint-50',
+                      isSel && 'bg-green-tint-50',
+                    )}
+                  >
+                    <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSel}
+                        onChange={() => toggle(c.id)}
+                        aria-label={`${c.full_name ?? 'Kunde'} auswählen`}
+                        className="h-4 w-4 cursor-pointer accent-green-primary"
+                      />
+                    </td>
+                    <td className="px-3 py-2.5 font-semibold text-text">{c.full_name ?? 'Unbekannt'}</td>
+                    <td className="px-3 py-2.5 text-muted">{c.customer_number ?? '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold', meta.badge)}>
+                        {meta.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', sm.badge)}>
+                        {sm.label}
+                      </span>
+                    </td>
+                    <td className="max-w-[200px] truncate px-3 py-2.5 text-muted">{c.email ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-muted">{c.phone ?? '—'}</td>
+                    <td className="max-w-[220px] truncate px-3 py-2.5 text-muted">{addr(c.address)}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right text-xs text-muted">
+                      {c.inquiry_count} · {c.appointment_count} · {c.photo_count + c.document_count}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div
+          aria-busy={isFetching}
+          className={cn(
+            'grid grid-cols-1 gap-5 transition-opacity md:grid-cols-2 xl:grid-cols-3',
+            isFetching && 'pointer-events-none opacity-50',
+          )}
+        >
+          {customers.map((c) => {
+            const meta = TYPE_META[c.customer_type ?? 'new'] ?? TYPE_META.new
+            const sm = sourceMeta(c.identified_by)
+            const isSel = selected.has(c.id)
+            return (
+              <div
+                key={c.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/customers/${c.id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') navigate(`/customers/${c.id}`)
+                }}
+                className={cn(
+                  'relative flex cursor-pointer flex-col rounded-lg border bg-surface p-5 text-left shadow-e1 transition hover:bg-green-tint-50 hover:shadow-e2',
+                  isSel ? 'border-green-primary ring-1 ring-green-primary' : 'border-border',
+                )}
+              >
+                <div className="mb-4 flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={isSel}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggle(c.id)}
+                      aria-label={`${c.full_name ?? 'Kunde'} auswählen`}
+                      className="h-4 w-4 shrink-0 cursor-pointer accent-green-primary"
+                    />
+                    <User size={18} className="shrink-0 text-green-deep" />
+                    <span className="truncate text-base font-bold text-text">{c.full_name ?? 'Unbekannt'}</span>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-bold', meta.badge)}>
+                      {meta.label}
+                    </span>
+                    <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', sm.badge)}>
+                      {sm.label}
+                    </span>
+                  </div>
                 </div>
-                <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-xs font-bold', meta.badge)}>
-                  {meta.label}
-                </span>
+                <div className="space-y-1.5 text-sm text-muted">
+                  <div className="flex items-center gap-2">
+                    <AtSign size={14} className="flex-shrink-0 text-faint" />
+                    <span className="truncate">{c.email ?? '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Phone size={14} className="flex-shrink-0 text-faint" />
+                    <span className="truncate">{c.phone ?? '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <MapPin size={14} className="flex-shrink-0 text-faint" />
+                    <span className="truncate">{addr(c.address)}</span>
+                  </div>
+                </div>
+                <div className="mt-4 border-t border-border pt-3 text-xs text-muted">
+                  {c.inquiry_count} Anfragen · {c.appointment_count} Termine · {c.photo_count} Fotos ·{' '}
+                  {c.document_count} Dokumente
+                </div>
               </div>
-              <div className="space-y-1.5 text-sm text-muted">
-                <div className="flex items-center gap-2">
-                  <AtSign size={14} className="flex-shrink-0 text-faint" />
-                  <span className="truncate">{c.email ?? '—'}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Phone size={14} className="flex-shrink-0 text-faint" />
-                  <span className="truncate">{c.phone ?? '—'}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <MapPin size={14} className="flex-shrink-0 text-faint" />
-                  <span className="truncate">{addr(c.address)}</span>
-                </div>
-              </div>
-              <div className="mt-4 border-t border-border pt-3 text-xs text-muted">
-                {c.inquiry_count} Anfragen · {c.appointment_count} Termine · {c.photo_count} Fotos ·{' '}
-                {c.document_count} Dokumente
-              </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
       )}
 
       {!isLoading && !customers.length && (

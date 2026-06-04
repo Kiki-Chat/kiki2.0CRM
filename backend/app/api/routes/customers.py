@@ -1,7 +1,9 @@
+import csv
+import io
 import json
 from collections import Counter
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -31,7 +33,8 @@ def _list(org_id: str, q: str | None, limit: int, offset: int, customer_type: st
     query = (
         client.table("customers")
         .select(
-            "id, full_name, phone, email, customer_number, address, customer_type, created_at",
+            "id, full_name, phone, email, customer_number, address, customer_type, "
+            "identified_by, created_at",
             count="exact",
         )
         .eq("org_id", org_id)
@@ -140,6 +143,7 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
         .select("id, summary_title, direction, duration_seconds, started_at")
         .eq("org_id", org_id)
         .eq("customer_id", customer_id)
+        .is_("deleted_at", "null")
         .order("started_at", desc=True)
         .execute()
         .data
@@ -167,6 +171,89 @@ async def list_customers(
     user: CurrentUser = Depends(require_org),
 ) -> dict:
     return await run_in_threadpool(_list, user.org_id, q, limit, offset, customer_type)
+
+
+_TYPE_LABELS = {
+    "new": "Neukunde",
+    "regular": "Stammkunde",
+    "supplier": "Lieferant",
+    "property_management": "Hausverwaltung",
+}
+# identified_by → human label. "phone" is how callers/AI-identified customers arise.
+_SOURCE_LABELS = {"phone": "Anruf / KI", "manual": "Manuell", "csv_import": "Import"}
+
+
+def _export_csv(org_id: str, q: str | None, customer_type: str | None) -> str:
+    """Semicolon-delimited, UTF-8-BOM CSV of every customer matching the current
+    view (search + type filter). Pages past PostgREST's 1000-row cap so a 4–5k
+    base exports in full."""
+    client = get_service_client()
+
+    def _page(start: int):
+        query = (
+            client.table("customers")
+            .select(
+                "customer_number, full_name, email, phone, phone2, address, "
+                "customer_type, identified_by, notes, created_at"
+            )
+            .eq("org_id", org_id)
+            .neq("status", "deleted")
+        )
+        if customer_type:
+            query = query.eq("customer_type", customer_type)
+        if q:
+            query = query.or_(
+                f"full_name.ilike.%{q}%,phone.ilike.%{q}%,email.ilike.%{q}%,"
+                f"customer_number.ilike.%{q}%"
+            )
+        return query.order("created_at", desc=True).range(start, start + 999).execute().data or []
+
+    rows: list[dict] = []
+    start = 0
+    while True:
+        batch = _page(start)
+        rows.extend(batch)
+        if len(batch) < 1000:
+            break
+        start += 1000
+
+    buf = io.StringIO()
+    buf.write("﻿")  # UTF-8 BOM so Excel renders umlauts correctly
+    w = csv.writer(buf, delimiter=";")
+    w.writerow([
+        "Kundennummer", "Name", "E-Mail", "Telefon", "Telefon 2", "Adresse",
+        "Typ", "Quelle", "Notizen", "Erstellt am",
+    ])
+    for r in rows:
+        a = r.get("address")
+        address = a.get("raw") if isinstance(a, dict) else (a or "")
+        w.writerow([
+            r.get("customer_number") or "",
+            r.get("full_name") or "",
+            r.get("email") or "",
+            r.get("phone") or "",
+            r.get("phone2") or "",
+            address or "",
+            _TYPE_LABELS.get(r.get("customer_type") or "new", "Neukunde"),
+            _SOURCE_LABELS.get(r.get("identified_by") or "", "Unbekannt"),
+            r.get("notes") or "",
+            (r.get("created_at") or "")[:10],
+        ])
+    return buf.getvalue()
+
+
+@router.get("/export")
+async def export_customers(
+    q: str | None = None,
+    customer_type: str | None = None,
+    user: CurrentUser = Depends(require_org),
+) -> Response:
+    csv_text = await run_in_threadpool(_export_csv, user.org_id, q, customer_type)
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="kunden.csv"'},
+    )
 
 
 @router.get("/{customer_id}")

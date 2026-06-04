@@ -228,6 +228,7 @@ export function CallLogsPage() {
           emergency={selectedEmergency}
           rightOpen={rightOpen}
           onToggleRight={() => setRightOpen((o) => !o)}
+          onDeleted={() => setSelectedId(null)}
         />
       ) : (
         <NoCallSelected />

@@ -31,6 +31,7 @@ import {
 import { useState, type ReactNode } from 'react'
 
 import { cn, initials } from '../../lib/utils'
+import { useMe } from '../../lib/useMe'
 import { Tag } from '../../components/ui/Tag'
 import { AssignDropdown, Avatar, MoodPill, NotdienstBadge, StatusPill } from './atoms'
 import { SectionLabel } from './ui'
@@ -93,10 +94,14 @@ function StatusSwitcher({ status, onChange, disabled }: { status: string; onChan
 // ─── Assignment field ──────────────────────────────────────────────────────
 function AssignField({ current, employees, onAssign, disabled }: { current: string | null; employees: Employee[]; onAssign: (id: string | null) => void; disabled: boolean }) {
   const e = employees.find((x) => x.id === current)
+  // Only admins may (re)assign — employees see a read-only assignee.
+  const { isAdmin } = useMe()
+  const locked = disabled || !isAdmin
   return (
-    <AssignDropdown current={current} employees={employees} onAssign={onAssign} disabled={disabled}>
+    <AssignDropdown current={current} employees={employees} onAssign={onAssign} disabled={locked}>
       <button
-        disabled={disabled}
+        disabled={locked}
+        title={!isAdmin ? 'Nur Admins können Mitarbeiter zuweisen' : undefined}
         className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5 disabled:opacity-60"
       >
         <Avatar employeeId={current} text={e ? initials(e.display_name ?? '?') : '—'} size={28} />
@@ -144,7 +149,7 @@ function MoreMenu({ onEdit, onReopen, onDelete, disabled }: { onEdit: () => void
           </DropdownMenu.Item>
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Item onSelect={onDelete} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-bold text-error outline-none data-[highlighted]:bg-error-bg">
-            <Trash2 size={15} /> Anfrage löschen
+            <Trash2 size={15} /> Anruf löschen
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -160,6 +165,7 @@ function ActionsTab({
   busy,
   appointmentSlot,
   onStatus,
+  onDelete,
   onAssign,
   onEdit,
   onAppointment,
@@ -171,6 +177,7 @@ function ActionsTab({
   busy: boolean
   appointmentSlot?: ReactNode
   onStatus: (s: string) => void
+  onDelete: () => void
   onAssign: (id: string | null) => void
   onEdit: () => void
   onAppointment: () => void
@@ -209,7 +216,7 @@ function ActionsTab({
           >
             <Pencil size={16} /> Bearbeiten
           </button>
-          <MoreMenu onEdit={onEdit} onReopen={() => onStatus('open')} onDelete={() => onStatus('deleted')} disabled={!inquiry || busy} />
+          <MoreMenu onEdit={onEdit} onReopen={() => onStatus('open')} onDelete={onDelete} disabled={busy} />
         </div>
       </div>
     </div>
@@ -421,6 +428,7 @@ export function Workspace({
   timelineLoading,
   appointmentSlot,
   onStatus,
+  onDelete,
   onAssign,
   onEdit,
   onAppointment,
@@ -438,6 +446,7 @@ export function Workspace({
   timelineLoading: boolean
   appointmentSlot?: ReactNode
   onStatus: (s: string) => void
+  onDelete: () => void
   onAssign: (id: string | null) => void
   onEdit: () => void
   onAppointment: () => void
@@ -490,6 +499,7 @@ export function Workspace({
             busy={busy}
             appointmentSlot={appointmentSlot}
             onStatus={onStatus}
+            onDelete={onDelete}
             onAssign={onAssign}
             onEdit={onEdit}
             onAppointment={onAppointment}

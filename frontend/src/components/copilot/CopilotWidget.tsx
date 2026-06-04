@@ -1,5 +1,6 @@
 import { Plus, Send, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import kikiAvatar from '../../assets/kiki-avatar.png'
@@ -39,8 +40,26 @@ interface Msg {
 }
 
 const OPEN_KEY = 'kiki-copilot-open'
+const POS_KEY = 'kiki-copilot-pos'
+const LAUNCHER = 64 // px — launcher diameter (h-16 w-16)
+const PANEL_W = 370 // px — open chat panel width
+const MARGIN = 16 // px — min gap kept from any viewport edge
+type Pos = { x: number; y: number } // launcher top-left, viewport px
 let _seq = 0
 const uid = () => `m${Date.now()}_${_seq++}`
+
+/** Read a previously dragged launcher position from localStorage. */
+function loadPos(): Pos | null {
+  try {
+    const raw = localStorage.getItem(POS_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as Pos
+    if (typeof p?.x === 'number' && typeof p?.y === 'number') return p
+  } catch {
+    /* ignore malformed value */
+  }
+  return null
+}
 
 /** Strip simple markdown emphasis so plain bubbles read cleanly. */
 const clean = (s: string) => s.replace(/\*\*(.+?)\*\*/g, '$1')
@@ -58,20 +77,29 @@ export function CopilotWidget() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pos, setPos] = useState<Pos | null>(() => loadPos())
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number; moved: boolean } | null>(null)
+  const posRef = useRef<Pos | null>(null)
+  const suppressClickRef = useRef(false)
+
+  useEffect(() => {
+    posRef.current = pos
+  }, [pos])
 
   useEffect(() => {
     localStorage.setItem(OPEN_KEY, open ? '1' : '0')
   }, [open])
 
   const greeting = (): Msg => {
-    // The PERSON's first name (from /api/me full_name) — not the org name.
-    const first = me?.full_name?.trim().split(/\s+/)[0] || ''
+    // Greet the ACCOUNT HOLDER = the company (org_name), dynamic per org — like the Dashboard.
+    const company = me?.org_name?.trim() || ''
     return {
       id: uid(),
       role: 'kiki',
-      content: `Hallo${first ? ' ' + first : ''}! Ich bin Kiki, dein CRM-Assistent. Frag mich z. B. „Wie viele offene Aufgaben habe ich?“ oder „Zeig mir die Anrufe“.`,
+      content: `Hallo${company ? ' ' + company : ''}! Ich bin Kiki, dein CRM-Assistent. Frag mich z. B. „Wie viele offene Aufgaben habe ich?“ oder „Zeig mir die Anrufe“.`,
     }
   }
 
@@ -147,8 +175,77 @@ export function CopilotWidget() {
     }
   }
 
+  // ─── Draggable launcher ──────────────────────────────────────────────────
+  const clampPos = (x: number, y: number): Pos => ({
+    x: Math.max(MARGIN, Math.min(x, window.innerWidth - LAUNCHER - MARGIN)),
+    y: Math.max(MARGIN, Math.min(y, window.innerHeight - LAUNCHER - MARGIN)),
+  })
+
+  // Keep a dragged bubble on-screen across viewport resizes.
+  useEffect(() => {
+    const onResize = () => setPos((p) => (p ? clampPos(p.x, p.y) : p))
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const startDrag = (e: ReactPointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    const rect = wrapperRef.current?.getBoundingClientRect()
+    const baseX = pos?.x ?? rect?.left ?? window.innerWidth - LAUNCHER - 24
+    const baseY = pos?.y ?? rect?.top ?? window.innerHeight - LAUNCHER - 24
+    dragRef.current = { startX: e.clientX, startY: e.clientY, baseX, baseY, moved: false }
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
+  const moveDrag = (e: ReactPointerEvent) => {
+    const d = dragRef.current
+    if (!d) return
+    const dx = e.clientX - d.startX
+    const dy = e.clientY - d.startY
+    if (!d.moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) d.moved = true
+    if (d.moved) {
+      const next = clampPos(d.baseX + dx, d.baseY + dy)
+      posRef.current = next
+      setPos(next)
+    }
+  }
+  const endDrag = (e: ReactPointerEvent) => {
+    const d = dragRef.current
+    dragRef.current = null
+    if (!d) return
+    try {
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    } catch {
+      /* pointer already released */
+    }
+    if (d.moved) {
+      suppressClickRef.current = true // swallow the click that follows a drag
+      if (posRef.current) localStorage.setItem(POS_KEY, JSON.stringify(posRef.current))
+    } else {
+      setOpen(true) // a tap/click with no movement opens the chat
+    }
+  }
+
+  // When a custom position is set, place the wrapper there — clamped so the open
+  // panel never spills off-screen; otherwise fall back to the bottom-right dock.
+  const wrapperStyle: CSSProperties | undefined = pos
+    ? (() => {
+        const w = open ? PANEL_W : LAUNCHER
+        const h = open ? Math.min(560, Math.round(window.innerHeight * 0.8)) : LAUNCHER
+        return {
+          left: Math.max(MARGIN, Math.min(pos.x, window.innerWidth - w - MARGIN)),
+          top: Math.max(MARGIN, Math.min(pos.y, window.innerHeight - h - MARGIN)),
+        }
+      })()
+    : undefined
+
   return (
-    <div className="fixed bottom-14 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-3 print:hidden">
+    <div
+      ref={wrapperRef}
+      style={wrapperStyle}
+      className={`fixed z-50 flex flex-col items-end gap-3 print:hidden ${pos ? '' : 'bottom-6 right-6'}`}
+    >
       {open && (
         <div className="flex h-[560px] max-h-[80vh] w-[370px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
           <div className="flex items-center gap-3 border-b border-border bg-alt px-4 py-3">
@@ -270,11 +367,21 @@ export function CopilotWidget() {
 
       {!open && (
         <button
-          onClick={() => setOpen(true)}
-          className="kiki-glow relative h-16 w-16 overflow-hidden rounded-full bg-white shadow-xl ring-2 ring-green-primary transition hover:scale-105"
+          onPointerDown={startDrag}
+          onPointerMove={moveDrag}
+          onPointerUp={endDrag}
+          onClick={() => {
+            if (suppressClickRef.current) {
+              suppressClickRef.current = false
+              return
+            }
+            setOpen(true)
+          }}
+          className="relative h-16 w-16 cursor-grab touch-none overflow-hidden rounded-full bg-white shadow-xl ring-2 ring-green-primary transition hover:scale-105 active:cursor-grabbing"
           aria-label="Kiki Assistent öffnen"
+          title="Kiki öffnen · ziehen zum Verschieben"
         >
-          <img src={kikiAvatar} alt="Kiki" className="h-full w-full object-cover" />
+          <img src={kikiAvatar} alt="Kiki" className="h-full w-full object-cover" draggable={false} />
         </button>
       )}
     </div>

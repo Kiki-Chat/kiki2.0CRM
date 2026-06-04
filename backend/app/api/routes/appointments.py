@@ -10,7 +10,7 @@ from app.schemas.admin import AppointmentCreate, AppointmentPatch
 from app.services import calendar_sync
 from app.services.appointment_notify import notify_appointment_outcome
 from app.services.appointments import import_ics
-from app.services.common import validate_fk_in_org
+from app.services.common import enforce_self_assignment, validate_fk_in_org
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
 
@@ -95,7 +95,8 @@ async def list_appointments(
     return await run_in_threadpool(_list, user.org_id, frm, to)
 
 
-def _create(org_id: str, payload: AppointmentCreate) -> dict:
+def _create(user: CurrentUser, payload: AppointmentCreate) -> dict:
+    org_id = user.org_id
     client = get_service_client()
     # FK hardening: every foreign-key id in the body must belong to this org.
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
@@ -104,6 +105,11 @@ def _create(org_id: str, payload: AppointmentCreate) -> dict:
     validate_fk_in_org(
         client, table="employees", fk_id=payload.assigned_employee_id,
         org_id=org_id, label="Mitarbeiter", require_active=True,
+    )
+    # A plain employee may only create work assigned to themselves.
+    enforce_self_assignment(
+        client, user=user, current_assignee_id=None,
+        new_assignee_id=payload.assigned_employee_id,
     )
     row = {
         "org_id": org_id,
@@ -127,7 +133,7 @@ def _create(org_id: str, payload: AppointmentCreate) -> dict:
 async def create_appointment(
     payload: AppointmentCreate, user: CurrentUser = Depends(require_org)
 ) -> dict:
-    return await run_in_threadpool(_create, user.org_id, payload)
+    return await run_in_threadpool(_create, user, payload)
 
 
 @router.post("/import-ics")
@@ -138,7 +144,8 @@ async def import_appointments_ics(
     return await run_in_threadpool(import_ics, user.org_id, content)
 
 
-def _patch(org_id: str, appointment_id: str, payload: AppointmentPatch) -> dict | None:
+def _patch(user: CurrentUser, appointment_id: str, payload: AppointmentPatch) -> dict | None:
+    org_id = user.org_id
     client = get_service_client()
     # FK hardening: employee / vehicle / tool reassignment must stay same-org.
     validate_fk_in_org(
@@ -148,6 +155,22 @@ def _patch(org_id: str, appointment_id: str, payload: AppointmentPatch) -> dict 
     validate_fk_in_org(client, table="vehicles", fk_id=payload.vehicle_id, org_id=org_id, label="Fahrzeug")
     validate_fk_in_org(client, table="tools", fk_id=payload.tool_id, org_id=org_id, label="Werkzeug")
     fields = payload.model_dump(exclude_unset=True)
+    # A plain employee may not reassign an appointment to a colleague.
+    if "assigned_employee_id" in fields:
+        cur = (
+            client.table("appointments")
+            .select("assigned_employee_id")
+            .eq("org_id", org_id)
+            .eq("id", appointment_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        enforce_self_assignment(
+            client, user=user,
+            current_assignee_id=cur[0].get("assigned_employee_id") if cur else None,
+            new_assignee_id=fields.get("assigned_employee_id"),
+        )
     if "location" in fields and isinstance(fields["location"], str):
         fields["location"] = {"raw": fields["location"]}
     if not fields:
@@ -167,7 +190,7 @@ def _patch(org_id: str, appointment_id: str, payload: AppointmentPatch) -> dict 
 async def update_appointment(
     appointment_id: str, payload: AppointmentPatch, user: CurrentUser = Depends(require_org)
 ) -> dict:
-    appt = await run_in_threadpool(_patch, user.org_id, appointment_id, payload)
+    appt = await run_in_threadpool(_patch, user, appointment_id, payload)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
     return appt

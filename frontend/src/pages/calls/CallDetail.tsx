@@ -18,12 +18,14 @@ export function CallDetail({
   emergency,
   rightOpen,
   onToggleRight,
+  onDeleted,
 }: {
   callId: string
   isSuperAdmin: boolean
   emergency: boolean
   rightOpen: boolean
   onToggleRight: () => void
+  onDeleted?: () => void
 }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -50,6 +52,17 @@ export function CallDetail({
       qc.invalidateQueries({ queryKey: ['callInquiry', callId] })
       qc.invalidateQueries({ queryKey: ['calls'] })
       qc.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
+    },
+  })
+
+  // Delete the whole call (soft-delete on the server). Clears the selection via
+  // onDeleted so the cockpit lands on the next call instead of a stale pane.
+  const deleteCall = useMutation({
+    mutationFn: () => apiFetch(`/api/calls/${callId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
+      onDeleted?.()
     },
   })
 
@@ -101,7 +114,7 @@ export function CallDetail({
               call={call}
               inquiry={inquiry}
               employees={employees}
-              busy={patchInquiry.isPending}
+              busy={patchInquiry.isPending || deleteCall.isPending}
               emergency={emergency}
               tab={tab}
               setTab={setTab}
@@ -109,6 +122,14 @@ export function CallDetail({
               timelineLoading={timeline.isLoading}
               appointmentSlot={appointmentSlot}
               onStatus={(s) => patchInquiry.mutate({ status: s })}
+              onDelete={() => {
+                if (
+                  window.confirm(
+                    'Diesen Anruf wirklich löschen? Die zugehörige Anfrage wird ebenfalls entfernt.',
+                  )
+                )
+                  deleteCall.mutate()
+              }}
               onAssign={(id) => patchInquiry.mutate({ assigned_employee_id: id })}
               onEdit={() => setModal('process')}
               onAppointment={() => setModal('appointment')}
