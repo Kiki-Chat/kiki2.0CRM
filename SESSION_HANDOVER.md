@@ -5,6 +5,15 @@
 ## Recent changes
 _Append one dated bullet per shipped, UI-visible change. Newest first._
 
+- **2026-06-04 (UAT ROUND 3 — calendar/card UI + telephony + REAL emergency forwarding; DEPLOYED to Railway prod) — 6 more items from Amber's testing + wired live call-forwarding.**
+  - **Calendar appt modal:** "Zu Kalender hinzufügen" + "Verschieben / Bearbeiten" now SIDE-BY-SIDE (equal width); Verschieben is ORANGE (`bg-warning`). `CalendarPage.tsx`.
+  - **Confirmed appt card LOCKED:** once confirmed, the "Kategorie, Dauer & Zuweisung" toggle is grey + not expandable (no editing/assignment) — changes happen in the calendar. `AppointmentCard.tsx`.
+  - **Outbound:** removed the "Geschätzte Belastung" (KI-minutes estimate) card entirely + its dead calc. `ConfigSections.tsx`.
+  - **Telefon → 3 numbers:** removed the "Notdienst-Weiterleitung" field (emergency number lives ONLY in Notdienst now). `ConfigSections.tsx`.
+  - **Emergency forwarding — REAL Twilio bridge (Amber chose raw Twilio over native):** `hk_transferCall` now redirects the LIVE inbound call via the Twilio REST API (`POST /Calls/{CallSid}` → `<Dial>{number}`) using the `_callSid` + the Notdienst `emergency_number` (fallback `forwarding_number`). New settings `TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN` (dormant when blank). Prompt: agent announces the transfer BEFORE calling the tool. `transfer.py`, `config.py`, `agent_config.py`.
+  - **UAT-verified:** Twilio creds valid (GET account → 200, active); redirect endpoint authenticates (POST fake CallSid → 404). httpx already a dep. ⚠️ The media-stream hand-off (redirecting an ElevenLabs-held call) is only confirmable on a LIVE emergency call.
+  - **DEPLOYED to Railway prod (2026-06-04).** ⚠️ Forwarding stays **DORMANT on prod** until `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` are added to the **backend's Railway prod vars** (Amber adds — secrets). Then: set the org's Notdienst emergency_number + save a Kiki-Zentrale section (re-push prompt) + live-call test. No new migration.
+
 - **2026-06-04 (UAT ROUND 2 — live-testing bug fixes; DEPLOYED to Railway prod) — Fixed 6 issues Amber found while using the build.**
   - **Re-asking phone number:** the topic-8 required-fields lead-in told the agent to ask every field "first", overriding the skip-known-fields rule → it re-asked the number. Lead-in now: ask in priority order but NEVER re-ask auto-recognized fields (caller-ID / hk_identifyCustomer). `agent_config.render_required_fields_block`. (Prompt — needs uvicorn restart / re-push to take effect.)
   - **Emergency over-flagging:** `ensure_call_inquiry` flagged ANY after-hours call (Notdienst on) as emergency. Now requires BOTH after-hours AND the agent's data-collection urgent signal (Amber's choice). `inquiries.py`.
