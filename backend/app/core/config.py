@@ -27,10 +27,11 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     # Master on/off for the whole copilot surface (router + UI). Off by default.
     copilot_enabled: bool = Field(default=False, validation_alias="COPILOT_ENABLED")
-    # Small / fast model (4o-mini-class) — decided 2026-06-04: no flagship needed
-    # for CRM tasks; cheaper + lower latency. The copilot AND the shared
-    # classifiers (emergency / employee auto-assign) use this tier. Override per env.
-    openai_copilot_model: str = Field(default="gpt-4o-mini", validation_alias="OPENAI_COPILOT_MODEL")
+    # Copilot model — upgraded 2026-06-04 to gpt-4o for far more reliable tool-calling
+    # + reasoning (the mini tier dropped confirm-cards / disambiguation). Override per
+    # env; the client also tolerates "thinking" o-series models (o1/o3/o4) — see ai/client.
+    # Classifiers (emergency / employee auto-assign) stay on the cheap mini tier.
+    openai_copilot_model: str = Field(default="gpt-4o", validation_alias="OPENAI_COPILOT_MODEL")
     openai_classifier_model: str = Field(default="gpt-4o-mini", validation_alias="OPENAI_CLASSIFIER_MODEL")
     # Network timeout (seconds) for OpenAI calls.
     openai_timeout_seconds: float = Field(default=30.0, validation_alias="OPENAI_TIMEOUT_SECONDS")

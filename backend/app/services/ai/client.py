@@ -82,11 +82,12 @@ def _build_params(
     temperature: float,
     extra: dict[str, Any],
 ) -> dict[str, Any]:
-    params: dict[str, Any] = {
-        "model": model or settings.openai_copilot_model,
-        "messages": messages,
-        "temperature": temperature,
-    }
+    chosen = model or settings.openai_copilot_model
+    params: dict[str, Any] = {"model": chosen, "messages": messages}
+    # "Thinking" reasoning models (o1/o3/o4…) reject `temperature` — only send it to
+    # the standard chat models.
+    if not chosen.startswith(("o1", "o3", "o4")):
+        params["temperature"] = temperature
     if tools:
         params["tools"] = tools
         if tool_choice is not None:

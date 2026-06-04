@@ -65,8 +65,27 @@ function loadPos(): Pos | null {
 const clean = (s: string) => s.replace(/\*\*(.+?)\*\*/g, '$1')
 
 function actionSummary(a: ProposedAction): string {
-  if (a.tool === 'create_customer') return `Neuen Kunden anlegen: ${String(a.args.name ?? '')}`
-  return a.description || a.tool
+  const s = (k: string) => String(a.args[k] ?? '')
+  switch (a.tool) {
+    case 'create_customer':
+      return `Neuen Kunden anlegen: ${s('name')}`
+    case 'update_customer':
+      return 'Kundendaten ändern'
+    case 'create_inquiry':
+      return `Anfrage anlegen: ${s('title')}`
+    case 'set_inquiry_status':
+      return `Anfrage-Status → ${s('status')}`
+    case 'create_appointment': {
+      const at = s('scheduled_at').replace('T', ' ').slice(0, 16)
+      return `Termin anlegen${a.args.title ? ': ' + s('title') : ''}${at ? ' (' + at + ')' : ''}`
+    }
+    case 'report_problem':
+      return `Problem melden: ${s('summary')}`
+    case 'update_org_profile':
+      return 'Stammdaten ändern'
+    default:
+      return a.description || a.tool
+  }
 }
 
 export function CopilotWidget() {

@@ -70,7 +70,7 @@ def _search_customers(user: CurrentUser, args: dict) -> dict:
     q = _sanitize_search(args.get("query", ""))
     client = get_service_client()
     sel = "id, full_name, phone, email, customer_number"
-    query = client.table("customers").select(sel).eq("org_id", user.org_id)
+    query = client.table("customers").select(sel).eq("org_id", user.org_id).neq("status", "deleted")
     if q:
         query = query.or_(
             f"full_name.ilike.%{q}%,phone.ilike.%{q}%,email.ilike.%{q}%,customer_number.ilike.%{q}%"
@@ -89,6 +89,7 @@ def _get_customer(user: CurrentUser, args: dict) -> dict:
         .select("id, full_name, phone, email, address, customer_number, created_at")
         .eq("org_id", user.org_id)
         .eq("id", cid)
+        .neq("status", "deleted")
         .limit(1)
         .execute()
         .data
@@ -160,15 +161,48 @@ _SETTINGS_DICT: dict[str, tuple[tuple[str, ...], str]] = {
 }
 
 
+def _resolve_customer(org_id: str, ref: str) -> dict:
+    """Resolve a customer reference (UUID, customer number, or name) to ONE active
+    customer. Returns {"id": ...} on a unique hit, else {"error"/"ambiguous": ...,
+    "candidates": [...]} so the model can say "not found" or ask which one."""
+    ref = (ref or "").strip()
+    if not ref:
+        return {"error": "Kein Kunde angegeben."}
+    base = (
+        get_service_client().table("customers")
+        .select("id, full_name, customer_number").eq("org_id", org_id).neq("status", "deleted")
+    )
+    if _UUID_RE.match(ref):
+        rows = base.eq("id", ref).limit(1).execute().data or []
+        return {"id": rows[0]["id"]} if rows else {"error": "Kunde nicht gefunden."}
+    if ref.isdigit():
+        rows = base.eq("customer_number", ref).limit(5).execute().data or []
+    else:
+        q = _sanitize_search(ref)
+        rows = (base.or_(f"full_name.ilike.%{q}%,email.ilike.%{q}%,customer_number.ilike.%{q}%")
+                .limit(5).execute().data if q else []) or []
+    if not rows:
+        return {"error": f"Kein aktiver Kunde zu „{ref}“ gefunden."}
+    if len(rows) > 1:
+        return {
+            "ambiguous": True,
+            "message": f"Mehrere Kunden passen zu „{ref}“. Bitte präzisieren:",
+            "candidates": [
+                {"id": r["id"], "name": r.get("full_name"), "number": r.get("customer_number")} for r in rows
+            ],
+        }
+    return {"id": rows[0]["id"], "name": rows[0].get("full_name")}
+
+
 def _update_customer(user: CurrentUser, args: dict) -> dict:
     from app.schemas.tools import UpdateCustomerDataRequest
     from app.services.customers import update_customer_data
 
-    cid = (args.get("customer_id") or "").strip()
-    if not _UUID_RE.match(cid):
-        return {"error": "Ungültige Kunden-ID."}
+    resolved = _resolve_customer(user.org_id, args.get("customer_id") or args.get("customer") or "")
+    if "id" not in resolved:
+        return resolved  # not found / ambiguous → the model relays it or asks which one
     req = UpdateCustomerDataRequest(
-        customer_id=cid, name=args.get("name"), email=args.get("email"),
+        customer_id=resolved["id"], name=args.get("name"), email=args.get("email"),
         phone=args.get("phone"), address=args.get("address"),
     )
     return update_customer_data(user.org_id, req)
@@ -211,14 +245,21 @@ def _create_appointment(user: CurrentUser, args: dict) -> dict:
     scheduled_at = (args.get("scheduled_at") or "").strip()
     if not scheduled_at:
         return {"error": "scheduled_at (ISO-Datum/Uhrzeit) ist erforderlich."}
+    customer_id = None
+    ref = (args.get("customer_id") or args.get("customer") or "").strip()
+    if ref:
+        resolved = _resolve_customer(user.org_id, ref)
+        if "id" not in resolved:
+            return resolved  # not found / ambiguous → ask which customer
+        customer_id = resolved["id"]
     try:
         payload = AppointmentCreate(
-            customer_id=args.get("customer_id"), title=args.get("title"),
+            customer_id=customer_id, title=args.get("title"),
             scheduled_at=scheduled_at, duration_minutes=int(args.get("duration_minutes") or 60),
             location=args.get("location"), assigned_employee_id=args.get("assigned_employee_id"),
             notes=args.get("notes"),
         )
-        return {"appointment": appt_routes._create(user.org_id, payload)}
+        return {"appointment": appt_routes._create(user, payload)}  # pass the CurrentUser (new signature)
     except Exception as exc:  # noqa: BLE001 — FK validation raises; surface a clean message
         return {"error": f"Termin nicht angelegt: {getattr(exc, 'detail', str(exc))}"}
 
