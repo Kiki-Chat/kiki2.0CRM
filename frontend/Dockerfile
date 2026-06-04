@@ -10,8 +10,11 @@ COPY . .
 ARG VITE_API_URL=https://backend-production-3f88a.up.railway.app
 ARG VITE_SUPABASE_URL=https://ifbluvdcbcesuhvkxsfn.supabase.co
 ARG VITE_SUPABASE_ANON_KEY=sb_publishable_j2SeGLjSYz5NZdCzBrF6Jw_VLJq466Q
-RUN printf 'VITE_API_URL=%s\nVITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\n' \
-      "$VITE_API_URL" "$VITE_SUPABASE_URL" "$VITE_SUPABASE_ANON_KEY" > .env.production \
+# Kiki copilot widget — on by default for prod builds; Railway can override the
+# VITE_COPILOT_ENABLED service build arg to '0' to ship it hidden.
+ARG VITE_COPILOT_ENABLED=1
+RUN printf 'VITE_API_URL=%s\nVITE_SUPABASE_URL=%s\nVITE_SUPABASE_ANON_KEY=%s\nVITE_COPILOT_ENABLED=%s\n' \
+      "$VITE_API_URL" "$VITE_SUPABASE_URL" "$VITE_SUPABASE_ANON_KEY" "$VITE_COPILOT_ENABLED" > .env.production \
   && npm run build
 
 # ---- serve stage: static SPA on $PORT ----
