@@ -18,6 +18,13 @@ class Settings(BaseSettings):
 
     elevenlabs_api_key: str = ""
 
+    # ── Twilio (raw call-forwarding for emergency/staff transfers) ────────
+    # Used by the hk_transferCall tool to redirect the LIVE inbound call to a
+    # human via the Twilio REST API. Dormant when blank: the tool still returns
+    # the number + spoken line, just no actual bridge.
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+
     # ── OpenAI copilot ("Kiki Assistent") — Phase 0, dormant by default ────
     # The centralized AI service (app/services/ai) + the in-app copilot. Ships
     # INERT: with no OPENAI_API_KEY the AI client is disabled (every call is a

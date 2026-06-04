@@ -642,8 +642,9 @@ def render_emergency_block(cfg: dict) -> str:
             )
 
     lines.append(
-        "  Leite bei bestätigtem Notfall über `hk_transferCall` mit `notfall=true` "
-        "weiter."
+        "  Sag dem Anrufer bei bestätigtem Notfall ZUERST kurz, dass du ihn jetzt mit "
+        "dem Notdienst verbindest, und rufe DANN `hk_transferCall` mit `notfall=true` "
+        "auf — die Weiterleitung erfolgt sofort, sprich danach nicht weiter."
     )
     return "\n".join(lines)
 

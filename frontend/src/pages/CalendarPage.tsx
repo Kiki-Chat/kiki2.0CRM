@@ -571,41 +571,37 @@ function AppointmentDetailModal({
         {appt.customer_name && <DetailRow label="Kunde">{appt.customer_name}</DetailRow>}
         {loc && <DetailRow label="Ort">{loc}</DetailRow>}
         {appt.notes && <DetailRow label="Notizen">{appt.notes}</DetailRow>}
-        {pushable && (
-          <div className="border-t border-border pt-3">
-            {alreadyPushed ? (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+          {pushable && (
+            alreadyPushed ? (
               <span className="text-sm font-medium text-success">✓ Im Kalender</span>
             ) : canPush ? (
               <button
                 onClick={() => push.mutate()}
                 disabled={push.isPending}
-                className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60"
+                className="flex-1 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60"
               >
                 {push.isPending ? 'Wird übertragen…' : `Zu ${providerLabel} hinzufügen`}
               </button>
             ) : (
-              <>
-                <button
-                  disabled
-                  title={pushDisabledReason}
-                  className="cursor-not-allowed rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white opacity-50"
-                >
-                  Zum Kalender hinzufügen
-                </button>
-                <p className="mt-2 text-xs text-muted">{pushDisabledReason}</p>
-              </>
-            )}
-            {pushMsg && <p className="mt-2 text-xs text-muted">{pushMsg}</p>}
-          </div>
-        )}
-        <div className="border-t border-border pt-3">
+              <button
+                disabled
+                title={pushDisabledReason}
+                className="flex-1 cursor-not-allowed rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white opacity-50"
+              >
+                Zum Kalender hinzufügen
+              </button>
+            )
+          )}
           <button
             onClick={onReschedule}
-            className="w-full rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110"
+            className="flex-1 rounded-md bg-warning px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
           >
             Verschieben / Bearbeiten
           </button>
         </div>
+        {pushable && !canPush && !alreadyPushed && <p className="text-xs text-muted">{pushDisabledReason}</p>}
+        {pushMsg && <p className="text-xs text-muted">{pushMsg}</p>}
         <div className="flex items-center justify-between border-t border-border pt-3">
           <button
             onClick={() => cancel.mutate()}

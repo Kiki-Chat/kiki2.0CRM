@@ -372,22 +372,27 @@ export function AppointmentCard({
           </div>
         )}
 
-        {/* Expandable "Kategorie, Dauer & Zuweisung" toggle */}
+        {/* "Kategorie, Dauer & Zuweisung" — editable while pending, LOCKED (grey,
+            not expandable) once confirmed; from then on it's changed in the calendar. */}
         <button
-          onClick={() => setExpanded((o) => !o)}
-          className="mt-4 flex w-full items-center gap-2 border-t border-border pt-3 text-left text-sm text-text hover:text-green-deep"
-          aria-expanded={expanded}
+          onClick={() => !confirmedDone && setExpanded((o) => !o)}
+          disabled={confirmedDone}
+          className={cn(
+            'mt-4 flex w-full items-center gap-2 border-t border-border pt-3 text-left text-sm',
+            confirmedDone ? 'cursor-default text-muted' : 'text-text hover:text-green-deep',
+          )}
+          aria-expanded={expanded && !confirmedDone}
         >
           <ChevronDown
             size={14}
             className={cn(
               'text-muted transition-transform',
-              expanded && 'rotate-180',
+              expanded && !confirmedDone && 'rotate-180',
             )}
           />
           <span className="flex-1 font-medium">Kategorie, Dauer &amp; Zuweisung</span>
-          {!expanded && (
-            <span className="text-xs text-green-deep">
+          {(!expanded || confirmedDone) && (
+            <span className={cn('text-xs', confirmedDone ? 'text-muted' : 'text-green-deep')}>
               (
               {[selectedCategory?.name ?? appointment.category, `${effectiveDuration} Min`]
                 .filter(Boolean)
@@ -397,7 +402,7 @@ export function AppointmentCard({
           )}
         </button>
 
-        {expanded && (
+        {expanded && !confirmedDone && (
           <div className="mt-3 space-y-3 rounded-md bg-alt p-3">
             {/* Kategorie */}
             <div>

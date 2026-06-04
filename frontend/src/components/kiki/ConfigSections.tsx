@@ -684,7 +684,6 @@ export function NotdienstSection({ data, flash }: Props) {
 export function TelefonSection({ data, flash }: Props) {
   const c = data.config
   const patch = useConfigPatch('/phone', flash)
-  const [fwd, setFwd] = useState(c.forwarding_number ?? '')
   const [inc, setInc] = useState(c.incoming_forwarding_number ?? '')
   const [biz, setBiz] = useState(data.existing_business_number ?? '')
   return (
@@ -719,19 +718,16 @@ export function TelefonSection({ data, flash }: Props) {
           </Link>
         </p>
       </div>
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="mt-4">
         <Field label="Eingehende Weiterleitung"><input value={inc} onChange={(e) => setInc(e.target.value)} placeholder="+49 …" className={inputCls} /></Field>
-        <Field label="Notdienst-Weiterleitung"><input value={fwd} onChange={(e) => setFwd(e.target.value)} placeholder="+49 …" className={inputCls} /></Field>
       </div>
-      <p className="mt-1 text-xs text-muted">"Eingehende Weiterleitung" ist die bestehende Geschäftsnummer, an die Kiki Anrufer weiterleitet, die sie nicht selbst übernehmen kann. "Notdienst-Weiterleitung" ist die Nummer, an die akute Notfälle außerhalb der Geschäftszeiten weitergegeben werden.</p>
+      <p className="mt-1 text-xs text-muted">„Eingehende Weiterleitung" ist die Nummer, an die Kiki einen Anrufer an einen Menschen weiterleitet, wenn sie das Anliegen nicht selbst übernehmen kann. Die Notdienst-Weiterleitung wird im Bereich <span className="font-medium text-body">Notdienst</span> festgelegt.</p>
       <SaveBar
         onReset={() => {
-          setFwd(c.forwarding_number ?? '')
           setInc(c.incoming_forwarding_number ?? '')
           setBiz(data.existing_business_number ?? '')
         }}
         onSave={() => patch.mutate({
-          forwarding_number: fwd || null,
           incoming_forwarding_number: inc || null,
           existing_business_number: biz || null,
         })}
@@ -759,12 +755,6 @@ export function AusgehendeSection({ data, flash }: Props) {
   }
   const [f, setF] = useState(initialF)
   const set = (k: keyof typeof f, v: unknown) => setF((p) => ({ ...p, [k]: v }))
-  const enabledCount = Object.values(f.outbound_occasions).filter(Boolean).length
-  const estMinutes = enabledCount * 10 * 3 // ~10 calls/occasion/month × 3 min
-  const quota = data.ai_minutes_quota ?? 0
-  const pct = quota ? Math.round((estMinutes / quota) * 100) : 0
-  const over = quota > 0 && estMinutes > quota
-  const warn = quota > 0 && pct >= 70
 
   return (
     <div className="space-y-4">
@@ -797,19 +787,6 @@ export function AusgehendeSection({ data, flash }: Props) {
             <p className="mt-2 text-[11px] text-muted">Ein Klick auf die jeweilige Aktion in den Anrufen löst nur dann einen Ausgangsanruf (+ E-Mail) aus, wenn sie hier aktiv ist.</p>
           </div>
         )}
-      </Card>
-      <Card className={cn(over && 'border-error/50')}>
-        <GroupLabel>Geschätzte Belastung</GroupLabel>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted">Geschätzte KI-Minuten / Monat</span>
-          <span className={cn('text-lg font-bold', over ? 'text-error' : warn ? 'text-warning' : 'text-text')}>{estMinutes} {quota ? `/ ${quota}` : ''}</span>
-        </div>
-        {quota > 0 && (
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-alt">
-            <div className={cn('h-full rounded-full', over ? 'bg-error' : warn ? 'bg-warning' : 'bg-green-primary')} style={{ width: `${Math.min(pct, 100)}%` }} />
-          </div>
-        )}
-        {over && <p className="mt-2 text-xs font-medium text-error">Warnung: Die Schätzung übersteigt Ihr monatliches Kontingent.</p>}
       </Card>
       <Card>
         <GroupLabel>Wiederholung & Rückruf</GroupLabel>
