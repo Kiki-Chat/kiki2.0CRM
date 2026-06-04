@@ -165,3 +165,37 @@ def test_chat_never_anonymous():
     # Either way an unauthenticated caller can never reach the copilot.
     resp = TestClient(app).post("/api/copilot/chat", json={"message": "hi"})
     assert resp.status_code == (401 if settings.copilot_enabled else 404)
+
+
+def test_phase2_4_tools_registered_and_gated():
+    emp = {t.name for t in tools.tools_for_role("employee")}
+    assert {
+        "update_customer", "create_inquiry", "set_inquiry_status",
+        "create_appointment", "report_problem", "explain_setting",
+    } <= emp
+    # admin-only tools must NOT be offered to a plain employee
+    assert "get_settings" not in emp and "update_org_profile" not in emp
+    adm = {t.name for t in tools.tools_for_role("org_admin")}
+    assert {"get_settings", "update_org_profile"} <= adm
+    assert tools.get_tool("create_appointment").needs_confirm is True
+    assert tools.get_tool("report_problem").needs_confirm is True
+    assert tools.get_tool("explain_setting").needs_confirm is False
+
+
+def test_explain_setting_matches_german_terms():
+    out = tools.get_tool("explain_setting").run(_user(), {"topic": "Notdienst"})
+    assert out["topic"] == "emergency" and "Notdienst" in out["explanation"]
+    miss = tools.get_tool("explain_setting").run(_user(), {"topic": "xyz"})
+    assert "available_topics" in miss  # unknown topic never crashes
+
+
+def test_report_problem_requires_summary():
+    # returns before any email/DB call
+    assert "error" in tools.get_tool("report_problem").run(_user(), {})
+
+
+def test_set_inquiry_status_validation():
+    t = tools.get_tool("set_inquiry_status")
+    assert "error" in t.run(_user(), {"inquiry_id": "not-a-uuid", "status": "open"})
+    good = "11111111-1111-1111-1111-111111111111"
+    assert "error" in t.run(_user(), {"inquiry_id": good, "status": "bogus"})

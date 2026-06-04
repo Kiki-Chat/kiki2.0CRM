@@ -51,7 +51,7 @@ function actionSummary(a: ProposedAction): string {
 }
 
 export function CopilotWidget() {
-  const { me } = useMe()
+  const { me, isLoading: meLoading } = useMe()
   const navigate = useNavigate()
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) === '1')
   const [messages, setMessages] = useState<Msg[]>([])
@@ -66,7 +66,8 @@ export function CopilotWidget() {
   }, [open])
 
   const greeting = (): Msg => {
-    const first = me?.full_name?.split(' ')[0] || me?.org_name || ''
+    // The PERSON's first name (from /api/me full_name) — not the org name.
+    const first = me?.full_name?.trim().split(/\s+/)[0] || ''
     return {
       id: uid(),
       role: 'kiki',
@@ -74,11 +75,12 @@ export function CopilotWidget() {
     }
   }
 
-  // Greeting on first open.
+  // Greeting on first open — wait until the user has loaded so we greet them by
+  // name instead of a nameless "Hallo!" (the name flashes in once /api/me resolves).
   useEffect(() => {
-    if (open && messages.length === 0) setMessages([greeting()])
+    if (open && messages.length === 0 && !meLoading) setMessages([greeting()])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, messages.length, me])
+  }, [open, messages.length, me, meLoading])
 
   const newChat = () => {
     setMessages([greeting()])
