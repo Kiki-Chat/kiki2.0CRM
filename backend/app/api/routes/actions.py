@@ -210,18 +210,96 @@ def _kva_pending_acceptance(client, org_id: str) -> list[dict[str, Any]]:
     return out
 
 
-def _callback_owed(_client, _org_id: str) -> list[dict[str, Any]]:
-    """No-op: the inquiries.status enum has no 'callback_required' value in the
-    current schema. Returns empty until a callback status/flag is added.
-    """
-    return []
+def _callback_owed(client, org_id: str) -> list[dict[str, Any]]:
+    """Missed inbound calls that still owe a callback (missed_calls.status='pending')."""
+    rows = (
+        client.table("missed_calls")
+        .select("id, customer_id, caller_number, missed_at, created_at, status")
+        .eq("org_id", org_id)
+        .eq("status", "pending")
+        .order("missed_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    name_by_cust = _customer_name_map(
+        client, org_id, [r.get("customer_id") for r in rows]
+    )
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        nm = name_by_cust.get(r.get("customer_id")) or r.get("caller_number") or "Unbekannter Anrufer"
+        out.append(
+            {
+                "kind": "callback_owed",
+                "id": r["id"],
+                "inquiry_id": None,
+                "call_id": None,
+                "customer_name": nm,
+                "customer_id": r.get("customer_id"),
+                "summary": f"Rückruf offen — verpasster Anruf von {r.get('caller_number') or nm}",
+                "created_at": r.get("created_at"),
+                "due_at": None,
+                "priority": "high",
+            }
+        )
+    return out
 
 
-def _alt_time_proposal(_client, _org_id: str) -> list[dict[str, Any]]:
-    """No-op: appointments has no alternative_proposed_at column today.
-    Returns empty until the alt-time proposal feature ships.
-    """
-    return []
+def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
+    """Appointments with an OPEN alternative-time proposal: the customer counter-
+    proposed a slot (awaiting a team decision — high priority) or the team sent an
+    alternative (awaiting the customer)."""
+    cols = (
+        "id, inquiry_id, customer_id, title, created_at, status, "
+        "alternative_proposed_at, alternative_start_time, "
+        "customer_proposed_at, customer_proposed_start_time"
+    )
+    cust = (
+        client.table("appointments").select(cols).eq("org_id", org_id)
+        .neq("status", "cancelled").not_.is_("customer_proposed_at", "null")
+        .execute().data
+        or []
+    )
+    alt = (
+        client.table("appointments").select(cols).eq("org_id", org_id)
+        .neq("status", "cancelled").not_.is_("alternative_proposed_at", "null")
+        .execute().data
+        or []
+    )
+    by_id: dict[str, tuple[dict, bool]] = {}
+    for r in alt:
+        by_id[r["id"]] = (r, False)  # awaiting customer
+    for r in cust:
+        by_id[r["id"]] = (r, True)  # customer counter-proposal — awaiting team (priority)
+    name_by_cust = _customer_name_map(
+        client, org_id, [r.get("customer_id") for r, _ in by_id.values()]
+    )
+    out: list[dict[str, Any]] = []
+    for r, is_cust in by_id.values():
+        nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
+        if is_cust:
+            summary = "Kunde schlägt neuen Termin vor — Entscheidung ausstehend"
+            due = r.get("customer_proposed_start_time")
+            priority = "high"
+        else:
+            summary = "Alternativtermin gesendet — Kundenantwort ausstehend"
+            due = r.get("alternative_start_time")
+            priority = "normal"
+        out.append(
+            {
+                "kind": "alt_time_proposal",
+                "id": r["id"],
+                "inquiry_id": r.get("inquiry_id"),
+                "call_id": None,
+                "customer_name": nm,
+                "customer_id": r.get("customer_id"),
+                "summary": summary,
+                "created_at": r.get("created_at"),
+                "due_at": due,
+                "priority": priority,
+            }
+        )
+    return out
 
 
 # ─── Sort: priority desc, due_at asc nulls last, created_at desc ────────────

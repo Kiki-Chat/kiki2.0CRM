@@ -97,6 +97,7 @@ export function CalendarPage() {
   const [filter, setFilter] = useState<Filter>(() => searchParams.get('employee') || 'all')
   const [detail, setDetail] = useState<Appointment | null>(null)
   const [createAt, setCreateAt] = useState<Date | null>(null)
+  const [editAppt, setEditAppt] = useState<Appointment | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [mode, setMode] = useState<'appointments' | 'projects'>('appointments')
 
@@ -424,17 +425,23 @@ export function CalendarPage() {
           color={colorFor(detail.assigned_employee_id)}
           calendarProvider={calendarProvider}
           onClose={() => setDetail(null)}
+          onReschedule={() => { setEditAppt(detail); setDetail(null) }}
         />
       )}
-      {createAt && (
+      {(createAt || editAppt) && (
         <CreateAppointmentModal
-          at={createAt}
+          at={editAppt?.scheduled_at ? new Date(editAppt.scheduled_at) : (createAt ?? new Date())}
+          edit={editAppt ?? undefined}
           employees={employees}
           colorFor={colorFor}
-          onClose={() => setCreateAt(null)}
+          onClose={() => { setCreateAt(null); setEditAppt(null) }}
           onCreated={() => {
             setCreateAt(null)
+            setEditAppt(null)
             qc.invalidateQueries({ queryKey: ['appointments'] })
+            // Reflect a calendar reschedule back to the call card + worklist.
+            qc.invalidateQueries({ queryKey: ['pendingAppointment'] })
+            qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
           }}
         />
       )}
@@ -489,11 +496,13 @@ function AppointmentDetailModal({
   color,
   calendarProvider,
   onClose,
+  onReschedule,
 }: {
   appt: Appointment
   color: string
   calendarProvider: string | null
   onClose: () => void
+  onReschedule: () => void
 }) {
   const qc = useQueryClient()
   const start = appt.scheduled_at ? new Date(appt.scheduled_at) : null
@@ -525,6 +534,10 @@ function AppointmentDetailModal({
   })
   const afterMutate = () => {
     qc.invalidateQueries({ queryKey: ['appointments'] })
+    // Same appointment row drives the call's open-action card + the worklist —
+    // refresh them so a calendar cancel/change reflects back there.
+    qc.invalidateQueries({ queryKey: ['pendingAppointment'] })
+    qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
     onClose()
   }
   // Cancel keeps the row (status='cancelled'); Delete hard-removes it. Both
@@ -585,6 +598,14 @@ function AppointmentDetailModal({
             {pushMsg && <p className="mt-2 text-xs text-muted">{pushMsg}</p>}
           </div>
         )}
+        <div className="border-t border-border pt-3">
+          <button
+            onClick={onReschedule}
+            className="w-full rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110"
+          >
+            Verschieben / Bearbeiten
+          </button>
+        </div>
         <div className="flex items-center justify-between border-t border-border pt-3">
           <button
             onClick={() => cancel.mutate()}
@@ -621,24 +642,26 @@ const inputCls =
 
 function CreateAppointmentModal({
   at,
+  edit,
   employees,
   colorFor,
   onClose,
   onCreated,
 }: {
   at: Date
+  edit?: Appointment
   employees: Employee[]
   colorFor: (id: string | null) => string
   onClose: () => void
   onCreated: () => void
 }) {
-  const [customerId, setCustomerId] = useState('')
-  const [title, setTitle] = useState('')
-  const [date, setDate] = useState(ymd(at))
-  const [time, setTime] = useState(hm(at))
-  const [duration, setDuration] = useState(60)
-  const [assigned, setAssigned] = useState('')
-  const [location, setLocation] = useState('')
+  const [customerId, setCustomerId] = useState(edit?.customer_id ?? '')
+  const [title, setTitle] = useState(edit?.title ?? '')
+  const [date, setDate] = useState(edit?.scheduled_at ? ymd(new Date(edit.scheduled_at)) : ymd(at))
+  const [time, setTime] = useState(edit?.scheduled_at ? hm(new Date(edit.scheduled_at)) : hm(at))
+  const [duration, setDuration] = useState(edit?.duration_minutes ?? 60)
+  const [assigned, setAssigned] = useState(edit?.assigned_employee_id ?? '')
+  const [location, setLocation] = useState(edit ? (locStr(edit.location) ?? '') : '')
   const [error, setError] = useState<string | null>(null)
 
   const { data: customerData } = useQuery({
@@ -648,28 +671,29 @@ function CreateAppointmentModal({
   const customers = customerData?.customers ?? []
 
   const create = useMutation({
-    mutationFn: () =>
-      apiFetch('/api/appointments', {
-        method: 'POST',
-        body: JSON.stringify({
-          customer_id: customerId || null,
-          title: title || 'Termin',
-          scheduled_at: new Date(`${date}T${time}`).toISOString(),
-          duration_minutes: duration,
-          location: location || null,
-          color: colorFor(assigned || null),
-          assigned_employee_id: assigned || null,
-        }),
-      }),
+    mutationFn: () => {
+      const body = JSON.stringify({
+        customer_id: customerId || null,
+        title: title || 'Termin',
+        scheduled_at: new Date(`${date}T${time}`).toISOString(),
+        duration_minutes: duration,
+        location: location || null,
+        color: colorFor(assigned || null),
+        assigned_employee_id: assigned || null,
+      })
+      return edit
+        ? apiFetch(`/api/appointments/${edit.id}`, { method: 'PATCH', body })
+        : apiFetch('/api/appointments', { method: 'POST', body })
+    },
     onSuccess: onCreated,
-    onError: () => setError('Termin konnte nicht erstellt werden.'),
+    onError: () => setError(edit ? 'Termin konnte nicht geändert werden.' : 'Termin konnte nicht erstellt werden.'),
   })
 
   return (
     <Modal
       open
       onOpenChange={(o) => !o && onClose()}
-      title="Neuer Termin"
+      title={edit ? 'Termin verschieben / bearbeiten' : 'Neuer Termin'}
       widthClass="max-w-xl"
       footer={
         <div className="flex gap-3">
@@ -678,7 +702,7 @@ function CreateAppointmentModal({
             onClick={() => create.mutate()}
             className="flex-1 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
           >
-            {create.isPending ? 'Speichert…' : 'Termin speichern'}
+            {create.isPending ? 'Speichert…' : edit ? 'Änderungen speichern' : 'Termin speichern'}
           </button>
           <button
             onClick={onClose}

@@ -58,22 +58,24 @@ def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
     title = call.get("summary_title") or dc.get("issue_summary") or "Anruf"
     notes = dc.get("ultimate_summary") or call.get("summary") or ""
 
-    # Emergency tagging: flag the inquiry when (a) the call arrived OUTSIDE
-    # business hours and the org runs a Notdienst, or (b) the agent's data
-    # collection marked it urgent. The NOTDIENST badge reads emergency_flag.
-    emergency = False
+    # Emergency tagging (user-confirmed): flag ONLY when BOTH (a) the call arrived
+    # outside business hours while the org runs a Notdienst AND (b) the agent's data
+    # collection actually marked it urgent. A normal after-hours call is no longer
+    # auto-flagged as an emergency. The NOTDIENST badge reads emergency_flag.
+    outside_hours = False
     started = _parse_iso(call.get("started_at"))
     if started is not None:
         try:
-            emergency = is_emergency_by_hours(org_id, started)
+            outside_hours = is_emergency_by_hours(org_id, started)
         except Exception:
-            emergency = False
-    if not emergency:
-        for key in ("is_emergency", "emergency", "notfall", "urgent"):
-            v = dc.get(key)
-            if v is True or (isinstance(v, str) and v.strip().lower() in ("true", "ja", "yes", "1")):
-                emergency = True
-                break
+            outside_hours = False
+    agent_urgent = False
+    for key in ("is_emergency", "emergency", "notfall", "urgent"):
+        v = dc.get(key)
+        if v is True or (isinstance(v, str) and v.strip().lower() in ("true", "ja", "yes", "1")):
+            agent_urgent = True
+            break
+    emergency = outside_hours and agent_urgent
 
     row = {
         "org_id": org_id,

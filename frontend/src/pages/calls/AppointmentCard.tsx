@@ -31,6 +31,7 @@ import {
   X,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { apiFetch } from '../../lib/api'
 import { cn } from '../../lib/utils'
@@ -129,6 +130,7 @@ export function AppointmentCard({
   onRemove: () => void
 }) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
   // Ausblenden minimises the card to a one-line summary rather than removing it.
   const [collapsed, setCollapsed] = useState(false)
@@ -195,6 +197,10 @@ export function AppointmentCard({
     qc.invalidateQueries({ queryKey: ['callInquiry', callId] })
     qc.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
     qc.invalidateQueries({ queryKey: ['customerDetail'] })
+    // Card ↔ calendar are the same appointment row: refresh the calendar + the
+    // open-actions worklist so a confirm/reject here shows up there immediately.
+    qc.invalidateQueries({ queryKey: ['appointments'] })
+    qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
   }
 
   const confirm = useMutation({
@@ -331,13 +337,15 @@ export function AppointmentCard({
             {confirmedDone ? <CheckCircle2 size={12} className="flex-shrink-0" /> : <Clock size={12} className="flex-shrink-0" />}
             {statusPill.label}
           </span>
-          <button
-            onClick={onRemove}
-            title="Aus der Liste entfernen"
-            className="rounded p-1 text-muted transition-colors hover:bg-alt hover:text-error"
-          >
-            <X size={14} />
-          </button>
+          {!confirmedDone && (
+            <button
+              onClick={onRemove}
+              title="Aus der Liste entfernen"
+              className="rounded p-1 text-muted transition-colors hover:bg-alt hover:text-error"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
 
         {/* Subject is the bold heading; the date/time sits just below it (bold,
@@ -608,8 +616,21 @@ export function AppointmentCard({
               confirmedDone ? 'border-green-tint-200 bg-green-tint-50 text-green-deep' : 'border-border bg-alt text-muted',
             )}
           >
-            <div className="font-semibold">{confirmedDone ? 'Termin bestätigt' : 'Termin abgelehnt'}</div>
-            <div className="mt-0.5">Bleibt als Erinnerung sichtbar — mit ✕ entfernen.</div>
+            <div className="font-semibold">{confirmedDone ? 'Termin bestätigt — im Kalender' : 'Termin abgelehnt'}</div>
+            {confirmedDone && appointment.scheduled_at ? (
+              <button
+                onClick={() =>
+                  navigate(
+                    `/calendar?date=${new Date(appointment.scheduled_at as string).toISOString().slice(0, 10)}&appointment=${appointment.id}`,
+                  )
+                }
+                className="mt-1 font-semibold text-green-deep underline hover:opacity-80"
+              >
+                Im Kalender öffnen → (Ändern/Verschieben dort)
+              </button>
+            ) : (
+              <div className="mt-0.5">Bleibt als Erinnerung sichtbar — mit ✕ entfernen.</div>
+            )}
           </div>
         )}
 

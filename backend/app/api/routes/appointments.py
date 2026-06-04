@@ -461,6 +461,31 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
     # confirmed it leaves the card and appears on the calendar (and confirming
     # there fires the outbound call+email).
     appt = appt_rows[0] if appt_rows else None
+    if appt is None:
+        # Persistence (UAT): once confirmed the appointment leaves the pending set,
+        # but the card must STAY as a "Bestätigt — im Kalender" reminder + deep-link.
+        # Fall back to the most-recent CONFIRMED appointment on this call. The card
+        # reads confirmed_at to render the locked done-state (no action buttons).
+        done_rows = (
+            client.table("appointments")
+            .select(
+                "id, title, scheduled_at, duration_minutes, status, category, "
+                "color, location, notes, customer_id, inquiry_id, "
+                "assigned_employee_id, confirmed_at, rejected_at, rejection_reason, "
+                "alternative_start_time, alternative_end_time, alternative_note, "
+                "alternative_proposed_at, customer_proposed_start_time, "
+                "customer_proposed_end_time, customer_proposed_at, customer_proposal_source"
+            )
+            .eq("org_id", org_id)
+            .eq("status", "confirmed")
+            .or_(",".join(ors))
+            .order("confirmed_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        appt = done_rows[0] if done_rows else None
     if appt is not None:
         # Surface the call's summary as the (up-to-)2-line issue description.
         appt["issue_summary"] = call_summary

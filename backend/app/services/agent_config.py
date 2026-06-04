@@ -469,11 +469,15 @@ def render_required_fields_block(fields: list[dict]) -> str:
             "OPTIONALE FELDER: Kundennummer."
         )
     # Topic 8: fields arrive in the org's configured priority order
-    # (agent_required_fields.sort_order) — ask + confirm them in exactly that
-    # order, top field first / highest priority.
+    # (agent_required_fields.sort_order) — ask them in that order, top first.
+    # BUT never re-ask a field that's already known / auto-recognised (caller-ID,
+    # hk_identifyCustomer) — only confirm it briefly. (Fixes the agent re-asking
+    # for the phone number it already has.)
     lead = (
-        "Erfasse und bestätige die folgenden Felder in DIESER Reihenfolge — das "
-        "oberste Feld hat die höchste Priorität und wird zuerst erfragt und bestätigt:"
+        "Erfasse die folgenden Felder in DIESER Reihenfolge (oberstes Feld = höchste "
+        "Priorität, zuerst). Felder, die bereits bekannt sind oder automatisch erkannt "
+        "wurden (z. B. die Telefonnummer über die Anrufererkennung bzw. "
+        "hk_identifyCustomer), NICHT erneut erfragen — höchstens kurz bestätigen:"
     )
     return lead + "\n" + "\n".join(lines)
 
