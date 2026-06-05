@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import json
@@ -46,7 +47,7 @@ def _resolve_sort(sort_by: str | None, sort_dir: str | None) -> tuple[str, bool]
     return col, desc
 
 
-def _list(
+async def _list(
     org_id: str,
     q: str | None,
     limit: int,
@@ -56,66 +57,39 @@ def _list(
     sort_dir: str | None = None,
 ) -> dict:
     client = get_service_client()
-    query = (
-        client.table("customers")
-        .select(
-            "id, full_name, phone, email, customer_number, address, customer_type, "
-            "identified_by, created_at",
-            count="exact",
-        )
-        .eq("org_id", org_id)
-        .neq("status", "deleted")
-    )
-    if customer_type:
-        query = query.eq("customer_type", customer_type)
-    if q:
-        query = query.or_(
-            f"full_name.ilike.%{q}%,phone.ilike.%{q}%,email.ilike.%{q}%,"
-            f"customer_number.ilike.%{q}%"
-        )
-    col, desc = _resolve_sort(sort_by, sort_dir)
-    query = query.order(col, desc=desc, nullsfirst=False)  # blanks always last
-    if col != "created_at":
-        query = query.order("created_at", desc=True)  # stable tiebreaker for paging
-    res = query.range(offset, offset + limit - 1).execute()
-    customers = res.data or []
 
-    ids = [c["id"] for c in customers]
-    inq_counts: Counter = Counter()
-    appt_counts: Counter = Counter()
-    photo_counts: Counter = Counter()
-    doc_counts: Counter = Counter()
-    if ids:
-        for r in (
-            client.table("inquiries").select("customer_id").eq("org_id", org_id)
-            .neq("status", "deleted").in_("customer_id", ids).execute().data or []
-        ):
-            inq_counts[r["customer_id"]] += 1
-        for r in (
-            client.table("appointments").select("customer_id").eq("org_id", org_id)
-            .in_("customer_id", ids).execute().data or []
-        ):
-            appt_counts[r["customer_id"]] += 1
-        for r in (
-            client.table("documents").select("customer_id, is_image").eq("org_id", org_id)
-            .in_("customer_id", ids).execute().data or []
-        ):
-            if r.get("is_image"):
-                photo_counts[r["customer_id"]] += 1
-            else:
-                doc_counts[r["customer_id"]] += 1
-    for c in customers:
-        c["inquiry_count"] = inq_counts.get(c["id"], 0)
-        c["appointment_count"] = appt_counts.get(c["id"], 0)
-        c["photo_count"] = photo_counts.get(c["id"], 0)
-        c["document_count"] = doc_counts.get(c["id"], 0)
+    def _fetch_page():
+        query = (
+            client.table("customers")
+            .select(
+                "id, full_name, phone, email, customer_number, address, customer_type, "
+                "identified_by, created_at",
+                count="exact",
+            )
+            .eq("org_id", org_id)
+            .neq("status", "deleted")
+        )
+        if customer_type:
+            query = query.eq("customer_type", customer_type)
+        if q:
+            query = query.or_(
+                f"full_name.ilike.%{q}%,phone.ilike.%{q}%,email.ilike.%{q}%,"
+                f"customer_number.ilike.%{q}%"
+            )
+        col, desc = _resolve_sort(sort_by, sort_dir)
+        query = query.order(col, desc=desc, nullsfirst=False)  # blanks always last
+        if col != "created_at":
+            query = query.order("created_at", desc=True)  # stable tiebreaker for paging
+        return query.range(offset, offset + limit - 1).execute()
 
-    # Type counts for the filter badges. Uses count="exact" (the exact total is
-    # returned in the Content-Range header) so it is NOT capped by PostgREST's
-    # default 1000-row read limit — a plain select(...).execute() silently caps at
-    # 1000 and under-reports on large orgs. NULL customer_type buckets as "new"
-    # (mirrors the prior behaviour).
-    def _type_count(ctype: str | None) -> int:
+    # Filter-badge totals. count="exact" reads the total from the Content-Range
+    # header, so it is NOT capped by PostgREST's 1000-row read limit (selecting the
+    # rows and counting in Python would silently under-count large orgs). NULL
+    # customer_type buckets as "new" (mirrors the prior behaviour). These 5 counts
+    # plus the page query are all independent, so they fire concurrently below —
+    # ~1 round-trip wall-clock instead of 6 serial. (A single GROUP BY RPC would
+    # collapse the 5 count scans to 1; available as a follow-up, pending approval.)
+    def _count_type(ctype: str | None) -> int:
         qb = (
             client.table("customers")
             .select("id", count="exact")
@@ -128,7 +102,60 @@ def _list(
             qb = qb.eq("customer_type", ctype)
         return qb.limit(1).execute().count or 0
 
-    type_counts = {"all": _type_count(None), **{t: _type_count(t) for t in _CUSTOMER_TYPES}}
+    # The shared sync client is safe across these threadpool tasks: httpx.Client is
+    # thread-safe and postgrest builds a fresh request per .table() call.
+    res, *counts = await asyncio.gather(
+        run_in_threadpool(_fetch_page),
+        run_in_threadpool(_count_type, None),
+        *[run_in_threadpool(_count_type, t) for t in _CUSTOMER_TYPES],
+    )
+    type_counts = {"all": counts[0], **{t: counts[i + 1] for i, t in enumerate(_CUSTOMER_TYPES)}}
+    customers = res.data or []
+
+    ids = [c["id"] for c in customers]
+    inq_counts: Counter = Counter()
+    appt_counts: Counter = Counter()
+    photo_counts: Counter = Counter()
+    doc_counts: Counter = Counter()
+    if ids:
+        def _fetch_inq():
+            return (
+                client.table("inquiries").select("customer_id").eq("org_id", org_id)
+                .neq("status", "deleted").in_("customer_id", ids).execute().data or []
+            )
+
+        def _fetch_appt():
+            return (
+                client.table("appointments").select("customer_id").eq("org_id", org_id)
+                .in_("customer_id", ids).execute().data or []
+            )
+
+        def _fetch_docs():
+            return (
+                client.table("documents").select("customer_id, is_image").eq("org_id", org_id)
+                .in_("customer_id", ids).execute().data or []
+            )
+
+        # Enrichment counts depend on the page ids but not on each other → parallel.
+        inq_rows, appt_rows, doc_rows = await asyncio.gather(
+            run_in_threadpool(_fetch_inq),
+            run_in_threadpool(_fetch_appt),
+            run_in_threadpool(_fetch_docs),
+        )
+        for r in inq_rows:
+            inq_counts[r["customer_id"]] += 1
+        for r in appt_rows:
+            appt_counts[r["customer_id"]] += 1
+        for r in doc_rows:
+            if r.get("is_image"):
+                photo_counts[r["customer_id"]] += 1
+            else:
+                doc_counts[r["customer_id"]] += 1
+    for c in customers:
+        c["inquiry_count"] = inq_counts.get(c["id"], 0)
+        c["appointment_count"] = appt_counts.get(c["id"], 0)
+        c["photo_count"] = photo_counts.get(c["id"], 0)
+        c["document_count"] = doc_counts.get(c["id"], 0)
 
     return {"customers": customers, "total": res.count or 0, "type_counts": type_counts}
 
@@ -202,9 +229,7 @@ async def list_customers(
     sort_dir: str | None = None,
     user: CurrentUser = Depends(require_org),
 ) -> dict:
-    return await run_in_threadpool(
-        _list, user.org_id, q, limit, offset, customer_type, sort_by, sort_dir
-    )
+    return await _list(user.org_id, q, limit, offset, customer_type, sort_by, sort_dir)
 
 
 _TYPE_LABELS = {

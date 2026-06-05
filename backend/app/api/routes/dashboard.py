@@ -1,3 +1,4 @@
+import asyncio
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -99,20 +100,6 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
     client = get_service_client()
     org_id = user.org_id
 
-    open_inquiries = _count(client, "inquiries", org_id, status="open")
-    total_customers = _count(client, "customers", org_id)
-    # P0.4 — unread calls (sidebar badge source). Direct query because `_count`
-    # only filters with `.eq()`; we need `read_at is null`.
-    unread_calls = (
-        client.table("calls")
-        .select("id", count="exact")
-        .eq("org_id", org_id)
-        .is_("read_at", "null")
-        .execute()
-        .count
-        or 0
-    )
-
     # Hero bubble — "heute X Anrufe und Y Anfragen empfangen". Today = Berlin-local
     # midnight, converted to UTC for the (UTC-stored) created_at comparison.
     # "Anrufe empfangen" = received = INBOUND only (matches the "Anrufe ansehen"
@@ -122,50 +109,79 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
         .astimezone(timezone.utc)
         .isoformat()
     )
-    calls_today = (
-        client.table("calls")
-        .select("id", count="exact")
-        .eq("org_id", org_id)
-        .eq("direction", "inbound")
-        .gte("created_at", today_start_iso)
-        .execute()
-        .count
-        or 0
-    )
-    inquiries_today = (
-        client.table("inquiries")
-        .select("id", count="exact")
-        .eq("org_id", org_id)
-        .gte("created_at", today_start_iso)
-        .execute()
-        .count
-        or 0
-    )
-    # KVA-pending KPI card — cost estimates sent but not yet accepted/rejected
-    # (mirrors /finanzen's kvas_pending definition: status == "sent").
-    kva_pending = _count(client, "cost_estimates", org_id, status="sent")
+    now_iso = datetime.now(timezone.utc).isoformat()
 
-    appts_res = (
-        client.table("appointments")
-        .select("id, title, scheduled_at, status, customer_id")
-        .eq("org_id", org_id)
-        .gte("scheduled_at", datetime.now(timezone.utc).isoformat())
-        .order("scheduled_at")
-        .limit(5)
-        .execute()
-    )
-    upcoming = appts_res.data or []
+    # These reads are all independent. Run them concurrently in the threadpool so
+    # this async handler never blocks the event loop — previously 8 serial sync
+    # calls ran ON the loop, stalling every other request on the worker — and the
+    # page resolves in ~1 round-trip instead of ~8. The shared sync Supabase client
+    # is safe across threads: httpx.Client is thread-safe and postgrest builds a
+    # fresh request per .table() call.
+    def _q_open_inquiries():
+        return _count(client, "inquiries", org_id, status="open")
 
-    tasks_res = (
-        client.table("inquiries")
-        .select("id, title, type, status, created_at, customer_id")
-        .eq("org_id", org_id)
-        .eq("status", "open")
-        .order("created_at", desc=True)
-        .limit(5)
-        .execute()
+    def _q_total_customers():
+        return _count(client, "customers", org_id)
+
+    def _q_unread_calls():
+        # `_count` only does `.eq()`; we need `read_at is null` (sidebar badge).
+        return (
+            client.table("calls").select("id", count="exact")
+            .eq("org_id", org_id).is_("read_at", "null").execute().count or 0
+        )
+
+    def _q_calls_today():
+        return (
+            client.table("calls").select("id", count="exact")
+            .eq("org_id", org_id).eq("direction", "inbound")
+            .gte("created_at", today_start_iso).execute().count or 0
+        )
+
+    def _q_inquiries_today():
+        return (
+            client.table("inquiries").select("id", count="exact")
+            .eq("org_id", org_id).gte("created_at", today_start_iso).execute().count or 0
+        )
+
+    def _q_kva_pending():
+        # Mirrors /finanzen's kvas_pending definition: status == "sent".
+        return _count(client, "cost_estimates", org_id, status="sent")
+
+    def _q_upcoming():
+        return (
+            client.table("appointments")
+            .select("id, title, scheduled_at, status, customer_id")
+            .eq("org_id", org_id).gte("scheduled_at", now_iso)
+            .order("scheduled_at").limit(5).execute().data or []
+        )
+
+    def _q_open_tasks():
+        return (
+            client.table("inquiries")
+            .select("id, title, type, status, created_at, customer_id")
+            .eq("org_id", org_id).eq("status", "open")
+            .order("created_at", desc=True).limit(5).execute().data or []
+        )
+
+    (
+        open_inquiries,
+        total_customers,
+        unread_calls,
+        calls_today,
+        inquiries_today,
+        kva_pending,
+        upcoming,
+        open_tasks,
+    ) = await asyncio.gather(
+        run_in_threadpool(_q_open_inquiries),
+        run_in_threadpool(_q_total_customers),
+        run_in_threadpool(_q_unread_calls),
+        run_in_threadpool(_q_calls_today),
+        run_in_threadpool(_q_inquiries_today),
+        run_in_threadpool(_q_kva_pending),
+        run_in_threadpool(_q_upcoming),
+        run_in_threadpool(_q_open_tasks),
     )
-    open_tasks = tasks_res.data or []
 
     return {
         "kpis": {
