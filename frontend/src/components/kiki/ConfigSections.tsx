@@ -787,6 +787,7 @@ export function AusgehendeSection({ data, flash }: Props) {
             <p className="mt-2 text-[11px] text-muted">Ein Klick auf die jeweilige Aktion in den Anrufen löst nur dann einen Ausgangsanruf (+ E-Mail) aus, wenn sie hier aktiv ist.</p>
           </div>
         )}
+        <SaveBar onReset={() => setF(initialF)} onSave={() => patch.mutate(f)} saving={patch.isPending} />
       </Card>
       <Card>
         <GroupLabel>Wiederholung & Rückruf</GroupLabel>

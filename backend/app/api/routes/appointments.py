@@ -174,6 +174,15 @@ def _patch(user: CurrentUser, appointment_id: str, payload: AppointmentPatch) ->
         )
     if "location" in fields and isinstance(fields["location"], str):
         fields["location"] = {"raw": fields["location"]}
+    # A manual time edit (calendar "Verschieben / Bearbeiten") resolves any open
+    # reschedule counter-proposal: clear the customer_proposed_* markers so the
+    # call card / timeline stop showing a stale "verschoben / Kundenvorschlag" tag
+    # once the admin has set the new time themselves.
+    if "scheduled_at" in fields:
+        fields.setdefault("customer_proposed_start_time", None)
+        fields.setdefault("customer_proposed_end_time", None)
+        fields.setdefault("customer_proposed_at", None)
+        fields.setdefault("customer_proposal_source", None)
     if not fields:
         rows = (
             client.table("appointments").select("*").eq("org_id", org_id)

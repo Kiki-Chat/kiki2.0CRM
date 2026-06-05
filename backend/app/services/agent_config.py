@@ -121,6 +121,7 @@ _PROMPT_TOKENS = [
     "SERVICE_AREA", "BUSINESS_HOURS",
     "KZ_REQUIRED_FIELDS", "KZ_PROBLEM_DESCRIPTION", "KZ_APPOINTMENT_CATEGORIES",
     "KZ_SCHEDULING_RULES", "KZ_EMERGENCY", "KZ_STAFF_TRANSFER", "KZ_AUTONOMY",
+    "KZ_PRICE_INFO",
 ]
 
 
@@ -356,7 +357,7 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
             "lead_time_earliest_clock, emergency_enabled, emergency_number, "
             "emergency_only_outside_business_hours, emergency_keywords, "
             "emergency_extra_windows, emergency_surcharge_notice_enabled, "
-            "emergency_surcharge_text, incoming_forwarding_number"
+            "emergency_surcharge_text, incoming_forwarding_number, price_info_enabled"
         )
         .eq("org_id", str(org_id))
         .limit(1)
@@ -365,6 +366,32 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
         or []
     )
     return rows[0] if rows else {}
+
+
+def render_price_info_block(cfg: dict) -> str:
+    """``# Preise`` body, gated by the Preisauskunft toggle (price_info_enabled).
+
+    ON  → Kiki quotes Richtpreise from the knowledge base (legacy behavior).
+    OFF (default) → Kiki gives NO prices and offers a Kostenvoranschlag instead.
+    Wires the Kiki-Zentrale toggle to real call behavior (previously decorative)."""
+    if cfg.get("price_info_enabled"):
+        return (
+            "  Wenn nach Preisen gefragt wird, agiere Stichpunkt für Stichpunkt — nicht\n"
+            "  zu viele Informationen auf einmal. Einleitung wörtlich:\n"
+            "  „Gerne sage ich Ihnen, was die gewünschte Leistung ungefähr kostet. Ich\n"
+            "  nenne Ihnen jeweils einen Richtpreis — der kann je nach Situation vor Ort\n"
+            "  etwas abweichen.“\n"
+            "  Wenn kein belastbarer Richtpreis im Wissen vorliegt: anbieten, dass das\n"
+            "  Team einen verbindlichen Kostenvoranschlag erstellt — keine Preise raten."
+        )
+    return (
+        "  Nenne am Telefon KEINE Preise oder Richtpreise — auch keine ungefähren.\n"
+        "  Wenn nach Preisen gefragt wird, erkläre freundlich, dass sich der genaue\n"
+        "  Preis erst nach einer Einschätzung beziffern lässt, und biete an, dass das\n"
+        "  Team einen unverbindlichen Kostenvoranschlag erstellt:\n"
+        "  „Das hängt von den Details vor Ort ab — ich nehme Ihr Anliegen gern auf und\n"
+        "  das Team meldet sich mit einem unverbindlichen Kostenvoranschlag.“"
+    )
 
 
 # ─── Company-identity render helpers (German prose, empty-safe) ──────────────
@@ -862,6 +889,7 @@ def render_prompt_for_org(
         "KZ_EMERGENCY": render_emergency_block(kz_cfg),
         "KZ_STAFF_TRANSFER": render_staff_transfer_block(kz_cfg),
         "KZ_AUTONOMY": render_autonomy_block(kz_cfg),
+        "KZ_PRICE_INFO": render_price_info_block(kz_cfg),
     }
     for key, value in tokens.items():
         text = text.replace("{{" + key + "}}", value)

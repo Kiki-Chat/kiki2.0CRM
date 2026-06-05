@@ -130,8 +130,8 @@ function PrimaryAction({ icon: Icon, label, tone, onClick, disabled }: { icon: L
   )
 }
 
-// ─── Overflow kebab (Bearbeiten / Wieder öffnen / Anfrage löschen) ─────────
-function MoreMenu({ onEdit, onReopen, onDelete, disabled }: { onEdit: () => void; onReopen: () => void; onDelete: () => void; disabled: boolean }) {
+// ─── Overflow kebab (Anruf löschen) ────────────────────────────────────────
+function MoreMenu({ onDelete, disabled }: { onDelete: () => void; disabled: boolean }) {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild disabled={disabled}>
@@ -141,13 +141,6 @@ function MoreMenu({ onEdit, onReopen, onDelete, disabled }: { onEdit: () => void
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={6} className="z-[60] w-52 rounded-xl border border-border bg-surface p-1.5 shadow-e3">
-          <DropdownMenu.Item onSelect={onEdit} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-bold text-body outline-none data-[highlighted]:bg-alt">
-            <Pencil size={15} /> Bearbeiten
-          </DropdownMenu.Item>
-          <DropdownMenu.Item onSelect={onReopen} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-bold text-body outline-none data-[highlighted]:bg-alt">
-            <RotateCcw size={15} /> Wieder öffnen
-          </DropdownMenu.Item>
-          <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Item onSelect={onDelete} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-bold text-error outline-none data-[highlighted]:bg-error-bg">
             <Trash2 size={15} /> Anruf löschen
           </DropdownMenu.Item>
@@ -216,7 +209,7 @@ function ActionsTab({
           >
             <Pencil size={16} /> Bearbeiten
           </button>
-          <MoreMenu onEdit={onEdit} onReopen={() => onStatus('open')} onDelete={onDelete} disabled={busy} />
+          <MoreMenu onDelete={onDelete} disabled={busy} />
         </div>
       </div>
     </div>

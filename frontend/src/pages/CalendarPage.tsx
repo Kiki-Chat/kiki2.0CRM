@@ -120,6 +120,9 @@ export function CalendarPage() {
     queryKey: ['appointments', range?.from, range?.to],
     queryFn: () => apiFetch<Appointment[]>(`/api/appointments?from=${range!.from}&to=${range!.to}`),
     enabled: !!range,
+    // The calendar is a shared, multi-user surface — poll so edits made by another
+    // user/account appear here without a manual reload.
+    refetchInterval: 30_000,
   })
 
   // FIX 1 — calendar connection state, to gate the push button (provider-aware).

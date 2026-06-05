@@ -10,9 +10,13 @@ import './index.css'
 
 const queryClient = new QueryClient({
   // staleTime 30s: navigating between pages reuses cached data instead of
-  // refetching on every mount. Mutations invalidate explicitly and realtime
-  // broadcasts still refetch ['calls'], so freshness is preserved where it matters.
-  defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 30_000 } },
+  // refetching on every mount. refetchOnWindowFocus/Reconnect are ON so changes
+  // made by another user/account/tab surface when this tab regains focus or the
+  // network reconnects — it only refetches once data is older than staleTime, so
+  // the perf win on quick navigation is preserved.
+  defaultOptions: {
+    queries: { refetchOnWindowFocus: true, refetchOnReconnect: true, retry: 1, staleTime: 30_000 },
+  },
 })
 
 createRoot(document.getElementById('root')!).render(

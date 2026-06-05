@@ -893,13 +893,7 @@ frage explizit nach seiner Telefonnummer BEVOR du hk_createInquiry aufrufst.
 {{KZ_EMERGENCY}}
 
   # Preise
-  Wenn nach Preisen gefragt wird, agiere Stichpunkt für Stichpunkt — nicht
-  zu viele Informationen auf einmal. Einleitung wörtlich:
-  „Gerne sage ich Ihnen, was die gewünschte Leistung ungefähr kostet. Ich
-  nenne Ihnen jeweils einen Richtpreis — der kann je nach Situation vor Ort
-  etwas abweichen."
-  Wenn kein belastbarer Richtpreis im Wissen vorliegt: anbieten, dass das
-  Team einen verbindlichen Kostenvoranschlag erstellt — keine Preise raten.
+{{KZ_PRICE_INFO}}
 
   # Personal / Rückrufnotiz
   Bei Rückrufwunsch oder direktem Mitarbeiterbezug:

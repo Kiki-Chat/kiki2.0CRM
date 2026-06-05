@@ -8,13 +8,11 @@ import { apiFetch } from '../../lib/api'
 import { cn, initials } from '../../lib/utils'
 import {
   type CallDetailData,
-  CATEGORIES,
   COLORS,
   displayName,
   type Employee,
   type Inquiry,
   isMeaningful,
-  STATUS_TAG,
 } from './shared'
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -38,16 +36,12 @@ export function ProcessRequestModal({
   onSave: (body: Partial<Inquiry>) => void
 }) {
   const [title, setTitle] = useState(inquiry.title ?? '')
-  const [type, setType] = useState(inquiry.type ?? 'info')
   const [notes, setNotes] = useState(inquiry.notes ?? '')
-  const [status, setStatus] = useState(inquiry.status)
 
   useEffect(() => {
     if (open) {
       setTitle(inquiry.title ?? '')
-      setType(inquiry.type ?? 'info')
       setNotes(inquiry.notes ?? '')
-      setStatus(inquiry.status)
     }
   }, [open, inquiry])
 
@@ -59,7 +53,7 @@ export function ProcessRequestModal({
       footer={
         <div className="flex gap-3">
           <button
-            onClick={() => onSave({ title, type, notes, status })}
+            onClick={() => onSave({ title, notes })}
             className="flex-1 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110"
           >
             Aktualisieren
@@ -78,22 +72,6 @@ export function ProcessRequestModal({
             className="w-full rounded-md border border-border bg-alt px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary"
           />
         </Field>
-        <Field label="Kategorie">
-          <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setType(cat)}
-                className={cn(
-                  'rounded-md border px-3 py-1.5 text-sm font-medium capitalize',
-                  type === cat ? 'border-green-primary bg-green-primary text-white' : 'border-border bg-surface text-body hover:bg-alt',
-                )}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        </Field>
         <Field label="Notiz">
           <textarea
             rows={5}
@@ -101,28 +79,6 @@ export function ProcessRequestModal({
             onChange={(e) => setNotes(e.target.value)}
             className="w-full rounded-md border border-border bg-alt px-3 py-2.5 text-sm text-body outline-none focus:border-green-primary"
           />
-        </Field>
-        <Field label="Status">
-          <div className="flex gap-2">
-            {(['open', 'in_progress', 'completed'] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatus(s)}
-                className={cn(
-                  'rounded-full px-3 py-1.5 text-sm font-semibold',
-                  status === s
-                    ? STATUS_TAG[s].variant === 'success'
-                      ? 'bg-success text-white'
-                      : STATUS_TAG[s].variant === 'warning'
-                        ? 'bg-warning text-white'
-                        : 'bg-info text-white'
-                    : 'bg-alt text-muted',
-                )}
-              >
-                {STATUS_TAG[s].label}
-              </button>
-            ))}
-          </div>
         </Field>
       </div>
     </Modal>

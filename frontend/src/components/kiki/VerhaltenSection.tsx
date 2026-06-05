@@ -206,7 +206,7 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
           </div>
         </div>
         <div className="mt-4">
-          <Field label="Begrüßungs-Nachricht (first_message)" hint={`${firstMessage.length}/500 Zeichen`}>
+          <Field label="Begrüßungs-Nachricht" hint={`${firstMessage.length}/500 Zeichen`}>
             <textarea
               value={firstMessage}
               maxLength={500}

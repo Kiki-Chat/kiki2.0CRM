@@ -192,6 +192,11 @@ export function CallDetail({
         onCreated={() => {
           setModal(null)
           qc.invalidateQueries({ queryKey: ['callInquiry', callId] })
+          // Reflect the new appointment on the calendar + the call's action card
+          // right away (was missing → calendar only updated after a manual reload).
+          qc.invalidateQueries({ queryKey: ['appointments'] })
+          qc.invalidateQueries({ queryKey: ['pendingAppointment', callId] })
+          qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
         }}
       />
     </>
