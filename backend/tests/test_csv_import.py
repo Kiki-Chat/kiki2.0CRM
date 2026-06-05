@@ -338,6 +338,71 @@ def test_extract_address_unit():
     assert csv_import.extract_address(None) is None
 
 
+# ─── content-aware column detection + mapping ────────────────────────────────
+def test_detect_column_type():
+    d = csv_import.detect_column_type
+    assert d(["a@b.de", "c@d.com", "e@f.net"])["type"] == "email"
+    assert d(["0175 8771486", "0160 1234567"])["type"] == "mobile"
+    assert d(["040 734170", "04161 713810"])["type"] == "landline"
+    assert d(["21035", "21147", "21640"])["type"] == "postal_code"   # NOT phone
+    assert d(["101001", "101002", "101003"])["type"] == "customer_number"  # NOT phone
+    assert d(["Wischenwinkel 17", "Rübker Str. 22b"])["type"] == "street"
+    # Cities repeat heavily across rows (low distinctness) → city; names are distinct.
+    assert d(["Hamburg", "Hamburg", "Hamburg", "Buxtehude", "Hamburg"])["type"] == "city"
+    assert d(["Max Mustermann", "Erika Meier", "Klaus Klein"])["type"] == "person_name"
+    assert d([])["type"] == "empty"
+
+
+def test_suggest_mapping_content_overrides_header():
+    # The 'Mail'-headed column actually holds PHONES; the real emails are under a
+    # weirdly-named header. Content must win: email maps to the email column, and the
+    # phone-typed 'Mail' column is NOT mapped to email.
+    columns = {
+        "Mail": csv_import.detect_column_type(["0175 111", "0176 222", "0177 333"]),
+        "Kontakt": csv_import.detect_column_type(["a@b.de", "c@d.de", "e@f.de"]),
+        "Telefon": csv_import.detect_column_type(["040 111", "040 222"]),
+        "Name": csv_import.detect_column_type(["Max Mustermann", "Erika Meier"]),
+    }
+    m = csv_import.suggest_mapping(columns)
+    assert m.get("email") == "Kontakt"      # content-detected email column
+    assert m.get("email") != "Mail"         # the phone-filled 'Mail' is NOT email
+    assert m.get("full_name") == "Name"
+
+
+def test_suggest_mapping_avoids_datev_decoys():
+    # Wide DATEV-style headers: full_name must bind to the full column, not Vorname/
+    # Suchwort/Kurzname; city to Ort not Titel; phone to Telefon not Titel.
+    cols = {
+        "Suchwort": csv_import.detect_column_type(["ADAMHH", "MEIERHH"]),
+        "Kurzname": csv_import.detect_column_type(["Adam, Wischenwinkel 17", "Meier, Hauptstr 2"]),
+        "Titel": csv_import.detect_column_type(["Dr.", "Dr.", "Prof."]),
+        "Vorname": csv_import.detect_column_type(["Heiko", "Erika"]),
+        "Titel+Vorname+Name": csv_import.detect_column_type(["Heiko Adam", "Erika Meier"]),
+        "Telefon": csv_import.detect_column_type(["040 734170", "04161 713810"]),
+        "Mail": csv_import.detect_column_type(["a@b.de", "c@d.de"]),
+        "PLZ": csv_import.detect_column_type(["21035", "21147"]),
+        "Ort": csv_import.detect_column_type(["Hamburg", "Buxtehude"]),
+    }
+    m = csv_import.suggest_mapping(cols)
+    assert m["full_name"] == "Titel+Vorname+Name"
+    assert m["phone"] == "Telefon"
+    assert m["postal_code"] == "PLZ"
+    assert m["city"] == "Ort"
+    assert m["email"] == "Mail"
+
+
+def test_preview_customers_smoke():
+    csv_bytes = (
+        "Kundennummer;Titel+Vorname+Name;Mail;Telefon;Mobil;Strasse;PLZ;Ort;Bemerkung\n"
+        "101001;Heiko Adam;adam@x.de;040 734170;0175 8771486;Wischenwinkel 17;21147;Hamburg;Notiz\n"
+    ).encode("utf-8")
+    pv = csv_import.preview_customers(csv_bytes)
+    assert pv["row_count"] == 1
+    assert pv["suggested_mapping"]["email"] == "Mail"
+    assert pv["suggested_mapping"]["postal_code"] == "PLZ"
+    assert pv["columns"]["Mobil"]["type"] == "mobile"
+
+
 # ─── real DATEV export (B5 field-test regression) ────────────────────────────
 # Wide DATEV header with the decoy columns (Suchwort/Titel/Kurzname) that the OLD
 # frontend auto-mapper mis-bound (city→Suchwort, phone→Titel, name→Kurzname). This

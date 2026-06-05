@@ -21,6 +21,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+from collections import Counter
 
 from app.db.supabase_client import get_service_client
 from app.services.common import gen_customer_number
@@ -144,6 +145,160 @@ def extract_address(text: str | None) -> dict | None:
                 "city": m.group(3).strip(),
             }
     return None
+
+
+# ─── content-type detection (intelligent mapping) ────────────────────────────
+# A column's TYPE is read from its DATA, not its header — so an address is known to
+# be an address by content, a phone is never put in the email/address field, and an
+# odd/missing header still maps correctly.
+_STREET_TOKEN = re.compile(
+    r"(str\.?|straße|strasse|weg|allee|platz|ring|gasse|damm|chaussee|ufer|stieg|kamp|hof|berg)\b",
+    re.I,
+)
+_ALPHA = re.compile(r"^[A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß .,'\-/]+$")
+
+
+def _value_type(v: str) -> str:
+    """Best-effort content type of a single non-empty cell value. Order matters: a
+    5-digit PLZ and a bare customer number are ALSO ≥5 digits, so they must be caught
+    before the phone test (which accepts any 5+ digit run)."""
+    v = v.strip()
+    if not v:
+        return "empty"
+    if _valid_email(v):
+        return "email"
+    if re.fullmatch(r"\d{5}", v):
+        return "postal_code"  # exactly 5 bare digits = German PLZ (never a phone)
+    if v.isdigit() and not v.startswith("0"):
+        return "number"  # bare id, e.g. a customer number (a phone starts 0/+ or is formatted)
+    if _looks_like_phone(v):
+        return "mobile" if classify_phone(clean_phone(v)) == "mobile" else "landline"
+    if _STREET_TOKEN.search(v) or re.search(r"\d+\s*[a-z]?$", v):
+        return "street"
+    if _ALPHA.match(v):
+        return "name_or_city"  # resolved per column by distinctness
+    return "free_text"
+
+
+def detect_column_type(samples: list[str]) -> dict:
+    """Detect a column's dominant content type from sampled cell values. Returns
+    ``{type, confidence, samples(≤3), mixed_phone}``. ``type`` ∈ email / mobile /
+    landline / postal_code / customer_number / street / person_name / city /
+    free_text / empty."""
+    vals = [str(s).strip() for s in samples if s is not None and str(s).strip()]
+    if not vals:
+        return {"type": "empty", "confidence": 0.0, "samples": [], "mixed_phone": False}
+    cnt = Counter(_value_type(v) for v in vals)
+    distinct = len(set(vals)) / len(vals)
+    top, n = cnt.most_common(1)[0]
+    if top == "number":  # bare digit run: distinct → an id; repeating → not customer-relevant
+        top = "customer_number" if distinct > 0.8 else "number"
+    elif top == "name_or_city":  # cities repeat across rows; names are mostly distinct
+        top = "person_name" if distinct >= 0.6 else "city"
+    return {
+        "type": top,
+        "confidence": round(n / len(vals), 2),
+        "samples": vals[:3],
+        "mixed_phone": bool(cnt.get("mobile") and cnt.get("landline")),
+    }
+
+
+# Header-name hints (mirror the frontend) — used only to break ties / fill the soft
+# text fields where content alone is ambiguous (name vs city vs notes).
+_HEADER_HINTS = {
+    "full_name": ["titel+vorname+name", "name", "vorname", "kurzname"],
+    "email": ["mail", "email", "e-mail"],
+    "phone": ["telefon", "phone", "tel", "festnetz"],
+    "phone2": ["mobil", "mobile", "handy"],
+    "street": ["strasse", "straße", "street", "str"],
+    "postal_code": ["plz", "postleitzahl", "zip", "postal"],
+    "city": ["ort", "stadt", "city"],
+    "notes": ["bemerkung", "notiz", "notes", "comment"],
+    "customer_number": ["kundennummer", "kunden-nr", "kdnr", "customer_number", "adressnummer"],
+}
+
+
+def _hint_score(field: str, header: str) -> int:
+    """Header-name match score. Preserves hint PRIORITY order (an exact match on the
+    first hint beats a match on a later one) so e.g. full_name binds to
+    'Titel+Vorname+Name' before the lower-priority 'Vorname'. Exact > substring."""
+    h = header.lower().strip()
+    hints = _HEADER_HINTS.get(field, [])
+    for i, kw in enumerate(hints):
+        if h == kw:
+            return 100 - i
+    for i, kw in enumerate(hints):
+        if len(kw) >= 4 and kw in h:
+            return 50 - i
+    return 0
+
+
+def suggest_mapping(columns: dict) -> dict:
+    """Pick ``{target_field: header}`` from per-column detected types — CONTENT first
+    (so a 'Mail'-headed column that actually holds phones is NOT mapped to email),
+    header-name hint as the tiebreaker. Each header maps to at most one field."""
+    used: set[str] = set()
+    m: dict[str, str] = {}
+
+    def take(field: str, want_types: set[str]) -> None:
+        best, best_key = None, (-1, -1.0)
+        for h, info in columns.items():
+            if h in used or info.get("type") not in want_types:
+                continue
+            key = (_hint_score(field, h), info.get("confidence", 0.0))
+            if key > best_key:
+                best, best_key = h, key
+        if best:
+            m[field] = best
+            used.add(best)
+
+    # High-precision content types first.
+    take("email", {"email"})
+    take("phone", {"landline"})
+    take("phone2", {"mobile"})
+    take("postal_code", {"postal_code"})
+    take("customer_number", {"customer_number"})
+    take("street", {"street"})
+    take("city", {"city"})
+    take("full_name", {"person_name"})
+    # Fallbacks: a lone mobile can be the primary phone; a name field may read as city.
+    if "phone" not in m:
+        take("phone", {"mobile"})
+    if "full_name" not in m:
+        take("full_name", {"city", "free_text"})
+    # Soft fields still unmapped → header hint only (never steal a typed column).
+    for field in ("notes", "customer_number", "city", "street", "full_name", "phone2"):
+        if field in m:
+            continue
+        for h in columns:
+            if h not in used and _hint_score(field, h) >= 1:
+                m[field] = h
+                used.add(h)
+                break
+    return m
+
+
+def preview_customers(content: bytes, sample_size: int = 50) -> dict:
+    """Read-only: detect each column's content type from up to ``sample_size`` cells
+    and propose a content-aware mapping. Powers the import dialog's live preview so a
+    bad mapping is caught BEFORE anything is written."""
+    headers, rows = parse_csv(content)
+    columns: dict[str, dict] = {}
+    for h in headers:
+        samples: list[str] = []
+        for r in rows:
+            v = r.get(h)
+            if v is not None and str(v).strip():
+                samples.append(str(v).strip())
+                if len(samples) >= sample_size:
+                    break
+        columns[h] = detect_column_type(samples)
+    return {
+        "headers": headers,
+        "columns": columns,
+        "suggested_mapping": suggest_mapping(columns),
+        "row_count": len(rows),
+    }
 
 
 def _num(v: str | None):

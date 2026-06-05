@@ -363,6 +363,18 @@ async def import_customers_csv(
     return await run_in_threadpool(csv_import.import_customers, user.org_id, content, m)
 
 
+@router.post("/import/preview")
+async def import_customers_preview(
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    """Read-only column analysis for the import dialog: each column's detected
+    content type + sample values, plus a content-aware suggested mapping (so a
+    phone column is never proposed for E-Mail/Adresse). Never writes."""
+    content = await file.read()
+    return await run_in_threadpool(csv_import.preview_customers, content)
+
+
 def _update(org_id: str, customer_id: str, payload: CustomerUpsert) -> dict | None:
     client = get_service_client()
     fields: dict = {}
