@@ -5,7 +5,7 @@ underscore-prefixed system fields plus its own parameters. No business logic
 lives here — these are just the typed contracts for the Phase 2 handlers.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class ToolRequestBase(BaseModel):
@@ -114,8 +114,16 @@ class QueryKnowledgeBaseRequest(ToolRequestBase):
 
 # 10. transferCall
 class TransferCallRequest(ToolRequestBase):
-    emergency: bool | None = None
-    reason: str | None = None
+    # The ElevenLabs tool param is `emergency`, but the German prompt has historically
+    # said "notfall=true" / "grund". Accept BOTH spellings so the emergency flag can
+    # never be silently lost (→ a Notfall misrouted to the staff line). With
+    # populate_by_name=True (ToolRequestBase), the field name still works too.
+    emergency: bool | None = Field(
+        default=None, validation_alias=AliasChoices("emergency", "notfall")
+    )
+    reason: str | None = Field(
+        default=None, validation_alias=AliasChoices("reason", "grund")
+    )
 
 
 # 11. draftCostEstimate

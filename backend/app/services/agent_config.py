@@ -120,7 +120,7 @@ _PROMPT_TOKENS = [
     "COMPANY_NAME", "COMPANY_TRADE", "COMPANY_CONTACT", "COMPANY_PROFILE",
     "SERVICE_AREA", "BUSINESS_HOURS",
     "KZ_REQUIRED_FIELDS", "KZ_PROBLEM_DESCRIPTION", "KZ_APPOINTMENT_CATEGORIES",
-    "KZ_SCHEDULING_RULES", "KZ_EMERGENCY", "KZ_AUTONOMY",
+    "KZ_SCHEDULING_RULES", "KZ_EMERGENCY", "KZ_STAFF_TRANSFER", "KZ_AUTONOMY",
 ]
 
 
@@ -356,7 +356,7 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
             "lead_time_earliest_clock, emergency_enabled, emergency_number, "
             "emergency_only_outside_business_hours, emergency_keywords, "
             "emergency_extra_windows, emergency_surcharge_notice_enabled, "
-            "emergency_surcharge_text"
+            "emergency_surcharge_text, incoming_forwarding_number"
         )
         .eq("org_id", str(org_id))
         .limit(1)
@@ -592,7 +592,7 @@ def render_emergency_block(cfg: dict) -> str:
 
     Disabled → a short 'no emergency service' instruction. Enabled → the configured
     keyword list (fallback set only if empty), the active-window clause, and the
-    optional surcharge notice. Transfer is always via hk_transferCall notfall=true."""
+    optional surcharge notice. Transfer is always via hk_transferCall emergency=true."""
     if not cfg.get("emergency_enabled"):
         return (
             "  Kein Notdienst aktiv: außerhalb der Geschäftszeiten Anliegen "
@@ -625,7 +625,12 @@ def render_emergency_block(cfg: dict) -> str:
             "Abschnitt „=== Geschäftszeiten ===“)."
         )
     else:
-        active = "  Der Notdienst greift bei einem bestätigten Notfall jederzeit."
+        active = (
+            "  Der Notdienst greift bei einem bestätigten Notfall JEDERZEIT — auch "
+            "INNERHALB der Geschäftszeiten (z. B. Gasgeruch, Rohrbruch). Ein per "
+            "Notfall-Stichwort bestätigter Notfall wird also unabhängig von der "
+            "Uhrzeit sofort weitergeleitet."
+        )
     if window_txt:
         active += f" Zusätzliche Notdienst-Zeiten: {window_txt}."
     lines.append(active)
@@ -643,10 +648,34 @@ def render_emergency_block(cfg: dict) -> str:
 
     lines.append(
         "  Sag dem Anrufer bei bestätigtem Notfall ZUERST kurz, dass du ihn jetzt mit "
-        "dem Notdienst verbindest, und rufe DANN `hk_transferCall` mit `notfall=true` "
+        "dem Notdienst verbindest, und rufe DANN `hk_transferCall` mit `emergency=true` "
         "auf — die Weiterleitung erfolgt sofort, sprich danach nicht weiter."
     )
     return "\n".join(lines)
+
+
+def render_staff_transfer_block(cfg: dict) -> str:
+    """Explicit "connect me to a person" handling for the ``{{KZ_STAFF_TRANSFER}}``
+    token. Live staff transfer is only offered when an ``incoming_forwarding_number``
+    is configured AND it is inside business hours; otherwise the agent takes a
+    callback note (the existing default). This is distinct from the Notdienst path
+    (emergency=true) — here ``hk_transferCall`` is called with ``emergency=false``."""
+    number_set = bool((cfg.get("incoming_forwarding_number") or "").strip())
+    if not number_set:
+        return (
+            "  Es ist KEINE Mitarbeiter-Weiterleitung hinterlegt. Bei der Bitte, mit "
+            "einer Person zu sprechen, nimm eine Rückrufnotiz auf (kein Live-Transfer)."
+        )
+    return (
+        "  Wenn der Anrufer AUSDRÜCKLICH darum bittet, sofort mit einem Mitarbeiter/"
+        "einer Person verbunden zu werden, UND es INNERHALB der Geschäftszeiten ist:\n"
+        "  - Sage kurz, dass du verbindest, und rufe `hk_transferCall` mit "
+        "`emergency=false` auf. Die Mitarbeiter-Nummer ist im Backend hinterlegt — du "
+        "musst sie weder kennen noch ansagen.\n"
+        "  - Außerhalb der Geschäftszeiten ODER wenn keine sofortige Verbindung "
+        "gewünscht ist (reine Rückrufbitte): nimm stattdessen eine Notiz mit "
+        "`hk_createInquiry` (`rueckrufGewuenscht=true`) auf — nicht weiterleiten."
+    )
 
 
 def render_autonomy_block(cfg: dict) -> str:
@@ -827,6 +856,7 @@ def render_prompt_for_org(
         "KZ_APPOINTMENT_CATEGORIES": render_appointment_categories_block(categories),
         "KZ_SCHEDULING_RULES": render_scheduling_rules_block(kz_cfg),
         "KZ_EMERGENCY": render_emergency_block(kz_cfg),
+        "KZ_STAFF_TRANSFER": render_staff_transfer_block(kz_cfg),
         "KZ_AUTONOMY": render_autonomy_block(kz_cfg),
     }
     for key, value in tokens.items():

@@ -1,5 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ArrowDown,
+  ArrowDownUp,
+  ArrowUp,
   AtSign,
   ChevronLeft,
   ChevronRight,
@@ -71,6 +74,18 @@ const FILTERS: { key: string; label: string; type?: string }[] = [
 // Records-per-page choices for the selector.
 const PAGE_SIZE_OPTIONS = [24, 48, 96, 200]
 
+// Sorting: which column + direction. Mirrors the backend whitelist.
+type SortBy = 'created_at' | 'full_name' | 'customer_number'
+type SortDir = 'asc' | 'desc'
+const SORT_OPTIONS: { value: string; label: string }[] = [
+  { value: 'created_at:desc', label: 'Neueste zuerst' },
+  { value: 'created_at:asc', label: 'Älteste zuerst' },
+  { value: 'full_name:asc', label: 'Name (A–Z)' },
+  { value: 'full_name:desc', label: 'Name (Z–A)' },
+  { value: 'customer_number:asc', label: 'Kundennr. (aufsteigend)' },
+  { value: 'customer_number:desc', label: 'Kundennr. (absteigend)' },
+]
+
 // Responsive default page size: estimate the visible columns (from width) × rows
 // (from height) so the first page roughly fills the viewport, then snap up to a
 // page-size option. Computed once on mount; the user can override via the selector.
@@ -97,6 +112,8 @@ export function CustomersPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(() => defaultPageSize())
+  const [sortBy, setSortBy] = useState<SortBy>('created_at')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [view, setView] = useState<'cards' | 'list'>(() =>
     localStorage.getItem('kunden-view') === 'list' ? 'list' : 'cards',
   )
@@ -106,7 +123,7 @@ export function CustomersPage() {
   }, [view])
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['customers', filter, search, page, pageSize],
+    queryKey: ['customers', filter, search, page, pageSize, sortBy, sortDir],
     queryFn: () => {
       const params = new URLSearchParams()
       if (search.trim()) params.set('q', search.trim())
@@ -114,6 +131,8 @@ export function CustomersPage() {
       if (f?.type) params.set('customer_type', f.type)
       params.set('limit', String(pageSize))
       params.set('offset', String(page * pageSize))
+      params.set('sort_by', sortBy)
+      params.set('sort_dir', sortDir)
       return apiFetch<CustomerListResponse>(`/api/customers?${params.toString()}`)
     },
     // Keep the previous page visible (dimmed) while the next one loads — smooth
@@ -133,12 +152,22 @@ export function CustomersPage() {
   // Back to page 1 whenever the query shape changes.
   useEffect(() => {
     setPage(0)
-  }, [filter, search, pageSize])
+  }, [filter, search, pageSize, sortBy, sortDir])
   // Clear selection whenever the visible set changes (so a hidden row can never
   // be silently included in a bulk delete).
   useEffect(() => {
     setSelected(new Set())
-  }, [filter, search, page, pageSize])
+  }, [filter, search, page, pageSize, sortBy, sortDir])
+
+  // Sort from a clickable column header: same column → flip direction; new column
+  // → newest-first for dates, ascending (A→Z / 1→9) otherwise.
+  const toggleSort = (col: SortBy) => {
+    if (sortBy === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSortBy(col)
+      setSortDir(col === 'created_at' ? 'desc' : 'asc')
+    }
+  }
 
   const allSelected = customers.length > 0 && customers.every((c) => selected.has(c.id))
   const someSelected = selected.size > 0 && !allSelected
@@ -182,6 +211,8 @@ export function CustomersPage() {
       if (search.trim()) params.set('q', search.trim())
       const f = FILTERS.find((x) => x.key === filter)
       if (f?.type) params.set('customer_type', f.type)
+      params.set('sort_by', sortBy)
+      params.set('sort_dir', sortDir)
       const url = await apiBlobUrl(`/api/customers/export?${params.toString()}`)
       const a = document.createElement('a')
       a.href = url
@@ -265,25 +296,47 @@ export function CustomersPage() {
         />
       </div>
 
-      {/* Filter tabs */}
-      <div className="mb-4 flex flex-wrap gap-2">
-        {FILTERS.map((f) => {
-          const active = filter === f.key
-          const count = f.key === 'all' ? counts.all ?? 0 : counts[f.type!] ?? 0
-          return (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={cn(
-                'flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold transition-colors',
-                active ? 'bg-text text-white' : 'bg-surface text-body hover:bg-alt',
-              )}
-            >
-              <span className={active ? '' : f.type ? typeText(f.type) : ''}>{f.label}</span>
-              <span className={cn('text-xs', active ? 'text-white/70' : 'text-faint')}>{count}</span>
-            </button>
-          )
-        })}
+      {/* Filter tabs + sort */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {FILTERS.map((f) => {
+            const active = filter === f.key
+            const count = f.key === 'all' ? counts.all ?? 0 : counts[f.type!] ?? 0
+            return (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={cn(
+                  'flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold transition-colors',
+                  active ? 'bg-text text-white' : 'bg-surface text-body hover:bg-alt',
+                )}
+              >
+                <span className={active ? '' : f.type ? typeText(f.type) : ''}>{f.label}</span>
+                <span className={cn('text-xs', active ? 'text-white/70' : 'text-faint')}>{count}</span>
+              </button>
+            )
+          })}
+        </div>
+        <label className="flex items-center gap-1.5 text-sm text-muted">
+          <ArrowDownUp size={14} className="text-faint" />
+          <span className="hidden sm:inline">Sortieren</span>
+          <select
+            value={`${sortBy}:${sortDir}`}
+            onChange={(e) => {
+              const [by, dir] = e.target.value.split(':') as [SortBy, SortDir]
+              setSortBy(by)
+              setSortDir(dir)
+            }}
+            aria-label="Kundenliste sortieren"
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-body outline-none focus:border-green-primary"
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {/* Selection / bulk-remove bar */}
@@ -344,8 +397,14 @@ export function CustomersPage() {
                     className="h-4 w-4 cursor-pointer accent-green-primary"
                   />
                 </th>
-                <th className="px-3 py-2.5 font-semibold">Name</th>
-                <th className="px-3 py-2.5 font-semibold">Kundennr.</th>
+                <SortTh label="Name" col="full_name" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+                <SortTh
+                  label="Kundennr."
+                  col="customer_number"
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                />
                 <th className="px-3 py-2.5 font-semibold">Typ</th>
                 <th className="px-3 py-2.5 font-semibold">Quelle</th>
                 <th className="px-3 py-2.5 font-semibold">E-Mail</th>
@@ -550,6 +609,42 @@ export function CustomersPage() {
         />
       )}
     </div>
+  )
+}
+
+function SortTh({
+  label,
+  col,
+  sortBy,
+  sortDir,
+  onSort,
+}: {
+  label: string
+  col: SortBy
+  sortBy: SortBy
+  sortDir: SortDir
+  onSort: (c: SortBy) => void
+}) {
+  const active = sortBy === col
+  return (
+    <th className="px-3 py-2.5 font-semibold">
+      <button
+        type="button"
+        onClick={() => onSort(col)}
+        aria-label={`Nach ${label} sortieren`}
+        className={cn(
+          'group inline-flex items-center gap-1 transition-colors hover:text-body',
+          active && 'text-body',
+        )}
+      >
+        {label}
+        {active ? (
+          sortDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+        ) : (
+          <ArrowDownUp size={12} className="opacity-0 transition-opacity group-hover:opacity-60" />
+        )}
+      </button>
+    </th>
   )
 }
 

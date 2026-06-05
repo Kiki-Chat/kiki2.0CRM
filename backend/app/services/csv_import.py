@@ -4,10 +4,17 @@ Mapping-driven: the frontend supplies ``mapping = {target_field: csv_header}``;
 the backend parses authoritatively (encoding + delimiter detection), applies the
 mapping, normalizes phones to E.164, dedups, and batch-inserts in chunks.
 
-Dedup is mandatory and idempotent: a row whose unique key (email OR normalized
-phone) already exists — in the DB or earlier in the same file — is SKIPPED, never
-overwritten and never duplicated. Re-running the same file imports nothing new.
-Each row gets a result: imported / skipped_duplicate / error.
+Dedup is mandatory and idempotent, but SHARED-LANDLINE-SAFE: a row is a duplicate
+only when its email already exists, OR its normalized phone AND name both already
+exist (in the DB or earlier in the same file). Two DIFFERENT people on one phone
+number — a married couple, or a property manager running several WEGs — are kept
+as distinct customers; phone-alone no longer collapses them. Re-running the same
+file still imports nothing new. Each row gets a result: imported / skipped_duplicate
+/ error.
+
+The email column is also validated: a value that is not a real address (German ERP
+exports routinely have a phone number typed into the Mail field) is NOT stored as an
+email; if it looks like a phone and no second number is set, it is salvaged into phone2.
 """
 from __future__ import annotations
 
@@ -21,6 +28,8 @@ from app.services.identify import _to_e164
 
 _CHUNK = 500
 _PHONE_HEAD = re.compile(r"[\s+\-/().\d]*")
+# A pragmatic "is this actually an email" check — local@domain.tld, no spaces.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 # ─── parsing ─────────────────────────────────────────────────────────────────
@@ -76,6 +85,25 @@ def clean_phone(raw: str | None) -> str | None:
     return _to_e164(head)
 
 
+def _valid_email(raw: str | None) -> str | None:
+    """Return the address only if it is actually an email, else None — so a phone
+    number (or other junk) typed into the source 'Mail' column is never stored as
+    one."""
+    if not raw:
+        return None
+    v = raw.strip()
+    return v if _EMAIL_RE.match(v) else None
+
+
+def _looks_like_phone(raw: str | None) -> bool:
+    """True if the value is plausibly a phone number (only phone-ish chars, ≥5
+    digits) — used to salvage a phone wrongly placed in the Mail column."""
+    if not raw:
+        return False
+    v = raw.strip()
+    return bool(re.fullmatch(r"[\d\s+\-/().]+", v)) and sum(c.isdigit() for c in v) >= 5
+
+
 def _num(v: str | None):
     if not v:
         return None
@@ -104,7 +132,7 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
 
     existing = (
         client.table("customers")
-        .select("email, phone")
+        .select("email, phone, full_name")
         .eq("org_id", org_id)
         .neq("status", "deleted")
         .execute()
@@ -112,7 +140,14 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
         or []
     )
     seen_emails = {e["email"].lower() for e in existing if e.get("email")}
-    seen_phones = {e["phone"] for e in existing if e.get("phone")}
+    # phone → set of names already on that number (lowercased). A phone match is a
+    # duplicate ONLY when the name also matches, so two different people sharing a
+    # landline (couples, property managers) are both kept.
+    seen_phone_names: dict[str, set[str]] = {}
+    for e in existing:
+        p = e.get("phone")
+        if p:
+            seen_phone_names.setdefault(p, set()).add((e.get("full_name") or "").strip().lower())
 
     # Continue numbering after BOTH existing rows and any explicit CSV numbers.
     max_num = int(gen_customer_number(client, org_id)) - 1
@@ -122,15 +157,24 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
 
     for i, row in enumerate(rows, start=1):
         full_name = _get(row, mapping, "full_name") or _get(row, mapping, "name")
-        email = _get(row, mapping, "email")
+        raw_email = _get(row, mapping, "email")
+        email = _valid_email(raw_email)
         phone = clean_phone(_get(row, mapping, "phone"))
         phone2 = clean_phone(_get(row, mapping, "phone2"))
+        # Source 'Mail' column held a phone, not an address → salvage it into the
+        # second number slot rather than dropping it (only if that slot is free).
+        if raw_email and not email and not phone2 and _looks_like_phone(raw_email):
+            phone2 = clean_phone(raw_email)
         if not (full_name or email or phone):
             results.append({"row": i, "status": "error", "reason": "Kein Name/E-Mail/Telefon"})
             continue
 
         email_l = email.lower() if email else None
-        if (email_l and email_l in seen_emails) or (phone and phone in seen_phones):
+        name_l = (full_name or "").strip().lower()
+        is_dup = (email_l and email_l in seen_emails) or (
+            phone and name_l in seen_phone_names.get(phone, set())
+        )
+        if is_dup:
             results.append(
                 {"row": i, "status": "skipped_duplicate", "name": full_name,
                  "reason": "E-Mail/Telefon existiert bereits"}
@@ -169,7 +213,7 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
         if email_l:
             seen_emails.add(email_l)
         if phone:
-            seen_phones.add(phone)
+            seen_phone_names.setdefault(phone, set()).add(name_l)
         results.append({"row": i, "status": "imported", "name": full_name, "customer_number": num})
 
     inserted = 0

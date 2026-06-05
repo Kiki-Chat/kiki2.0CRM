@@ -144,11 +144,60 @@ def test_import_customers_skips_existing_email(monkeypatch):
     assert out["results"][0]["status"] == "skipped_duplicate"
 
 
-def test_import_customers_skips_existing_phone(monkeypatch):
-    db = _DB({"customers": [{"email": None, "phone": "+494059466635", "customer_number": "1"}]})
+def test_import_customers_skips_existing_phone_same_name(monkeypatch):
+    # Same phone AND same name as an existing row → genuine duplicate, skipped.
+    db = _DB({"customers": [
+        {"email": None, "phone": "+494059466635", "full_name": "Heiko Adam", "customer_number": "1"},
+    ]})
     monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
     out = csv_import.import_customers("org-1", _cust_csv(), _CUST_MAP)
     assert out["imported"] == 0 and out["skipped_duplicate"] == 1
+
+
+def test_import_customers_same_phone_different_name_is_kept(monkeypatch):
+    # SHARED-LANDLINE BUG FIX: a married couple (or property manager) shares one
+    # phone but is two distinct people — the second MUST NOT be dropped as a dupe.
+    db = _DB({"customers": [
+        {"email": None, "phone": "+494059466635", "full_name": "Heike Adam", "customer_number": "1"},
+    ]})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", _cust_csv(), _CUST_MAP)  # CSV row = "Heiko Adam"
+    assert out["imported"] == 1 and out["skipped_duplicate"] == 0
+    assert db.inserted("customers")[0]["full_name"] == "Heiko Adam"
+
+
+def test_import_two_people_one_phone_within_batch(monkeypatch):
+    # Two different names, same phone, in the SAME file → both imported.
+    couple = (
+        '101003,Werner Breuhahn,,04164 812949,,Weg 1,21680,Stade,Ehemann\n'
+        '101004,Heike Breuhahn,,04164 812949,,Weg 1,21680,Stade,Ehefrau\n'
+    )
+    csv_bytes = (
+        "Kundennummer,Name,Mail,Telefon,Mobil,Strasse,PLZ,Ort,Bemerkung\n" + couple
+    ).encode("utf-8")
+    db = _DB({"customers": []})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", csv_bytes, _CUST_MAP)
+    assert out["imported"] == 2 and out["skipped_duplicate"] == 0
+
+
+def test_import_customers_phone_in_email_field(monkeypatch):
+    # The source 'Mail' column held a mobile number (real HUD data). It must NOT be
+    # stored as an email; with no Mobil set, it is salvaged into phone2.
+    row = (
+        '122015,Tierschutzverein,0171 697 3333,04161 5409977,,Str 1,21614,Buxtehude,note\n'
+    )
+    csv_bytes = (
+        "Kundennummer,Name,Mail,Telefon,Mobil,Strasse,PLZ,Ort,Bemerkung\n" + row
+    ).encode("utf-8")
+    db = _DB({"customers": []})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", csv_bytes, _CUST_MAP)
+    assert out["imported"] == 1
+    rec = db.inserted("customers")[0]
+    assert rec["email"] is None  # phone number is NOT stored as an email
+    assert rec["phone"] == "+4941615409977"
+    assert rec["phone2"] == "+491716973333"  # salvaged from the bogus Mail value
 
 
 def test_import_customers_dedup_within_batch(monkeypatch):

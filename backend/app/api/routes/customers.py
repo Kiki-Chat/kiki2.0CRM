@@ -27,8 +27,34 @@ def _addr(value: str | None):
 
 _CUSTOMER_TYPES = ["new", "regular", "supplier", "property_management"]
 
+# Whitelisted sort columns for the customer list (guards against arbitrary order-by
+# injection). customer_number is text but the numbering scheme is fixed-width 6-digit,
+# so a lexical sort matches numeric order.
+_SORT_COLUMNS = {"created_at", "full_name", "customer_number"}
 
-def _list(org_id: str, q: str | None, limit: int, offset: int, customer_type: str | None) -> dict:
+
+def _resolve_sort(sort_by: str | None, sort_dir: str | None) -> tuple[str, bool]:
+    """(column, desc) for the order-by. Unknown column → created_at. Direction
+    defaults to newest-first for dates and ascending (A→Z / 1→9) otherwise."""
+    col = (sort_by or "").strip()
+    if col not in _SORT_COLUMNS:
+        col = "created_at"
+    if sort_dir in ("asc", "desc"):
+        desc = sort_dir == "desc"
+    else:
+        desc = col == "created_at"
+    return col, desc
+
+
+def _list(
+    org_id: str,
+    q: str | None,
+    limit: int,
+    offset: int,
+    customer_type: str | None,
+    sort_by: str | None = None,
+    sort_dir: str | None = None,
+) -> dict:
     client = get_service_client()
     query = (
         client.table("customers")
@@ -47,7 +73,11 @@ def _list(org_id: str, q: str | None, limit: int, offset: int, customer_type: st
             f"full_name.ilike.%{q}%,phone.ilike.%{q}%,email.ilike.%{q}%,"
             f"customer_number.ilike.%{q}%"
         )
-    res = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+    col, desc = _resolve_sort(sort_by, sort_dir)
+    query = query.order(col, desc=desc, nullsfirst=False)  # blanks always last
+    if col != "created_at":
+        query = query.order("created_at", desc=True)  # stable tiebreaker for paging
+    res = query.range(offset, offset + limit - 1).execute()
     customers = res.data or []
 
     ids = [c["id"] for c in customers]
@@ -168,9 +198,13 @@ async def list_customers(
     limit: int = 100,
     offset: int = 0,
     customer_type: str | None = None,
+    sort_by: str | None = None,
+    sort_dir: str | None = None,
     user: CurrentUser = Depends(require_org),
 ) -> dict:
-    return await run_in_threadpool(_list, user.org_id, q, limit, offset, customer_type)
+    return await run_in_threadpool(
+        _list, user.org_id, q, limit, offset, customer_type, sort_by, sort_dir
+    )
 
 
 _TYPE_LABELS = {
@@ -183,11 +217,18 @@ _TYPE_LABELS = {
 _SOURCE_LABELS = {"phone": "Anruf / KI", "manual": "Manuell", "csv_import": "Import"}
 
 
-def _export_csv(org_id: str, q: str | None, customer_type: str | None) -> str:
+def _export_csv(
+    org_id: str,
+    q: str | None,
+    customer_type: str | None,
+    sort_by: str | None = None,
+    sort_dir: str | None = None,
+) -> str:
     """Semicolon-delimited, UTF-8-BOM CSV of every customer matching the current
-    view (search + type filter). Pages past PostgREST's 1000-row cap so a 4–5k
-    base exports in full."""
+    view (search + type filter + sort). Pages past PostgREST's 1000-row cap so a
+    4–5k base exports in full."""
     client = get_service_client()
+    col, desc = _resolve_sort(sort_by, sort_dir)
 
     def _page(start: int):
         query = (
@@ -206,7 +247,10 @@ def _export_csv(org_id: str, q: str | None, customer_type: str | None) -> str:
                 f"full_name.ilike.%{q}%,phone.ilike.%{q}%,email.ilike.%{q}%,"
                 f"customer_number.ilike.%{q}%"
             )
-        return query.order("created_at", desc=True).range(start, start + 999).execute().data or []
+        query = query.order(col, desc=desc, nullsfirst=False)
+        if col != "created_at":
+            query = query.order("created_at", desc=True)
+        return query.range(start, start + 999).execute().data or []
 
     rows: list[dict] = []
     start = 0
@@ -246,9 +290,13 @@ def _export_csv(org_id: str, q: str | None, customer_type: str | None) -> str:
 async def export_customers(
     q: str | None = None,
     customer_type: str | None = None,
+    sort_by: str | None = None,
+    sort_dir: str | None = None,
     user: CurrentUser = Depends(require_org),
 ) -> Response:
-    csv_text = await run_in_threadpool(_export_csv, user.org_id, q, customer_type)
+    csv_text = await run_in_threadpool(
+        _export_csv, user.org_id, q, customer_type, sort_by, sort_dir
+    )
     return Response(
         content=csv_text,
         media_type="text/csv; charset=utf-8",

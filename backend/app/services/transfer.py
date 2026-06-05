@@ -15,6 +15,7 @@ call. The agent prompt announces the transfer BEFORE calling this tool.
 """
 
 import logging
+import re
 
 import httpx
 
@@ -25,17 +26,36 @@ from app.schemas.tools import TransferCallRequest
 logger = logging.getLogger(__name__)
 
 
+def _dial_target(number: str | None) -> str:
+    """Reduce a stored number to a dialable string (keep only ``+`` and digits).
+    Guards against configured values like ``"+49 30 1234"`` that Twilio would
+    reject mid-call."""
+    return re.sub(r"[^\d+]", "", number or "")
+
+
 def _twilio_redirect(call_sid: str | None, to_number: str) -> bool:
     """Redirect a LIVE Twilio call to `to_number` by updating its TwiML to
     `<Dial>`. Returns True iff Twilio accepted the update. Best-effort: never
     raises, and is a no-op when creds or call_sid are missing."""
     sid = settings.twilio_account_sid
     token = settings.twilio_auth_token
-    if not (sid and token and call_sid and to_number):
+    to = _dial_target(to_number)
+    if not (sid and token and call_sid and to):
+        # Log WHY the live bridge was skipped — the usual reasons a transfer
+        # "announces but never connects" are dormant Twilio creds (prod) or a
+        # non-Twilio call leg (no system__call_sid → empty call_sid).
+        missing = []
+        if not (sid and token):
+            missing.append("twilio_creds")
+        if not call_sid:
+            missing.append("call_sid")
+        if not to:
+            missing.append("number")
+        logger.warning("transfer: live bridge skipped (missing %s)", ", ".join(missing) or "?")
         return False
     twiml = (
         "<?xml version='1.0' encoding='UTF-8'?>"
-        f"<Response><Dial>{to_number}</Dial></Response>"
+        f"<Response><Dial>{to}</Dial></Response>"
     )
     try:
         resp = httpx.post(
@@ -87,6 +107,14 @@ def transfer_call(org_id: str, payload: TransferCallRequest) -> dict:
 
     # Raw Twilio REST: actually bridge the live call to the human.
     transferred = _twilio_redirect(payload.call_sid, number)
+    logger.info(
+        "transfer_call org=%s type=%s bridged=%s has_call_sid=%s -> %s",
+        org_id,
+        "EMERGENCY" if emergency else "STAFF",
+        transferred,
+        bool(payload.call_sid),
+        _dial_target(number),
+    )
 
     if emergency:
         return {
