@@ -10,7 +10,7 @@ import { CreateAppointmentModal, ProcessRequestModal } from './Modals'
 import { ResizeHandle, useColumnResize } from './resize'
 import { Transcript } from './Transcript'
 import { Workspace } from './Workspace'
-import type { CallDetailData, Employee, Inquiry, TimelineEvent } from './shared'
+import type { CallDetailData, CallListItem, Employee, Inquiry, TimelineEvent } from './shared'
 
 export function CallDetail({
   callId,
@@ -59,10 +59,24 @@ export function CallDetail({
   // onDeleted so the cockpit lands on the next call instead of a stale pane.
   const deleteCall = useMutation({
     mutationFn: () => apiFetch(`/api/calls/${callId}`, { method: 'DELETE' }),
-    onSuccess: () => {
+    // Optimistic: drop the row from the list cache immediately so it vanishes with
+    // zero lag, and the parent's auto-select lands on the correct next call instead
+    // of re-picking this (still-cached) one — the "stuck on the transcript" bug.
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ['calls'] })
+      const prev = qc.getQueryData<{ calls: CallListItem[] }>(['calls'])
+      qc.setQueryData<{ calls: CallListItem[] }>(['calls'], (old) =>
+        old ? { ...old, calls: old.calls.filter((c) => c.id !== callId) } : old,
+      )
+      onDeleted?.()
+      return { prev }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['calls'], ctx.prev) // restore the row on failure
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['calls'] })
       qc.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
-      onDeleted?.()
     },
   })
 
