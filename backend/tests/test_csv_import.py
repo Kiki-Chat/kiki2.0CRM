@@ -198,6 +198,8 @@ def test_import_customers_phone_in_email_field(monkeypatch):
     assert rec["email"] is None  # phone number is NOT stored as an email
     assert rec["phone"] == "+4941615409977"
     assert rec["phone2"] == "+491716973333"  # salvaged from the bogus Mail value
+    assert out["corrected"] == 1
+    assert out["corrections"][0]["action"] == "phone_salvaged_from_email"
 
 
 def test_import_customers_dedup_within_batch(monkeypatch):
@@ -230,6 +232,110 @@ def test_import_customers_generates_number_when_missing(monkeypatch):
     out = csv_import.import_customers("org-1", no_num, {"full_name": "Name", "email": "Mail"})
     assert out["imported"] == 1
     assert db.inserted("customers")[0]["customer_number"] == "101006"
+
+
+# ─── phone classification + 3-key dedup (mobile unique, landline+name) ───────
+@pytest.mark.parametrize(
+    "e164,expected",
+    [
+        ("+491758771486", "mobile"),   # 015x
+        ("+491608177777", "mobile"),   # 016x
+        ("+491701234567", "mobile"),   # 017x
+        ("+494059466635", "landline"), # Hamburg area code
+        ("+4941617220742", "landline"),
+        ("+4930123456", "landline"),   # Berlin
+        ("+43123456789", "unknown"),   # non-German
+        (None, "unknown"),
+    ],
+)
+def test_classify_phone(e164, expected):
+    assert csv_import.classify_phone(e164) == expected
+
+
+def test_mobile_dedup_collapses_same_person(monkeypatch):
+    # A MOBILE is unique to one person, so a second row with that mobile is a dupe
+    # even if the name differs (mobile alone, no name needed).
+    csv_bytes = (
+        "Kundennummer,Name,Mail,Telefon,Mobil,Strasse,PLZ,Ort,Bemerkung\n"
+        "200,Max Mobil,,,0175 8771486,,,,\n"
+    ).encode("utf-8")
+    db = _DB({"customers": [
+        {"email": None, "phone": "+491758771486", "phone2": None, "full_name": "Anna Andere"},
+    ]})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", csv_bytes, _CUST_MAP)
+    assert out["imported"] == 0 and out["skipped_duplicate"] == 1
+    assert out["results"][0]["reason"] == "Mobilnummer existiert bereits"
+
+
+def test_landline_plus_name_is_duplicate(monkeypatch):
+    db = _DB({"customers": [
+        {"email": None, "phone": "+494059466635", "phone2": None, "full_name": "Heiko Adam"},
+    ]})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", _cust_csv(), _CUST_MAP)  # CSV row = Heiko Adam
+    assert out["imported"] == 0 and out["skipped_duplicate"] == 1
+    assert out["results"][0]["reason"] == "Festnetz + Name existiert bereits"
+
+
+def test_two_people_one_landline_kept_vs_existing(monkeypatch):
+    # Existing "Heike" on a landline; CSV "Werner" on the SAME landline → kept.
+    couple = "201,Werner Breuhahn,,04164 812949,,Weg 1,21680,Stade,Ehemann\n"
+    csv_bytes = ("Kundennummer,Name,Mail,Telefon,Mobil,Strasse,PLZ,Ort,Bemerkung\n" + couple).encode("utf-8")
+    db = _DB({"customers": [
+        {"email": None, "phone": "+494164812949", "phone2": None, "full_name": "Heike Breuhahn"},
+    ]})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", csv_bytes, _CUST_MAP)
+    assert out["imported"] == 1 and out["skipped_duplicate"] == 0
+
+
+def test_reimport_same_file_is_idempotent(monkeypatch):
+    db = _DB({"customers": []})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    csv_bytes = _cust_csv()
+    first = csv_import.import_customers("org-1", csv_bytes, _CUST_MAP)
+    assert first["imported"] == 1
+    # Seed the "existing" rows from what the first run inserted, then re-import.
+    db.rows["customers"] = db.inserted("customers")
+    second = csv_import.import_customers("org-1", csv_bytes, _CUST_MAP)
+    assert second["imported"] == 0 and second["skipped_duplicate"] == 1
+
+
+# ─── address stranded in notes → salvaged ────────────────────────────────────
+def test_address_from_notes_salvaged(monkeypatch):
+    csv_bytes = (
+        "Kundennummer,Name,Mail,Telefon,Mobil,Strasse,PLZ,Ort,Bemerkung\n"
+        '300,Klaus Klein,,,,,,,"Rübker Str. 22b, 21640 Buxtehude"\n'
+    ).encode("utf-8")
+    db = _DB({"customers": []})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", csv_bytes, _CUST_MAP)
+    rec = db.inserted("customers")[0]
+    assert rec["address"] == {"street": "Rübker Str. 22b", "postal_code": "21640", "city": "Buxtehude"}
+    assert out["corrections"][0]["action"] == "address_from_notes"
+
+
+def test_plain_note_not_mangled(monkeypatch):
+    csv_bytes = (
+        "Kundennummer,Name,Mail,Telefon,Mobil,Strasse,PLZ,Ort,Bemerkung\n"
+        '301,Otto Ohneadresse,,030 111222,,,,,"Messihaushalt, nur auf Mobil anrufen!"\n'
+    ).encode("utf-8")
+    db = _DB({"customers": []})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", csv_bytes, _CUST_MAP)
+    rec = db.inserted("customers")[0]
+    assert rec["address"] is None
+    assert "Messihaushalt" in rec["notes"]
+    assert out["corrected"] == 0
+
+
+def test_extract_address_unit():
+    assert csv_import.extract_address("Rübker Str. 22b, 21640 Buxtehude") == {
+        "street": "Rübker Str. 22b", "postal_code": "21640", "city": "Buxtehude"
+    }
+    assert csv_import.extract_address("nur eine Notiz ohne Adresse") is None
+    assert csv_import.extract_address(None) is None
 
 
 # ─── real DATEV export (B5 field-test regression) ────────────────────────────
