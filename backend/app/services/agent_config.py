@@ -760,8 +760,12 @@ def _clock_str(value: Any) -> str:
         return ""
 
 
+# NB: distinct name from the `_WEEKDAY_DE` LIST near the top (full names, int-indexed
+# by `_render_business_hours`). This short-form abbreviation map previously REUSED the
+# `_WEEKDAY_DE` name and shadowed the list at runtime → `_WEEKDAY_DE[0]` raised
+# KeyError, breaking BUSINESS_HOURS render for every org with business hours.
 _WEEKDAY_ORDER = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-_WEEKDAY_DE = {
+_WEEKDAY_ABBR_DE = {
     "mon": "Mo", "tue": "Di", "wed": "Mi", "thu": "Do",
     "fri": "Fr", "sat": "Sa", "sun": "So",
 }
@@ -773,7 +777,7 @@ def _weekdays_str(days: Any) -> str:
     if not isinstance(days, list):
         return ""
     keys = {str(d).strip().lower() for d in days}
-    return ", ".join(_WEEKDAY_DE[k] for k in _WEEKDAY_ORDER if k in keys)
+    return ", ".join(_WEEKDAY_ABBR_DE[k] for k in _WEEKDAY_ORDER if k in keys)
 
 
 def _emergency_windows_str(windows: Any) -> str:
