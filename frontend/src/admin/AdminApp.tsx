@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { AdminAuthProvider } from './AdminAuthProvider'
+import { AdminBillingPage } from './AdminBillingPage'
 import { AdminLoginPage } from './AdminLoginPage'
 import { AdminOrgsPage } from './AdminOrgsPage'
 import { AdminOrgFormPage } from './AdminOrgFormPage'
@@ -27,6 +28,7 @@ export function AdminApp() {
           <Route path="orgs" element={<AdminOrgsPage />} />
           <Route path="orgs/new" element={<AdminOrgFormPage />} />
           <Route path="orgs/:id" element={<AdminOrgFormPage />} />
+          <Route path="billing" element={<AdminBillingPage />} />
         </Route>
         {/* Anything else under /admin/* that doesn't match → bounce to login (or list, if signed in).
             AdminProtectedRoute does the role check; non-super-admins get 404'd there. */}

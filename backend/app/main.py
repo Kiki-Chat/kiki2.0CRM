@@ -119,6 +119,16 @@ if settings.copilot_enabled:
 
     app.include_router(copilot.router)
 
+# Stripe billing — mounted ONLY when STRIPE_BILLING_ENABLED=1 (Phase 1, read-first).
+# Ships OFF/inert by default; the usage-reporting WRITE path is independently gated
+# by STRIPE_USAGE_REPORTING_ENABLED (see app/api/routes/post_call.py).
+if settings.stripe_billing_enabled:
+    from app.api.routes import billing, billing_admin, stripe_webhook
+
+    app.include_router(billing.router)
+    app.include_router(billing_admin.router)
+    app.include_router(stripe_webhook.router)
+
 
 @app.get("/")
 async def root() -> dict:

@@ -1,0 +1,231 @@
+"""Tradesperson-facing billing reads (Phase 1). All require_org; org_id from the
+JWT, never the request body. Pure reads go through ``stripe_read``; the only
+write-ish op is creating a billing-portal session.
+"""
+
+from __future__ import annotations
+
+import stripe
+from fastapi import APIRouter, Depends, HTTPException, Query
+from starlette.concurrency import run_in_threadpool
+
+from app.api.deps import CurrentUser, require_org
+from app.core.config import settings
+from app.db.supabase_client import get_service_client
+from app.schemas.billing import (
+    BillingInvoice,
+    BillingSummary,
+    PaymentMethod,
+    PortalSessionResponse,
+    UpcomingInvoice,
+)
+from app.services.common import now_berlin
+from app.services.stripe_billing import (
+    StripeBillingError,
+    get_stripe,
+    is_configured,
+    stripe_call_safely,
+    stripe_read,
+)
+
+router = APIRouter(prefix="/api/billing", tags=["billing"])
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+def _org(client, org_id: str) -> dict:
+    rows = (
+        client.table("organizations").select("*").eq("id", org_id).limit(1).execute().data
+    )
+    return rows[0] if rows else {}
+
+
+def _used_minutes(client, org_id: str, period_start_iso: str | None) -> int:
+    """Sum call minutes since the period start (Stripe billing period, else month).
+
+    Mirrors settings._usage exactly (round(sum(duration_seconds)/60)) so the
+    'minutes used' shown in Abrechnung matches the rest of the app."""
+    start = period_start_iso or now_berlin().replace(day=1).date().isoformat()
+    calls = (
+        client.table("calls")
+        .select("duration_seconds")
+        .eq("org_id", org_id)
+        .gte("created_at", start)
+        .execute()
+        .data
+        or []
+    )
+    return round(sum((c.get("duration_seconds") or 0) for c in calls) / 60)
+
+
+def _map_invoice(i: dict) -> BillingInvoice:
+    return BillingInvoice(
+        id=i.get("id"),
+        number=i.get("number"),
+        status=i.get("status"),
+        amount_due_cents=i.get("amount_due"),
+        amount_paid_cents=i.get("amount_paid"),
+        currency=i.get("currency"),
+        created=i.get("created"),
+        period_start=i.get("period_start"),
+        period_end=i.get("period_end"),
+        hosted_invoice_url=i.get("hosted_invoice_url"),
+        invoice_pdf=i.get("invoice_pdf"),
+    )
+
+
+# ─── GET /api/billing/summary ────────────────────────────────────────────────
+def _summary(org_id: str) -> BillingSummary:
+    client = get_service_client()
+    org = _org(client, org_id)
+    customer_id = org.get("stripe_customer_id")
+    quota = org.get("billing_quota_minutes") or org.get("ai_minutes_quota") or 0
+    period_start = org.get("billing_period_start")
+    used = _used_minutes(client, org_id, period_start)
+    used_percent = round(used / quota * 100) if quota else 0
+
+    next_amount: int | None = None
+    if customer_id and is_configured():
+        # 'No upcoming invoice' is an EXPECTED state (unsubscribed customer) — handle
+        # inline so it never floods billing_events with benign 'failed' rows.
+        try:
+            s = get_stripe()
+            upcoming = s.Invoice.upcoming(customer=customer_id)
+            next_amount = upcoming.get("amount_due")
+        except stripe.error.InvalidRequestError:  # type: ignore[attr-defined]
+            next_amount = None
+        except stripe.error.StripeError:  # type: ignore[attr-defined]
+            next_amount = None  # best-effort; summary must still render
+
+    return BillingSummary(
+        configured=bool(customer_id),
+        plan_title=org.get("billing_plan_title"),
+        status=org.get("billing_status"),
+        period_start=period_start,
+        period_end=org.get("billing_period_end"),
+        quota_minutes=int(quota),
+        used_minutes=int(used),
+        used_percent=int(used_percent),
+        over_quota=bool(quota and used > quota),
+        next_invoice_amount_cents=next_amount,
+    )
+
+
+@router.get("/summary", response_model=BillingSummary)
+async def billing_summary(user: CurrentUser = Depends(require_org)) -> BillingSummary:
+    return await run_in_threadpool(_summary, user.org_id)
+
+
+# ─── GET /api/billing/invoices ───────────────────────────────────────────────
+def _invoices(org_id: str, limit: int) -> list[BillingInvoice]:
+    client = get_service_client()
+    customer_id = _org(client, org_id).get("stripe_customer_id")
+    if not customer_id or not is_configured():
+        return []
+    result = stripe_read(
+        op="invoice.list",
+        org_id=org_id,
+        fn=lambda: get_stripe().Invoice.list(customer=customer_id, limit=limit),
+    )
+    return [_map_invoice(i) for i in (result.get("data") or [])]
+
+
+@router.get("/invoices", response_model=list[BillingInvoice])
+async def billing_invoices(
+    user: CurrentUser = Depends(require_org),
+    limit: int = Query(default=12, ge=1, le=100),
+) -> list[BillingInvoice]:
+    return await run_in_threadpool(_invoices, user.org_id, limit)
+
+
+# ─── GET /api/billing/upcoming-invoice ───────────────────────────────────────
+def _upcoming(org_id: str) -> UpcomingInvoice | None:
+    client = get_service_client()
+    customer_id = _org(client, org_id).get("stripe_customer_id")
+    if not customer_id or not is_configured():
+        return None
+    try:
+        up = get_stripe().Invoice.upcoming(customer=customer_id)
+    except stripe.error.InvalidRequestError:  # type: ignore[attr-defined]
+        return None  # no upcoming invoice (unsubscribed) — expected
+    except stripe.error.StripeError:  # type: ignore[attr-defined]
+        return None
+    return UpcomingInvoice(
+        amount_due_cents=up.get("amount_due"),
+        currency=up.get("currency"),
+        period_start=up.get("period_start"),
+        period_end=up.get("period_end"),
+    )
+
+
+@router.get("/upcoming-invoice", response_model=UpcomingInvoice | None)
+async def billing_upcoming(user: CurrentUser = Depends(require_org)) -> UpcomingInvoice | None:
+    return await run_in_threadpool(_upcoming, user.org_id)
+
+
+# ─── GET /api/billing/payment-methods ────────────────────────────────────────
+def _payment_methods(org_id: str) -> list[PaymentMethod]:
+    client = get_service_client()
+    customer_id = _org(client, org_id).get("stripe_customer_id")
+    if not customer_id or not is_configured():
+        return []
+    result = stripe_read(
+        op="payment_method.list",
+        org_id=org_id,
+        fn=lambda: get_stripe().PaymentMethod.list(customer=customer_id, type="card"),
+    )
+    out: list[PaymentMethod] = []
+    for pm in result.get("data") or []:
+        card = pm.get("card") or {}
+        out.append(
+            PaymentMethod(
+                id=pm.get("id"),
+                type=pm.get("type"),
+                brand=card.get("brand"),
+                last4=card.get("last4"),
+                exp_month=card.get("exp_month"),
+                exp_year=card.get("exp_year"),
+            )
+        )
+    return out
+
+
+@router.get("/payment-methods", response_model=list[PaymentMethod])
+async def billing_payment_methods(
+    user: CurrentUser = Depends(require_org),
+) -> list[PaymentMethod]:
+    return await run_in_threadpool(_payment_methods, user.org_id)
+
+
+# ─── POST /api/billing/portal-session ────────────────────────────────────────
+def _portal_session(org_id: str, actor_id: str) -> PortalSessionResponse:
+    client = get_service_client()
+    customer_id = _org(client, org_id).get("stripe_customer_id")
+    if not customer_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Für diese Organisation ist noch keine Abrechnung eingerichtet.",
+        )
+    return_url = settings.billing_portal_return_url or (
+        settings.frontend_public_url.rstrip("/") + "/settings/abrechnung"
+    )
+    try:
+        session = stripe_call_safely(
+            op="portal_session.create",
+            org_id=org_id,
+            actor_id=actor_id,
+            stripe_object=customer_id,
+            request_payload={"customer": customer_id, "return_url": return_url},
+            builder=lambda idem, meta: get_stripe().billing_portal.Session.create(
+                customer=customer_id, return_url=return_url
+            ),
+        )
+    except StripeBillingError as exc:
+        raise HTTPException(status_code=502, detail="Stripe-Portal konnte nicht geöffnet werden.") from exc
+    return PortalSessionResponse(url=session.get("url"))
+
+
+@router.post("/portal-session", response_model=PortalSessionResponse)
+async def billing_portal_session(
+    user: CurrentUser = Depends(require_org),
+) -> PortalSessionResponse:
+    return await run_in_threadpool(_portal_session, user.org_id, user.id)

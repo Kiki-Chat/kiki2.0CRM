@@ -1,8 +1,13 @@
 import { ShieldAlert, LogOut } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 
 import { useAdminAuth } from './AdminAuthProvider'
+
+const NAV = [
+  { to: '/admin/orgs', label: 'Organisationen' },
+  { to: '/admin/billing', label: 'Abrechnung' },
+]
 
 /**
  * Standalone admin shell. Slate/dark palette + amber accent — deliberately
@@ -48,6 +53,25 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
+      <nav className="border-b border-slate-800 bg-slate-900/60">
+        <div className="mx-auto flex max-w-7xl items-center gap-1 px-6">
+          {NAV.map((n) => (
+            <NavLink
+              key={n.to}
+              to={n.to}
+              className={({ isActive }) =>
+                `border-b-2 px-3 py-2.5 text-sm font-medium transition ${
+                  isActive
+                    ? 'border-amber-400 text-amber-300'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`
+              }
+            >
+              {n.label}
+            </NavLink>
+          ))}
+        </div>
+      </nav>
       <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
     </div>
   )

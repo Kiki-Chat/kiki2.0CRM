@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Clock,
   CreditCard,
+  ExternalLink,
   Eye,
   EyeOff,
   FileText,
@@ -32,6 +33,13 @@ import { KpiCard } from '../components/ui/KpiCard'
 import { Modal } from '../components/ui/Modal'
 import { applyAccent, isHexColor } from '../lib/accent'
 import { apiFetch, apiUpload } from '../lib/api'
+import {
+  type BillingInvoice,
+  type BillingSummary,
+  billingStatusLabel,
+  fmtCents,
+  stripeInvoiceStatusLabel,
+} from '../lib/dashApi'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../lib/theme'
 import { cn } from '../lib/utils'
@@ -522,19 +530,79 @@ function DesignSection({ org }: { org: Org }) {
 
 // ─── Abrechnung ───────────────────────────────────────────────────────────────
 function AbrechnungSection({ usage }: { usage: Usage }) {
-  const quota = usage.ai_minutes_quota ?? 0
-  const pct = quota ? Math.round((usage.ai_minutes_used / quota) * 100) : 0
-  const over = quota > 0 && usage.ai_minutes_used > quota
+  // Billing endpoints exist only when STRIPE_BILLING_ENABLED on the backend; on
+  // 404 (module off) the queries error and we fall back to the usage-only view.
+  const summaryQ = useQuery({
+    queryKey: ['billing', 'summary'],
+    queryFn: () => apiFetch<BillingSummary>('/api/billing/summary'),
+    retry: false,
+    staleTime: STALE,
+  })
+  const s = summaryQ.data
+  const configured = !!s?.configured
+  const invoicesQ = useQuery({
+    queryKey: ['billing', 'invoices'],
+    queryFn: () => apiFetch<BillingInvoice[]>('/api/billing/invoices?limit=12'),
+    retry: false,
+    enabled: configured,
+    staleTime: STALE,
+  })
+  const portal = useMutation({
+    mutationFn: () => apiFetch<{ url: string }>('/api/billing/portal-session', { method: 'POST' }),
+    onSuccess: (r) => { window.location.href = r.url },
+  })
+
+  // Prefer the Stripe-derived summary; fall back to the settings usage payload.
+  const used = s ? s.used_minutes : usage.ai_minutes_used
+  const quota = s ? s.quota_minutes : usage.ai_minutes_quota ?? 0
+  const over = s ? s.over_quota : quota > 0 && usage.ai_minutes_used > quota
+  const pct = quota ? Math.round((used / quota) * 100) : 0
   const size = usage.document_size_bytes > 1e6 ? `${(usage.document_size_bytes / 1e6).toFixed(1)} MB` : `${Math.round(usage.document_size_bytes / 1024)} KB`
+  const invoices = invoicesQ.data ?? []
+
   return (
     <div className="space-y-4">
+      {configured && s && (
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-tint-100"><CreditCard size={18} className="text-green-deep" /></div>
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-muted">Aktueller Tarif</div>
+                <div className="text-lg font-bold leading-tight text-text">{s.plan_title ?? 'Individueller Tarif'}</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-muted">Status</div>
+                <div className={cn('text-sm font-semibold', s.status === 'past_due' || s.status === 'unpaid' ? 'text-error' : 'text-text')}>{billingStatusLabel(s.status)}</div>
+              </div>
+              {s.next_invoice_amount_cents != null && (
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wide text-muted">Nächste Rechnung</div>
+                  <div className="text-sm font-semibold text-text">{fmtCents(s.next_invoice_amount_cents, s.currency)}</div>
+                </div>
+              )}
+              <button
+                onClick={() => portal.mutate()}
+                disabled={portal.isPending}
+                className="flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+              >
+                <ExternalLink size={15} /> {portal.isPending ? 'Öffnet…' : 'Zahlungsdetails verwalten'}
+              </button>
+            </div>
+          </div>
+          {portal.isError && <div className="mt-3 text-sm text-error">{(portal.error as Error).message}</div>}
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card>
           <div className="flex items-center gap-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-tint-100"><Clock size={18} className="text-green-deep" /></div>
             <div className="min-w-0">
-              <div className="text-xs font-bold uppercase tracking-wide text-muted">KI-Minuten (Monat)</div>
-              <div className="text-2xl font-bold leading-tight text-text">{usage.ai_minutes_used} / {quota || '∞'}</div>
+              <div className="text-xs font-bold uppercase tracking-wide text-muted">KI-Minuten {configured ? '(Abrechnungsperiode)' : '(Monat)'}</div>
+              <div className="text-2xl font-bold leading-tight text-text">{used} / {quota || '∞'}</div>
             </div>
           </div>
           <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-alt">
@@ -544,10 +612,44 @@ function AbrechnungSection({ usage }: { usage: Usage }) {
         <KpiCard label="Aktive Mitarbeiter" value={usage.active_employees} icon={Users} />
         <KpiCard label="Gespeicherte Dokumente" value={usage.document_count} sub={size} icon={FileText} />
       </div>
-      <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
-        <Info size={16} className="mt-0.5 shrink-0 text-info" />
-        <span>Für Änderungen an Ihrem Abonnement oder Kontingent wenden Sie sich bitte an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>.</span>
-      </div>
+
+      {over && (
+        <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-bg/40 p-4 text-sm text-body">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
+          <span>Ihr Minutenkontingent ist aufgebraucht. Ihre KI bleibt erreichbar — der <strong>Mehrverbrauch wird nach Tarif berechnet</strong>.</span>
+        </div>
+      )}
+
+      {configured && invoices.length > 0 && (
+        <Card>
+          <div className="mb-3 flex items-center gap-2 text-sm font-bold text-text"><Receipt size={16} className="text-green-deep" /> Rechnungen</div>
+          <div className="divide-y divide-border">
+            {invoices.map((inv) => (
+              <div key={inv.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-text">{inv.number ?? inv.id}</div>
+                  <div className="text-xs text-muted">
+                    {inv.created ? new Date(inv.created * 1000).toLocaleDateString('de-DE') : '—'} · {stripeInvoiceStatusLabel(inv.status)}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <span className="font-semibold text-text">{fmtCents(inv.amount_paid_cents ?? inv.amount_due_cents, inv.currency ?? 'EUR')}</span>
+                  {inv.hosted_invoice_url && (
+                    <a href={inv.hosted_invoice_url} target="_blank" rel="noreferrer" className="font-medium text-green-deep hover:underline">Ansehen</a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {!configured && (
+        <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
+          <Info size={16} className="mt-0.5 shrink-0 text-info" />
+          <span>Für Änderungen an Ihrem Abonnement oder Kontingent wenden Sie sich bitte an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>.</span>
+        </div>
+      )}
     </div>
   )
 }

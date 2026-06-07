@@ -123,6 +123,24 @@ class Settings(BaseSettings):
         default=False, validation_alias="OUTBOUND_OCCASION_EMAILS_ENABLED"
     )
 
+    # ── Stripe billing (Phase 1 — read-first; ships INERT) ─────────────────
+    # The whole billing surface (customer + super-admin routers + webhook) is
+    # mounted ONLY when STRIPE_BILLING_ENABLED=1, and every Stripe call reads
+    # the key from env — so with no key + the gate off, a fresh deploy behaves
+    # exactly as today. Use TEST keys (sk_test_… / whsec_…) until go-live.
+    # The usage-reporting WRITE path is independently gated by
+    # STRIPE_USAGE_REPORTING_ENABLED so reads can go live while billing writes
+    # stay disarmed. See the Phase-1 plan / STRIPE_INTEGRATION_HANDOVER.md.
+    stripe_secret_key: str = Field(default="", validation_alias="STRIPE_SECRET_KEY")
+    stripe_webhook_secret: str = Field(default="", validation_alias="STRIPE_WEBHOOK_SECRET")
+    stripe_billing_enabled: bool = Field(default=False, validation_alias="STRIPE_BILLING_ENABLED")
+    stripe_usage_reporting_enabled: bool = Field(
+        default=False, validation_alias="STRIPE_USAGE_REPORTING_ENABLED"
+    )
+    # Return URL for the Stripe billing-portal session. Falls back to
+    # frontend_public_url + '/settings/abrechnung' when blank.
+    billing_portal_return_url: str = Field(default="", validation_alias="BILLING_PORTAL_RETURN_URL")
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

@@ -17,3 +17,10 @@ openai==2.40.0
 # Item 4 (caching). Lazy-imported by app/core/cache.py ONLY when REDIS_URL is set,
 # so it's an unused dependency until caching is enabled under supervision.
 redis==5.2.1
+# Stripe billing (Phase 1). Lazy-imported by app/services/stripe_billing.py ONLY
+# when STRIPE_SECRET_KEY is set, so it's dormant until billing is enabled.
+# PINNED <12 ON PURPOSE: the live account's ~80 subs use the LEGACY usage-records
+# model (recurring.meter=null), reported via SubscriptionItem.create_usage_record
+# + Invoice.upcoming — both REMOVED in stripe-python v12+ (Meters API migration).
+# Do NOT bump to >=12 without porting usage reporting to the Meters API first.
+stripe==11.6.0

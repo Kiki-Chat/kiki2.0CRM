@@ -57,6 +57,41 @@ export interface AiInsightsData {
   }[]
 }
 
+// ─── Stripe billing (Phase 1) ────────────────────────────────────────────────
+export interface BillingSummary {
+  configured: boolean
+  plan_title: string | null
+  status: string | null
+  period_start: string | null
+  period_end: string | null
+  quota_minutes: number
+  used_minutes: number
+  used_percent: number
+  over_quota: boolean
+  next_invoice_amount_cents: number | null
+  currency: string
+}
+export interface BillingInvoice {
+  id: string; number: string | null; status: string | null
+  amount_due_cents: number | null; amount_paid_cents: number | null; currency: string | null
+  created: number | null; period_start: number | null; period_end: number | null
+  hosted_invoice_url: string | null; invoice_pdf: string | null
+}
+export const fmtCents = (c: number | null | undefined, cur = 'EUR') =>
+  c == null ? '—' : new Intl.NumberFormat('de-DE', { style: 'currency', currency: (cur || 'EUR').toUpperCase() }).format(c / 100)
+
+const BILLING_STATUS_LABELS: Record<string, string> = {
+  active: 'Aktiv', trialing: 'Testphase', past_due: 'Zahlung überfällig', unpaid: 'Unbezahlt',
+  canceled: 'Gekündigt', incomplete: 'Unvollständig', incomplete_expired: 'Abgelaufen',
+  paused: 'Pausiert', legacy: 'Altvertrag', none: 'Kein Abo',
+}
+export const billingStatusLabel = (s: string | null) => (s ? BILLING_STATUS_LABELS[s] ?? s : '—')
+
+const STRIPE_INVOICE_STATUS_LABELS: Record<string, string> = {
+  draft: 'Entwurf', open: 'Offen', paid: 'Bezahlt', uncollectible: 'Uneinbringlich', void: 'Storniert',
+}
+export const stripeInvoiceStatusLabel = (s: string | null) => (s ? STRIPE_INVOICE_STATUS_LABELS[s] ?? s : '—')
+
 export const fmtDur = (s: number) => `${Math.floor((s || 0) / 60)}:${String(Math.round((s || 0) % 60)).padStart(2, '0')}`
 export const fmtEur = (n: number) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n || 0)
 export const fmtNum = (n: number) => new Intl.NumberFormat('de-DE').format(n || 0)
