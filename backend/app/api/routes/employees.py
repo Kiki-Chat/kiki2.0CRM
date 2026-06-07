@@ -138,6 +138,27 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
     client = get_service_client()
     user_id = None
     warning = None
+    # Email must be unique per org among active (non-deleted) employees. The
+    # employees table has NO DB constraint and the users-table check below only
+    # runs for login_access; without this, a duplicate-email employee inserts
+    # cleanly. Case-insensitive exact match; soft-deleted rows are ignored so a
+    # removed person can be re-added.
+    if payload.email:
+        target = payload.email.strip().lower()
+        existing_emails = (
+            client.table("employees")
+            .select("email")
+            .eq("org_id", org_id)
+            .eq("deleted", False)
+            .execute()
+            .data
+            or []
+        )
+        if any((e.get("email") or "").strip().lower() == target for e in existing_emails):
+            raise HTTPException(
+                status_code=409,
+                detail="Ein Mitarbeiter mit dieser E-Mail-Adresse existiert bereits.",
+            )
     if payload.login_access:
         if not payload.email:
             raise HTTPException(status_code=400, detail="E-Mail ist für den Login erforderlich")

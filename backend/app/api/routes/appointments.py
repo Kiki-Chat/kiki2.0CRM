@@ -10,7 +10,7 @@ from app.schemas.admin import AppointmentCreate, AppointmentPatch
 from app.services import calendar_sync
 from app.services.appointment_notify import notify_appointment_outcome
 from app.services.appointments import import_ics
-from app.services.common import enforce_self_assignment, validate_fk_in_org
+from app.services.common import enforce_self_assignment, format_address, validate_fk_in_org
 from app.services.projects import maybe_create_project_for_appointment
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
@@ -56,18 +56,18 @@ def _list(org_id: str, frm: str | None, to: str | None) -> list[dict]:
     customer_ids = {a["customer_id"] for a in appts if a.get("customer_id")}
     employee_ids = {a["assigned_employee_id"] for a in appts if a.get("assigned_employee_id")}
 
-    customers: dict[str, str] = {}
+    customers: dict[str, dict] = {}
     if customer_ids:
         for c in (
             client.table("customers")
-            .select("id, full_name")
+            .select("id, full_name, phone, address")
             .eq("org_id", org_id)
             .in_("id", list(customer_ids))
             .execute()
             .data
             or []
         ):
-            customers[c["id"]] = c.get("full_name")
+            customers[c["id"]] = c
     employees: dict[str, str] = {}
     if employee_ids:
         for e in (
@@ -82,7 +82,10 @@ def _list(org_id: str, frm: str | None, to: str | None) -> list[dict]:
             employees[e["id"]] = e.get("display_name")
 
     for a in appts:
-        a["customer_name"] = customers.get(a.get("customer_id"))
+        cust = customers.get(a.get("customer_id"))
+        a["customer_name"] = cust.get("full_name") if cust else None
+        a["customer_phone"] = cust.get("phone") if cust else None
+        a["customer_address"] = format_address(cust.get("address")) if cust else None
         a["employee_name"] = employees.get(a.get("assigned_employee_id"))
     return appts
 

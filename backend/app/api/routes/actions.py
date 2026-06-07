@@ -252,7 +252,7 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
     cols = (
         "id, inquiry_id, customer_id, title, created_at, status, "
         "alternative_proposed_at, alternative_start_time, "
-        "customer_proposed_at, customer_proposed_start_time"
+        "customer_proposed_at, customer_proposed_start_time, source_conversation_id"
     )
     cust = (
         client.table("appointments").select(cols).eq("org_id", org_id)
@@ -274,6 +274,30 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
     name_by_cust = _customer_name_map(
         client, org_id, [r.get("customer_id") for r, _ in by_id.values()]
     )
+    # Resolve a call_id for each appointment so the worklist card can deep-link to
+    # the call whose action card carries the Genehmigen/Ablehnen buttons — via the
+    # inquiry's call_id, else the agent-booking conversation link. Without this the
+    # card had no call to open and wrongly fell back to the customer page.
+    inq_ids = [r.get("inquiry_id") for r, _ in by_id.values() if r.get("inquiry_id")]
+    conv_ids = [
+        r.get("source_conversation_id") for r, _ in by_id.values() if r.get("source_conversation_id")
+    ]
+    inq_call: dict[str, str] = {}
+    if inq_ids:
+        for row in (
+            client.table("inquiries").select("id, call_id")
+            .eq("org_id", org_id).in_("id", inq_ids).execute().data or []
+        ):
+            if row.get("call_id"):
+                inq_call[row["id"]] = row["call_id"]
+    conv_call: dict[str, str] = {}
+    if conv_ids:
+        for row in (
+            client.table("calls").select("id, conversation_id")
+            .eq("org_id", org_id).in_("conversation_id", conv_ids).execute().data or []
+        ):
+            if row.get("conversation_id"):
+                conv_call[row["conversation_id"]] = row["id"]
     out: list[dict[str, Any]] = []
     for r, is_cust in by_id.values():
         nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
@@ -290,7 +314,8 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
                 "kind": "alt_time_proposal",
                 "id": r["id"],
                 "inquiry_id": r.get("inquiry_id"),
-                "call_id": None,
+                "call_id": inq_call.get(r.get("inquiry_id"))
+                or conv_call.get(r.get("source_conversation_id")),
                 "customer_name": nm,
                 "customer_id": r.get("customer_id"),
                 "summary": summary,

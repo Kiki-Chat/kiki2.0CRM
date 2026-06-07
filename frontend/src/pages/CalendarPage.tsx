@@ -30,6 +30,8 @@ interface Appointment {
   customer_id: string | null
   assigned_employee_id: string | null
   customer_name: string | null
+  customer_phone: string | null
+  customer_address: string | null
   employee_name: string | null
 }
 interface Employee {
@@ -572,6 +574,8 @@ function AppointmentDetailModal({
           </DetailRow>
         )}
         {appt.customer_name && <DetailRow label="Kunde">{appt.customer_name}</DetailRow>}
+        {appt.customer_phone && <DetailRow label="Telefon">{appt.customer_phone}</DetailRow>}
+        {appt.customer_address && <DetailRow label="Adresse">{appt.customer_address}</DetailRow>}
         {loc && <DetailRow label="Ort">{loc}</DetailRow>}
         {appt.notes && <DetailRow label="Notizen">{appt.notes}</DetailRow>}
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">

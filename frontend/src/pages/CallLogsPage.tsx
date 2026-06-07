@@ -209,6 +209,14 @@ export function CallLogsPage() {
                 key={`${item.kind}:${item.id}`}
                 item={item}
                 onSelect={() => {
+                  // A reschedule counter-proposal is approved/declined on the call's
+                  // action card (Genehmigen/Ablehnen) — open that call rather than the
+                  // customer page, which had no way to act on it.
+                  if (item.kind === 'alt_time_proposal' && item.call_id) {
+                    setTab('anfragen')
+                    setSelectedId(item.call_id)
+                    return
+                  }
                   if (item.customer_id) navigate(`/customers/${item.customer_id}`)
                 }}
               />

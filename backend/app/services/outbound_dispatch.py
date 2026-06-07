@@ -631,8 +631,10 @@ def run_due_retries(now: datetime | None = None, dry_run: bool = False) -> dict:
     )
     fired, errors = 0, []
     for r in due:
-        rid = r["id"]
+        rid = r.get("id")
         org_id, occasion, referenz_id = r.get("org_id"), r.get("occasion"), r.get("referenz_id")
+        if not rid:
+            continue
         if not dry_run:
             # Clear first so a concurrent sweep can't double-fire this row.
             db.table("outbound_calls").update({"next_retry_at": None}).eq("id", rid).execute()

@@ -115,7 +115,7 @@ def notify_appointment_outcome(
         return {"fired": False, "reason": f"unknown_action:{action}"}
 
     if not appointment_outbound_enabled(org_id, action):
-        return {"fired": False, "reason": "appointment_outbound_disabled"}
+        return {"fired": False, "reason": "appointment_reminders_disabled"}
 
     try:
         to_number = enforce_call_scope(org_id, _customer_phone(org_id, appointment_id))
