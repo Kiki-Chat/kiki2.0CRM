@@ -198,20 +198,58 @@ def _handle_invoice_failed(db, inv: dict) -> str:
     db.table("organizations").update(
         {"billing_status": "past_due", "billing_last_sync_at": _now()}
     ).eq("id", org["id"]).execute()
+    try:
+        from app.services.billing_notifications import notify_payment_failed
+        notify_payment_failed(org["id"])
+    except Exception:  # noqa: BLE001
+        pass
     return f"invoice payment failed org {org['id']} → past_due"
+
+
+def _handle_trial_will_end(db, sub: dict) -> str:
+    """Trial about to end → sync status + record a notification for the org."""
+    note = _handle_subscription(db, sub)
+    org = _org_by_customer(db, sub.get("customer"))
+    if org:
+        try:
+            from app.services.billing_notifications import notify_trial_will_end
+            notify_trial_will_end(org["id"])
+        except Exception:  # noqa: BLE001
+            pass
+    return f"trial will end → {note}"
+
+
+def _handle_checkout_completed(db, session: dict) -> str:
+    """A subscribe Checkout finished → link the new subscription to the org."""
+    sub_id = session.get("subscription")
+    note = "no subscription on session"
+    if sub_id:
+        try:
+            sub = stripe.Subscription.retrieve(sub_id, expand=["items.data.price"])
+            note = _handle_subscription(db, sub)
+        except Exception as exc:  # noqa: BLE001
+            note = f"sub sync failed: {exc}"
+    try:
+        db.table("billing_checkout_sessions").update(
+            {"status": "completed", "completed_at": _now()}
+        ).eq("stripe_session_id", session.get("id")).execute()
+    except Exception:  # noqa: BLE001 — table may predate 0049; never block sub linking
+        pass
+    return f"checkout completed → {note}"
 
 
 # event.type → handler(db, event_data_object) -> note
 _HANDLERS: dict[str, Callable[[Any, dict], str]] = {
     "customer.subscription.created": _handle_subscription,
     "customer.subscription.updated": _handle_subscription,
-    "customer.subscription.trial_will_end": _handle_subscription,
+    "customer.subscription.trial_will_end": _handle_trial_will_end,
     "customer.subscription.paused": _handle_subscription,
     "customer.subscription.resumed": _handle_subscription,
     "customer.subscription.deleted": _handle_subscription_deleted,
     "invoice.paid": _handle_invoice_paid,
     "invoice.payment_succeeded": _handle_invoice_paid,
     "invoice.payment_failed": _handle_invoice_failed,
+    "checkout.session.completed": _handle_checkout_completed,
 }
 
 

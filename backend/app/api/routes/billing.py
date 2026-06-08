@@ -15,7 +15,10 @@ from app.db.supabase_client import get_service_client
 from app.schemas.billing import (
     BillingInvoice,
     BillingSummary,
+    CheckoutRequest,
+    CheckoutResponse,
     PaymentMethod,
+    PlanOption,
     PortalSessionResponse,
     UpcomingInvoice,
 )
@@ -229,3 +232,44 @@ async def billing_portal_session(
     user: CurrentUser = Depends(require_org),
 ) -> PortalSessionResponse:
     return await run_in_threadpool(_portal_session, user.org_id, user.id)
+
+
+# ─── GET /api/billing/plans (catalog for the subscribe UI) ───────────────────
+def _plans() -> list[PlanOption]:
+    from app.services.stripe_catalog import ANNUAL_MONTHS, PLANS
+
+    return [
+        PlanOption(
+            plan_title=title,
+            included_minutes=spec["minutes"],
+            monthly_cents=spec["monthly_cents"],
+            annual_cents=spec["monthly_cents"] * ANNUAL_MONTHS,
+            overage_cents_per_min=spec["overage_cents"],
+        )
+        for title, spec in PLANS.items()
+    ]
+
+
+@router.get("/plans", response_model=list[PlanOption])
+async def billing_plans(user: CurrentUser = Depends(require_org)) -> list[PlanOption]:
+    return await run_in_threadpool(_plans)
+
+
+# ─── POST /api/billing/checkout-session (subscribe) ──────────────────────────
+def _checkout(org_id: str, actor_id: str, body: CheckoutRequest) -> CheckoutResponse:
+    from app.services.stripe_provisioning import create_checkout_session
+
+    try:
+        result = create_checkout_session(
+            org_id, body.plan_title, body.interval, trial_days=body.trial_days, actor_id=actor_id
+        )
+    except StripeBillingError as exc:
+        raise HTTPException(status_code=502, detail=f"Checkout fehlgeschlagen: {exc}") from exc
+    return CheckoutResponse(url=result["url"], session_id=result["session_id"])
+
+
+@router.post("/checkout-session", response_model=CheckoutResponse)
+async def billing_checkout(
+    body: CheckoutRequest, user: CurrentUser = Depends(require_org)
+) -> CheckoutResponse:
+    return await run_in_threadpool(_checkout, user.org_id, user.id, body)

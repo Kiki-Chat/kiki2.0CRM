@@ -75,6 +75,20 @@ export function AdminBillingPage() {
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin', 'billing', 'matches'] }); flash(`${r.proposals_created} Vorschläge aus ${r.orgs_scanned} Orgs erstellt.`) },
     onError: (e: Error) => flash(e.message),
   })
+  const approveMatch = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/super-admin/billing/matches/${id}/approve`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'billing', 'matches'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'billing', 'orgs'] })
+      flash('Verknüpfung freigegeben — heykiki_org_id in Stripe geschrieben.')
+    },
+    onError: (e: Error) => flash(e.message),
+  })
+  const rejectMatch = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/super-admin/billing/matches/${id}/reject`, { method: 'POST' }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'billing', 'matches'] }); flash('Vorschlag abgelehnt.') },
+    onError: (e: Error) => flash(e.message),
+  })
 
   const ov = overviewQ.data
   const health = healthQ.data
@@ -164,9 +178,23 @@ export function AdminBillingPage() {
                     <div className="font-mono text-[11px] text-slate-500">{m.stripe_customer_id ?? 'kein Treffer'}</div>
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <span title="Freigabe + Rückschreibung folgt in Phase 2" className="cursor-not-allowed rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-500">
-                      Freigeben (Phase 2)
-                    </span>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => approveMatch.mutate(m.id)}
+                        disabled={approveMatch.isPending || !m.stripe_customer_id || m.status !== 'proposed'}
+                        title={m.stripe_customer_id ? 'Verknüpfen + heykiki_org_id zu Stripe schreiben' : 'Kein Treffer zum Freigeben'}
+                        className="rounded-md bg-amber-500 px-2 py-1 text-xs font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-40"
+                      >
+                        Freigeben
+                      </button>
+                      <button
+                        onClick={() => rejectMatch.mutate(m.id)}
+                        disabled={rejectMatch.isPending || m.status !== 'proposed'}
+                        className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+                      >
+                        Ablehnen
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

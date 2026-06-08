@@ -9,11 +9,18 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_super_admin
 from app.db.supabase_client import get_service_client
+from app.services.stripe_admin_actions import (
+    approve_match,
+    cancel_subscription,
+    reject_match,
+    retry_payment,
+)
+from app.services.stripe_billing import ConnectAttributionError, StripeBillingError
 from app.schemas.billing import (
     AdminBillingOverview,
     AdminOrgBilling,
@@ -249,3 +256,43 @@ async def migration_matches(
 @router.post("/run-matcher")
 async def run_matcher(user: CurrentUser = Depends(require_super_admin)) -> dict:
     return await run_in_threadpool(propose_matches)
+
+
+# ─── Write actions (Phase 2) ─────────────────────────────────────────────────
+def _guard(fn, *args):
+    try:
+        return fn(*args)
+    except ConnectAttributionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except StripeBillingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/matches/{match_id}/approve")
+async def approve_match_ep(
+    match_id: str, user: CurrentUser = Depends(require_super_admin)
+) -> dict:
+    """Approve a dry-run match → write heykiki_org_id to Stripe + link the org."""
+    return await run_in_threadpool(_guard, approve_match, match_id, user.id)
+
+
+@router.post("/matches/{match_id}/reject")
+async def reject_match_ep(
+    match_id: str, user: CurrentUser = Depends(require_super_admin)
+) -> dict:
+    return await run_in_threadpool(_guard, reject_match, match_id, user.id)
+
+
+@router.post("/orgs/{org_id}/retry-payment")
+async def retry_payment_ep(
+    org_id: str, user: CurrentUser = Depends(require_super_admin)
+) -> dict:
+    return await run_in_threadpool(_guard, retry_payment, org_id, user.id)
+
+
+@router.post("/orgs/{org_id}/cancel-subscription")
+async def cancel_subscription_ep(
+    org_id: str, user: CurrentUser = Depends(require_super_admin)
+) -> dict:
+    """Cancel at period end. Refused (409) on legacy Connect-attributed subs."""
+    return await run_in_threadpool(_guard, cancel_subscription, org_id, user.id)

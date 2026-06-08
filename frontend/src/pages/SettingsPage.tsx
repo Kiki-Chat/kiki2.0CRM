@@ -36,6 +36,7 @@ import { apiFetch, apiUpload } from '../lib/api'
 import {
   type BillingInvoice,
   type BillingSummary,
+  type PlanOption,
   billingStatusLabel,
   fmtCents,
   stripeInvoiceStatusLabel,
@@ -551,6 +552,19 @@ function AbrechnungSection({ usage }: { usage: Usage }) {
     mutationFn: () => apiFetch<{ url: string }>('/api/billing/portal-session', { method: 'POST' }),
     onSuccess: (r) => { window.location.href = r.url },
   })
+  const plansQ = useQuery({
+    queryKey: ['billing', 'plans'],
+    queryFn: () => apiFetch<PlanOption[]>('/api/billing/plans'),
+    retry: false,
+    enabled: !configured,
+    staleTime: STALE,
+  })
+  const [planInterval, setPlanInterval] = useState<'month' | 'year'>('month')
+  const subscribe = useMutation({
+    mutationFn: (vars: { plan_title: string; interval: string }) =>
+      apiFetch<{ url: string }>('/api/billing/checkout-session', { method: 'POST', body: JSON.stringify(vars) }),
+    onSuccess: (r) => { window.location.href = r.url },
+  })
 
   // Prefer the Stripe-derived summary; fall back to the settings usage payload.
   const used = s ? s.used_minutes : usage.ai_minutes_used
@@ -559,9 +573,26 @@ function AbrechnungSection({ usage }: { usage: Usage }) {
   const pct = quota ? Math.round((used / quota) * 100) : 0
   const size = usage.document_size_bytes > 1e6 ? `${(usage.document_size_bytes / 1e6).toFixed(1)} MB` : `${Math.round(usage.document_size_bytes / 1024)} KB`
   const invoices = invoicesQ.data ?? []
+  const plans = plansQ.data ?? []
+  const trialing = s?.status === 'trialing'
+  const paymentDue = s?.status === 'past_due' || s?.status === 'unpaid'
 
   return (
     <div className="space-y-4">
+      {paymentDue && (
+        <div className="flex items-start gap-3 rounded-xl border border-error/40 bg-error-bg/40 p-4 text-sm text-body">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-error" />
+          <span><strong>Zahlung erforderlich.</strong> Ihre letzte Zahlung ist fehlgeschlagen. Bitte aktualisieren Sie Ihre Zahlungsdetails, um eine Unterbrechung zu vermeiden.{' '}
+            <button onClick={() => portal.mutate()} className="font-semibold text-green-deep underline">Jetzt aktualisieren</button>
+          </span>
+        </div>
+      )}
+      {trialing && (
+        <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
+          <Info size={16} className="mt-0.5 shrink-0 text-info" />
+          <span><strong>Testphase aktiv</strong>{s?.period_end ? ` – endet am ${new Date(s.period_end).toLocaleDateString('de-DE')}` : ''}. Hinterlegen Sie eine Zahlungsmethode, damit Ihre KI nahtlos weiterläuft.</span>
+        </div>
+      )}
       {configured && s && (
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -644,10 +675,41 @@ function AbrechnungSection({ usage }: { usage: Usage }) {
         </Card>
       )}
 
+      {!configured && plans.length > 0 && (
+        <Card>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-text">Tarif wählen</div>
+              <div className="text-xs text-muted">Starten Sie Ihr Abonnement — inkl. Testphase.</div>
+            </div>
+            <div className="flex items-center gap-1 rounded-lg bg-alt p-1 text-xs font-semibold">
+              <button onClick={() => setPlanInterval('month')} className={cn('rounded-md px-3 py-1', planInterval === 'month' ? 'bg-surface text-text shadow' : 'text-muted')}>Monatlich</button>
+              <button onClick={() => setPlanInterval('year')} className={cn('rounded-md px-3 py-1', planInterval === 'year' ? 'bg-surface text-text shadow' : 'text-muted')}>Jährlich</button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {plans.map((p) => {
+              const price = planInterval === 'month' ? p.monthly_cents : p.annual_cents
+              return (
+                <div key={p.plan_title} className="flex flex-col rounded-xl border border-border p-4">
+                  <div className="text-sm font-bold text-text">{p.plan_title}</div>
+                  <div className="mt-1 text-2xl font-bold text-text">{fmtCents(price)}<span className="text-xs font-normal text-muted">/{planInterval === 'month' ? 'Mon.' : 'Jahr'}</span></div>
+                  <div className="mt-1 text-xs text-muted">{p.included_minutes} Min. inkl. · dann {fmtCents(p.overage_cents_per_min)}/Min.</div>
+                  <button onClick={() => subscribe.mutate({ plan_title: p.plan_title, interval: planInterval })} disabled={subscribe.isPending} className="mt-4 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+                    {subscribe.isPending ? 'Weiterleitung…' : 'Jetzt abonnieren'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+          {subscribe.isError && <div className="mt-3 text-sm text-error">{(subscribe.error as Error).message}</div>}
+        </Card>
+      )}
+
       {!configured && (
         <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
           <Info size={16} className="mt-0.5 shrink-0 text-info" />
-          <span>Für Änderungen an Ihrem Abonnement oder Kontingent wenden Sie sich bitte an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>.</span>
+          <span>Für Fragen zu Ihrem Abonnement wenden Sie sich an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>.</span>
         </div>
       )}
     </div>

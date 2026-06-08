@@ -77,6 +77,13 @@ export interface BillingInvoice {
   created: number | null; period_start: number | null; period_end: number | null
   hosted_invoice_url: string | null; invoice_pdf: string | null
 }
+export interface PlanOption {
+  plan_title: string
+  included_minutes: number
+  monthly_cents: number
+  annual_cents: number
+  overage_cents_per_min: number
+}
 export const fmtCents = (c: number | null | undefined, cur = 'EUR') =>
   c == null ? '—' : new Intl.NumberFormat('de-DE', { style: 'currency', currency: (cur || 'EUR').toUpperCase() }).format(c / 100)
 
