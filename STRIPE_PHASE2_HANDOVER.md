@@ -52,11 +52,11 @@ We are NOT going live yet. During the Railway "transition" week (real + test cus
 | **Webhook handlers** | `services/stripe_webhook.py` | `checkout.session.completed` → link sub to org; `trial_will_end` → sync + notify; `payment_failed` → `past_due` + notify. |
 | **Notifications** | `services/billing_notifications.py` | `record_notification` (deduped) + `notify_over_quota/_trial_will_end/_payment_failed` + `check_and_notify_over_quota`. **Email is deferred to Amber's Brevo track** (in-app only for now). |
 | **Super-admin writes** | `services/stripe_admin_actions.py` | `approve_match` (writes `heykiki_org_id` to Stripe metadata + links org), `reject_match`, `retry_payment`, `cancel_subscription` (Connect-blocked → 409). |
-| **Endpoints** | `routes/billing.py`, `routes/billing_admin.py` | `GET /api/billing/plans`, `POST /api/billing/checkout-session`; super-admin `POST .../matches/{id}/approve|reject`, `.../orgs/{id}/retry-payment|cancel-subscription`. |
+| **Endpoints** | `routes/billing.py`, `routes/billing_admin.py` | `GET /api/billing/plans`, `POST /api/billing/checkout-session`, `POST /api/billing/sync` (webhook fallback — lists the org's sub, syncs the live one via `_handle_subscription`, returns `BillingSummary`; never writes to Stripe); super-admin `POST .../matches/{id}/approve|reject`, `.../orgs/{id}/retry-payment|cancel-subscription`. |
 | **Frontend** | `pages/SettingsPage.tsx`, `admin/AdminBillingPage.tsx`, `lib/dashApi.ts` | Abrechnung plan-picker + "Jetzt abonnieren" + trial/payment-required banners; super-admin approve/reject on the match queue. |
 | **Tests** | `backend/tests/test_billing_phase2.py`, `test_billing_admin_actions.py` (+ P1: `test_stripe_safety/usage/webhook/matcher.py`, shared `billing_fakes.py`) | hermetic FakeDB + fake-Stripe. |
 
-**Full route set** (when `STRIPE_BILLING_ENABLED=1`): 8 customer (`/api/billing/*`) + 10 super-admin (`/api/super-admin/billing/*`) + the webhook.
+**Full route set** (when `STRIPE_BILLING_ENABLED=1`): 9 customer (`/api/billing/*`, incl. `POST /sync`) + 10 super-admin (`/api/super-admin/billing/*`) + the webhook.
 
 ---
 
@@ -101,7 +101,7 @@ We are NOT going live yet. During the Railway "transition" week (real + test cus
 
 ## 5. Remaining work / go-live checklist
 
-1. **Confirm real plan prices** in `stripe_catalog.PLANS` (currently Solo €99 / Team €249 / Premium €599 mo — placeholders).
+1. ~~**Confirm real plan prices** in `stripe_catalog.PLANS`~~ ✅ **CONFIRMED by Amber 2026-06-08** — Solo €99 (99 min, €1.19/min over) / Team €249 (250 min, €1.00/min) / Premium €599 (750 min, €0.70/min); annual = 10× monthly. Values are final; they still live only in the TEST sandbox (see #2 for the LIVE catalog).
 2. **Create the canonical catalog in LIVE mode** (run `ensure_catalog()` with the live key) — until then, checkout fails closed on live (lookup_keys don't exist there).
 3. **Decide minutes rounding** (`minutes_from_seconds`: round vs ceil) and **legacy-Connect usage** reconciliation.
 4. **Live webhook endpoint** in the Stripe dashboard → `https://<railway-backend>/api/billing/stripe-webhook` → set the live `STRIPE_WEBHOOK_SECRET`. (Local live round-trip needs the Stripe CLI — not installed.)

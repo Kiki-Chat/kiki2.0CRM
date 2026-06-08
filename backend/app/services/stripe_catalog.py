@@ -5,7 +5,9 @@ the included minutes are tier-1 at €0, overage is tier-2 per-minute). That gra
 shape is what makes soft-stop work: report ALL minutes to the metered item, the first
 N are free, the rest bill automatically. Monthly + annual price per product.
 
-⚠️ PLACEHOLDER PRICES (test mode). Confirm the real amounts with Amber before go-live.
+PRICES CONFIRMED by Amber 2026-06-08 (Solo €99 / Team €249 / Premium €599 mo; minutes
++ overage below). These now live only in the Stripe TEST sandbox — the canonical LIVE
+catalog must still be created with the live key at go-live (run ensure_catalog()).
 Metadata matches STRIPE_INTEGRATION_HANDOVER.md §4a so Phase-1 quota derivation works.
 """
 

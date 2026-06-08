@@ -279,7 +279,7 @@ function SectionContent({ section, data, flash }: { section: string; data: Setti
   switch (section) {
     case 'stammdaten': return <StammdatenSection org={data.organization} />
     case 'design': return <DesignSection org={data.organization} />
-    case 'abrechnung': return <AbrechnungSection usage={data.usage} />
+    case 'abrechnung': return <AbrechnungSection usage={data.usage} flash={flash} />
     case 'ki-vorschlaege': return <KiVorschlaegeSection ai={data.ai_suggestions} flash={flash} />
     case 'benachrichtigungen': return <BenachrichtigungenSection />
     case 'email-versand': return <EmailVersandSection config={data.email_config} flash={flash} />
@@ -530,7 +530,8 @@ function DesignSection({ org }: { org: Org }) {
 }
 
 // ─── Abrechnung ───────────────────────────────────────────────────────────────
-function AbrechnungSection({ usage }: { usage: Usage }) {
+function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) => void }) {
+  const qc = useQueryClient()
   // Billing endpoints exist only when STRIPE_BILLING_ENABLED on the backend; on
   // 404 (module off) the queries error and we fall back to the usage-only view.
   const summaryQ = useQuery({
@@ -565,6 +566,32 @@ function AbrechnungSection({ usage }: { usage: Usage }) {
       apiFetch<{ url: string }>('/api/billing/checkout-session', { method: 'POST', body: JSON.stringify(vars) }),
     onSuccess: (r) => { window.location.href = r.url },
   })
+
+  // Webhook fallback: Stripe redirects back to ?checkout=success after a self-serve
+  // Checkout, but its webhook can't reach localhost — so pull the new subscription
+  // once and refresh the billing views. (?checkout=cancel → just clean the URL.)
+  const checkoutHandled = useRef(false)
+  useEffect(() => {
+    if (checkoutHandled.current) return
+    const checkout = new URLSearchParams(window.location.search).get('checkout')
+    if (!checkout) return
+    checkoutHandled.current = true
+    window.history.replaceState({}, '', window.location.pathname) // don't re-trigger on refresh
+    if (checkout !== 'success') {
+      if (checkout === 'cancel') flash('Vorgang abgebrochen.')
+      return
+    }
+    apiFetch<BillingSummary>('/api/billing/sync', { method: 'POST' })
+      .then((s) => {
+        qc.setQueryData(['billing', 'summary'], s) // instant, before the refetch lands
+        qc.invalidateQueries({ queryKey: ['billing'] })
+        flash(s.status === 'trialing' ? 'Testphase gestartet.' : 'Abonnement aktiviert.')
+      })
+      .catch(() => {
+        qc.invalidateQueries({ queryKey: ['billing'] })
+        flash('Status konnte nicht aktualisiert werden. Bitte Seite neu laden.')
+      })
+  }, [qc, flash])
 
   // Prefer the Stripe-derived summary; fall back to the settings usage payload.
   const used = s ? s.used_minutes : usage.ai_minutes_used
