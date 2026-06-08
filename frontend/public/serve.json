@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/serve.json",
+  "headers": [
+    {
+      "comment": "Default: HTML/entry files must always revalidate so a tab open across a Railway redeploy fetches the fresh index.html (new hashed chunk names) instead of requesting deleted old chunks → the ChunkErrorBoundary 'cannot be reloaded' screen.",
+      "source": "**",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    },
+    {
+      "comment": "Vite emits content-hashed files under /assets — safe to cache forever (a new build = a new filename). Listed AFTER the catch-all so it overrides the no-cache default for these.",
+      "source": "assets/**",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    }
+  ]
+}

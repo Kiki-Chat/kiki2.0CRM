@@ -4,8 +4,6 @@ import {
   AtSign,
   CalendarClock,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Download,
   Euro,
   FileText,
@@ -209,9 +207,10 @@ export function CustomerDetailPage() {
         <AppointmentsPanel customer={customer} onNew={() => setNewAppt(true)} />
       </div>
 
-      {/* ACTIVITIES */}
+      {/* VERLAUF — single unified activity timeline (calls, inquiries,
+          appointments, KVAs) from the backend. The old frontend-reconstructed
+          "Aktivitäten" strip was removed: it duplicated these same events. */}
       <CustomerTimeline events={timeline} />
-      <ActivitiesTimeline customer={customer} docs={docs} onTranscript={() => navigate('/calls')} />
 
       {/* FILES */}
       <FilesPanel customerId={id} docs={docs} onChange={() => qc.invalidateQueries({ queryKey: ['customerDocs', id] })} />
@@ -277,7 +276,6 @@ function NewBtn({ label, onClick }: { label: string; onClick: () => void }) {
 }
 
 function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => void }) {
-  const [tab, setTab] = useState<'inquiries' | 'projects'>('inquiries')
   const [q, setQ] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const inquiries = customer.inquiries ?? []
@@ -287,28 +285,10 @@ function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => 
 
   return (
     <Panel
-      title={
-        <div className="flex gap-4">
-          <button
-            onClick={() => setTab('inquiries')}
-            className={cn('border-b-2 pb-1', tab === 'inquiries' ? 'border-green-primary text-green-deep' : 'border-transparent text-muted')}
-          >
-            Anfragen ({inquiries.length})
-          </button>
-          <button
-            onClick={() => setTab('projects')}
-            className={cn('border-b-2 pb-1', tab === 'projects' ? 'border-green-primary text-green-deep' : 'border-transparent text-muted')}
-          >
-            Projekte (0)
-          </button>
-        </div>
-      }
-      action={tab === 'inquiries' ? <NewBtn label="Neue Anfrage" onClick={onNew} /> : undefined}
+      title={`Anfragen (${inquiries.length})`}
+      action={<NewBtn label="Neue Anfrage" onClick={onNew} />}
     >
-      {tab === 'projects' ? (
-        <p className="py-8 text-center text-sm text-muted">Keine Projekte.</p>
-      ) : (
-        <>
+      <>
           <div className="mb-3 flex items-center gap-2">
             <Tag variant="info">{open} offen</Tag>
             <Tag variant="success">{done} erledigt</Tag>
@@ -353,7 +333,6 @@ function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => 
             {!filtered.length && <p className="py-6 text-center text-sm text-muted">Keine Anfragen.</p>}
           </div>
         </>
-      )}
     </Panel>
   )
 }
@@ -377,16 +356,6 @@ function AppointmentsPanel({ customer, onNew }: { customer: Customer; onNew: () 
       </div>
     </Panel>
   )
-}
-
-interface Activity {
-  icon: typeof Phone
-  color: string
-  date: string | null
-  label: string
-  desc: string
-  tag: string
-  transcript?: boolean
 }
 
 const TL_ICON: Record<TimelineEventKind, { Icon: LucideIcon; cls: string }> = {
@@ -435,67 +404,6 @@ function CustomerTimeline({ events }: { events: TimelineEvent[] }) {
           })}
         </div>
       )}
-    </div>
-  )
-}
-
-function ActivitiesTimeline({
-  customer,
-  docs,
-  onTranscript,
-}: {
-  customer: Customer
-  docs: DocRow[]
-  onTranscript: () => void
-}) {
-  const scroller = useRef<HTMLDivElement>(null)
-  const items: Activity[] = []
-  for (const c of customer.calls ?? [])
-    items.push({ icon: Phone, color: 'text-success bg-success-bg', date: c.started_at, label: 'Anruf (KI)', desc: c.summary_title ?? 'Anruf', tag: 'call', transcript: true })
-  for (const i of customer.inquiries ?? [])
-    items.push({ icon: MessageSquare, color: 'text-info bg-info-bg', date: i.created_at, label: 'Neue Anfrage', desc: i.title ?? 'Anfrage', tag: i.type ?? 'info' })
-  for (const k of customer.cost_estimates ?? [])
-    items.push({ icon: Euro, color: 'text-warning bg-warning-bg', date: k.created_at, label: 'Kostenvoranschlag', desc: k.number ?? 'KVA', tag: 'kva' })
-  for (const d of docs)
-    items.push({ icon: FileText, color: 'text-warning bg-warning-bg', date: d.uploaded_at, label: 'Dokument', desc: d.name ?? 'Datei', tag: d.category ?? 'Dokument' })
-  items.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
-
-  const scroll = (dir: number) => scroller.current?.scrollBy({ left: dir * 320, behavior: 'smooth' })
-
-  return (
-    <div className="rounded-lg border border-border bg-surface p-5 shadow-e1">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-bold text-text">Aktivitäten ({items.length})</h2>
-        <div className="flex gap-1">
-          <button onClick={() => scroll(-1)} className="rounded-md border border-border p-1.5 text-muted hover:bg-alt">
-            <ChevronLeft size={15} />
-          </button>
-          <button onClick={() => scroll(1)} className="rounded-md border border-border p-1.5 text-muted hover:bg-alt">
-            <ChevronRight size={15} />
-          </button>
-        </div>
-      </div>
-      <div ref={scroller} className="flex gap-3 overflow-x-auto pb-2">
-        {items.map((a, i) => (
-          <div key={i} className="w-64 flex-shrink-0 rounded-lg border border-border p-3">
-            <div className={cn('mb-2 flex h-8 w-8 items-center justify-center rounded-full', a.color)}>
-              <a.icon size={15} />
-            </div>
-            <div className="text-xs text-faint">{fmtDay(a.date)}</div>
-            <div className="text-sm font-semibold text-text">{a.label}</div>
-            <p className="mt-0.5 line-clamp-2 text-xs text-muted">{a.desc}</p>
-            <div className="mt-2 flex items-center justify-between">
-              <span className="rounded-full bg-alt px-2 py-0.5 text-[10px] font-semibold text-muted">{a.tag}</span>
-              {a.transcript && (
-                <button onClick={onTranscript} className="text-[11px] font-semibold text-green-deep hover:underline">
-                  Zum Transkript
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
-        {!items.length && <p className="py-6 text-sm text-muted">Keine Aktivitäten.</p>}
-      </div>
     </div>
   )
 }

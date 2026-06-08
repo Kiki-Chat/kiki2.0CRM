@@ -217,14 +217,31 @@ export function CallLogsPage() {
                 key={`${item.kind}:${item.id}`}
                 item={item}
                 onSelect={() => {
-                  // A reschedule counter-proposal is approved/declined on the call's
-                  // action card (Genehmigen/Ablehnen) — open that call rather than the
-                  // customer page, which had no way to act on it.
-                  if (item.kind === 'alt_time_proposal' && item.call_id) {
-                    setTab('anfragen')
-                    setSelectedId(item.call_id)
-                    return
+                  // Route each Aktion to the surface where it can actually be acted
+                  // on — not blanket-to the customer card (the old fallback, which
+                  // had no way to confirm an appointment or send a KVA).
+                  switch (item.kind) {
+                    // Appointment decisions (confirm / reschedule approval) live on
+                    // the call's inline action card → open that call.
+                    case 'termin_anfrage':
+                    case 'alt_time_proposal':
+                      if (item.call_id) {
+                        setTab('anfragen')
+                        setSelectedId(item.call_id)
+                        return
+                      }
+                      break
+                    // Cost estimates: open the KVA itself (send / review decision).
+                    case 'kva_to_send':
+                    case 'kva_pending_acceptance':
+                      navigate(`/cost-estimates/${item.id}`)
+                      return
+                    // Missed call owed a callback: the customer card has the number.
+                    case 'callback_owed':
+                      break
                   }
+                  // Fallback: the customer card (used for callback_owed and for any
+                  // appointment action whose call_id couldn't be resolved).
                   if (item.customer_id) navigate(`/customers/${item.customer_id}`)
                 }}
               />

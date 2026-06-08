@@ -223,7 +223,7 @@ def test_alt_time_proposal_resolves_call_id_via_conversation():
             ],
             "customers": [{"id": "c1", "org_id": ORG, "full_name": "Max"}],
             "inquiries": [],
-            "calls": [{"id": "call77", "org_id": ORG, "conversation_id": "conv1"}],
+            "calls": [{"id": "call77", "org_id": ORG, "elevenlabs_conversation_id": "conv1"}],
         }
     )
     out = ax._alt_time_proposal(client, ORG)

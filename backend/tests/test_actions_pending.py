@@ -36,10 +36,16 @@ class _FakeChain:
 
     def select(self, *a, **k): return self._rec("select", *a, **k)
     def eq(self, *a, **k): return self._rec("eq", *a, **k)
+    def neq(self, *a, **k): return self._rec("neq", *a, **k)
     def in_(self, *a, **k): return self._rec("in_", *a, **k)
+    def is_(self, *a, **k): return self._rec("is_", *a, **k)
     def gte(self, *a, **k): return self._rec("gte", *a, **k)
     def lte(self, *a, **k): return self._rec("lte", *a, **k)
     def order(self, *a, **k): return self._rec("order", *a, **k)
+
+    @property
+    def not_(self):  # postgrest exposes `.not_.is_(col, val)`
+        return self
     def execute(self):
         self._recorder.append({"table": self._table, "method": "execute"})
         return MagicMock(data=self._data, count=len(self._data))
@@ -83,7 +89,10 @@ def test_termin_anfrage_filters_pending_status_and_includes_customer_name():
         },
     ]
     customers = [{"id": "cust-1", "full_name": "Max Mustermann"}]
-    client = _FakeClient({"appointments": appts, "customers": customers})
+    # The inquiry carries the call_id so the worklist row can open the call whose
+    # action card confirms the appointment (resolved via _resolve_call_ids).
+    inquiries = [{"id": "inq-1", "call_id": "call-9"}]
+    client = _FakeClient({"appointments": appts, "customers": customers, "inquiries": inquiries})
 
     out = ax._termin_anfrage(client, ORG)
 
@@ -94,16 +103,19 @@ def test_termin_anfrage_filters_pending_status_and_includes_customer_name():
     assert row["inquiry_id"] == "inq-1"
     assert row["customer_id"] == "cust-1"
     assert row["customer_name"] == "Max Mustermann"
+    # call_id is resolved from the linked inquiry so the row opens the call.
+    assert row["call_id"] == "call-9"
     assert row["due_at"] == appts[0]["scheduled_at"]
     assert row["priority"] == "normal"
     assert "Heizungswartung" in row["summary"]
-    # Org scoping: every .eq("org_id", ORG) was used (one for appointments,
-    # one for the customer name lookup).
+    # Org scoping: every .eq("org_id", ORG) was used — appointments, the customer
+    # name lookup, AND the inquiry call_id lookup (the appt has no
+    # source_conversation_id, so the calls fallback query is skipped).
     eq_org_calls = [
         c for c in client.recorder
         if c["method"] == "eq" and c["args"] == ("org_id", ORG)
     ]
-    assert len(eq_org_calls) == 2
+    assert len(eq_org_calls) == 3
     # Status filter pinned to 'pending' (NOT 'pending_confirmation').
     assert any(
         c["method"] == "eq" and c["args"] == ("status", "pending")
@@ -223,8 +235,9 @@ def test_callback_owed_is_empty_until_schema_lands():
     assert ax._callback_owed(_FakeClient({}), ORG) == []
 
 
-def test_alt_time_proposal_is_empty_until_schema_lands():
-    """Documents the no-op: appointments has no alternative_proposed_at."""
+def test_alt_time_proposal_is_empty_when_no_open_proposals():
+    """With no customer/alternative proposals in the DB, the aggregator is empty
+    (the schema now has the columns; this asserts the empty-DB path)."""
     assert ax._alt_time_proposal(_FakeClient({}), ORG) == []
 
 

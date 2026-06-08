@@ -77,6 +77,40 @@ def _customer_name_map(client, org_id: str, ids: list[str]) -> dict[str, str | N
     return {r["id"]: r.get("full_name") for r in rows}
 
 
+def _resolve_call_ids(client, org_id: str, rows: list[dict]) -> dict[str, str]:
+    """Map appointment_id -> call_id for a set of appointment rows.
+
+    Resolves via the linked inquiry's call_id (preferred), else the agent-booking
+    conversation (source_conversation_id -> calls.conversation_id). Rows must carry
+    ``inquiry_id`` and ``source_conversation_id``. Appointments with no resolvable
+    call are simply omitted from the map.
+    """
+    inq_ids = [r.get("inquiry_id") for r in rows if r.get("inquiry_id")]
+    conv_ids = [r.get("source_conversation_id") for r in rows if r.get("source_conversation_id")]
+    inq_call: dict[str, str] = {}
+    if inq_ids:
+        for row in (
+            client.table("inquiries").select("id, call_id")
+            .eq("org_id", org_id).in_("id", inq_ids).execute().data or []
+        ):
+            if row.get("call_id"):
+                inq_call[row["id"]] = row["call_id"]
+    conv_call: dict[str, str] = {}
+    if conv_ids:
+        for row in (
+            client.table("calls").select("id, elevenlabs_conversation_id")
+            .eq("org_id", org_id).in_("elevenlabs_conversation_id", conv_ids).execute().data or []
+        ):
+            if row.get("elevenlabs_conversation_id"):
+                conv_call[row["elevenlabs_conversation_id"]] = row["id"]
+    out: dict[str, str] = {}
+    for r in rows:
+        cid = inq_call.get(r.get("inquiry_id")) or conv_call.get(r.get("source_conversation_id"))
+        if cid:
+            out[r["id"]] = cid
+    return out
+
+
 # ─── Per-kind aggregators (org-scoped) ──────────────────────────────────────
 def _termin_anfrage(client, org_id: str) -> list[dict[str, Any]]:
     """Appointments Kiki proposed but no human has confirmed yet.
@@ -88,7 +122,7 @@ def _termin_anfrage(client, org_id: str) -> list[dict[str, Any]]:
         client.table("appointments")
         .select(
             "id, inquiry_id, customer_id, title, scheduled_at, "
-            "created_at, status"
+            "created_at, status, source_conversation_id"
         )
         .eq("org_id", org_id)
         .eq("status", "pending")
@@ -100,6 +134,12 @@ def _termin_anfrage(client, org_id: str) -> list[dict[str, Any]]:
     name_by_cust = _customer_name_map(
         client, org_id, [r.get("customer_id") for r in rows]
     )
+    # Resolve a call_id per appointment so clicking the worklist row opens the
+    # call whose action card carries the Bestätigen/Ablehnen buttons (the only
+    # place a pending appointment can be confirmed) — via the inquiry's call_id,
+    # else the agent-booking conversation link. Without this the row had no call
+    # to open and wrongly fell back to the customer page (no confirm there).
+    call_by_appt = _resolve_call_ids(client, org_id, rows)
     out: list[dict[str, Any]] = []
     for r in rows:
         nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
@@ -109,7 +149,7 @@ def _termin_anfrage(client, org_id: str) -> list[dict[str, Any]]:
                 "kind": "termin_anfrage",
                 "id": r["id"],
                 "inquiry_id": r.get("inquiry_id"),
-                "call_id": None,
+                "call_id": call_by_appt.get(r["id"]),
                 "customer_name": nm,
                 "customer_id": r.get("customer_id"),
                 "summary": f"Terminbestätigung ausstehend: {title}",
@@ -293,11 +333,11 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
     conv_call: dict[str, str] = {}
     if conv_ids:
         for row in (
-            client.table("calls").select("id, conversation_id")
-            .eq("org_id", org_id).in_("conversation_id", conv_ids).execute().data or []
+            client.table("calls").select("id, elevenlabs_conversation_id")
+            .eq("org_id", org_id).in_("elevenlabs_conversation_id", conv_ids).execute().data or []
         ):
-            if row.get("conversation_id"):
-                conv_call[row["conversation_id"]] = row["id"]
+            if row.get("elevenlabs_conversation_id"):
+                conv_call[row["elevenlabs_conversation_id"]] = row["id"]
     out: list[dict[str, Any]] = []
     for r, is_cust in by_id.values():
         nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"

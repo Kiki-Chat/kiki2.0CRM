@@ -25,6 +25,41 @@ _STATUS_LABEL = {
     "deleted": "Gelöscht",
 }
 
+# Bilingual (DE + EN) emergency markers — a content-based fallback for the call-log
+# emergency flag. The agent's data_collection almost never carries an explicit
+# emergency field, so without this real emergencies (incl. English-language calls)
+# were never flagged. Deliberately PRECISE — strong urgency/hazard words, not generic
+# plumbing terms ("Toilette"/"Leck"/"Wasser") — so a routine after-hours repair isn't
+# mis-flagged. Matched as case-insensitive substrings. See ISSUES_2026-06-09.md.
+_EMERGENCY_TERMS = (
+    # German
+    "notfall", "notdienst", "dringend", "akut", "rohrbruch", "wasserrohrbruch",
+    "gasgeruch", "gasaustritt", "überschwemm", "ueberschwemm", "wasserschaden",
+    "heizungsausfall", "warmwasserausfall",
+    # English
+    "emergency", "urgent", "burst pipe", "gas leak", "gas smell", "flooding",
+    "flooded", "water damage", "no heating", "no hot water",
+)
+
+
+def _content_signals_emergency(call: dict) -> bool:
+    """True if the call's summary/extraction text contains a strong DE/EN emergency
+    marker. Language-agnostic fallback used when the agent didn't set an explicit
+    emergency field in data_collection."""
+    dc = call.get("data_collection") or {}
+    blob = " ".join(
+        str(v)
+        for v in (
+            call.get("summary_title"),
+            call.get("summary"),
+            dc.get("issue_summary"),
+            dc.get("ultimate_summary"),
+            dc.get("next_action"),
+        )
+        if v
+    ).lower()
+    return any(term in blob for term in _EMERGENCY_TERMS)
+
 
 def _compose_notes(message: str | None, additional_fields) -> str:
     parts = [message or ""]
@@ -75,6 +110,12 @@ def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
         if v is True or (isinstance(v, str) and v.strip().lower() in ("true", "ja", "yes", "1")):
             agent_urgent = True
             break
+    # The agent rarely sets an explicit emergency field, so also derive urgency from
+    # the call's summary/extraction text (bilingual, language-agnostic). Without this,
+    # clear emergencies — like an English "toilet emergency" outside hours — were logged
+    # as non-emergency even though the agent handled them as a Notfall.
+    if not agent_urgent and _content_signals_emergency(call):
+        agent_urgent = True
     emergency = outside_hours and agent_urgent
 
     row = {
