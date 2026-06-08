@@ -1,15 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import {
-  Calendar,
-  Clock,
-  Euro,
-  FileText,
-  LayoutDashboard,
-  ListChecks,
-  Phone,
-  Sparkles,
-  Users2,
-} from 'lucide-react'
+import { Clock, Euro, LayoutDashboard, Phone, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -18,41 +8,24 @@ import { FinanzenTab } from '../components/dashboard/FinanzenTab'
 import { KiInsightsTab } from '../components/dashboard/KiInsightsTab'
 import { KiNutzungTab } from '../components/dashboard/KiNutzungTab'
 import { Card } from '../components/ui/Card'
-import { KpiCard } from '../components/ui/KpiCard'
-import { Tag } from '../components/ui/Tag'
 import kikiAvatar from '../assets/kiki-avatar.png'
 import { apiFetch } from '../lib/api'
 import { isSupabaseConfigured } from '../lib/env'
 import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
+// The overview tab now leads with call performance (Gesamtanrufe / Beantwortet /
+// Durchschnittsdauer + graphs, via <AnrufeTab/>). The hero bubble still needs the
+// two "heute" counts, so this is all we read from /api/dashboard/overview.
 interface OverviewData {
   kpis: {
-    open_inquiries: number
-    total_customers: number
-    upcoming_appointments: number
     calls_today: number
     inquiries_today: number
-    kva_pending: number
   }
-  open_tasks: Array<{
-    id: string
-    title: string | null
-    type: string | null
-    status: string
-    customer_id: string | null
-  }>
-  upcoming_appointments: Array<{
-    id: string
-    title: string | null
-    scheduled_at: string | null
-    status: string
-  }>
 }
 
 const TABS = [
   { id: 'overview', label: 'Übersicht', icon: LayoutDashboard },
-  { id: 'anrufe', label: 'Anrufe', icon: Phone },
   { id: 'finanzen', label: 'Finanzen', icon: Euro },
   { id: 'ki-nutzung', label: 'KI-Nutzung', icon: Clock },
   { id: 'ki-insights', label: 'KI-Insights', icon: Sparkles },
@@ -124,7 +97,6 @@ export function DashboardPage() {
 
       <div key={tab} style={{ animation: 'fadeUp 220ms ease' }}>
         {tab === 'overview' && <OverviewTab company={company} />}
-        {tab === 'anrufe' && <AnrufeTab />}
         {tab === 'finanzen' && <FinanzenTab />}
         {tab === 'ki-nutzung' && <KiNutzungTab />}
         {tab === 'ki-insights' && <KiInsightsTab />}
@@ -135,19 +107,11 @@ export function DashboardPage() {
 
 function OverviewTab({ company }: { company: string }) {
   const navigate = useNavigate()
-  // Each open task is an open inquiry tied to a customer → open that customer
-  // (its activity timeline shows the inquiry). Fall back to the Anrufe list
-  // when the inquiry has no linked customer.
-  const goToTask = (customerId: string | null) =>
-    navigate(customerId ? `/customers/${customerId}` : '/calls')
-  // Open the calendar focused on the appointment's date with its detail modal
-  // (CalendarPage reads ?date= & ?appointment=). Local date keeps the month in
-  // sync with the calendar's own (local-tz) rendering.
-  const goToAppointment = (id: string, scheduledAt: string | null) => {
-    const date = scheduledAt ? new Date(scheduledAt).toLocaleDateString('en-CA') : null
-    navigate(`/calendar?appointment=${id}${date ? `&date=${date}` : ''}`)
-  }
-  const { data, isLoading, error } = useQuery<OverviewData>({
+  // The hero bubble shows today's tallies; the stats + graphs below come from
+  // <AnrufeTab/> (its own period-filtered query). We only read the two "heute"
+  // counts here, so a slow/failed overview fetch just leaves the bubble at 0 —
+  // it never blocks the call-stats block from rendering.
+  const { data } = useQuery<OverviewData>({
     queryKey: ['dashboard-overview'],
     queryFn: () => apiFetch<OverviewData>('/api/dashboard/overview'),
     enabled: isSupabaseConfigured,
@@ -161,21 +125,13 @@ function OverviewTab({ company }: { company: string }) {
     )
   }
 
-  if (isLoading) return <Card className="text-sm text-muted">Übersicht wird geladen…</Card>
-  if (error)
-    return (
-      <Card className="text-sm text-error">
-        Übersicht konnte nicht geladen werden: {(error as Error).message}
-      </Card>
-    )
-
   const kpis = data?.kpis
   const callsToday = kpis?.calls_today ?? 0
-  const inquiriesToday = kpis?.inquiries_today ?? 0
+  const actionsToday = kpis?.inquiries_today ?? 0
 
   return (
     <div className="space-y-5">
-      {/* ── Hero ─────────────────────────────────────────────────────────── */}
+      {/* ── Hero (poster stays; "Anfragen" → "Aktionen") ─────────────────── */}
       <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-green-tint-50 via-surface to-surface shadow-e1">
         {/* soft glow behind the avatar */}
         <div
@@ -200,7 +156,7 @@ function OverviewTab({ company }: { company: string }) {
               </span>{' '}
               und{' '}
               <span className="font-extrabold text-green-primary">
-                {inquiriesToday} {inquiriesToday === 1 ? 'Anfrage' : 'Anfragen'}
+                {actionsToday} {actionsToday === 1 ? 'Aktion' : 'Aktionen'}
               </span>{' '}
               empfangen. Wie soll ich fortfahren?
             </p>
@@ -217,7 +173,7 @@ function OverviewTab({ company }: { company: string }) {
               onClick={() => navigate('/calls?status=open&tab=aktionen')}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-alt px-4 py-2.5 text-sm font-bold text-text transition hover:border-green-tint-200 hover:bg-green-tint-50"
             >
-              <Sparkles size={15} /> {inquiriesToday} {inquiriesToday === 1 ? 'Anfrage' : 'Anfragen'} ansehen
+              <Sparkles size={15} /> {actionsToday} {actionsToday === 1 ? 'Aktion' : 'Aktionen'} ansehen
             </button>
           </div>
         </div>
@@ -230,111 +186,8 @@ function OverviewTab({ company }: { company: string }) {
         />
       </section>
 
-      {/* ── KPI row ──────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <KpiCard
-          label="Offene Anfragen"
-          value={kpis?.open_inquiries ?? 0}
-          icon={Sparkles}
-          sub="warten auf Bearbeitung"
-          onClick={() => navigate('/calls?status=open&tab=anfragen')}
-        />
-        <KpiCard
-          label="Kunden gesamt"
-          value={kpis?.total_customers ?? 0}
-          icon={Users2}
-          sub="in dieser Organisation"
-          onClick={() => navigate('/customers')}
-        />
-        <KpiCard
-          label="KVA pending"
-          value={kpis?.kva_pending ?? 0}
-          icon={FileText}
-          sub="Kostenvoranschläge offen"
-          onClick={() => navigate('/cost-estimates')}
-        />
-      </div>
-
-      {/* ── Panels ───────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <div className="mb-2 flex items-center gap-3">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-green-tint-100 text-green-deep">
-              <ListChecks size={17} />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-base font-bold text-text">Offene Aufgaben</h2>
-              <p className="text-xs text-muted">Von Kiki erkannt · warten auf Freigabe</p>
-            </div>
-          </div>
-          {data?.open_tasks.length ? (
-            <ul className="space-y-0.5">
-              {data.open_tasks.map((t) => (
-                <li
-                  key={t.id}
-                  onClick={() => goToTask(t.customer_id)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      goToTask(t.customer_id)
-                    }
-                  }}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-md p-2 hover:bg-alt"
-                >
-                  <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-green-primary" />
-                  <span className="flex-1 truncate text-sm text-text">{t.title ?? 'Ohne Titel'}</span>
-                  {t.type && <Tag variant="info">{t.type}</Tag>}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted">Keine offenen Aufgaben.</p>
-          )}
-        </Card>
-
-        <Card>
-          <div className="mb-2 flex items-center gap-3">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-green-tint-100 text-green-deep">
-              <Calendar size={17} />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-base font-bold text-text">Anstehende Termine</h2>
-              <p className="text-xs text-muted">Nächste 5 geplant</p>
-            </div>
-          </div>
-          {data?.upcoming_appointments.length ? (
-            <ul className="space-y-0.5">
-              {data.upcoming_appointments.map((a) => (
-                <li
-                  key={a.id}
-                  onClick={() => goToAppointment(a.id, a.scheduled_at)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      goToAppointment(a.id, a.scheduled_at)
-                    }
-                  }}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-md p-2 hover:bg-alt"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm text-text">{a.title ?? 'Termin'}</div>
-                    <div className="text-xs text-muted">
-                      {a.scheduled_at ? new Date(a.scheduled_at).toLocaleString('de-DE') : '—'}
-                    </div>
-                  </div>
-                  <Tag variant="green">{a.status}</Tag>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted">Keine anstehenden Termine.</p>
-          )}
-        </Card>
-      </div>
+      {/* ── Call performance — the new headline stats + graphs ───────────── */}
+      <AnrufeTab />
     </div>
   )
 }
