@@ -5,6 +5,8 @@
 ## Recent changes
 _Append one dated bullet per shipped, UI-visible change. Newest first._
 
+- **2026-06-08 (🚀 DEPLOYED to Railway prod — merged `main` `9d19b47`) — pushed the combined `main` (Stripe Phase 2 + arch-audit hardening + dashboard call-stats redesign) to Railway prod via `railway up --path-as-root` per service. Backend deploy `46c54c6f` + frontend `fb2e975c` both SUCCESS; prior deploys REMOVED. Verified: backend `/health` 200, frontend root 200, `openapi.json` shows the dashboard routes live and **0 `/api/billing/*` routes (billing still gated OFF in prod** — `STRIPE_BILLING_ENABLED` unset; migration `0049` still unapplied, fine while gated). ⚠️ Outbound remains LIVE (`OUTBOUND_TEST_SCOPE_ONLY=0`) — stress/load tests that hit outbound flows reach REAL customers; confine functional tests to `kiki-test-007` or flip the guard to `1` first.**
+
 - **2026-06-08 (Stripe billing — PHASE 2 on the `stripe` BRANCH, off main; TEST-mode; NOT on main, NOT deployed) — checkout/provisioning, trial lifecycle, dunning + notifications, super-admin write actions. Commits `947e66f` + `f8c2db4` on origin/stripe.**
   - **Catalog (`stripe_catalog`):** idempotent Solo/Team/Premium created in the Stripe TEST sandbox (flat base + GRADUATED metered so soft-stop bills overage). PLACEHOLDER prices — confirm before go-live.
   - **Checkout (`stripe_provisioning` + `POST /api/billing/checkout-session`, `GET /plans`):** ensure_stripe_customer (idempotent) + hosted Stripe Checkout (pre-filled, base+metered, optional 14-day trial, automatic_tax). `checkout.session.completed` → links the sub to the org. **Proven vs real test mode** (`cs_test_` session + auto-provisioned customer).
