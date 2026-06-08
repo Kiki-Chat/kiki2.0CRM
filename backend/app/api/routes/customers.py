@@ -34,13 +34,19 @@ _CUSTOMER_TYPES = ["new", "regular", "supplier", "property_management"]
 # Whitelisted sort columns for the customer list (guards against arbitrary order-by
 # injection). customer_number is text but the numbering scheme is fixed-width 6-digit,
 # so a lexical sort matches numeric order. phone is plain text (canonical E.164).
-_SORT_COLUMNS = {"created_at", "full_name", "customer_number", "phone"}
+# address_text is the generated flat-address column (migration 0051) that sorts
+# across both address jsonb shapes ({raw} and {street,…}).
+_SORT_COLUMNS = {"created_at", "full_name", "customer_number", "phone", "address_text"}
+# Public sort key → physical column (so the API stays "address" while the DB sorts
+# on the generated address_text).
+_SORT_ALIASES = {"address": "address_text"}
 
 
 def _resolve_sort(sort_by: str | None, sort_dir: str | None) -> tuple[str, bool]:
     """(column, desc) for the order-by. Unknown column → created_at. Direction
     defaults to newest-first for dates and ascending (A→Z / 1→9) otherwise."""
     col = (sort_by or "").strip()
+    col = _SORT_ALIASES.get(col, col)
     if col not in _SORT_COLUMNS:
         col = "created_at"
     if sort_dir in ("asc", "desc"):

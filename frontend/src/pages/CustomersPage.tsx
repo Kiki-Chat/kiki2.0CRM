@@ -32,7 +32,7 @@ interface CustomerCard {
   full_name: string | null
   email: string | null
   phone: string | null
-  address: { raw?: string } | string | null
+  address: { raw?: string; street?: string; postal_code?: string; city?: string } | string | null
   customer_number: string | null
   customer_type: string | null
   identified_by: string | null
@@ -76,7 +76,7 @@ const FILTERS: { key: string; label: string; type?: string }[] = [
 const PAGE_SIZE_OPTIONS = [24, 48, 96]
 
 // Sorting: which column + direction. Mirrors the backend whitelist.
-type SortBy = 'created_at' | 'full_name' | 'customer_number' | 'phone'
+type SortBy = 'created_at' | 'full_name' | 'customer_number' | 'phone' | 'address'
 type SortDir = 'asc' | 'desc'
 const SORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'created_at:desc', label: 'Neueste zuerst' },
@@ -85,6 +85,8 @@ const SORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'full_name:desc', label: 'Name (Z–A)' },
   { value: 'phone:asc', label: 'Telefon (aufsteigend)' },
   { value: 'phone:desc', label: 'Telefon (absteigend)' },
+  { value: 'address:asc', label: 'Adresse (A–Z)' },
+  { value: 'address:desc', label: 'Adresse (Z–A)' },
   { value: 'customer_number:asc', label: 'Kundennr. (aufsteigend)' },
   { value: 'customer_number:desc', label: 'Kundennr. (absteigend)' },
 ]
@@ -102,7 +104,14 @@ function defaultPageSize(): number {
 
 function addr(a: CustomerCard['address']): string {
   if (!a) return '—'
-  return typeof a === 'string' ? a : a.raw ?? '—'
+  if (typeof a === 'string') return a
+  if (a.raw) return a.raw
+  // CSV-imported addresses arrive as {street, postal_code, city} with no `raw` —
+  // build a readable line so they no longer render blank.
+  const line = [a.street, [a.postal_code, a.city].filter(Boolean).join(' ')]
+    .filter(Boolean)
+    .join(', ')
+  return line || '—'
 }
 
 export function CustomersPage() {
@@ -420,7 +429,14 @@ export function CustomersPage() {
                   onSort={toggleSort}
                   thClassName="hidden md:table-cell"
                 />
-                <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Adresse</th>
+                <SortTh
+                  label="Adresse"
+                  col="address"
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  thClassName="hidden md:table-cell"
+                />
                 <th
                   className="px-3 py-2.5 text-right font-semibold"
                   title="Anfragen · Termine · Dokumente/Fotos"
