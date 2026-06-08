@@ -8,7 +8,7 @@ import {
   Search,
   Settings,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 
 import { useAuth } from '../../auth/AuthProvider'
@@ -50,14 +50,27 @@ export function Sidebar({
   collapsed,
   badges = {},
   onOpenSearch,
+  mobileNavOpen = false,
+  onClose,
 }: {
   collapsed: boolean
   badges?: Record<string, number>
   onOpenSearch: () => void
+  mobileNavOpen?: boolean
+  onClose?: () => void
 }) {
   const { session, signOut } = useAuth()
   const navigate = useNavigate()
   const [personalOpen, setPersonalOpen] = useState(false)
+  // Close the mobile drawer on Escape.
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose?.()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mobileNavOpen, onClose])
   // Nav groups default to OPEN so the nested submenus read like the poster
   // design out of the box (the user can still collapse them).
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
@@ -91,26 +104,44 @@ export function Sidebar({
   const badgeEmail = isAdmin ? (companyEmail ?? email) : email
   const badgeLogo = isAdmin ? companyLogo : null
 
+  // While the mobile drawer is open it is always full-width, so its contents must
+  // render expanded regardless of the desktop collapse toggle.
+  const railCollapsed = mobileNavOpen ? false : collapsed
+
   return (
+    <>
+      {/* Mobile backdrop — closes the drawer on tap. Desktop never shows it. */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={onClose} aria-hidden />
+      )}
     <aside
-      className="rail sticky top-0 z-20 flex h-screen flex-shrink-0 flex-col gap-0.5 transition-[width] duration-200"
-      style={{ width: collapsed ? 64 : 240, padding: '18px 14px 14px' }}
+      className={cn(
+        'rail fixed inset-y-0 left-0 z-50 flex h-screen flex-shrink-0 flex-col gap-0.5 transition-transform duration-200',
+        'md:sticky md:top-0 md:z-20 md:transition-[width]',
+        mobileNavOpen ? 'translate-x-0' : '-translate-x-full',
+        'md:translate-x-0',
+      )}
+      style={{
+        // On mobile the open drawer is always expanded (240); desktop honours collapse.
+        width: railCollapsed ? 64 : 240,
+        padding: '18px 14px 14px',
+      }}
     >
       {/* Brand — HeyKiki product mark (company identity lives in the bottom badge). */}
-      <div className={cn('mb-3 flex items-center gap-2.5 px-1', collapsed && 'justify-center')}>
+      <div className={cn('mb-3 flex items-center gap-2.5 px-1', railCollapsed && 'justify-center')}>
         <span className="rail-mark">K</span>
-        {!collapsed && <span className="rail-word">HeyKiki</span>}
+        {!railCollapsed && <span className="rail-word">HeyKiki</span>}
       </div>
 
       {/* Kiki fragen — ⌘K command palette over the nav menus + submenus. */}
       <button
         type="button"
         onClick={onOpenSearch}
-        className={cn('rail-search mb-2', collapsed && 'justify-center')}
+        className={cn('rail-search mb-2', railCollapsed && 'justify-center')}
         title="Kiki fragen"
       >
         <Search size={15} className="flex-shrink-0" />
-        {!collapsed && (
+        {!railCollapsed && (
           <>
             <span>Kiki fragen</span>
             <span className="rail-search-kbd">⌘K</span>
@@ -122,7 +153,7 @@ export function Sidebar({
       <nav className="-mx-1 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden px-1">
         {visibleNav.map((entry) => {
           if (!isGroup(entry)) {
-            return <Leaf key={entry.to} leaf={entry} collapsed={collapsed} badges={badges} />
+            return <Leaf key={entry.to} leaf={entry} collapsed={railCollapsed} badges={badges} />
           }
           const Icon = entry.icon
           const key = entry.label
@@ -131,13 +162,13 @@ export function Sidebar({
             <div key={key}>
               <button
                 onClick={() => setOpenGroups((g) => ({ ...g, [key]: !g[key] }))}
-                className={cn('nav-item', collapsed && 'justify-center')}
+                className={cn('nav-item', railCollapsed && 'justify-center')}
                 title={entry.label}
               >
                 <span className="nav-ico">
                   <Icon size={18} />
                 </span>
-                {!collapsed && (
+                {!railCollapsed && (
                   <>
                     <span className="flex-1 text-left">{entry.label}</span>
                     <span className={cn('nav-caret', open && 'open')}>
@@ -146,7 +177,7 @@ export function Sidebar({
                   </>
                 )}
               </button>
-              {open && !collapsed && (
+              {open && !railCollapsed && (
                 <div className="nav-sub">
                   {entry.children.map((child) => (
                     <NavLink
@@ -169,20 +200,20 @@ export function Sidebar({
             employee); hide the whole section for non-admins. */}
         {isAdmin && (
           <>
-            {!collapsed ? (
+            {!railCollapsed ? (
               <div className="rail-group">KI-Konfiguration</div>
             ) : (
               <div className="my-2 h-px bg-white/10" />
             )}
             <NavLink
               to="/kiki-zentrale"
-              className={({ isActive }) => cn('nav-item', isActive && 'active', collapsed && 'justify-center')}
+              className={({ isActive }) => cn('nav-item', isActive && 'active', railCollapsed && 'justify-center')}
               title="Kiki-Zentrale"
             >
               <span className="nav-ico kiki">
                 <Bot size={18} />
               </span>
-              {!collapsed && <span className="flex-1">Kiki-Zentrale</span>}
+              {!railCollapsed && <span className="flex-1">Kiki-Zentrale</span>}
             </NavLink>
           </>
         )}
@@ -192,13 +223,13 @@ export function Sidebar({
       <div className="mt-2">
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button className={cn('rail-account', collapsed && 'justify-center')}>
+            <button className={cn('rail-account', railCollapsed && 'justify-center')}>
               {badgeLogo ? (
                 <img src={badgeLogo} alt="" className="rail-ava" />
               ) : (
                 <span className="rail-ava">{initials(badgeName)}</span>
               )}
-              {!collapsed && (
+              {!railCollapsed && (
                 <>
                   <div className="min-w-0 flex-1 text-left">
                     <div className="rail-nm truncate">{badgeName}</div>
@@ -213,7 +244,7 @@ export function Sidebar({
             <DropdownMenu.Content
               align="start"
               sideOffset={8}
-              className="z-50 w-56 overflow-hidden rounded-lg border border-border bg-surface p-1 shadow-e3"
+              className="z-50 w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-surface p-1 shadow-e3 sm:w-56"
             >
               {/* Personal settings belong to the employee login (a person). The
                   admin login represents the COMPANY → it gets Company Settings
@@ -247,5 +278,6 @@ export function Sidebar({
       </div>
       <PersonalSettingsModal open={personalOpen} onClose={() => setPersonalOpen(false)} />
     </aside>
+    </>
   )
 }

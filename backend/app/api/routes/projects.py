@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import ProjectEmployeeAdd, ProjectPatch, ProjectUpsert
-from app.services.common import now_berlin
+from app.services.common import fetch_all_rows, now_berlin, run_parallel, validate_fk_in_org
 from app.services.invoices import maybe_create_invoice_for_project
 from app.services.projects import gen_project_number
 
@@ -62,38 +62,60 @@ def _attach_employee_names(client, org_id: str, rows: list[dict]) -> None:
 # ─── List (with per-project stats) ────────────────────────────────────────────
 def _list(org_id: str, status: str | None, customer_id: str | None, search: str | None) -> list[dict]:
     client = get_service_client()
-    q = client.table("projects").select("*").eq("org_id", org_id)
-    if status:
-        q = q.eq("status", status)
-    if customer_id:
-        q = q.eq("customer_id", customer_id)
-    projects = q.order("created_at", desc=True).execute().data or []
+
+    # Page past the 1000-row cap: the list is filtered/searched client-side, so it
+    # must contain EVERY project — a silent truncation would hide projects on large
+    # orgs. fetch_all_rows rebuilds the (filtered) query per page.
+    def _projects_query():
+        qq = client.table("projects").select("*").eq("org_id", org_id)
+        if status:
+            qq = qq.eq("status", status)
+        if customer_id:
+            qq = qq.eq("customer_id", customer_id)
+        return qq.order("created_at", desc=True)
+
+    projects = fetch_all_rows(_projects_query)
     if not projects:
         return []
     pids = [p["id"] for p in projects]
     cids = list({p["customer_id"] for p in projects if p.get("customer_id")})
 
     def rows(table: str, sel: str) -> list[dict]:
-        return (
-            client.table(table).select(sel).eq("org_id", org_id)
-            .in_("project_id", pids).execute().data or []
+        # Paged: these feed per-project COUNTS, so a silent 1000-row truncation
+        # would undercount stats for orgs with many projects/rows.
+        return fetch_all_rows(
+            lambda: client.table(table).select(sel).eq("org_id", org_id).in_("project_id", pids)
         )
 
-    inq = rows("inquiries", "project_id, status")
-    appts = rows("appointments", "project_id, status")
-    kvas = rows("cost_estimates", "project_id")
-    invs = rows("invoices", "project_id, total, status")
-    pe = (
-        client.table("project_employees").select("project_id, employee_id")
-        .in_("project_id", pids).execute().data or []
+    # Five independent enrichment reads — run them concurrently instead of serially.
+    inq, appts, kvas, invs, pe = run_parallel(
+        lambda: rows("inquiries", "project_id, status"),
+        lambda: rows("appointments", "project_id, status"),
+        lambda: rows("cost_estimates", "project_id"),
+        lambda: rows("invoices", "project_id, total, status"),
+        lambda: fetch_all_rows(
+            lambda: client.table("project_employees")
+            .select("project_id, employee_id")
+            .in_("project_id", pids)
+        ),
     )
 
     customers: dict[str, str] = {}
     calls_by_cust: dict[str, int] = {}
     if cids:
-        for c in client.table("customers").select("id, full_name").eq("org_id", org_id).in_("id", cids).execute().data or []:
+        cust_rows, call_rows = run_parallel(
+            lambda: fetch_all_rows(
+                lambda: client.table("customers").select("id, full_name")
+                .eq("org_id", org_id).in_("id", cids)
+            ),
+            lambda: fetch_all_rows(
+                lambda: client.table("calls").select("customer_id")
+                .eq("org_id", org_id).in_("customer_id", cids)
+            ),
+        )
+        for c in cust_rows:
             customers[c["id"]] = c.get("full_name")
-        for cl in client.table("calls").select("customer_id").eq("org_id", org_id).in_("customer_id", cids).execute().data or []:
+        for cl in call_rows:
             calls_by_cust[cl["customer_id"]] = calls_by_cust.get(cl["customer_id"], 0) + 1
 
     def count(rs: list[dict]) -> dict[str, int]:
@@ -161,6 +183,9 @@ async def list_projects(
 # ─── Create ──────────────────────────────────────────────────────────────────
 def _create(org_id: str, user_id: str | None, payload: ProjectUpsert) -> dict:
     client = get_service_client()
+    # Service-role bypasses RLS — verify a client-supplied customer_id actually
+    # belongs to this org before linking it (cross-tenant integrity / IDOR).
+    validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
     row = {
         "org_id": org_id,
         "customer_id": payload.customer_id,
@@ -202,16 +227,47 @@ def _detail(org_id: str, project_id: str) -> dict | None:
         p["customer_name"] = cust.get("full_name")
         p["customer"] = cust
 
-    inquiries = client.table("inquiries").select("status").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    appts = client.table("appointments").select("status, scheduled_at").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    kvas = client.table("cost_estimates").select("id").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    invs = client.table("invoices").select("total, status").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    docs = client.table("documents").select("id").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    calls = 0
-    if cid:
-        calls = client.table("calls").select("id", count="exact").eq("org_id", org_id).eq("customer_id", cid).execute().count or 0
+    # Six independent reads (all scoped to this project / its customer) — run them
+    # concurrently, and PAGE the row-returning ones so a project with >1000 related
+    # rows can't silently truncate its stats.
+    def _inq():
+        return fetch_all_rows(
+            lambda: client.table("inquiries").select("status").eq("org_id", org_id).eq("project_id", project_id)
+        )
 
-    pe = client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id).execute().data or []
+    def _appts():
+        return fetch_all_rows(
+            lambda: client.table("appointments").select("status, scheduled_at").eq("org_id", org_id).eq("project_id", project_id)
+        )
+
+    def _kvas():
+        return fetch_all_rows(
+            lambda: client.table("cost_estimates").select("id").eq("org_id", org_id).eq("project_id", project_id)
+        )
+
+    def _invs():
+        return fetch_all_rows(
+            lambda: client.table("invoices").select("total, status").eq("org_id", org_id).eq("project_id", project_id)
+        )
+
+    def _docs():
+        return fetch_all_rows(
+            lambda: client.table("documents").select("id").eq("org_id", org_id).eq("project_id", project_id)
+        )
+
+    def _calls_count():
+        if not cid:
+            return 0
+        return (
+            client.table("calls").select("id", count="exact")
+            .eq("org_id", org_id).eq("customer_id", cid).execute().count or 0
+        )
+
+    inquiries, appts, kvas, invs, docs, calls = run_parallel(_inq, _appts, _kvas, _invs, _docs, _calls_count)
+
+    pe = fetch_all_rows(
+        lambda: client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id)
+    )
     employees: list[dict] = []
     if pe:
         edata = {
@@ -276,6 +332,9 @@ def _patch(org_id: str, project_id: str, payload: ProjectPatch) -> dict | None:
     fields = payload.model_dump(exclude_unset=True)
     if not fields:
         return _fetch(client, org_id, project_id)
+    # Service-role bypasses RLS — a re-pointed customer_id on the UPDATE path must
+    # still belong to this org (the create path validates; close the PATCH gap too).
+    validate_fk_in_org(client, table="customers", fk_id=fields.get("customer_id"), org_id=org_id, label="Kunde")
     if "status" in fields and fields["status"] not in _STATUSES:
         raise HTTPException(status_code=422, detail="Invalid status")
     if "internal_notes" in fields:
@@ -504,7 +563,9 @@ async def list_project_employees(project_id: str, user: CurrentUser = Depends(re
         client = get_service_client()
         if not _fetch(client, user.org_id, project_id):
             return None
-        pe = client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id).execute().data or []
+        pe = fetch_all_rows(
+            lambda: client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id)
+        )
         if not pe:
             return []
         ids = [e["employee_id"] for e in pe]

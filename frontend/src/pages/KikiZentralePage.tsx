@@ -16,6 +16,7 @@ import { Modal } from '../components/ui/Modal'
 import { apiFetch } from '../lib/api'
 import { KZ, KZ_STALE, minutesAgo, SECTION_ENDPOINT_LABEL, type KzAudit, type KzHealth, type KzOverview } from '../lib/kikiApi'
 import { useMe } from '../lib/useMe'
+import { useToast } from '../lib/useToast'
 import { cn } from '../lib/utils'
 
 interface NavItem { slug: string; label: string; icon: LucideIcon }
@@ -48,10 +49,9 @@ export function KikiZentralePage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { isAdmin, isLoading: meLoading } = useMe()
-  const [toast, setToast] = useState<string | null>(null)
+  const { toast, flash } = useToast()
   const [healthOpen, setHealthOpen] = useState(false)
   const [rollbackSnap, setRollbackSnap] = useState<string | null>(null)
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 4000) }
 
   const { data, isLoading } = useQuery({
     queryKey: ['kiki-zentrale'],
@@ -104,7 +104,7 @@ export function KikiZentralePage() {
   return (
     <div className="p-8">
       {/* Header */}
-      <div className="mb-6 flex items-start justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-ai-bg"><Bot size={24} className="text-ai" /></div>
           <div>

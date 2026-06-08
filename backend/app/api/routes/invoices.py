@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -6,10 +7,13 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import InvoiceSend, InvoiceStatus, InvoiceUpsert
+from app.services.common import validate_fk_in_org
 from app.services.cost_estimates import build_pdf, compute_totals, fetch_customer, fetch_org
 from app.services import email_templates
 from app.services.email_send import Attachment, send_email
 from app.services.invoices import add_days, gen_invoice_number, today_iso
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
 
@@ -115,15 +119,37 @@ async def list_invoices(user: CurrentUser = Depends(require_org)) -> list[dict]:
 # ─── Create ──────────────────────────────────────────────────────────────────
 def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
     client = get_service_client()
+    # The service-role client BYPASSES RLS, so a client-supplied FK is trusted
+    # unless we check it. Reject pointers to another org's customer / KVA / project
+    # (cross-tenant integrity, IDOR) before writing anything.
+    validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
+    validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Kostenvoranschlag")
+    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+
     row = _build_row(org_id, payload, user_id)
     row["number"] = gen_invoice_number(client, org_id)
     row["status"] = "draft"
     created = client.table("invoices").insert(row).execute().data[0]
     # Converting a KVA: mark the source estimate invoiced and link it both ways.
+    # Two writes, no transaction — if the back-link update fails, COMPENSATE by
+    # deleting the just-created invoice so we never leave an invoice whose KVA
+    # still shows "draft" with no link (the conversion would look broken).
     if payload.kva_id:
-        client.table("cost_estimates").update(
-            {"status": "invoiced", "invoice_id": created["id"]}
-        ).eq("org_id", org_id).eq("id", payload.kva_id).execute()
+        try:
+            client.table("cost_estimates").update(
+                {"status": "invoiced", "invoice_id": created["id"]}
+            ).eq("org_id", org_id).eq("id", payload.kva_id).execute()
+        except Exception:
+            try:
+                client.table("invoices").delete().eq("org_id", org_id).eq(
+                    "id", created["id"]
+                ).execute()
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "invoice create: KVA back-link failed AND invoice rollback failed "
+                    "— orphan invoice %s (org %s)", created["id"], org_id
+                )
+            raise
     return created
 
 
@@ -162,6 +188,10 @@ async def get_invoice(inv_id: str, user: CurrentUser = Depends(require_org)) -> 
 
 def _update(org_id: str, inv_id: str, payload: InvoiceUpsert) -> dict | None:
     client = get_service_client()
+    # Same FK-in-org guards as _create — the UPDATE path is just as exposed.
+    validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
+    validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Kostenvoranschlag")
+    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
     row = _build_row(org_id, payload, None)
     row.pop("created_by", None)
     row["updated_at"] = _now()

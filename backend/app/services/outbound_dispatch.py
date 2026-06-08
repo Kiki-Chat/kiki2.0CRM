@@ -26,6 +26,7 @@ ledger claim (repeatable).
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from datetime import datetime, time, timedelta, timezone
 
@@ -154,13 +155,37 @@ def _maybe_send_occasion_email(*, spec, record, customer, org, org_id) -> str | 
         return None
     try:
         subject, body_html = spec.email_render(record, customer, org)
-        send_email(
-            org_id=org_id,
-            to_email=to_email,
-            subject=subject,
-            body_html=body_html,
-            reply_to=(org.get("email") or None),
-        )
+        # Bound the send: the email provider can take 20-30s on a bad day, and in
+        # the sweep every record waits on it serially. Email is best-effort and the
+        # CALL IS ALREADY PLACED, so cap the wait at 5s and move on — a slow inbox
+        # must not delay real customer calls. (A fast/failed send returns well
+        # under 5s, so this loses nothing in the normal case.)
+        outcome: dict = {}
+
+        def _send() -> None:
+            try:
+                send_email(
+                    org_id=org_id,
+                    to_email=to_email,
+                    subject=subject,
+                    body_html=body_html,
+                    reply_to=(org.get("email") or None),
+                )
+                outcome["ok"] = True
+            except Exception as exc:  # noqa: BLE001 — surfaced to the outer handler
+                outcome["err"] = exc
+
+        th = threading.Thread(target=_send, daemon=True)
+        th.start()
+        th.join(timeout=5)
+        if th.is_alive():
+            logger.warning(
+                "occasion email send exceeded 5s (%s) — abandoned; the call was "
+                "already placed and the sweep continues", spec.key
+            )
+            return None
+        if "err" in outcome:
+            raise outcome["err"]
         return to_email
     except Exception as e:  # pragma: no cover — never break the placed call
         logger.warning("occasion email failed (%s): %s", spec.key, e)

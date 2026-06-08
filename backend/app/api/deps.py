@@ -40,15 +40,20 @@ async def get_current_user(
             detail="Token missing subject",
         )
 
-    client = get_service_client()
-    res = (
-        client.table("users")
-        .select("id, email, org_id, role, full_name")
-        .eq("id", user_id)
-        .limit(1)
-        .execute()
-    )
-    row = res.data[0] if res.data else {}
+    # The Supabase client is synchronous; run it off the event loop so this async
+    # dependency (hit on EVERY authenticated request) never blocks the worker.
+    def _load_user_row() -> dict:
+        res = (
+            get_service_client()
+            .table("users")
+            .select("id, email, org_id, role, full_name")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else {}
+
+    row = await run_in_threadpool(_load_user_row)
     return CurrentUser(
         id=user_id,
         email=row.get("email") or claims.get("email"),

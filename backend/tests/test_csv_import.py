@@ -33,6 +33,11 @@ class _Chain:
     def neq(self, *a, **k):
         return self
 
+    def range(self, *a, **k):
+        # Paged reads (fetch_all_rows) call .range(); the fake returns the full
+        # set in one page, so a single pass terminates (test data is < 1 page).
+        return self
+
     def insert(self, payload):
         self._op = "insert"
         self._payload = payload

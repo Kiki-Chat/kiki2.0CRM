@@ -16,7 +16,7 @@ from app.schemas.admin import (
     EmployeeUpdate,
 )
 from app.services import csv_import, employee_invite
-from app.services.common import validate_fk_in_org
+from app.services.common import run_parallel, validate_fk_in_org
 
 log = logging.getLogger(__name__)
 
@@ -58,25 +58,23 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
     )
 
     user_ids = [e["user_id"] for e in employees if e.get("user_id")]
-    users: dict[str, dict] = {}
-    if user_ids:
-        for u in (
-            client.table("users")
-            .select("id, email, role, full_name")
-            .in_("id", user_ids)
-            .execute()
-            .data
-            or []
-        ):
-            users[u["id"]] = u
-
-    # Absences covering "now" → presence.
-    now_iso = _now().isoformat()
-    absent_ids = set()
-    absence_type: dict[str, str] = {}
     emp_ids = [e["id"] for e in employees]
-    if emp_ids:
-        for a in (
+    now_iso = _now().isoformat()  # absences covering "now" → presence
+
+    # The login-users read and the absences read both depend only on the employee
+    # list, not on each other → fetch them concurrently.
+    def _fetch_users():
+        if not user_ids:
+            return []
+        return (
+            client.table("users").select("id, email, role, full_name")
+            .in_("id", user_ids).execute().data or []
+        )
+
+    def _fetch_absences():
+        if not emp_ids:
+            return []
+        return (
             client.table("employee_absences")
             .select("employee_id, type, starts_at, ends_at")
             .eq("org_id", org_id)
@@ -84,12 +82,16 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
             .in_("employee_id", emp_ids)
             .lte("starts_at", now_iso)
             .gte("ends_at", now_iso)
-            .execute()
-            .data
-            or []
-        ):
-            absent_ids.add(a["employee_id"])
-            absence_type[a["employee_id"]] = a["type"]
+            .execute().data or []
+        )
+
+    user_rows, absence_rows = run_parallel(_fetch_users, _fetch_absences)
+    users: dict[str, dict] = {u["id"]: u for u in user_rows}
+    absent_ids = set()
+    absence_type: dict[str, str] = {}
+    for a in absence_rows:
+        absent_ids.add(a["employee_id"])
+        absence_type[a["employee_id"]] = a["type"]
 
     out = []
     for e in employees:
@@ -181,10 +183,11 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                 client.auth.admin.update_user_by_id(
                     user_id, {"user_metadata": {"full_name": payload.display_name}}
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
+                log.exception("employee recreate: profile/auth update failed (user %s)", user_id)
                 warning = (
                     "Login wiederverwendet, aber das Profil konnte nicht vollständig "
-                    f"aktualisiert werden ({exc})."
+                    "aktualisiert werden."
                 )
             try:
                 employee_invite.revoke_user_sessions(user_id)
@@ -201,10 +204,11 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                     login_email=payload.email,
                     set_password_link=link,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
+                log.exception("employee recreate: invite email failed (user %s)", user_id)
                 warning = ((warning + " ") if warning else "") + (
                     "Login aktualisiert, aber die Einladungs-E-Mail konnte nicht "
-                    f"gesendet werden ({exc})."
+                    "gesendet werden."
                 )
         else:
             # New login (Wave 2): generate a set-password invite link (this creates
@@ -226,14 +230,15 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                         "role": "org_admin" if payload.access_role == "admin" else "employee",
                     }
                 ).execute()
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 # Could not create the login → don't lose the record; create the
                 # employee without login. Admin can resend / set a password later.
+                log.exception("employee create: login provisioning failed (email %s)", payload.email)
                 user_id = None
                 link = None
                 warning = (
                     "Mitarbeiter angelegt, aber der Login-Zugang konnte nicht "
-                    f"erstellt werden ({exc}). Sie können die Einladung später erneut "
+                    "erstellt werden. Sie können die Einladung später erneut "
                     "senden oder ein Passwort manuell setzen."
                 )
             if user_id and link:
@@ -245,10 +250,11 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                         login_email=payload.email,
                         set_password_link=link,
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
+                    log.exception("employee create: welcome email failed (email %s)", payload.email)
                     warning = (
                         "Login erstellt, aber die Willkommens-E-Mail konnte nicht "
-                        f"gesendet werden ({exc}). Bitte die Einladung erneut senden "
+                        "gesendet werden. Bitte die Einladung erneut senden "
                         "oder ein Passwort manuell setzen."
                     )
 

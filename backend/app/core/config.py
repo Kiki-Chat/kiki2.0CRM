@@ -7,12 +7,26 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # Deployment environment. Set APP_ENV=production in Railway prod so startup
+    # validation can FAIL FAST on missing security-critical secrets instead of
+    # silently running open. Anything other than "production" is treated as dev.
+    app_env: str = Field(default="development", validation_alias="APP_ENV")
+
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_jwt_secret: str = ""
 
-    master_webhook_secret: str = "change-me"
+    # Shared secret for the master/provision + post-call webhook gates. Default is
+    # EMPTY (fail-closed): with no secret set, the verifiers reject every request
+    # rather than accept a well-known fallback string. MUST be set in production —
+    # validate_runtime_config() refuses to start the app if it is empty there.
+    master_webhook_secret: str = Field(default="", validation_alias="MASTER_WEBHOOK_SECRET")
     post_call_webhook_secret: str = ""
+
+    # TTL (seconds) for the cached Supabase JWKS. Default 5 min (was a hardcoded
+    # 1 h) so a rotated/revoked signing key stops being trusted within one refresh
+    # window instead of up to an hour. Lower per-env via JWKS_TTL_SECONDS.
+    jwks_ttl_seconds: int = Field(default=300, validation_alias="JWKS_TTL_SECONDS")
 
     cors_origins: str = "http://localhost:5173"
 
@@ -82,7 +96,9 @@ class Settings(BaseSettings):
     # The SMTP key is stored in Railway as BREVO_SMTP_KEY (NOT BREVO_SMTP_PASSWORD);
     # read it from that existing env name. The key stays in env — never hardcoded.
     brevo_smtp_password: str = Field(default="", validation_alias="BREVO_SMTP_KEY")
-    brevo_smtp_from_address: str = "info@kiki-zusammenfassung.de"
+    brevo_smtp_from_address: str = Field(
+        default="info@kiki-zusammenfassung.de", validation_alias="BREVO_SMTP_FROM_ADDRESS"
+    )
     brevo_smtp_from_name: str = "HeyKiki"
     # Brevo transactional HTTP API key (api.brevo.com/v3/smtp/email, HTTPS/443).
     # Tier-3 fallback sends via the HTTP API instead of SMTP/587 (Railway egress
@@ -149,10 +165,35 @@ class Settings(BaseSettings):
     def outbound_test_org_id_set(self) -> set[str]:
         return {o.strip() for o in self.outbound_test_org_ids.split(",") if o.strip()}
 
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() in ("production", "prod")
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def validate_runtime_config(s: "Settings | None" = None) -> list[str]:
+    """Return a list of fatal config problems for the current environment.
+
+    Called once at startup (app.main). In production a non-empty list aborts boot —
+    a loud crash is strictly safer than silently running with auth wide open or with
+    no DB. In dev it only warns, so local boot stays frictionless. Returns the list
+    (also handy to unit-test) so the caller decides how to react.
+    """
+    s = s or get_settings()
+    problems: list[str] = []
+    if s.is_production:
+        if not s.master_webhook_secret:
+            problems.append(
+                "MASTER_WEBHOOK_SECRET is empty — webhook auth would reject all "
+                "requests. Set a strong secret in the production environment."
+            )
+        if not s.supabase_url or not s.supabase_service_role_key:
+            problems.append("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY must be set in production.")
+    return problems
 
 
 settings = get_settings()

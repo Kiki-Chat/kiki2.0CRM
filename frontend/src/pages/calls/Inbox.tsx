@@ -171,8 +171,8 @@ export function ActionRow({ item, onSelect }: { item: ActionItem; onSelect: () =
           )}
           <span className="ml-auto truncate text-[11px] text-faint">{fmtTime(time)}</span>
         </div>
-        <div className="text-[13.5px] font-bold leading-snug text-text">{item.summary}</div>
-        <div className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+        <div className="truncate text-[13.5px] font-bold leading-snug text-text">{item.summary}</div>
+        <div className="mt-1 flex items-center gap-1.5 truncate text-xs text-muted">
           <User size={12} className="text-faint" />
           {item.customer_name || 'Unbekannter Kunde'}
         </div>

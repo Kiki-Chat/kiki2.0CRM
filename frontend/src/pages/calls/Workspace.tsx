@@ -450,7 +450,7 @@ export function Workspace({
 }) {
   const status = inquiry?.status ?? 'open'
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface">
       <div className="px-[18px] pt-4">
         <div className="mb-2.5 flex items-start gap-2.5">
           {emergency && <span className="mt-0.5"><NotdienstBadge small /></span>}

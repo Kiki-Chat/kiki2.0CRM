@@ -24,14 +24,10 @@ const AdminAuthContext = createContext<AdminAuthContextValue | null>(null)
  * password-only by design — see AdminLoginPage).
  */
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
-  const binding = useSupabaseAuthBinding(adminSupabase)
-  const value: AdminAuthContextValue = {
-    session: binding.session,
-    loading: binding.loading,
-    configured: binding.configured,
-    signInWithPassword: binding.signInWithPassword,
-    signOut: binding.signOut,
-  }
+  // The binding is already memoized in useSupabaseAuthBinding and AdminAuthContextValue
+  // is a structural subset of its return type (minus the magic-link helper), so we pass
+  // it through directly instead of rebuilding a fresh object every render.
+  const value: AdminAuthContextValue = useSupabaseAuthBinding(adminSupabase)
   return <AdminAuthContext.Provider value={value}>{children}</AdminAuthContext.Provider>
 }
 

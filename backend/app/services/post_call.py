@@ -82,12 +82,28 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
             for appt in pending:
                 appt_id = appt["id"]
                 try:
-                    client.table("appointments").update(
-                        {
-                            "status": "confirmed",
-                            "confirmed_at": datetime.now(timezone.utc).isoformat(),
-                        }
-                    ).eq("org_id", org_id).eq("id", appt_id).execute()
+                    # Idempotent flip: only update rows STILL 'pending'. PostgREST
+                    # returns the rows it actually changed, so if two overlapping
+                    # post-call deliveries race, exactly ONE update flips the row
+                    # and gets a non-empty result — the loser sees [] and skips the
+                    # notify, so the customer never gets a DUPLICATE confirmation
+                    # call/email. (This is the OUTBOUND, real-customer path.)
+                    confirmed = (
+                        client.table("appointments")
+                        .update(
+                            {
+                                "status": "confirmed",
+                                "confirmed_at": datetime.now(timezone.utc).isoformat(),
+                            }
+                        )
+                        .eq("org_id", org_id)
+                        .eq("id", appt_id)
+                        .eq("status", "pending")
+                        .execute()
+                        .data
+                    )
+                    if not confirmed:
+                        continue  # already confirmed by a concurrent delivery
                     notify_appointment_outcome(org_id, appt_id, "confirm")
                     maybe_create_project_for_appointment(org_id, appt, None, client)
                 except Exception:  # noqa: BLE001 — one bad appt must not stop the rest

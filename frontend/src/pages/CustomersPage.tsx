@@ -229,7 +229,7 @@ export function CustomersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1440px] p-8">
+    <div className="mx-auto max-w-7xl p-4 md:p-6 lg:p-8">
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -404,12 +404,13 @@ export function CustomersPage() {
                   sortBy={sortBy}
                   sortDir={sortDir}
                   onSort={toggleSort}
+                  thClassName="hidden md:table-cell"
                 />
                 <th className="px-3 py-2.5 font-semibold">Typ</th>
-                <th className="px-3 py-2.5 font-semibold">Quelle</th>
-                <th className="px-3 py-2.5 font-semibold">E-Mail</th>
-                <th className="px-3 py-2.5 font-semibold">Telefon</th>
-                <th className="px-3 py-2.5 font-semibold">Adresse</th>
+                <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Quelle</th>
+                <th className="hidden px-3 py-2.5 font-semibold md:table-cell">E-Mail</th>
+                <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Telefon</th>
+                <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Adresse</th>
                 <th
                   className="px-3 py-2.5 text-right font-semibold"
                   title="Anfragen · Termine · Dokumente/Fotos"
@@ -442,20 +443,20 @@ export function CustomersPage() {
                       />
                     </td>
                     <td className="px-3 py-2.5 font-semibold text-text">{c.full_name ?? 'Unbekannt'}</td>
-                    <td className="px-3 py-2.5 text-muted">{c.customer_number ?? '—'}</td>
+                    <td className="hidden px-3 py-2.5 text-muted md:table-cell">{c.customer_number ?? '—'}</td>
                     <td className="px-3 py-2.5">
                       <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold', meta.badge)}>
                         {meta.label}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="hidden px-3 py-2.5 md:table-cell">
                       <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', sm.badge)}>
                         {sm.label}
                       </span>
                     </td>
-                    <td className="max-w-[200px] truncate px-3 py-2.5 text-muted">{c.email ?? '—'}</td>
-                    <td className="px-3 py-2.5 text-muted">{c.phone ?? '—'}</td>
-                    <td className="max-w-[220px] truncate px-3 py-2.5 text-muted">{addr(c.address)}</td>
+                    <td className="hidden max-w-[200px] truncate px-3 py-2.5 text-muted md:table-cell">{c.email ?? '—'}</td>
+                    <td className="hidden px-3 py-2.5 text-muted md:table-cell">{c.phone ?? '—'}</td>
+                    <td className="hidden max-w-[220px] truncate px-3 py-2.5 text-muted md:table-cell">{addr(c.address)}</td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-right text-xs text-muted">
                       {c.inquiry_count} · {c.appointment_count} · {c.photo_count + c.document_count}
                     </td>
@@ -618,16 +619,18 @@ function SortTh({
   sortBy,
   sortDir,
   onSort,
+  thClassName,
 }: {
   label: string
   col: SortBy
   sortBy: SortBy
   sortDir: SortDir
   onSort: (c: SortBy) => void
+  thClassName?: string
 }) {
   const active = sortBy === col
   return (
-    <th className="px-3 py-2.5 font-semibold">
+    <th className={cn('px-3 py-2.5 font-semibold', thClassName)}>
       <button
         type="button"
         onClick={() => onSort(col)}

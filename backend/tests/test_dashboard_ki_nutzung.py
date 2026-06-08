@@ -66,12 +66,27 @@ class _FakeChain:
     def in_(self, *a, **k):
         return self
 
+    def lte(self, *a, **k):
+        return self
+
+    def neq(self, *a, **k):
+        return self
+
+    def order(self, *a, **k):
+        return self
+
+    def range(self, *a, **k):
+        # Paged reads (fetch_all_rows) call .range(); the fake returns the whole
+        # set in one page so a single pass terminates (test data is < 1 page).
+        return self
+
     def limit(self, *a, **k):
         return self
 
     def execute(self):
         r = MagicMock()
         r.data = list(self.db.get(self.table, []))
+        r.count = len(r.data)
         return r
 
 

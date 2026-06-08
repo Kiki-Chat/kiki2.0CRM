@@ -1,11 +1,13 @@
 // Center + right orchestrator. Owns the detail queries/mutations/modals/timeline
 // (identical wiring to the original CallDetail) and composes Transcript + Workspace.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronLeft, ListChecks, MessageSquare } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { apiFetch } from '../../lib/api'
 import { AppointmentCard, usePendingAppointment, type PendingAppointment } from './AppointmentCard'
+import { Segmented } from './atoms'
 import { CreateAppointmentModal, ProcessRequestModal } from './Modals'
 import { ResizeHandle, useColumnResize } from './resize'
 import { Transcript } from './Transcript'
@@ -19,6 +21,8 @@ export function CallDetail({
   rightOpen,
   onToggleRight,
   onDeleted,
+  isWide = true,
+  onBack,
 }: {
   callId: string
   isSuperAdmin: boolean
@@ -26,11 +30,15 @@ export function CallDetail({
   rightOpen: boolean
   onToggleRight: () => void
   onDeleted?: () => void
+  isWide?: boolean
+  onBack?: () => void
 }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [tab, setTab] = useState<'actions' | 'details' | 'course'>('actions')
   const [modal, setModal] = useState<'process' | 'appointment' | null>(null)
+  // Mobile single-pane: which of transcript / workspace is showing.
+  const [mobileView, setMobileView] = useState<'transcript' | 'workspace'>('transcript')
 
   const { data: call } = useQuery({
     queryKey: ['call', callId],
@@ -117,61 +125,45 @@ export function CallDetail({
       />
     ) : null
 
-  return (
+  const workspaceNode = (
+    <Workspace
+      call={call}
+      inquiry={inquiry}
+      employees={employees}
+      busy={patchInquiry.isPending || deleteCall.isPending}
+      emergency={emergency}
+      tab={tab}
+      setTab={setTab}
+      timeline={timeline.data ?? []}
+      timelineLoading={timeline.isLoading}
+      appointmentSlot={appointmentSlot}
+      onStatus={(s) => patchInquiry.mutate({ status: s })}
+      onDelete={() => {
+        if (
+          window.confirm(
+            'Diesen Anruf wirklich löschen? Die zugehörige Anfrage wird ebenfalls entfernt.',
+          )
+        )
+          deleteCall.mutate()
+      }}
+      onAssign={(id) => patchInquiry.mutate({ assigned_employee_id: id })}
+      onEdit={() => setModal('process')}
+      onAppointment={() => setModal('appointment')}
+      onKva={
+        call.customer_id
+          ? () =>
+              navigate(
+                `/cost-estimates/new?customer_id=${call.customer_id}` +
+                  (inquiry?.id ? `&inquiry_id=${inquiry.id}` : ''),
+              )
+          : undefined
+      }
+      onOpenCustomer={() => call.customer_id && navigate(`/customers/${call.customer_id}`)}
+    />
+  )
+
+  const modals = (
     <>
-      <Transcript
-        call={call}
-        isSuperAdmin={isSuperAdmin}
-        onOpenSummary={() => setTab('details')}
-        onToggleRight={onToggleRight}
-        rightOpen={rightOpen}
-      />
-
-      {rightOpen && (
-        <>
-          <ResizeHandle onMouseDown={rightResize.onMouseDown} />
-          <aside
-            style={{ width: rightResize.width }}
-            className="flex h-full flex-shrink-0 flex-col border-l border-border bg-surface"
-          >
-            <Workspace
-              call={call}
-              inquiry={inquiry}
-              employees={employees}
-              busy={patchInquiry.isPending || deleteCall.isPending}
-              emergency={emergency}
-              tab={tab}
-              setTab={setTab}
-              timeline={timeline.data ?? []}
-              timelineLoading={timeline.isLoading}
-              appointmentSlot={appointmentSlot}
-              onStatus={(s) => patchInquiry.mutate({ status: s })}
-              onDelete={() => {
-                if (
-                  window.confirm(
-                    'Diesen Anruf wirklich löschen? Die zugehörige Anfrage wird ebenfalls entfernt.',
-                  )
-                )
-                  deleteCall.mutate()
-              }}
-              onAssign={(id) => patchInquiry.mutate({ assigned_employee_id: id })}
-              onEdit={() => setModal('process')}
-              onAppointment={() => setModal('appointment')}
-              onKva={
-                call.customer_id
-                  ? () =>
-                      navigate(
-                        `/cost-estimates/new?customer_id=${call.customer_id}` +
-                          (inquiry?.id ? `&inquiry_id=${inquiry.id}` : ''),
-                      )
-                  : undefined
-              }
-              onOpenCustomer={() => call.customer_id && navigate(`/customers/${call.customer_id}`)}
-            />
-          </aside>
-        </>
-      )}
-
       {inquiry && (
         <ProcessRequestModal
           open={modal === 'process'}
@@ -199,6 +191,75 @@ export function CallDetail({
           qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
         }}
       />
+    </>
+  )
+
+  // ── Mobile (< lg): single pane — back button + Transkript/Bearbeiten toggle.
+  // The 3-pane desktop cockpit can't fit, so we show one pane at a time.
+  if (!isWide) {
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col bg-surface">
+        <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-2">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-bold text-body hover:bg-alt"
+          >
+            <ChevronLeft size={15} /> Liste
+          </button>
+          <div className="ml-auto">
+            <Segmented
+              value={mobileView}
+              onChange={(v) => setMobileView(v as 'transcript' | 'workspace')}
+              options={[
+                { value: 'transcript', label: 'Transkript', icon: MessageSquare },
+                { value: 'workspace', label: 'Bearbeiten', icon: ListChecks },
+              ]}
+            />
+          </div>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {mobileView === 'transcript' ? (
+            <Transcript
+              call={call}
+              isSuperAdmin={isSuperAdmin}
+              onOpenSummary={() => {
+                setTab('details')
+                setMobileView('workspace')
+              }}
+            />
+          ) : (
+            workspaceNode
+          )}
+        </div>
+        {modals}
+      </div>
+    )
+  }
+
+  // ── Desktop (≥ lg): the resizable transcript + optional workspace cockpit.
+  return (
+    <>
+      <Transcript
+        call={call}
+        isSuperAdmin={isSuperAdmin}
+        onOpenSummary={() => setTab('details')}
+        onToggleRight={onToggleRight}
+        rightOpen={rightOpen}
+      />
+
+      {rightOpen && (
+        <>
+          <ResizeHandle onMouseDown={rightResize.onMouseDown} />
+          <aside
+            style={{ width: rightResize.width }}
+            className="flex h-full flex-shrink-0 flex-col border-l border-border bg-surface"
+          >
+            {workspaceNode}
+          </aside>
+        </>
+      )}
+
+      {modals}
     </>
   )
 }

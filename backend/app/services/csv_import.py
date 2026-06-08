@@ -24,7 +24,7 @@ import re
 from collections import Counter
 
 from app.db.supabase_client import get_service_client
-from app.services.common import gen_customer_number
+from app.services.common import fetch_all_rows, gen_customer_number
 from app.services.identify import _to_e164
 
 _CHUNK = 500
@@ -327,14 +327,14 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
     client = get_service_client()
     _headers, rows = parse_csv(content)
 
-    existing = (
-        client.table("customers")
+    # Read ALL existing customers (paged) — dedup is only idempotent if it sees
+    # every prior row. A plain .execute() caps at ~1000, so on an org past 1000
+    # customers a re-import of the same file would insert duplicates for rows 1001+.
+    existing = fetch_all_rows(
+        lambda: client.table("customers")
         .select("email, phone, phone2, full_name")
         .eq("org_id", org_id)
         .neq("status", "deleted")
-        .execute()
-        .data
-        or []
     )
 
     # ── Dedup keys, each giving 100% assurance on its own trigger ──
@@ -471,7 +471,10 @@ def import_employees(org_id: str, content: bytes, mapping: dict) -> dict:
     client = get_service_client()
     _headers, rows = parse_csv(content)
 
-    existing = client.table("employees").select("email, display_name").eq("org_id", org_id).execute().data or []
+    # Paged read (see import_customers): the dedup must see every existing employee.
+    existing = fetch_all_rows(
+        lambda: client.table("employees").select("email, display_name").eq("org_id", org_id)
+    )
     seen_emails = {e["email"].lower() for e in existing if e.get("email")}
     seen_names = {e["display_name"].lower() for e in existing if e.get("display_name")}
 

@@ -19,6 +19,7 @@ from app.services.cost_estimates import (
     valid_until_for,
 )
 from app.services import email_templates
+from app.services.common import run_parallel, validate_fk_in_org
 from app.services.email_send import Attachment, send_email
 
 router = APIRouter(prefix="/api/cost-estimates", tags=["cost-estimates"])
@@ -72,20 +73,27 @@ def _list(org_id: str) -> list[dict]:
     )
     cust_ids = {r["customer_id"] for r in rows if r.get("customer_id")}
     inq_ids = {r["inquiry_id"] for r in rows if r.get("inquiry_id")}
-    customers: dict[str, dict] = {}
-    if cust_ids:
-        for c in (
+
+    # The customer and inquiry enrichment reads are independent → run concurrently.
+    def _fetch_customers():
+        if not cust_ids:
+            return []
+        return (
             client.table("customers").select("id, full_name, email").eq("org_id", org_id)
             .in_("id", list(cust_ids)).execute().data or []
-        ):
-            customers[c["id"]] = c
-    inquiries: dict[str, str] = {}
-    if inq_ids:
-        for i in (
+        )
+
+    def _fetch_inquiries():
+        if not inq_ids:
+            return []
+        return (
             client.table("inquiries").select("id, title").eq("org_id", org_id)
             .in_("id", list(inq_ids)).execute().data or []
-        ):
-            inquiries[i["id"]] = i.get("title")
+        )
+
+    cust_rows, inq_rows = run_parallel(_fetch_customers, _fetch_inquiries)
+    customers: dict[str, dict] = {c["id"]: c for c in cust_rows}
+    inquiries: dict[str, str] = {i["id"]: i.get("title") for i in inq_rows}
     for r in rows:
         c = customers.get(r.get("customer_id")) or {}
         r["customer_name"] = c.get("full_name")
@@ -129,8 +137,16 @@ def _build_row(org_id: str, payload: CostEstimateUpsert, user_id: str | None) ->
     }
 
 
+def _validate_fks(client, org_id: str, payload: CostEstimateUpsert) -> None:
+    """Reject cross-tenant customer/inquiry/project ids (service-role bypasses RLS)."""
+    validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
+    validate_fk_in_org(client, table="inquiries", fk_id=payload.inquiry_id, org_id=org_id, label="Anfrage")
+    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+
+
 def _create(org_id: str, user_id: str | None, payload: CostEstimateUpsert) -> dict:
     client = get_service_client()
+    _validate_fks(client, org_id, payload)
     row = _build_row(org_id, payload, user_id)
     row["number"] = gen_number(client, org_id, payload.type)
     row["status"] = "draft"
@@ -170,6 +186,7 @@ async def get_estimate(ce_id: str, user: CurrentUser = Depends(require_org)) -> 
 
 def _update(org_id: str, ce_id: str, payload: CostEstimateUpsert) -> dict | None:
     client = get_service_client()
+    _validate_fks(client, org_id, payload)
     row = _build_row(org_id, payload, None)
     row.pop("created_by", None)
     row["updated_at"] = _now()

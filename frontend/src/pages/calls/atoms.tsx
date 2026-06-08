@@ -205,11 +205,9 @@ function ChipRow<T extends string>({
 export function FilterPopover({
   filters,
   setFilters,
-  align = 'left',
 }: {
   filters: InboxFilters
   setFilters: (f: InboxFilters | ((f: InboxFilters) => InboxFilters)) => void
-  align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -248,9 +246,8 @@ export function FilterPopover({
 
       {open && (
         <div
-          className="absolute z-[60] mt-2 w-[300px] rounded-2xl border p-4 shadow-e3"
+          className="absolute right-0 z-[60] mt-2 w-[min(300px,calc(100vw-1.5rem))] rounded-2xl border p-4 shadow-e3"
           style={{
-            [align]: 0,
             background: 'var(--glass-bg)',
             backdropFilter: 'blur(20px) saturate(1.6)',
             WebkitBackdropFilter: 'blur(20px) saturate(1.6)',

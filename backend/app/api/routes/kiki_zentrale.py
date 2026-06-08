@@ -291,6 +291,8 @@ def _el_read_state(agent_id: str) -> dict:
     try:
         cfg = ea.get_agent_config(agent_id)
     except Exception as exc:  # noqa: BLE001
+        # Log so an EL outage / auth failure is diagnosable (was silent before).
+        logger.warning("ElevenLabs agent state unreachable (agent %s): %s", agent_id, exc)
         return {"reachable": False, "error": str(exc)[:200]}
     ce = ea._get_path(cfg, ea.CLIENT_EVENTS_PATH) or []
     return {
