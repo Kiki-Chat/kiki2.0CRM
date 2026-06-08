@@ -92,7 +92,7 @@ const TOOL_CONDITION: Record<string, { l: string; cls: string }> = {
 }
 const money = (n: number | null) => '€' + (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const margin = (s: number | null, b: number | null) => (s && b ? `${(((s - b) / s) * 100).toFixed(0)} %` : '–')
-const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' }) : '–')
+const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Berlin' }) : '–')
 const inputCls = 'w-full rounded-md border border-border bg-alt px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary'
 const labelCls = 'mb-1.5 block text-xs font-semibold text-body'
 

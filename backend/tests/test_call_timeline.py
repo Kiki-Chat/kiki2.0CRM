@@ -34,6 +34,7 @@ class _FakeChain:
     def select(self, *a, **k): return self._rec("select", *a, **k)
     def eq(self, *a, **k): return self._rec("eq", *a, **k)
     def in_(self, *a, **k): return self._rec("in_", *a, **k)
+    def or_(self, *a, **k): return self._rec("or_", *a, **k)
     def neq(self, *a, **k): return self._rec("neq", *a, **k)
     def order(self, *a, **k): return self._rec("order", *a, **k)
     def limit(self, *a, **k): return self._rec("limit", *a, **k)
@@ -281,6 +282,31 @@ def test_appointment_lifecycle_events(monkeypatch):
     # Reason is surfaced on the rejected event extras.
     rej = next(e for e in events if e["kind"] == "appointment_rejected")
     assert rej["extras"]["reason"] == "Kunde nicht erreichbar"
+
+
+def test_appointment_events_cancelled_and_rescheduled():
+    """The new cancelled_at / rescheduled_at columns each emit their own event;
+    a staff reject (rejected_at) must NOT also emit a cancellation."""
+    now = _now()
+    resched = call_routes._appointment_events(
+        {"id": "ap1", "title": "Wartung", "scheduled_at": _iso(now),
+         "rescheduled_at": _iso(now - timedelta(minutes=5))}
+    )
+    assert any(e["kind"] == "appointment_rescheduled" for e in resched)
+
+    cancelled = call_routes._appointment_events(
+        {"id": "ap2", "title": "Wartung", "scheduled_at": _iso(now),
+         "cancelled_at": _iso(now - timedelta(minutes=2))}
+    )
+    assert any(e["kind"] == "appointment_cancelled" for e in cancelled)
+
+    # rejected_at present → 'rejected', NOT a duplicate 'cancelled'.
+    rejected = call_routes._appointment_events(
+        {"id": "ap3", "title": "Wartung", "scheduled_at": _iso(now),
+         "rejected_at": _iso(now), "cancelled_at": _iso(now)}
+    )
+    kinds = {e["kind"] for e in rejected}
+    assert "appointment_rejected" in kinds and "appointment_cancelled" not in kinds
 
 
 def test_kva_lifecycle_events(monkeypatch):

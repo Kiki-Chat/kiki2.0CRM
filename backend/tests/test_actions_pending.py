@@ -241,6 +241,40 @@ def test_alt_time_proposal_is_empty_when_no_open_proposals():
     assert ax._alt_time_proposal(_FakeClient({}), ORG) == []
 
 
+# ─── appointment_cancelled (kept visible so the team is informed) ─────────────
+def test_appointment_cancelled_surfaces_recent_cancellations():
+    appts = [
+        {
+            "id": "ap-c", "inquiry_id": "inq-c", "customer_id": "cust-c", "title": "Wartung",
+            "scheduled_at": _iso(_now() + timedelta(days=1)),
+            "cancelled_at": _iso(_now() - timedelta(hours=2)),
+            "created_at": _iso(_now() - timedelta(days=1)), "status": "cancelled",
+            "source_conversation_id": None,
+        },
+    ]
+    customers = [{"id": "cust-c", "full_name": "Lena Storno"}]
+    inquiries = [{"id": "inq-c", "call_id": "call-c"}]
+    client = _FakeClient({"appointments": appts, "customers": customers, "inquiries": inquiries})
+
+    out = ax._appointment_cancelled(client, ORG)
+
+    assert len(out) == 1
+    row = out[0]
+    assert row["kind"] == "appointment_cancelled"
+    assert row["id"] == "ap-c"
+    assert row["customer_name"] == "Lena Storno"
+    # call_id resolved via the inquiry so the worklist row opens the call for context.
+    assert row["call_id"] == "call-c"
+    assert row["priority"] == "high"
+    assert "storniert" in row["summary"].lower()
+    # Status filter pinned to 'cancelled'.
+    assert any(c["method"] == "eq" and c["args"] == ("status", "cancelled") for c in client.recorder)
+
+
+def test_appointment_cancelled_empty_when_none():
+    assert ax._appointment_cancelled(_FakeClient({"appointments": []}), ORG) == []
+
+
 # ─── _aggregate sort order ──────────────────────────────────────────────────
 def test_aggregate_sort_priority_desc_due_asc_nulls_last_created_desc(monkeypatch):
     """High-priority comes before normal; within a priority, rows with a

@@ -42,7 +42,7 @@ const inputCls =
   'w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary'
 const todayYmd = () => new Date().toISOString().slice(0, 10)
 const fmtDate = (s: string) =>
-  new Date(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  new Date(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' })
 
 export function MyAbsencePage() {
   const [open, setOpen] = useState(false)

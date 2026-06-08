@@ -49,6 +49,7 @@ ActionKind = Literal[
     "kva_pending_acceptance",
     "callback_owed",
     "alt_time_proposal",
+    "appointment_cancelled",
 ]
 
 
@@ -367,6 +368,56 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
     return out
 
 
+def _appointment_cancelled(client, org_id: str) -> list[dict[str, Any]]:
+    """Recently-cancelled appointments — kept visible so the team is INFORMED instead
+    of the worklist item silently vanishing on cancel. Windowed to the last 14 days
+    (no dismissal table); the team can re-book from the customer card if needed.
+
+    Sourced from cancelled_at (set on /cancel + the agent cancel tool), so only NEW
+    cancellations appear — a staff 'Ablehnen' of a pending request (rejected_at) is a
+    different lifecycle event and is not surfaced here."""
+    cutoff = _iso_minus_days(14)
+    rows = (
+        client.table("appointments")
+        .select(
+            "id, inquiry_id, customer_id, title, scheduled_at, cancelled_at, "
+            "created_at, status, source_conversation_id"
+        )
+        .eq("org_id", org_id)
+        .eq("status", "cancelled")
+        .gte("cancelled_at", cutoff)
+        .order("cancelled_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        return []
+    name_by_cust = _customer_name_map(
+        client, org_id, [r.get("customer_id") for r in rows]
+    )
+    call_by_appt = _resolve_call_ids(client, org_id, rows)
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
+        title = r.get("title") or "Termin"
+        out.append(
+            {
+                "kind": "appointment_cancelled",
+                "id": r["id"],
+                "inquiry_id": r.get("inquiry_id"),
+                "call_id": call_by_appt.get(r["id"]),
+                "customer_name": nm,
+                "customer_id": r.get("customer_id"),
+                "summary": f"Termin storniert: {title} — Team informieren / ggf. neu vereinbaren",
+                "created_at": r.get("created_at"),
+                "due_at": None,
+                "priority": "high",
+            }
+        )
+    return out
+
+
 # ─── Sort: priority desc, due_at asc nulls last, created_at desc ────────────
 _PRIORITY_RANK = {"high": 0, "normal": 1}
 
@@ -400,6 +451,7 @@ def _aggregate(org_id: str) -> list[dict[str, Any]]:
     items.extend(_kva_pending_acceptance(client, org_id))
     items.extend(_callback_owed(client, org_id))
     items.extend(_alt_time_proposal(client, org_id))
+    items.extend(_appointment_cancelled(client, org_id))
 
     # Sort: priority desc, due_at asc nulls last, created_at desc.
     # Python sorted() is stable — do passes in reverse priority order:

@@ -352,22 +352,34 @@ def gen_inquiry_number(client, org_id: str) -> str:
     return f"ANF-{year}-{(res.count or 0) + 1:04d}"
 
 
+CUSTOMER_NUMBER_PREFIX = "KI-"
+
+
+def ki_customer_seq(value: str | None) -> int | None:
+    """Return the integer sequence of a ``KI-NNNNNN`` customer number, else None.
+
+    Used to advance the auto-number sequence while ignoring legacy/manual numbers."""
+    if isinstance(value, str) and value.startswith(CUSTOMER_NUMBER_PREFIX):
+        tail = value[len(CUSTOMER_NUMBER_PREFIX):]
+        if tail.isdigit():
+            return int(tail)
+    return None
+
+
 def gen_customer_number(client, org_id: str) -> str:
-    """Next customer number = max existing numeric customer_number + 1 (per org),
-    starting at 101001. Unified across the AI-tool, manual-create, and CSV-import
-    paths so call-created customers continue the same numeric sequence as the
-    imported ones (CSV rows keep their original Kundennummer).
+    """Next auto-assigned customer number, AI-tagged and per-org: ``KI-000001``.
+
+    The ``KI-`` prefix (Kiki / KI = Künstliche Intelligenz) marks every
+    system-generated number so it can NEVER collide with a Kundennummer the
+    business already uses on its own — which may itself be a plain number like
+    101001. Only previously auto-generated ``KI-`` numbers advance the sequence;
+    legacy numeric or manually-entered numbers are left untouched and ignored here.
 
     Pages past the 1000-row cap: customer_number is a *text* column holding the
-    original (possibly non-numeric) Kundennummer, so we cannot ``order``/``max`` it
-    in SQL — we must read every value and take the numeric max in Python. Without
-    paging, an org with >1000 customers would re-mint an existing number."""
+    original (possibly non-numeric) Kundennummer, so we read every value and take
+    the max KI- sequence in Python (a >1000-customer org would otherwise re-mint)."""
     rows = fetch_all_rows(
         lambda: client.table("customers").select("customer_number").eq("org_id", org_id)
     )
-    nums = [
-        int(r["customer_number"])
-        for r in rows
-        if r.get("customer_number") and str(r["customer_number"]).isdigit()
-    ]
-    return str(max(nums) + 1 if nums else 101001)
+    seqs = [s for r in rows if (s := ki_customer_seq(r.get("customer_number"))) is not None]
+    return f"{CUSTOMER_NUMBER_PREFIX}{(max(seqs) + 1 if seqs else 1):06d}"

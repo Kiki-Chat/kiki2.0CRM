@@ -24,7 +24,7 @@ import re
 from collections import Counter
 
 from app.db.supabase_client import get_service_client
-from app.services.common import fetch_all_rows, gen_customer_number
+from app.services.common import fetch_all_rows, gen_customer_number, ki_customer_seq
 from app.services.identify import _to_e164
 
 _CHUNK = 500
@@ -365,8 +365,11 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
             (e.get("full_name") or "").strip().lower(),
         )
 
-    # Continue numbering after BOTH existing rows and any explicit CSV numbers.
-    max_num = int(gen_customer_number(client, org_id)) - 1
+    # Auto-number sequence (KI-NNNNNN) for rows missing a Kundennummer. CSV rows
+    # that DO carry a number keep it verbatim — it lives in its own namespace and
+    # can't collide with the KI- auto numbers. gen_customer_number returns the NEXT
+    # free KI- number, so seed from its sequence.
+    ki_seq = ki_customer_seq(gen_customer_number(client, org_id)) or 1
 
     results: list[dict] = []
     corrections: list[dict] = []
@@ -419,11 +422,11 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
             continue
 
         num = _get(row, mapping, "customer_number")
-        if num and str(num).isdigit():
-            max_num = max(max_num, int(num))
-        elif not num:
-            max_num += 1
-            num = str(max_num)
+        if num:
+            num = str(num)  # keep the CSV's own Kundennummer verbatim
+        else:
+            num = f"KI-{ki_seq:06d}"
+            ki_seq += 1
 
         street = _get(row, mapping, "street")
         plz = _get(row, mapping, "postal_code")

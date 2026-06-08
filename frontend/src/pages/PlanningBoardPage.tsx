@@ -95,7 +95,7 @@ const addDays = (d: Date, n: number) => {
 const hm = (iso: string | null) => (iso ? new Date(iso).toTimeString().slice(0, 5) : '')
 const locStr = (l: Appt['location']) => (!l ? null : typeof l === 'string' ? l : l.raw ?? null)
 const fmtDate = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+  iso ? new Date(iso).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Berlin' }) : '—'
 const UNASSIGNED = 'NONE'
 const inputCls =
   'w-full rounded-md border border-border bg-alt px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary'
@@ -359,7 +359,7 @@ export function PlanningBoardPage() {
       {toast && <div className="mb-3 rounded-md bg-green-tint-50 px-3 py-2 text-sm font-medium text-green-deep">{toast}</div>}
 
       <p className="mb-4 text-sm font-medium text-body">
-        {selectedDateObj.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+        {selectedDateObj.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Berlin' })}
       </p>
 
       {view === 'timeline' ? (
@@ -786,7 +786,7 @@ function ApptDetailModal({ appt, vehicles, tools, onClose }: { appt: Appt; vehic
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={appt.title ?? 'Termin'}>
       <div className="space-y-3 text-sm">
-        {start && <Row2 label="Zeit">{start.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })} · {hm(appt.scheduled_at)} Uhr ({appt.duration_minutes ?? 60} Min)</Row2>}
+        {start && <Row2 label="Zeit">{start.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Berlin' })} · {hm(appt.scheduled_at)} Uhr ({appt.duration_minutes ?? 60} Min)</Row2>}
         {appt.customer_name && <Row2 label="Kunde">{appt.customer_name}</Row2>}
         {appt.employee_name && <Row2 label="Mitarbeiter">{appt.employee_name}</Row2>}
         {loc && <Row2 label="Ort">{loc}</Row2>}

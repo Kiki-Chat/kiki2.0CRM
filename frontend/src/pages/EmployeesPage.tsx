@@ -1183,7 +1183,7 @@ function AntraegeTab() {
 }
 
 function fmtAbsenceRange(a: Absence): string {
-  const f = (s: string) => new Date(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  const f = (s: string) => new Date(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' })
   return `${f(a.starts_at)} – ${f(a.ends_at)}`
 }
 

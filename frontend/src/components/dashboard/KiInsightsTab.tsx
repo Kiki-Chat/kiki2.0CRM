@@ -83,7 +83,7 @@ export function KiInsightsTab() {
                     <div className="text-sm font-semibold text-text">{s.title}</div>
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-muted">
                       <span>{s.subtitle}</span>
-                      {s.created_at && <span className="flex items-center gap-1"><Clock size={11} /> {new Date(s.created_at).toLocaleDateString('de-DE')}</span>}
+                      {s.created_at && <span className="flex items-center gap-1"><Clock size={11} /> {new Date(s.created_at).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' })}</span>}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">

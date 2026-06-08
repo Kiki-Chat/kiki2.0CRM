@@ -407,6 +407,24 @@ def _appointment_events(appt: dict) -> list[dict]:
             "description": f"Alternativtermin vorgeschlagen: {title}", "entity_id": appt["id"],
             "extras": {"alternative_start_time": appt.get("alternative_start_time")},
         })
+    # Human (calendar) reschedule of an existing time — distinct from a customer
+    # counter-proposal (customer_proposed_at, emitted above).
+    if appt.get("rescheduled_at"):
+        out.append({
+            "id": f"appointment:{appt['id']}:rescheduled_admin", "kind": "appointment_rescheduled",
+            "timestamp": appt["rescheduled_at"], "actor_kind": "employee", "actor_name": "Mitarbeiter",
+            "description": f"Termin verschoben: {title}", "entity_id": appt["id"],
+            "extras": {"scheduled_at": appt.get("scheduled_at")},
+        })
+    # Cancellation (via /cancel or the agent). `not rejected_at` keeps it distinct
+    # from a staff "Ablehnen" of a still-pending request (emitted as rejected above).
+    if appt.get("cancelled_at") and not appt.get("rejected_at"):
+        out.append({
+            "id": f"appointment:{appt['id']}:cancelled", "kind": "appointment_cancelled",
+            "timestamp": appt["cancelled_at"], "actor_kind": "employee", "actor_name": "Mitarbeiter",
+            "description": f"Termin storniert: {title}", "entity_id": appt["id"],
+            "extras": {"scheduled_at": appt.get("scheduled_at"), "reason": appt.get("notes")},
+        })
     return out
 
 
@@ -445,7 +463,7 @@ def _build_timeline(org_id: str, call_id: str) -> list[dict] | None:
     # Tenant guard: 404 if the call isn't in this org.
     call_rows = (
         client.table("calls")
-        .select("id, created_at, started_at, customer_id")
+        .select("id, created_at, started_at, customer_id, elevenlabs_conversation_id")
         .eq("org_id", org_id)
         .eq("id", call_id)
         .limit(1)
@@ -511,26 +529,42 @@ def _build_timeline(org_id: str, call_id: str) -> list[dict] | None:
     # 3 + 4. appointments and cost_estimates both depend only on inquiry_ids and
     # are independent of each other → fetch them concurrently (one round-trip
     # instead of two) after the inquiry barrier.
+    # An appointment belongs to "this call" if it's on the call's inquiry OR the
+    # agent booked it during this conversation (source_conversation_id) — agent
+    # bookings create a SEPARATE inquiry, so without the conversation link their
+    # confirm/reschedule/cancel events were missing from the per-call Verlauf
+    # (they only showed in the customer timeline, which scopes by customer_id).
+    conv_id = call.get("elevenlabs_conversation_id")
+    appt_ors: list[str] = []
+    if inquiry_ids:
+        appt_ors.append(f"inquiry_id.in.({','.join(inquiry_ids)})")
+    if conv_id:
+        appt_ors.append(f"source_conversation_id.eq.{conv_id}")
+
     appointments: list[dict] = []
     cost_estimates: list[dict] = []
-    if inquiry_ids:
+    if appt_ors or inquiry_ids:
         def _fetch_appts():
+            if not appt_ors:
+                return []
             return (
                 client.table("appointments")
                 .select(
                     "id, inquiry_id, title, scheduled_at, created_at, status, "
-                    "confirmed_at, rejected_at, rejection_reason, "
+                    "confirmed_at, rejected_at, rejection_reason, cancelled_at, rescheduled_at, "
                     "alternative_start_time, alternative_proposed_at, "
                     "customer_proposed_start_time, customer_proposed_at"
                 )
                 .eq("org_id", org_id)
-                .in_("inquiry_id", inquiry_ids)
+                .or_(",".join(appt_ors))
                 .execute()
                 .data
                 or []
             )
 
         def _fetch_kvas():
+            if not inquiry_ids:
+                return []
             return (
                 client.table("cost_estimates")
                 .select(
@@ -595,8 +629,8 @@ def build_customer_timeline(org_id: str, customer_id: str) -> list[dict] | None:
             lambda: client.table("appointments")
             .select(
                 "id, title, scheduled_at, created_at, status, confirmed_at, rejected_at, "
-                "rejection_reason, alternative_start_time, alternative_proposed_at, "
-                "customer_proposed_start_time, customer_proposed_at"
+                "rejection_reason, cancelled_at, rescheduled_at, alternative_start_time, "
+                "alternative_proposed_at, customer_proposed_start_time, customer_proposed_at"
             )
             .eq("org_id", org_id).eq("customer_id", customer_id)
         )

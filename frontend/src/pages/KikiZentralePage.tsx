@@ -232,7 +232,7 @@ function HealthDrawer({ open, onOpenChange, onFullLog }: { open: boolean; onOpen
           {(audit?.entries ?? []).slice(0, 5).map((e) => (
             <div key={e.id} className="flex items-center justify-between text-xs">
               <span className="text-body">{e.endpoint_label}</span>
-              <span className="text-muted">{new Date(e.created_at).toLocaleString('de-DE')}</span>
+              <span className="text-muted">{new Date(e.created_at).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })}</span>
             </div>
           ))}
           {(audit?.entries ?? []).length === 0 && <div className="text-xs text-faint">Noch keine Änderungen.</div>}

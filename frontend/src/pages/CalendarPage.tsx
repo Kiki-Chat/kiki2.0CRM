@@ -565,7 +565,7 @@ function AppointmentDetailModal({
         </div>
         {start && (
           <DetailRow label="Zeit">
-            {start.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })} ·{' '}
+            {start.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Berlin' })} ·{' '}
             {hm(start)} Uhr ({appt.duration_minutes ?? 60} Min)
           </DetailRow>
         )}

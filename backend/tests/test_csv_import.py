@@ -230,13 +230,14 @@ def test_import_customers_empty_row_is_error(monkeypatch):
 
 
 def test_import_customers_generates_number_when_missing(monkeypatch):
-    # Existing max numeric = 101005 → a row without Kundennummer gets 101006.
+    # A legacy numeric Kundennummer (101005) is NOT in the KI- namespace, so a row
+    # without a number gets the first auto KI- number, KI-000001 (no collision).
     no_num = "Name,Mail\nNeu Kunde,neu@x.de\n".encode("utf-8")
     db = _DB({"customers": [{"email": None, "phone": None, "customer_number": "101005"}]})
     monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
     out = csv_import.import_customers("org-1", no_num, {"full_name": "Name", "email": "Mail"})
     assert out["imported"] == 1
-    assert db.inserted("customers")[0]["customer_number"] == "101006"
+    assert db.inserted("customers")[0]["customer_number"] == "KI-000001"
 
 
 # ─── phone classification + 3-key dedup (mobile unique, landline+name) ───────
@@ -460,11 +461,21 @@ def test_import_customers_real_datev_mapping(monkeypatch):
 
 
 # ─── numbering unification ───────────────────────────────────────────────────
-def test_gen_customer_number_is_numeric_continue(monkeypatch):
+def test_gen_customer_number_is_ki_tagged(monkeypatch):
+    # Auto numbers are AI-tagged 'KI-NNNNNN' and live in their own namespace so they
+    # never collide with the business's own numbers. Legacy numeric ('101008') and
+    # manual-prefix ('KD-9') numbers do NOT advance the KI- sequence.
     db = _DB({"customers": [{"customer_number": "101008"}, {"customer_number": "KD-9"}]})
-    assert gen_customer_number(db, "org-1") == "101009"  # ignores non-numeric, max+1
+    assert gen_customer_number(db, "org-1") == "KI-000001"
     empty = _DB({"customers": []})
-    assert gen_customer_number(empty, "org-1") == "101001"  # seed
+    assert gen_customer_number(empty, "org-1") == "KI-000001"  # seed
+    # Only existing KI- numbers advance the sequence (max+1), legacy ignored.
+    mixed = _DB({"customers": [
+        {"customer_number": "101008"},
+        {"customer_number": "KI-000004"},
+        {"customer_number": "KI-000002"},
+    ]})
+    assert gen_customer_number(mixed, "org-1") == "KI-000005"
 
 
 # ─── employees ───────────────────────────────────────────────────────────────

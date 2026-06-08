@@ -87,7 +87,7 @@ export function VerlaufSection({ flash }: { flash: (m: string) => void }) {
               const ok = (e.elevenlabs_response_status ?? 200) < 300 && !e.rolled_back
               return (
                 <tr key={e.id} className={cn('border-t border-border hover:bg-alt', e.rolled_back && 'opacity-50')}>
-                  <td className="cursor-pointer px-3 py-2 text-body" onClick={() => setDetail(e)}>{new Date(e.created_at).toLocaleString('de-DE')}</td>
+                  <td className="cursor-pointer px-3 py-2 text-body" onClick={() => setDetail(e)}>{new Date(e.created_at).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })}</td>
                   <td className="px-3 py-2"><Tag variant="neutral">{sectionLabel(e.endpoint_label)}</Tag></td>
                   <td className="px-3 py-2 text-body">{e.actor_name ?? '—'}</td>
                   <td className="max-w-[200px] truncate px-3 py-2 font-mono text-xs text-muted">{fields || '—'}</td>
@@ -113,7 +113,7 @@ export function VerlaufSection({ flash }: { flash: (m: string) => void }) {
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-sm text-muted">
               <Tag variant="neutral">{sectionLabel(detail.endpoint_label)}</Tag>
-              <span>{new Date(detail.created_at).toLocaleString('de-DE')}</span>
+              <span>{new Date(detail.created_at).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })}</span>
               <span>· {detail.actor_name ?? '—'}</span>
             </div>
             {Object.entries(detail.fields_changed || {}).map(([path, ch]) => (

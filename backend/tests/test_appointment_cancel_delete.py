@@ -71,7 +71,9 @@ def test_cancel_pushed_event_deletes_google_and_clears_link(monkeypatch):
     client, dge = _patch(monkeypatch, {"id": "a1", "status": "confirmed", "google_event_id": "GEVT"})
     out = ar._cancel("org-1", "a1")
     dge.assert_called_once_with("org-1", "GEVT")
-    assert client.updated == {"status": "cancelled", "google_event_id": None}
+    assert client.updated["status"] == "cancelled"
+    assert client.updated["google_event_id"] is None
+    assert client.updated["cancelled_at"]  # stamped so the timeline + Aktion can surface it
     assert out["status"] == "cancelled"
 
 
@@ -79,7 +81,9 @@ def test_cancel_without_gid_skips_google(monkeypatch):
     client, dge = _patch(monkeypatch, {"id": "a2", "status": "confirmed", "google_event_id": None})
     ar._cancel("org-1", "a2")
     dge.assert_not_called()
-    assert client.updated == {"status": "cancelled", "google_event_id": None}
+    assert client.updated["status"] == "cancelled"
+    assert client.updated["google_event_id"] is None
+    assert client.updated["cancelled_at"]
 
 
 def test_delete_pushed_event_deletes_google_and_removes_row(monkeypatch):

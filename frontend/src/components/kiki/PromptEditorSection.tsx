@@ -137,7 +137,7 @@ export function PromptEditorSection({ flash }: { flash: (m: string) => void }) {
             <div key={h.snapshot_id} className="flex items-center justify-between rounded-lg border border-border p-3">
               <div className="flex items-center gap-2 text-sm">
                 <History size={15} className="text-muted" />
-                <span className="text-body">{new Date(h.created_at).toLocaleString('de-DE')}</span>
+                <span className="text-body">{new Date(h.created_at).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })}</span>
                 <span className="text-muted">· {h.prompt.length} Zeichen</span>
               </div>
               <button onClick={() => setRestoreSnap(h.snapshot_id)} className="flex items-center gap-1 text-sm font-medium text-green-deep hover:underline">

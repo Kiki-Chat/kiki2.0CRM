@@ -90,7 +90,7 @@ export function AnrufeTab() {
                   <Icon size={16} className={c.status === 'missed' ? 'text-error' : 'text-green-deep'} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-text">{c.customer_name || 'Unbekannt'}</div>
-                    <div className="text-xs text-muted">{c.started_at ? new Date(c.started_at).toLocaleString('de-DE') : '—'}</div>
+                    <div className="text-xs text-muted">{c.started_at ? new Date(c.started_at).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' }) : '—'}</div>
                   </div>
                   <span className="text-xs text-muted">{fmtDur(c.duration_seconds)}</span>
                 </button>

@@ -221,10 +221,12 @@ export function CallLogsPage() {
                   // on — not blanket-to the customer card (the old fallback, which
                   // had no way to confirm an appointment or send a KVA).
                   switch (item.kind) {
-                    // Appointment decisions (confirm / reschedule approval) live on
-                    // the call's inline action card → open that call.
+                    // Appointment decisions (confirm / reschedule approval) and the
+                    // "Termin storniert" notice live on the call's inline card → open
+                    // that call (falls through to the customer card if no call linked).
                     case 'termin_anfrage':
                     case 'alt_time_proposal':
+                    case 'appointment_cancelled':
                       if (item.call_id) {
                         setTab('anfragen')
                         setSelectedId(item.call_id)

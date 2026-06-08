@@ -53,7 +53,7 @@ const TYPE_LABEL: Record<string, string> = { kva: 'KVA', offer: 'Angebot', order
 const money = (n: number | null) =>
   '€' + (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtDate = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+  d ? new Date(d).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Berlin' }) : '—'
 
 export function CostEstimatesPage() {
   const navigate = useNavigate()

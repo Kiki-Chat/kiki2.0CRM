@@ -27,7 +27,7 @@ interface OrgStats {
 }
 
 const fmtDate = (s: string | null) =>
-  s ? new Date(s).toLocaleDateString('de-DE', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—'
+  s ? new Date(s).toLocaleDateString('de-DE', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Europe/Berlin' }) : '—'
 
 export function AdminOrgsPage() {
   const qc = useQueryClient()

@@ -171,11 +171,12 @@ export function CustomerFormModal({
           <input
             value={number}
             onChange={(e) => setNumber(e.target.value)}
-            placeholder="Automatisch (ab 101001)"
+            placeholder="Automatisch (z. B. KI-000001)"
             className={inputCls}
           />
           <p className="mt-1 text-xs text-faint">
-            Wird automatisch vergeben. Manuelles Überschreiben nur bei Datenübernahme.
+            Wird automatisch mit „KI-"-Präfix vergeben (eindeutig system­generiert, kollidiert
+            nie mit Ihren eigenen Nummern). Manuelles Überschreiben nur bei Datenübernahme.
           </p>
         </Field>
         <Field label="Kundentyp">

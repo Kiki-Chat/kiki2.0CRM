@@ -617,7 +617,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       {trialing && (
         <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
           <Info size={16} className="mt-0.5 shrink-0 text-info" />
-          <span><strong>Testphase aktiv</strong>{s?.period_end ? ` – endet am ${new Date(s.period_end).toLocaleDateString('de-DE')}` : ''}. Hinterlegen Sie eine Zahlungsmethode, damit Ihre KI nahtlos weiterläuft.</span>
+          <span><strong>Testphase aktiv</strong>{s?.period_end ? ` – endet am ${new Date(s.period_end).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' })}` : ''}. Hinterlegen Sie eine Zahlungsmethode, damit Ihre KI nahtlos weiterläuft.</span>
         </div>
       )}
       {configured && s && (
@@ -687,7 +687,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                 <div className="min-w-0">
                   <div className="truncate font-medium text-text">{inv.number ?? inv.id}</div>
                   <div className="text-xs text-muted">
-                    {inv.created ? new Date(inv.created * 1000).toLocaleDateString('de-DE') : '—'} · {stripeInvoiceStatusLabel(inv.status)}
+                    {inv.created ? new Date(inv.created * 1000).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' }) : '—'} · {stripeInvoiceStatusLabel(inv.status)}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
@@ -1200,7 +1200,7 @@ function CalendarProviderCard({ p, flash }: { p: { provider: string; name: strin
       {isGoogle && isConnected && (
         <p className="mt-2 text-xs text-muted">
           {lastSynced
-            ? `Zuletzt synchronisiert: ${new Date(lastSynced).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })} · ${syncStatus.data?.event_count ?? 0} Termine als belegte Zeit im CRM.`
+            ? `Zuletzt synchronisiert: ${new Date(lastSynced).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Berlin' })} · ${syncStatus.data?.event_count ?? 0} Termine als belegte Zeit im CRM.`
             : 'Wird beim Verbinden automatisch synchronisiert — Google-Termine erscheinen als belegte Zeit im CRM. Manuelle Synchronisierung auf der Kalender-Seite.'}
         </p>
       )}

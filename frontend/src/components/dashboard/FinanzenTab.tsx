@@ -100,7 +100,7 @@ export function FinanzenTab() {
                     <td className="py-2.5 text-body">{i.customer_name || '—'}</td>
                     <td className="py-2.5"><Tag variant={invoiceStatusVariant(i.status)}>{invoiceStatusLabel(i.status)}</Tag></td>
                     <td className="py-2.5 text-right font-semibold text-text">{fmtEur(i.total)}</td>
-                    <td className="py-2.5 text-right text-muted">{i.due_date ? new Date(i.due_date).toLocaleDateString('de-DE') : '—'}</td>
+                    <td className="py-2.5 text-right text-muted">{i.due_date ? new Date(i.due_date).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' }) : '—'}</td>
                   </tr>
                 ))}
               </tbody>

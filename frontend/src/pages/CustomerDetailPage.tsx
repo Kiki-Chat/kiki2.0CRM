@@ -95,10 +95,12 @@ const STATUS_TAG: Record<string, { label: string; variant: 'info' | 'warning' | 
   in_progress: { label: 'In Bearbeitung', variant: 'warning' },
   completed: { label: 'Erledigt', variant: 'success' },
 }
+// All timestamps render in Europe/Berlin (backend stores UTC; without the tz pin
+// these showed in the viewer's browser timezone).
 const fmt = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
+  iso ? new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' }) : '—'
 const fmtDay = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+  iso ? new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' }) : '—'
 const addrStr = (a: Customer['address']) => {
   if (!a) return '—'
   if (typeof a === 'string') return a
@@ -365,6 +367,7 @@ const TL_ICON: Record<TimelineEventKind, { Icon: LucideIcon; cls: string }> = {
   appointment_rescheduled: { Icon: CalendarClock, cls: 'bg-warning-bg text-warning' },
   appointment_confirmed: { Icon: CalendarClock, cls: 'bg-success-bg text-success' },
   appointment_rejected: { Icon: CalendarClock, cls: 'bg-error-bg text-error' },
+  appointment_cancelled: { Icon: CalendarClock, cls: 'bg-error-bg text-error' },
   alternative_proposed: { Icon: CalendarClock, cls: 'bg-warning-bg text-warning' },
   kva_sent: { Icon: Euro, cls: 'bg-ai-bg text-ai' },
   kva_accepted: { Icon: Euro, cls: 'bg-ai-bg text-ai' },

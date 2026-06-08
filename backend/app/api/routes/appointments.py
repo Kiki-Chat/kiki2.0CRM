@@ -186,6 +186,9 @@ def _patch(user: CurrentUser, appointment_id: str, payload: AppointmentPatch) ->
         fields.setdefault("customer_proposed_end_time", None)
         fields.setdefault("customer_proposed_at", None)
         fields.setdefault("customer_proposal_source", None)
+        # Record the human reschedule so it shows in the Verlauf timeline
+        # (appointment_rescheduled) — a calendar time edit was previously silent.
+        fields["rescheduled_at"] = _now_iso()
     if not fields:
         rows = (
             client.table("appointments").select("*").eq("org_id", org_id)
@@ -206,6 +209,16 @@ async def update_appointment(
     appt = await run_in_threadpool(_patch, user, appointment_id, payload)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    # If a human moved the time of an ALREADY-CONFIRMED appointment (calendar
+    # "Verschieben/Bearbeiten"), tell the customer about the new slot — the same
+    # reschedule confirmation call+email the in-call "Alternative vorschlagen" fires.
+    # Best-effort, gated by the master toggle + scope guard. (Pending appointments
+    # are skipped: the customer was never told a confirmed time yet.)
+    changed = payload.model_dump(exclude_unset=True)
+    if "scheduled_at" in changed and appt.get("status") == "confirmed":
+        appt["_outbound"] = await run_in_threadpool(
+            notify_appointment_outcome, user.org_id, appointment_id, "reschedule"
+        )
     return appt
 
 
@@ -661,7 +674,7 @@ def _cancel(org_id: str, appointment_id: str) -> dict | None:
     updated = (
         get_service_client()
         .table("appointments")
-        .update({"status": "cancelled", "google_event_id": None})
+        .update({"status": "cancelled", "google_event_id": None, "cancelled_at": _now_iso()})
         .eq("org_id", org_id)
         .eq("id", appointment_id)
         .execute()

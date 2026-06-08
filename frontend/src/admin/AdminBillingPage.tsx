@@ -47,7 +47,7 @@ interface Match {
 }
 
 const fmtDate = (s: string | null) =>
-  s ? new Date(s).toLocaleDateString('de-DE', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—'
+  s ? new Date(s).toLocaleDateString('de-DE', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Europe/Berlin' }) : '—'
 
 function Stat({ label, value, tone }: { label: string; value: string | number; tone?: 'warn' | 'ok' }) {
   return (

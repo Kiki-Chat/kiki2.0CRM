@@ -376,6 +376,7 @@ const TL_KIND: Record<TimelineEventKind, { Icon: LucideIcon; tile: string }> = {
   appointment_rescheduled: { Icon: RotateCcw, tile: 'bg-warning-bg text-warning' },
   appointment_confirmed: { Icon: CheckCircle2, tile: 'bg-success-bg text-success' },
   appointment_rejected: { Icon: X, tile: 'bg-error-bg text-error' },
+  appointment_cancelled: { Icon: X, tile: 'bg-error-bg text-error' },
   alternative_proposed: { Icon: CalendarPlus, tile: 'bg-warning-bg text-warning' },
   kva_sent: { Icon: Receipt, tile: 'bg-ai-bg text-ai' },
   kva_accepted: { Icon: Receipt, tile: 'bg-ai-bg text-ai' },

@@ -3,6 +3,7 @@
 import {
   Calendar,
   CalendarClock,
+  CalendarX,
   CheckCircle2,
   ChevronRight,
   Info,
@@ -136,6 +137,7 @@ const KIND_ICON: Record<ActionItem['kind'], LucideIcon> = {
   kva_pending_acceptance: Receipt,
   callback_owed: Phone,
   alt_time_proposal: CalendarClock,
+  appointment_cancelled: CalendarX,
 }
 const KIND_TONE: Record<ActionItem['kind'], { tile: string; tag: 'info' | 'ai' | 'warning' }> = {
   termin_anfrage: { tile: 'bg-info-bg text-info', tag: 'info' },
@@ -143,6 +145,7 @@ const KIND_TONE: Record<ActionItem['kind'], { tile: string; tag: 'info' | 'ai' |
   kva_pending_acceptance: { tile: 'bg-ai-bg text-ai', tag: 'ai' },
   callback_owed: { tile: 'bg-warning-bg text-warning', tag: 'warning' },
   alt_time_proposal: { tile: 'bg-warning-bg text-warning', tag: 'warning' },
+  appointment_cancelled: { tile: 'bg-error-bg text-error', tag: 'warning' },
 }
 
 export function ActionRow({ item, onSelect }: { item: ActionItem; onSelect: () => void }) {

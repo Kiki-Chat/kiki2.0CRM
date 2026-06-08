@@ -63,6 +63,7 @@ export interface ActionItem {
     | 'kva_pending_acceptance'
     | 'callback_owed'
     | 'alt_time_proposal'
+    | 'appointment_cancelled'
   id: string
   inquiry_id: string | null
   call_id: string | null
@@ -86,6 +87,7 @@ export type TimelineEventKind =
   | 'assignment_changed'
   | 'appointment_created'
   | 'appointment_rescheduled'
+  | 'appointment_cancelled'
 
 export interface TimelineEvent {
   id: string
@@ -116,6 +118,7 @@ export const ACTION_KIND_LABEL: Record<ActionItem['kind'], string> = {
   kva_pending_acceptance: 'KVA-Antwort offen',
   callback_owed: 'Rückruf',
   alt_time_proposal: 'Alternativtermin',
+  appointment_cancelled: 'Termin storniert',
 }
 
 // Filter types (left inbox) — direction + status + the NEW date filter, all client-side.
@@ -153,15 +156,10 @@ export function avatarColorForEmployee(employeeId: string | null): { bg: string;
 export const fmtDuration = (s: number | null) =>
   s || s === 0 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '—'
 
-export const fmtTime = (iso: string | null) =>
-  iso
-    ? new Date(iso).toLocaleString('de-DE', {
-        day: '2-digit',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : '—'
+// Date/time formatters live in lib/datetime (pinned to Europe/Berlin so times don't
+// render in the viewer's browser tz). Re-exported here so the many call-log modules
+// that import them from './shared' keep working unchanged.
+export { fmtTime, relativeTimeDe, absoluteTimeDe } from '../../lib/datetime'
 
 export const isMeaningful = (v?: string | null) =>
   !!v && !['unbekannt', 'keiner', 'anonymous'].includes(v.toLowerCase())
@@ -192,28 +190,5 @@ export function matchesDateFilter(c: CallListItem, f: InboxFilters): boolean {
   return t >= since
 }
 
-// Tight German relative-time for the timeline; falls back to absolute date past a week.
-export function relativeTimeDe(iso: string): string {
-  const now = Date.now()
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return '—'
-  const diffSec = Math.max(0, Math.round((now - then) / 1000))
-  if (diffSec < 60) return 'gerade eben'
-  const min = Math.round(diffSec / 60)
-  if (min < 60) return `vor ${min} Min`
-  const hours = Math.round(min / 60)
-  if (hours < 24) return `vor ${hours} Std`
-  const days = Math.round(hours / 24)
-  if (days < 7) return `vor ${days} ${days === 1 ? 'Tag' : 'Tagen'}`
-  return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-export function absoluteTimeDe(iso: string): string {
-  return new Date(iso).toLocaleString('de-DE', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+// relativeTimeDe / absoluteTimeDe now live in lib/datetime (Berlin-pinned) and are
+// re-exported at the top of this file.

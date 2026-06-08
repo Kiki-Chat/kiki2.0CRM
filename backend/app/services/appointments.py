@@ -422,7 +422,8 @@ def _upcoming_appts(client, org_id: str, customer_id: str) -> list[dict]:
 
 def _do_cancel(client, appt: dict, reason: str | None) -> dict:
     client.table("appointments").update(
-        {"status": "cancelled", "notes": reason}
+        {"status": "cancelled", "notes": reason,
+         "cancelled_at": datetime.now(timezone.utc).isoformat()}
     ).eq("id", appt["id"]).execute()
     dt = _parse_iso(appt["scheduled_at"])
     when = f"am {fmt_date(dt)} um {fmt_time(dt)} Uhr" if dt else ""

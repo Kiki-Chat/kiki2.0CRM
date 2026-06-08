@@ -53,7 +53,7 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 const money = (n: number | null) =>
   '€' + (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtDate = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
+  d ? new Date(d).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Berlin' }) : '—'
 
 export function InvoicesPage() {
   const navigate = useNavigate()
