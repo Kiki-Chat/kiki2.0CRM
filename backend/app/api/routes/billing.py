@@ -273,3 +273,51 @@ async def billing_checkout(
     body: CheckoutRequest, user: CurrentUser = Depends(require_org)
 ) -> CheckoutResponse:
     return await run_in_threadpool(_checkout, user.org_id, user.id, body)
+
+
+# ─── POST /api/billing/sync (webhook fallback) ───────────────────────────────
+_LIVE_SUB_STATES = {"active", "trialing", "past_due", "unpaid"}
+
+
+def _pick_primary_subscription(subs: list) -> dict | None:
+    """Pick the subscription that best represents the org's plan.
+
+    Prefer a live one (active/trialing/past_due/unpaid) over canceled/incomplete;
+    break ties by most-recently created. ``None`` for a customer with no subs."""
+    if not subs:
+        return None
+    return max(
+        subs,
+        key=lambda s: (1 if s.get("status") in _LIVE_SUB_STATES else 0, int(s.get("created") or 0)),
+    )
+
+
+def _sync(org_id: str) -> BillingSummary:
+    """Pull the org's current Stripe subscription and sync it onto ``organizations``.
+
+    Webhook fallback: Stripe webhooks can't reach localhost (and aren't yet live),
+    so after a self-serve Checkout the frontend calls this on ``?checkout=success``
+    to reflect the new subscription immediately. Pure inbound read + state-sync —
+    it reuses the webhook's ``_handle_subscription`` and NEVER writes to Stripe, so
+    it's safe to call at any time (idempotent, no-op when nothing has changed)."""
+    client = get_service_client()
+    customer_id = _org(client, org_id).get("stripe_customer_id")
+    if customer_id and is_configured():
+        result = stripe_read(
+            op="subscription.list",
+            org_id=org_id,
+            fn=lambda: get_stripe().Subscription.list(
+                customer=customer_id, status="all", limit=10
+            ),
+        )
+        sub = _pick_primary_subscription((result or {}).get("data") or [])
+        if sub is not None:
+            from app.services.stripe_webhook import _handle_subscription
+
+            _handle_subscription(client, sub)
+    return _summary(org_id)
+
+
+@router.post("/sync", response_model=BillingSummary)
+async def billing_sync(user: CurrentUser = Depends(require_org)) -> BillingSummary:
+    return await run_in_threadpool(_sync, user.org_id)

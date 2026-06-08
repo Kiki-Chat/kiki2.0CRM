@@ -65,7 +65,7 @@ interface Customer {
   full_name: string | null
   email: string | null
   phone: string | null
-  address: { raw?: string } | string | null
+  address: { raw?: string; street?: string; postal_code?: string; city?: string } | string | null
   customer_number: string | null
   customer_type: string | null
   vat_id: string | null
@@ -101,7 +101,16 @@ const fmt = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'
 const fmtDay = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
-const addrStr = (a: Customer['address']) => (!a ? '—' : typeof a === 'string' ? a : a.raw ?? '—')
+const addrStr = (a: Customer['address']) => {
+  if (!a) return '—'
+  if (typeof a === 'string') return a
+  if (a.raw) return a.raw
+  // CSV-imported addresses are {street, postal_code, city} with no `raw`.
+  const line = [a.street, [a.postal_code, a.city].filter(Boolean).join(' ')]
+    .filter(Boolean)
+    .join(', ')
+  return line || '—'
+}
 const dotFor = (s: string) =>
   s === 'confirmed' || s === 'completed' ? 'bg-success' : s === 'cancelled' ? 'bg-error' : 'bg-warning'
 

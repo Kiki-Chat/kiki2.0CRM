@@ -56,6 +56,9 @@ export function DashboardPage() {
   // Per Amber: the prominent greeting name = the real COMPANY name (org_name),
   // not a hardcoded person. Falls back to the user's own name, then a generic.
   const company = me?.org_name ?? me?.full_name ?? 'Willkommen'
+  // Greeting is personalised to the logged-in user (their own name); the company
+  // name stays the prominent identity below it. Falls back to no name if unset.
+  const person = me?.full_name?.trim() || null
   const now = new Date()
   const greeting = greetingFor(berlinHour(now))
   const today = now.toLocaleDateString('de-DE', {
@@ -69,7 +72,7 @@ export function DashboardPage() {
   return (
     <div className="p-8 font-poster">
       <div className="mb-6">
-        <p className="text-[15px] font-semibold text-muted">{greeting},</p>
+        <p className="text-[15px] font-semibold text-muted">{greeting}{person && person !== company ? `, ${person}` : ','}</p>
         <h1 className="text-3xl font-extrabold tracking-tight text-text">{company}</h1>
         <p className="mt-1 text-sm text-muted">{today}</p>
       </div>

@@ -1,15 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Languages, Mic, Play, Plus, User, X } from 'lucide-react'
+import { HelpCircle, Languages, Mic, Play, Plus, User, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { apiFetch } from '../../lib/api'
 import { KZ, KZ_STALE, type KzOverview, type KzVoice } from '../../lib/kikiApi'
 import { cn } from '../../lib/utils'
+import { Modal } from '../ui/Modal'
 import { Card, ConfirmDialog, Field, GroupLabel, inputCls, labelCls, Toggle } from './shared'
 
 type CapKey = 'appointments' | 'kva' | 'projects' | 'invoices'
 // Per-capability autonomy (topics 19/21/22). Termine + KVA act in the call;
-// Projekte + Rechnungen run in the background. levels[0..2] = Stufe 1..3.
+// Projekte + Rechnungen run in the background. levels[0..2] = Stufe 1..3 — but the
+// UI no longer exposes "Stufe": the on/off Toggle IS level 1 (off = record-only),
+// and when on the user picks halb- (2) or vollautomatisch (3). The stored 1/2/3
+// integers are unchanged, so backend/agent behaviour is identical.
 const CAPABILITIES: { key: CapKey; label: string; hint: string; backOffice?: boolean; levels: [string, string, string] }[] = [
   { key: 'appointments', label: 'Termine', hint: 'Die Telefon-KI bucht Termine im Gespräch.',
     levels: ['Nur Anfrage aufnehmen — keine Buchung', 'Vorläufig buchen — das Team bestätigt', 'Verbindlich buchen & im Gespräch bestätigen'] },
@@ -18,7 +22,7 @@ const CAPABILITIES: { key: CapKey; label: string; hint: string; backOffice?: boo
   { key: 'projects', label: 'Projekte & Plantafel', hint: 'Im Hintergrund bei Terminbestätigung.', backOffice: true,
     levels: ['Kein Projekt anlegen', 'Projekt als Entwurf bei Terminbestätigung', 'Projekt automatisch bei Terminbestätigung'] },
   { key: 'invoices', label: 'Rechnungen', hint: 'Im Hintergrund bei Projektabschluss.', backOffice: true,
-    levels: ['Keine Rechnung anlegen', 'Rechnungsentwurf bei Projektabschluss', 'Rechnung automatisch erstellen & versenden'] },
+    levels: ['Keine Rechnung anlegen', 'Rechnungsentwurf bei Projektabschluss', 'Rechnung automatisch erstellen (Versand folgt manuell)'] },
 ]
 const LANGUAGES: [string, string][] = [
   ['de', 'Deutsch'], ['en', 'Englisch'], ['fr', 'Französisch'], ['es', 'Spanisch'], ['it', 'Italienisch'],
@@ -29,6 +33,11 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
   const agent = data.agent
   const cfg = data.config
 
+  // Keep the RAW stored values — no silent normalisation. OFF (enabled=false)
+  // AND the legacy "enabled + Stufe 1" are both record-only on the backend, so
+  // the toggle treats "on" as enabled AND level>=2 (see isOn). This way a
+  // record-only org never shows as on, and an incidental save never flips it to
+  // auto-book.
   const initialCaps = {
     appointments_enabled: cfg.appointments_enabled,
     appointments_level: cfg.appointments_level,
@@ -40,7 +49,18 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
     invoices_level: cfg.invoices_level,
   }
   const [caps, setCaps] = useState(initialCaps)
+  const [hintOpen, setHintOpen] = useState(false)
   const setCap = (k: keyof typeof caps, v: boolean | number) => setCaps((p) => ({ ...p, [k]: v }))
+  // "On" = enabled AND Stufe>=2 (Stufe 1 is record-only, same as off).
+  const isOn = (key: CapKey) => caps[`${key}_enabled`] && caps[`${key}_level`] >= 2
+  // Toggling ON ⇒ enabled + Stufe>=2 (never persists Stufe 1); OFF ⇒ enabled=false,
+  // keeping the chosen level so re-enabling restores it.
+  const setEnabled = (key: CapKey, v: boolean) =>
+    setCaps((p) => ({
+      ...p,
+      [`${key}_enabled`]: v,
+      [`${key}_level`]: v ? Math.max(2, p[`${key}_level`]) : p[`${key}_level`],
+    }))
   const [welcome, setWelcome] = useState(cfg.welcome_message ?? '')
   const [welcomeMsgs, setWelcomeMsgs] = useState<{ from?: string; to?: string; message?: string }[]>(cfg.welcome_messages ?? [])
   const [personaName, setPersonaName] = useState(agent.persona_name ?? '')
@@ -107,14 +127,26 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
     <div className="space-y-4">
       {/* Card 1 — Autonomie pro Bereich */}
       <Card>
-        <GroupLabel>Autonomie pro Bereich</GroupLabel>
+        <div className="flex items-center gap-1.5">
+          <GroupLabel>Autonomie pro Bereich</GroupLabel>
+          <button
+            type="button"
+            onClick={() => setHintOpen(true)}
+            aria-label="Was bedeuten halb- und vollautomatisch?"
+            title="Was bedeuten die Modi?"
+            className="text-muted transition-colors hover:text-green-deep"
+          >
+            <HelpCircle size={15} />
+          </button>
+        </div>
         <p className="mb-3 text-xs text-muted">
-          Jeder Bereich hat einen eigenen Schalter und eine eigene Stufe (1–3). Termine &amp; KVA wirken im
-          Telefongespräch; Projekte &amp; Rechnungen laufen im Hintergrund.
+          Schalten Sie jeden Bereich einzeln ein und wählen Sie, wie selbstständig Kiki arbeitet. Ist der
+          Schalter aus, nimmt Kiki die Anfrage nur auf. Termine &amp; KVA wirken im Telefongespräch; Projekte
+          &amp; Rechnungen laufen im Hintergrund.
         </p>
         <div className="space-y-3">
           {CAPABILITIES.map((cap) => {
-            const enabled = caps[`${cap.key}_enabled`]
+            const enabled = isOn(cap.key)
             const lvl = caps[`${cap.key}_level`]
             return (
               <div key={cap.key} className={cn('rounded-lg border p-4 transition', enabled ? 'border-border' : 'border-border bg-alt/40')}>
@@ -128,12 +160,12 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
                     </div>
                     <div className="text-xs text-muted">{cap.hint}</div>
                   </div>
-                  <Toggle on={enabled} onChange={(v) => setCap(`${cap.key}_enabled`, v)} />
+                  <Toggle on={enabled} onChange={(v) => setEnabled(cap.key, v)} />
                 </div>
                 {enabled && (
                   <div className="mt-3">
                     <div className="flex gap-1.5">
-                      {[1, 2, 3].map((s) => (
+                      {([2, 3] as const).map((s) => (
                         <button
                           key={s}
                           onClick={() => setCap(`${cap.key}_level`, s)}
@@ -142,7 +174,7 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
                             lvl === s ? 'border-green-primary bg-green-tint-50 text-green-deep' : 'border-border text-muted hover:bg-alt',
                           )}
                         >
-                          Stufe {s}
+                          {s === 2 ? 'Halbautomatisch' : 'Vollautomatisch'}
                         </button>
                       ))}
                     </div>
@@ -266,6 +298,41 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
           {save.isPending ? 'Speichert…' : 'Speichern'}
         </button>
       </div>
+
+      <Modal open={hintOpen} onOpenChange={setHintOpen} title="So funktioniert die Autonomie">
+        <p className="mb-4 text-sm text-body">
+          Pro Bereich legen Sie fest, wie selbstständig Kiki arbeitet. Der Schalter steuert „aus“ (Stufe&nbsp;1);
+          ist er an, wählen Sie zwischen halb- und vollautomatisch (Stufe&nbsp;2 oder&nbsp;3).
+        </p>
+        <div className="overflow-hidden rounded-lg border border-border">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-alt text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th className="px-3 py-2 font-semibold">Stufe</th>
+                <th className="px-3 py-2 font-semibold">Modus</th>
+                <th className="px-3 py-2 font-semibold">Was passiert</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              <tr>
+                <td className="px-3 py-2.5 align-top font-semibold text-text">1</td>
+                <td className="whitespace-nowrap px-3 py-2.5 align-top font-medium text-text">Aus</td>
+                <td className="px-3 py-2.5 text-body">Der Schalter ist aus — Kiki nimmt die Anfrage nur auf, ohne weitere Aktion.</td>
+              </tr>
+              <tr>
+                <td className="px-3 py-2.5 align-top font-semibold text-text">2</td>
+                <td className="whitespace-nowrap px-3 py-2.5 align-top font-medium text-text">Halbautomatisch</td>
+                <td className="px-3 py-2.5 text-body">Kiki erledigt die Aufgabe (z. B. Entwurf oder Vorschlag) — Ihr Team bestätigt bzw. gibt sie frei.</td>
+              </tr>
+              <tr>
+                <td className="px-3 py-2.5 align-top font-semibold text-text">3</td>
+                <td className="whitespace-nowrap px-3 py-2.5 align-top font-medium text-text">Vollautomatisch</td>
+                <td className="px-3 py-2.5 text-body">Kiki übernimmt alles automatisch — ohne weitere Bestätigung durch Ihr Team.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Modal>
 
       <ConfirmDialog
         open={confirmOpen}

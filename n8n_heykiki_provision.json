@@ -1,0 +1,145 @@
+{
+  "name": "HeyKiki CRM Provision (test)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "heykiki-provision",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-880, 208],
+      "id": "a1111111-1111-4111-8111-111111111111",
+      "name": "Webhook",
+      "webhookId": "afd201d7-ffec-42b6-94c0-4383a877a775"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the incoming lead payload into a clean shape.\n// Accepts the same body the ChatDash webhook used.\nconst root = $input.first().json;\nconst body = root.body || root;\nconst ud = body.user_data || {};\nreturn [{\n  json: {\n    agent_id: body.agent_id || ud.agent_id || null,\n    user_data: {\n      email: ud.email || body.email || null,\n      name: ud.name || body.name || null,\n      phone: ud.phone || body.phone || null,\n      company: ud.company || body.company || null\n    },\n    session_id: body.session_id || null,\n    timestamp: body.timestamp || null\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-660, 208],
+      "id": "a2222222-2222-4222-8222-222222222222",
+      "name": "Process Lead Data"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.elevenlabs.io/v1/convai/agents/{{ $json.agent_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-440, 208],
+      "id": "a3333333-3333-4333-8333-333333333333",
+      "name": "Check Agent (ElevenLabs)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "1LxtvgjRQSTUbdn4",
+          "name": "11labs Automate Agent Creation x N8N"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "b1111111-1111-4111-8111-111111111111",
+              "leftValue": "={{ $json.phone_numbers[0].phone_number }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "exists", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-220, 208],
+      "id": "a4444444-4444-4444-8444-444444444444",
+      "name": "Agent has phone?"
+    },
+    {
+      "parameters": { "amount": 15 },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [-440, 400],
+      "id": "a5555555-5555-4555-8555-555555555555",
+      "name": "Wait 15s",
+      "webhookId": "a5993816-6e3f-4fc8-80d9-54b771d6c590"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the POST /api/heykiki/provision body and a UNIQUE tracking id.\n// The CRM dedups on heykikiOrgId + loginEmail (409 if it already exists), so a\n// unique id per provisioning is what lets you trace a tenant end to end. The id\n// is human-readable: <company-slug>-<base36 time><random>.\nconst lead = $('Process Lead Data').first().json;\nconst ud = lead.user_data || {};\nconst company = (ud.company || ud.name || 'Kunde').toString();\nconst slug = company.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'org';\nconst heykikiOrgId = `${slug}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;\n\nreturn [{\n  json: {\n    heykikiOrgId: heykikiOrgId,            // unique tenant tracking id\n    orgName: company,\n    loginEmail: ud.email,\n    loginPassword: 'changeme123',          // >= 8 chars; prompt a reset in the welcome email\n    elevenlabsAgentId: lead.agent_id,\n    adminName: ud.name || null,\n    contactEmail: ud.email || null\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 112],
+      "id": "a6666666-6666-4666-8666-666666666666",
+      "name": "Prepare Provision Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://REPLACE-WITH-YOUR-BACKEND/api/heykiki/provision",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-HeyKiki-Secret", "value": "REPLACE_WITH_MASTER_WEBHOOK_SECRET" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 112],
+      "id": "a7777777-7777-4777-8777-777777777777",
+      "name": "Provision CRM (/api/heykiki/provision)"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "body": {
+            "session_id": "pending_1771944650280_2rucnfo75",
+            "agent_id": "agent_7301kj8237ggekv9n36m9vds76qj",
+            "user_data": {
+              "email": "test-tenant@example.invalid",
+              "name": "Prateek Rai",
+              "phone": "+94827863876",
+              "company": "Asstricks Test GmbH",
+              "language": "de"
+            },
+            "timestamp": 1771944683025
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Process Lead Data", "type": "main", "index": 0 }]] },
+    "Process Lead Data": { "main": [[{ "node": "Check Agent (ElevenLabs)", "type": "main", "index": 0 }]] },
+    "Check Agent (ElevenLabs)": { "main": [[{ "node": "Agent has phone?", "type": "main", "index": 0 }]] },
+    "Agent has phone?": {
+      "main": [
+        [{ "node": "Prepare Provision Payload", "type": "main", "index": 0 }],
+        [{ "node": "Wait 15s", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 15s": { "main": [[{ "node": "Check Agent (ElevenLabs)", "type": "main", "index": 0 }]] },
+    "Prepare Provision Payload": { "main": [[{ "node": "Provision CRM (/api/heykiki/provision)", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": []
+}

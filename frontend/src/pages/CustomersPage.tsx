@@ -32,7 +32,7 @@ interface CustomerCard {
   full_name: string | null
   email: string | null
   phone: string | null
-  address: { raw?: string } | string | null
+  address: { raw?: string; street?: string; postal_code?: string; city?: string } | string | null
   customer_number: string | null
   customer_type: string | null
   identified_by: string | null
@@ -71,17 +71,22 @@ const FILTERS: { key: string; label: string; type?: string }[] = [
   { key: 'property_management', label: 'Hausverwaltungen', type: 'property_management' },
 ]
 
-// Records-per-page choices for the selector.
-const PAGE_SIZE_OPTIONS = [24, 48, 96, 200]
+// Records-per-page choices for the selector. (200 removed — one heavy request that
+// pulls every related row for 200 customers; the largest useful page is 96.)
+const PAGE_SIZE_OPTIONS = [24, 48, 96]
 
 // Sorting: which column + direction. Mirrors the backend whitelist.
-type SortBy = 'created_at' | 'full_name' | 'customer_number'
+type SortBy = 'created_at' | 'full_name' | 'customer_number' | 'phone' | 'address'
 type SortDir = 'asc' | 'desc'
 const SORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'created_at:desc', label: 'Neueste zuerst' },
   { value: 'created_at:asc', label: 'Älteste zuerst' },
   { value: 'full_name:asc', label: 'Name (A–Z)' },
   { value: 'full_name:desc', label: 'Name (Z–A)' },
+  { value: 'phone:asc', label: 'Telefon (aufsteigend)' },
+  { value: 'phone:desc', label: 'Telefon (absteigend)' },
+  { value: 'address:asc', label: 'Adresse (A–Z)' },
+  { value: 'address:desc', label: 'Adresse (Z–A)' },
   { value: 'customer_number:asc', label: 'Kundennr. (aufsteigend)' },
   { value: 'customer_number:desc', label: 'Kundennr. (absteigend)' },
 ]
@@ -99,7 +104,14 @@ function defaultPageSize(): number {
 
 function addr(a: CustomerCard['address']): string {
   if (!a) return '—'
-  return typeof a === 'string' ? a : a.raw ?? '—'
+  if (typeof a === 'string') return a
+  if (a.raw) return a.raw
+  // CSV-imported addresses arrive as {street, postal_code, city} with no `raw` —
+  // build a readable line so they no longer render blank.
+  const line = [a.street, [a.postal_code, a.city].filter(Boolean).join(' ')]
+    .filter(Boolean)
+    .join(', ')
+  return line || '—'
 }
 
 export function CustomersPage() {
@@ -229,7 +241,7 @@ export function CustomersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl p-4 md:p-6 lg:p-8">
+    <div className="w-full p-4 md:p-6 lg:p-8">
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -409,8 +421,22 @@ export function CustomersPage() {
                 <th className="px-3 py-2.5 font-semibold">Typ</th>
                 <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Quelle</th>
                 <th className="hidden px-3 py-2.5 font-semibold md:table-cell">E-Mail</th>
-                <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Telefon</th>
-                <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Adresse</th>
+                <SortTh
+                  label="Telefon"
+                  col="phone"
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  thClassName="hidden md:table-cell"
+                />
+                <SortTh
+                  label="Adresse"
+                  col="address"
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  thClassName="hidden md:table-cell"
+                />
                 <th
                   className="px-3 py-2.5 text-right font-semibold"
                   title="Anfragen · Termine · Dokumente/Fotos"
@@ -470,7 +496,7 @@ export function CustomersPage() {
         <div
           aria-busy={isFetching}
           className={cn(
-            'grid grid-cols-1 gap-5 transition-opacity md:grid-cols-2 xl:grid-cols-3',
+            'grid grid-cols-1 gap-5 transition-opacity sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4',
             isFetching && 'pointer-events-none opacity-50',
           )}
         >
