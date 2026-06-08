@@ -9,6 +9,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { apiFetch } from '../lib/api'
 import { supabase } from '../lib/supabase'
+import { cn } from '../lib/utils'
+import { useMediaQuery } from '../lib/useMediaQuery'
 import { useMe } from '../lib/useMe'
 import { FilterPopover, PagerNumbered, Segmented } from './calls/atoms'
 import { CallDetail } from './calls/CallDetail'
@@ -54,6 +56,10 @@ export function CallLogsPage() {
   const { me, role } = useMe()
   const orgId = me?.org_id
   const isSuperAdmin = role === 'super_admin'
+  // Below `lg` the 3-pane cockpit (inbox | transcript | workspace ≈ 700px of
+  // fixed panes) can't fit, so we switch to single-pane navigation: the inbox
+  // is full-width, and selecting a call swaps in the detail with a back button.
+  const isWide = useMediaQuery('(min-width: 1024px)')
 
   const callsQuery = useQuery({
     queryKey: ['calls'],
@@ -116,10 +122,11 @@ export function CallLogsPage() {
     }
   }, [orgId, qc])
 
-  // Auto-select the first call once loaded.
+  // Auto-select the first call once loaded — DESKTOP ONLY. On mobile we want to
+  // land on the inbox list, not jump straight into a call's detail pane.
   useEffect(() => {
-    if (!selectedId && calls.length) setSelectedId(calls[0].id)
-  }, [calls, selectedId])
+    if (isWide && !selectedId && calls.length) setSelectedId(calls[0].id)
+  }, [calls, selectedId, isWide])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -147,8 +154,11 @@ export function CallLogsPage() {
   return (
     <div className="flex h-full min-h-0 font-poster">
       <aside
-        style={{ width: listResize.width }}
-        className="flex flex-shrink-0 flex-col border-r border-border bg-bg"
+        style={isWide ? { width: listResize.width } : undefined}
+        className={cn(
+          'flex-col border-r border-border bg-bg',
+          isWide ? 'flex flex-shrink-0' : selectedId ? 'hidden' : 'flex w-full',
+        )}
       >
         <div className="border-b border-border bg-surface p-4">
           <Segmented
@@ -225,7 +235,7 @@ export function CallLogsPage() {
         )}
       </aside>
 
-      <ResizeHandle onMouseDown={listResize.onMouseDown} />
+      {isWide && <ResizeHandle onMouseDown={listResize.onMouseDown} />}
 
       {selectedId ? (
         <CallDetail
@@ -235,9 +245,11 @@ export function CallLogsPage() {
           rightOpen={rightOpen}
           onToggleRight={() => setRightOpen((o) => !o)}
           onDeleted={() => setSelectedId(null)}
+          isWide={isWide}
+          onBack={() => setSelectedId(null)}
         />
       ) : (
-        <NoCallSelected />
+        isWide && <NoCallSelected />
       )}
     </div>
   )

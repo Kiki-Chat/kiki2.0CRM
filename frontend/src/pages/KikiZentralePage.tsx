@@ -104,7 +104,7 @@ export function KikiZentralePage() {
   return (
     <div className="p-8">
       {/* Header */}
-      <div className="mb-6 flex items-start justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-ai-bg"><Bot size={24} className="text-ai" /></div>
           <div>

@@ -23,6 +23,13 @@ class FakeRedis:
     def setex(self, k, ttl, v):
         self.store[k] = v
 
+    def set(self, k, v, nx=False, ex=None):
+        # Atomic SET NX semantics for the single-flight lock: refuse if present.
+        if nx and k in self.store:
+            return None
+        self.store[k] = v
+        return True
+
     def delete(self, *keys):
         for k in keys:
             self.store.pop(k, None)
@@ -128,3 +135,64 @@ def test_fail_open_on_redis_error():
     # get returns None (miss), get_or_set falls back to the loader, nothing raises.
     assert cache.get("org-A", "k") is None
     assert cache.get_or_set("org-A", "k", lambda: {"v": 7}) == {"v": 7}
+
+
+# ─── Negative caching (opt-in) ───────────────────────────────────────────────
+def test_negative_caching_caches_none_when_opted_in():
+    cache.set_test_client(FakeRedis())
+    calls = {"n": 0}
+
+    def loader():
+        calls["n"] += 1
+        return None
+
+    assert cache.get_or_set("org-A", "missing", loader, cache_none=True) is None
+    assert cache.get_or_set("org-A", "missing", loader, cache_none=True) is None
+    assert calls["n"] == 1  # the None was cached → loader ran exactly once
+
+
+def test_none_is_requeried_by_default():
+    cache.set_test_client(FakeRedis())
+    calls = {"n": 0}
+
+    def loader():
+        calls["n"] += 1
+        return None
+
+    assert cache.get_or_set("org-A", "m", loader) is None
+    assert cache.get_or_set("org-A", "m", loader) is None
+    assert calls["n"] == 2  # default: None is never cached
+
+
+# ─── Single-flight / stampede guard ──────────────────────────────────────────
+def test_single_flight_takes_and_releases_the_lock():
+    fake = FakeRedis()
+    cache.set_test_client(fake)
+    calls = {"n": 0}
+
+    def loader():
+        calls["n"] += 1
+        return {"v": 1}
+
+    assert cache.get_or_set("org-A", "k", loader) == {"v": 1}
+    assert calls["n"] == 1
+    # The refresh lock was released after loading (only the value key remains).
+    assert all(not key.endswith(":lock") for key in fake.store)
+
+
+def test_stampede_contended_falls_through_and_never_hangs(monkeypatch):
+    fake = FakeRedis()
+    cache.set_test_client(fake)
+    # Simulate another caller already holding the lock with no value published.
+    fake.store[cache.org_key("org-A", "k") + ":lock"] = "held"
+    monkeypatch.setattr(cache, "_LOCK_TRIES", 2)
+    monkeypatch.setattr(cache, "_LOCK_WAIT", 0)
+    calls = {"n": 0}
+
+    def loader():
+        calls["n"] += 1
+        return {"v": 5}
+
+    # Waiter polls, value never appears, then loads anyway (fail-open, no hang).
+    assert cache.get_or_set("org-A", "k", loader) == {"v": 5}
+    assert calls["n"] == 1

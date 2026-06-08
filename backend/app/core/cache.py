@@ -23,11 +23,24 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Callable
 
 from app.core.config import settings
 
 log = logging.getLogger(__name__)
+
+# Sentinel for negative caching: a cached "no result" so a hot 404 path isn't
+# re-queried on every miss. Only used when a caller opts in via cache_none=True.
+_NULL = "\x00__cache_none__"
+
+# Single-flight (stampede) guard tunables. On a miss, one caller takes a short
+# lock and refreshes; the rest briefly poll for the value instead of all hitting
+# the source at once. Everything is FAIL-OPEN: if the lock can't be taken the
+# loader still runs — a thundering herd is bad, but never serving data is worse.
+_LOCK_TTL = 10  # seconds the refresh lock may be held (auto-expires)
+_LOCK_WAIT = 0.05  # poll interval while another caller refreshes
+_LOCK_TRIES = 10  # max polls (~0.5s) before loading anyway
 
 # Sentinel client states: None = not yet initialised; False = init failed/disabled.
 _client: Any = None
@@ -109,23 +122,74 @@ def set(org_id: str | None, name: str, value: Any, ttl: int | None = None) -> No
         log.warning("cache.set failed for org=%s name=%s: %s", org_id, name, exc)
 
 
+def _try_lock(client: Any, key: str) -> bool:
+    """Best-effort single-flight lock via ``SET key 1 NX EX``.
+
+    Returns True when THIS caller should run the loader (it took the lock), or
+    when the backend doesn't support atomic ``SET NX`` / errors — i.e. FAIL-OPEN,
+    so the loader always runs rather than the request stalling. False means
+    another caller holds the lock and is refreshing.
+    """
+    setfn = getattr(client, "set", None)
+    if setfn is None:
+        return True  # backend without SET-NX (e.g. the test fake) → no locking
+    try:
+        return bool(setfn(key, "1", nx=True, ex=_LOCK_TTL))
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        log.warning("cache lock acquire failed for %s: %s", key, exc)
+        return True
+
+
 def get_or_set(
-    org_id: str | None, name: str, loader: Callable[[], Any], ttl: int | None = None
+    org_id: str | None,
+    name: str,
+    loader: Callable[[], Any],
+    ttl: int | None = None,
+    *,
+    cache_none: bool = False,
 ) -> Any:
     """Return the cached value, or call ``loader()``, cache its result, and return it.
 
     When caching is disabled (or org_id is falsy), this is exactly ``loader()`` —
     so wiring it into a read path is a no-op until Redis is configured.
+
+    ``cache_none=True`` also caches a ``None`` result (negative caching) so a hot
+    "not found" path isn't re-queried on every miss. A single-flight lock collapses
+    concurrent misses on the same key to ONE loader call (stampede protection);
+    if the lock can't be taken it falls through to loading (fail-open).
     """
     if not org_id or not enabled():
         return loader()
     hit = get(org_id, name)
     if hit is not None:
-        return hit
-    value = loader()
-    if value is not None:
-        set(org_id, name, value, ttl)
-    return value
+        return None if hit == _NULL else hit
+
+    # Single-flight: only the lock winner refreshes; others poll briefly for it.
+    lock_key = org_key(org_id, name) + ":lock"
+    acquired = _try_lock(_get_client(), lock_key)
+    if not acquired:
+        for _ in range(_LOCK_TRIES):
+            time.sleep(_LOCK_WAIT)
+            hit = get(org_id, name)
+            if hit is not None:
+                return None if hit == _NULL else hit
+        # The holder is slow or died → load anyway so the request never hangs.
+
+    try:
+        value = loader()
+        if value is not None:
+            set(org_id, name, value, ttl)
+        elif cache_none:
+            set(org_id, name, _NULL, ttl)
+        return value
+    finally:
+        if acquired:
+            try:
+                client = _get_client()
+                if client is not None:
+                    client.delete(lock_key)
+            except Exception as exc:  # noqa: BLE001 — lock auto-expires anyway
+                log.warning("cache lock release failed for %s: %s", lock_key, exc)
 
 
 def invalidate(org_id: str | None, name: str) -> None:

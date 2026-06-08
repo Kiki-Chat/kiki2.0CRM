@@ -104,7 +104,8 @@ app.include_router(oauth.router)
 app.include_router(outbound.router)
 app.include_router(actions.router)
 
-# ElevenLabs tool webhooks (Phase 2 — handlers stubbed, return 501 for now).
+# ElevenLabs tool webhooks — LIVE: org-scoped handlers the agent calls mid-call
+# (identify customer, create inquiry, book/cancel/change appointment, etc.).
 app.include_router(identify_customer.router)
 app.include_router(update_customer.router)
 app.include_router(create_inquiry.router)

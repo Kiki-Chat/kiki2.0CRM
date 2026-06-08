@@ -62,12 +62,19 @@ def _attach_employee_names(client, org_id: str, rows: list[dict]) -> None:
 # ─── List (with per-project stats) ────────────────────────────────────────────
 def _list(org_id: str, status: str | None, customer_id: str | None, search: str | None) -> list[dict]:
     client = get_service_client()
-    q = client.table("projects").select("*").eq("org_id", org_id)
-    if status:
-        q = q.eq("status", status)
-    if customer_id:
-        q = q.eq("customer_id", customer_id)
-    projects = q.order("created_at", desc=True).execute().data or []
+
+    # Page past the 1000-row cap: the list is filtered/searched client-side, so it
+    # must contain EVERY project — a silent truncation would hide projects on large
+    # orgs. fetch_all_rows rebuilds the (filtered) query per page.
+    def _projects_query():
+        qq = client.table("projects").select("*").eq("org_id", org_id)
+        if status:
+            qq = qq.eq("status", status)
+        if customer_id:
+            qq = qq.eq("customer_id", customer_id)
+        return qq.order("created_at", desc=True)
+
+    projects = fetch_all_rows(_projects_query)
     if not projects:
         return []
     pids = [p["id"] for p in projects]
@@ -220,14 +227,43 @@ def _detail(org_id: str, project_id: str) -> dict | None:
         p["customer_name"] = cust.get("full_name")
         p["customer"] = cust
 
-    inquiries = client.table("inquiries").select("status").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    appts = client.table("appointments").select("status, scheduled_at").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    kvas = client.table("cost_estimates").select("id").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    invs = client.table("invoices").select("total, status").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    docs = client.table("documents").select("id").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-    calls = 0
-    if cid:
-        calls = client.table("calls").select("id", count="exact").eq("org_id", org_id).eq("customer_id", cid).execute().count or 0
+    # Six independent reads (all scoped to this project / its customer) — run them
+    # concurrently, and PAGE the row-returning ones so a project with >1000 related
+    # rows can't silently truncate its stats.
+    def _inq():
+        return fetch_all_rows(
+            lambda: client.table("inquiries").select("status").eq("org_id", org_id).eq("project_id", project_id)
+        )
+
+    def _appts():
+        return fetch_all_rows(
+            lambda: client.table("appointments").select("status, scheduled_at").eq("org_id", org_id).eq("project_id", project_id)
+        )
+
+    def _kvas():
+        return fetch_all_rows(
+            lambda: client.table("cost_estimates").select("id").eq("org_id", org_id).eq("project_id", project_id)
+        )
+
+    def _invs():
+        return fetch_all_rows(
+            lambda: client.table("invoices").select("total, status").eq("org_id", org_id).eq("project_id", project_id)
+        )
+
+    def _docs():
+        return fetch_all_rows(
+            lambda: client.table("documents").select("id").eq("org_id", org_id).eq("project_id", project_id)
+        )
+
+    def _calls_count():
+        if not cid:
+            return 0
+        return (
+            client.table("calls").select("id", count="exact")
+            .eq("org_id", org_id).eq("customer_id", cid).execute().count or 0
+        )
+
+    inquiries, appts, kvas, invs, docs, calls = run_parallel(_inq, _appts, _kvas, _invs, _docs, _calls_count)
 
     pe = client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id).execute().data or []
     employees: list[dict] = []

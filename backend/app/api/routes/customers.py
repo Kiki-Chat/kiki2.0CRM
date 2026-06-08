@@ -4,7 +4,7 @@ import io
 import json
 from collections import Counter
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -227,8 +227,8 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
 @router.get("")
 async def list_customers(
     q: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     customer_type: str | None = None,
     sort_by: str | None = None,
     sort_dir: str | None = None,

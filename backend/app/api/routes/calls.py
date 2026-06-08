@@ -292,8 +292,19 @@ async def get_call_audio(call_id: str, user: CurrentUser = Depends(require_org))
         raise HTTPException(status_code=503, detail="ElevenLabs API key not configured")
 
     url = f"https://api.elevenlabs.io/v1/convai/conversations/{conversation_id}/audio"
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(url, headers={"xi-api-key": settings.elevenlabs_api_key})
+    # Classify upstream failures so the client gets an accurate status instead of a
+    # bare 500: a hung ElevenLabs → 504, a network/transport error → 502.
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url, headers={"xi-api-key": settings.elevenlabs_api_key})
+    except httpx.TimeoutException as exc:
+        raise HTTPException(
+            status_code=504, detail="Zeitüberschreitung beim Laden der Aufnahme von ElevenLabs."
+        ) from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502, detail="Aufnahme konnte nicht von ElevenLabs geladen werden."
+        ) from exc
     if resp.status_code != 200:
         raise HTTPException(
             status_code=502, detail=f"Audio unavailable ({resp.status_code})"

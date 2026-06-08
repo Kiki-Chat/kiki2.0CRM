@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -19,6 +19,22 @@ BERLIN = ZoneInfo("Europe/Berlin")
 # ─── Date / format helpers (Berlin-local month boundaries) ───────────────────
 def _now() -> datetime:
     return datetime.now(BERLIN)
+
+
+def _validate_date_params(*values: str | None) -> None:
+    """Reject a malformed from_date/to_date with a clear 422 instead of silently
+    falling back to the default window (which produced plausible-but-wrong reports).
+    Empty/None means "not provided" and is allowed; otherwise it must be ISO date."""
+    for v in values:
+        if not v:
+            continue
+        try:
+            datetime.fromisoformat(v)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Ungültiges Datum: '{v}'. Erwartet wird das Format JJJJ-MM-TT.",
+            )
 
 
 def _month_start(dt: datetime) -> datetime:
@@ -284,6 +300,7 @@ async def anrufe(
 ) -> dict:
     if period not in ("day", "week", "month", "range"):
         period = "month"
+    _validate_date_params(from_date, to_date)
     return await run_in_threadpool(_anrufe, user.org_id, period, from_date, to_date)
 
 
@@ -405,6 +422,7 @@ async def finanzen(
 ) -> dict:
     if period not in ("day", "week", "month", "range"):
         period = "month"
+    _validate_date_params(from_date, to_date)
     return await run_in_threadpool(_finanzen, user.org_id, period, from_date, to_date)
 
 
@@ -550,6 +568,7 @@ async def ki_nutzung(
 ) -> dict:
     if period not in ("day", "week", "month", "range"):
         period = "month"
+    _validate_date_params(from_date, to_date)
     return await run_in_threadpool(_ki_nutzung, user.org_id, period, from_date, to_date)
 
 

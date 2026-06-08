@@ -93,7 +93,7 @@ export function ProjectsPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-start justify-between gap-4">
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <FolderOpen size={26} className="text-green-primary" />
           <div>

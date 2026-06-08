@@ -183,10 +183,11 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                 client.auth.admin.update_user_by_id(
                     user_id, {"user_metadata": {"full_name": payload.display_name}}
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
+                log.exception("employee recreate: profile/auth update failed (user %s)", user_id)
                 warning = (
                     "Login wiederverwendet, aber das Profil konnte nicht vollständig "
-                    f"aktualisiert werden ({exc})."
+                    "aktualisiert werden."
                 )
             try:
                 employee_invite.revoke_user_sessions(user_id)
@@ -203,10 +204,11 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                     login_email=payload.email,
                     set_password_link=link,
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
+                log.exception("employee recreate: invite email failed (user %s)", user_id)
                 warning = ((warning + " ") if warning else "") + (
                     "Login aktualisiert, aber die Einladungs-E-Mail konnte nicht "
-                    f"gesendet werden ({exc})."
+                    "gesendet werden."
                 )
         else:
             # New login (Wave 2): generate a set-password invite link (this creates
@@ -228,14 +230,15 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                         "role": "org_admin" if payload.access_role == "admin" else "employee",
                     }
                 ).execute()
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 # Could not create the login → don't lose the record; create the
                 # employee without login. Admin can resend / set a password later.
+                log.exception("employee create: login provisioning failed (email %s)", payload.email)
                 user_id = None
                 link = None
                 warning = (
                     "Mitarbeiter angelegt, aber der Login-Zugang konnte nicht "
-                    f"erstellt werden ({exc}). Sie können die Einladung später erneut "
+                    "erstellt werden. Sie können die Einladung später erneut "
                     "senden oder ein Passwort manuell setzen."
                 )
             if user_id and link:
@@ -247,10 +250,11 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                         login_email=payload.email,
                         set_password_link=link,
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
+                    log.exception("employee create: welcome email failed (email %s)", payload.email)
                     warning = (
                         "Login erstellt, aber die Willkommens-E-Mail konnte nicht "
-                        f"gesendet werden ({exc}). Bitte die Einladung erneut senden "
+                        "gesendet werden. Bitte die Einladung erneut senden "
                         "oder ein Passwort manuell setzen."
                     )
 
