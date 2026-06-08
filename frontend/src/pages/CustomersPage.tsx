@@ -241,7 +241,7 @@ export function CustomersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl p-4 md:p-6 lg:p-8">
+    <div className="w-full p-4 md:p-6 lg:p-8">
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -496,7 +496,7 @@ export function CustomersPage() {
         <div
           aria-busy={isFetching}
           className={cn(
-            'grid grid-cols-1 gap-5 transition-opacity md:grid-cols-2 xl:grid-cols-3',
+            'grid grid-cols-1 gap-5 transition-opacity sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4',
             isFetching && 'pointer-events-none opacity-50',
           )}
         >

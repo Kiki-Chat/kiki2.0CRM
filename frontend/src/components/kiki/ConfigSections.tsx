@@ -210,20 +210,24 @@ export function PflichtfelderSection({ data: overview, flash }: Props) {
             </button>
           </div>
         </div>
-      </Card>
 
-      <ProblemDescriptionCard config={overview.config} flash={flash} />
+        <ProblemDescriptionField config={overview.config} flash={flash} />
+      </Card>
     </div>
   )
 }
 
-// Separate card for the free-text "Anliegen / Problembeschreibung" that flows
-// into the agent prompt (2A.3). Saved via PATCH /problem-description.
-function ProblemDescriptionCard({ config, flash }: { config: KzOverview['config']; flash: (m: string) => void }) {
+// "Anliegen / Problembeschreibung" — the free-text problem detail that flows into
+// the agent prompt (2A.3). Rendered as a sub-section INSIDE the "Immer abgefragte
+// Felder" card (merged with the fields, not a separate card). Saved via PATCH
+// /problem-description. (Making it a fully drag-reorderable field row would mean
+// migrating problem_description into the agent_required_fields model — a backend
+// change, deferred.)
+function ProblemDescriptionField({ config, flash }: { config: KzOverview['config']; flash: (m: string) => void }) {
   const patch = useConfigPatch('/problem-description', flash)
   const [text, setText] = useState(config.problem_description ?? '')
   return (
-    <Card>
+    <div className="mt-4 border-t border-border pt-4">
       <GroupLabel>Anliegen / Problembeschreibung</GroupLabel>
       <p className="mb-2 text-sm text-muted">Hier definierst du, welche Problem-Details Kiki bei typischen Anliegen erfassen soll — dieser Text fließt in den Agenten-Prompt ein.</p>
       <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="z. B. Bei Heizungsausfall: Baujahr der Anlage, Fehlermeldung am Display, ob noch Warmwasser vorhanden ist …" className={cn(inputCls, 'min-h-[120px]')} />
@@ -232,7 +236,7 @@ function ProblemDescriptionCard({ config, flash }: { config: KzOverview['config'
           {patch.isPending ? 'Speichert…' : 'Speichern'}
         </button>
       </div>
-    </Card>
+    </div>
   )
 }
 
