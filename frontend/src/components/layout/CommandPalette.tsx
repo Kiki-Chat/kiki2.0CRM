@@ -96,14 +96,14 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Kiki fragen"
     >
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-surface shadow-e3"
+        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-e3"
         onKeyDown={onKeyDown}
       >
         <div className="flex items-center gap-2.5 border-b border-border px-4">
@@ -119,7 +119,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             ESC
           </kbd>
         </div>
-        <ul className="max-h-[320px] overflow-y-auto p-2">
+        <ul className="max-h-[320px] min-h-0 overflow-y-auto p-2">
           {visible.length === 0 ? (
             <li className="px-3 py-6 text-center text-sm text-muted">Nichts gefunden.</li>
           ) : (

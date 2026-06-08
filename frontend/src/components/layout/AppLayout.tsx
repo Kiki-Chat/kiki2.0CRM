@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 
 import { applyAccent } from '../../lib/accent'
 import { apiFetch } from '../../lib/api'
@@ -13,6 +13,10 @@ import { Topbar } from './Topbar'
 
 export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false)
+  // Mobile nav drawer (md=768px breakpoint). Desktop keeps the static rail.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const location = useLocation()
+  useEffect(() => setMobileNavOpen(false), [location.pathname])
   // Global ⌘K / Ctrl-K command palette ("Kiki fragen") — searches the nav
   // menus + submenus and jumps to a page.
   const [searchOpen, setSearchOpen] = useState(false)
@@ -62,14 +66,20 @@ export function AppLayout() {
         collapsed={collapsed}
         badges={{ calls: unreadCalls }}
         onOpenSearch={() => setSearchOpen(true)}
+        mobileNavOpen={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
       />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Topbar collapsed={collapsed} onToggleCollapse={() => setCollapsed((c) => !c)} />
+        <Topbar
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((c) => !c)}
+          onOpenNav={() => setMobileNavOpen(true)}
+        />
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>
         {(contactLine || me?.org_email) && (
-          <footer className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 border-t border-border bg-surface px-4 py-2 text-center text-xs text-muted">
+          <footer className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-t border-border bg-surface px-8 py-4 text-center text-xs text-muted">
             {contactLine && <span>{contactLine}</span>}
             {me?.org_email && (
               <>

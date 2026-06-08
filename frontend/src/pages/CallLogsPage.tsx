@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { apiFetch } from '../lib/api'
 import { supabase } from '../lib/supabase'
+import { useMe } from '../lib/useMe'
 import { FilterPopover, PagerNumbered, Segmented } from './calls/atoms'
 import { CallDetail } from './calls/CallDetail'
 import { ActionRow, CallRow, EmptyAktionen } from './calls/Inbox'
@@ -50,12 +51,9 @@ export function CallLogsPage() {
     searchParams.get('tab') === 'aktionen' ? 'aktionen' : 'anfragen',
   )
 
-  const me = useQuery({
-    queryKey: ['me'],
-    queryFn: () => apiFetch<{ org_id: string; role?: string | null }>('/api/me'),
-  })
-  const orgId = me.data?.org_id
-  const isSuperAdmin = me.data?.role === 'super_admin'
+  const { me, role } = useMe()
+  const orgId = me?.org_id
+  const isSuperAdmin = role === 'super_admin'
 
   const callsQuery = useQuery({
     queryKey: ['calls'],

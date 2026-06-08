@@ -9,6 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
+from app.services.common import fetch_all_rows, run_parallel
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -70,14 +71,14 @@ def _customer_names(client, org_id: str, ids: list) -> dict:
 
 
 def _fetch_calls(client, org_id: str, since_iso: str) -> list:
-    return (
-        client.table("calls")
+    # Paged: these rows are aggregated into KPIs/series. A busy org's window could
+    # exceed 1000 calls, and a plain .execute() would silently cap there → wrong
+    # totals. fetch_all_rows pages past the cap.
+    return fetch_all_rows(
+        lambda: client.table("calls")
         .select("id, customer_id, direction, started_at, duration_seconds, status, created_at")
         .eq("org_id", org_id)
         .gte("created_at", since_iso)
-        .execute()
-        .data
-        or []
     )
 
 
@@ -297,14 +298,19 @@ def _finanzen(org_id: str, period: str = "month", from_date: str | None = None, 
     cur_start = _month_start(now)
     six_start = _add_months(cur_start, -5)
 
-    invoices = (
-        client.table("invoices")
-        .select("id, number, total, status, due_date, paid_at, created_at, customer_id")
-        .eq("org_id", org_id).execute().data or []
-    )
-    estimates = (
-        client.table("cost_estimates")
-        .select("id, total, status, created_at").eq("org_id", org_id).execute().data or []
+    # Revenue KPIs sum over EVERY invoice/estimate — page past the 1000-row cap so
+    # totals are correct on large orgs, and fetch the two independent reads in
+    # parallel (they don't depend on each other).
+    invoices, estimates = run_parallel(
+        lambda: fetch_all_rows(
+            lambda: client.table("invoices")
+            .select("id, number, total, status, due_date, paid_at, created_at, customer_id")
+            .eq("org_id", org_id)
+        ),
+        lambda: fetch_all_rows(
+            lambda: client.table("cost_estimates")
+            .select("id, total, status, created_at").eq("org_id", org_id)
+        ),
     )
 
     def inv_dt(i):

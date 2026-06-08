@@ -1,5 +1,6 @@
 """Appointment tools: get_available_slots, book, cancel, change."""
 
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +24,8 @@ from app.services.common import (
 )
 from app.services.customers import get_or_create_customer
 from app.services.scheduling import WEEKDAY_KEYS, normalize_business_hours
+
+logger = logging.getLogger(__name__)
 
 MAX_SLOTS = 6
 
@@ -350,33 +353,49 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
             loc_addr = format_address(crow[0]["address"])
     location = {"raw": loc_addr} if loc_addr else None
 
-    appt = (
-        client.table("appointments")
-        .insert(
-            {
-                "org_id": org_id,
-                "inquiry_id": inquiry["id"],
-                "customer_id": customer["id"],
-                "assigned_employee_id": emp["id"] if emp else None,
-                "title": payload.inquiry_title or payload.description or "Termin",
-                "scheduled_at": dt.isoformat(),
-                "duration_minutes": 60,
-                "location": location,
-                "category": payload.category,
-                # Land as 'pending' (a reservation) so it shows in the call's
-                # "Offene Aktionen" card for a human to review/confirm. Confirming
-                # there moves it to the calendar AND fires the confirmation
-                # call+email — no automatic confirmation without a human.
-                "status": "pending",
-                "notes": notes.strip(),
-                # Correlate back to the call so the call-detail card can surface
-                # this agent-booked appointment (it lives on a separate inquiry).
-                "source_conversation_id": payload.conversation_id,
-            }
+    # supabase-py has no transaction, so the inquiry (above) and the appointment
+    # are two separate writes. If the appointment insert fails we must COMPENSATE
+    # by deleting the inquiry we just created — otherwise the call leaves a phantom
+    # "open inquiry" with no appointment behind it (silent data drift).
+    try:
+        appt = (
+            client.table("appointments")
+            .insert(
+                {
+                    "org_id": org_id,
+                    "inquiry_id": inquiry["id"],
+                    "customer_id": customer["id"],
+                    "assigned_employee_id": emp["id"] if emp else None,
+                    "title": payload.inquiry_title or payload.description or "Termin",
+                    "scheduled_at": dt.isoformat(),
+                    "duration_minutes": 60,
+                    "location": location,
+                    "category": payload.category,
+                    # Land as 'pending' (a reservation) so it shows in the call's
+                    # "Offene Aktionen" card for a human to review/confirm. Confirming
+                    # there moves it to the calendar AND fires the confirmation
+                    # call+email — no automatic confirmation without a human.
+                    "status": "pending",
+                    "notes": notes.strip(),
+                    # Correlate back to the call so the call-detail card can surface
+                    # this agent-booked appointment (it lives on a separate inquiry).
+                    "source_conversation_id": payload.conversation_id,
+                }
+            )
+            .execute()
+            .data[0]
         )
-        .execute()
-        .data[0]
-    )
+    except Exception:
+        try:
+            client.table("inquiries").delete().eq("org_id", org_id).eq(
+                "id", inquiry["id"]
+            ).execute()
+        except Exception:  # noqa: BLE001 — best-effort cleanup; log the orphan
+            logger.exception(
+                "book_appointment: appointment insert failed AND inquiry rollback "
+                "failed — orphaned inquiry %s (org %s)", inquiry["id"], org_id
+            )
+        raise
     # The confirmation call+email is fired AFTER the call ends (services/post_call.py),
     # NOT here — so it never collides with the still-active booking call. The
     # appointment carries source_conversation_id for that post-call linkage.

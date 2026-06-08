@@ -30,6 +30,7 @@ import { CsvImportModal } from '../components/CsvImportModal'
 import { Modal } from '../components/ui/Modal'
 import { apiFetch } from '../lib/api'
 import { useMe } from '../lib/useMe'
+import { useToast } from '../lib/useToast'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -109,11 +110,7 @@ export function EmployeesPage() {
   const [newOpen, setNewOpen] = useState(false)
   const [csvOpen, setCsvOpen] = useState(false)
   const [newAbsenceOpen, setNewAbsenceOpen] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
-  const flash = (m: string) => {
-    setToast(m)
-    setTimeout(() => setToast(null), 6000)
-  }
+  const { toast, flash } = useToast(6000)
 
   const isAbsenceTab = tab === 'calendar' || tab === 'applications'
 

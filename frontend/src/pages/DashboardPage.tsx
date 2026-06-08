@@ -182,7 +182,7 @@ function OverviewTab({ company }: { company: string }) {
           aria-hidden
           className="kiki-glow pointer-events-none absolute right-[130px] top-1/2 hidden h-[340px] w-[340px] rounded-full bg-green-primary/20 blur-3xl lg:block"
         />
-        <div className="relative z-10 max-w-[600px] p-7 sm:p-9">
+        <div className="relative z-10 max-w-[600px] p-8 sm:p-10">
           <div className="inline-flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.08em] text-green-deep">
             <span className="h-1.5 w-1.5 rounded-full bg-green-primary shadow-[0_0_0_4px_var(--green-tint-100)]" />
             HeyKiki

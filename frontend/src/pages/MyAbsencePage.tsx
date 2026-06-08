@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 import { Modal } from '../components/ui/Modal'
 import { apiFetch } from '../lib/api'
+import { useToast } from '../lib/useToast'
 import { cn } from '../lib/utils'
 
 // Employee-facing absence self-service. Employees apply for their OWN absence
@@ -45,11 +46,7 @@ const fmtDate = (s: string) =>
 
 export function MyAbsencePage() {
   const [open, setOpen] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
-  const flash = (m: string) => {
-    setToast(m)
-    setTimeout(() => setToast(null), 4000)
-  }
+  const { toast, flash } = useToast()
   const qc = useQueryClient()
 
   const { data: absences = [], isLoading } = useQuery({

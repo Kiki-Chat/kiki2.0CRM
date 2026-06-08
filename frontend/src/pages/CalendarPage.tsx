@@ -12,6 +12,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { Modal } from '../components/ui/Modal'
 import { apiFetch, apiUpload } from '../lib/api'
+import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -42,11 +43,6 @@ interface CustomerOption {
   id: string
   full_name: string | null
 }
-interface Me {
-  full_name: string | null
-  email: string | null
-}
-
 // ─── Constants ───────────────────────────────────────────────────────────────
 const EMP_COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#0891B2', '#65A30D']
 const UNASSIGNED_COLOR = '#78756F'
@@ -107,7 +103,7 @@ export function CalendarPage() {
     queryKey: ['employees'],
     queryFn: () => apiFetch<Employee[]>('/api/employees'),
   })
-  const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => apiFetch<Me>('/api/me') })
+  const { me } = useMe()
   const colorFor = useEmployeeColors(employees)
 
   const myEmployeeId = useMemo(() => {

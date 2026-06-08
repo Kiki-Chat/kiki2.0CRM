@@ -5,6 +5,7 @@ import { useMemo, useRef, useState } from 'react'
 import { Modal } from '../components/ui/Modal'
 import { apiBlobUrl, apiFetch, apiUpload } from '../lib/api'
 import { useMe } from '../lib/useMe'
+import { useToast } from '../lib/useToast'
 import { cn } from '../lib/utils'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -103,8 +104,7 @@ export function CatalogPage() {
   const [creating, setCreating] = useState<Tab | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const qc = useQueryClient()
-  const [toast, setToast] = useState<string | null>(null)
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 4000) }
+  const { toast, flash } = useToast()
 
   const { data: items = [] } = useQuery({ queryKey: ['catalog'], queryFn: () => apiFetch<CatalogItem[]>('/api/catalog') })
   const { data: textModules = [] } = useQuery({ queryKey: ['text-modules'], queryFn: () => apiFetch<TextModule[]>('/api/text-modules') })

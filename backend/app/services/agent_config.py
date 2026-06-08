@@ -51,6 +51,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -103,8 +104,13 @@ HK_TOOL_NAMES: list[str] = [
 # ``settings.backend_public_url`` so it follows local vs. prod automatically.
 _CONVERSATION_INIT_PATH = "/api/elevenlabs/conversation-init"
 
-# Module-level cache: {tool_name: tool_id}. Populated on first lookup.
+# Module-level cache: {tool_name: tool_id}. Populated on first lookup and
+# refreshed on a TTL so a tool DELETED or RENAMED in the workspace can't be served
+# stale for the whole process lifetime (the old code never re-fetched once a name
+# was cached, so an orphaned id could be patched onto an agent).
 _HK_TOOL_ID_CACHE: dict[str, str] = {}
+_HK_TOOL_ID_CACHE_TS: float = 0.0
+_HK_TOOL_ID_TTL = 3600  # seconds; bound on how long a stale tool id can survive
 
 # Path to the German master prompt template (committed at this path so
 # provisioning is self-contained — not loaded from Amber's Downloads dir).
@@ -155,18 +161,33 @@ def _fetch_workspace_tools() -> dict[str, str]:
     return out
 
 
+def _refresh_tool_cache() -> None:
+    """Full-replace the tool-id cache from the workspace and stamp the time.
+
+    Uses clear()+update() (not a merge) so tools removed/renamed in the workspace
+    are EVICTED — a merge-only update could never drop an orphaned id."""
+    global _HK_TOOL_ID_CACHE_TS
+    fresh = _fetch_workspace_tools()
+    _HK_TOOL_ID_CACHE.clear()
+    _HK_TOOL_ID_CACHE.update(fresh)
+    _HK_TOOL_ID_CACHE_TS = time.time()
+
+
 def _resolve_hk_tool_ids(required: list[str] | None = None) -> dict[str, str]:
     """Return ``{name: tool_id}`` for all required hk_* names.
 
     Fails with HTTPException(400) listing the missing names if any of the
     required tools aren't found in the workspace — operations are expected
     to create them outside this code path (workspace-config decision).
+
+    Re-fetches when a required name is missing OR the cache is older than the TTL,
+    so a workspace-side delete/rename converges instead of being served forever.
     """
     names = list(required or HK_TOOL_NAMES)
+    stale = (time.time() - _HK_TOOL_ID_CACHE_TS) > _HK_TOOL_ID_TTL
     missing = [n for n in names if n not in _HK_TOOL_ID_CACHE]
-    if missing:
-        fresh = _fetch_workspace_tools()
-        _HK_TOOL_ID_CACHE.update(fresh)
+    if missing or stale:
+        _refresh_tool_cache()
         missing = [n for n in names if n not in _HK_TOOL_ID_CACHE]
     if missing:
         raise HTTPException(

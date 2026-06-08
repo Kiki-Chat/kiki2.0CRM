@@ -12,6 +12,7 @@ from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import CustomerUpsert
 from app.services import csv_import
+from app.services.common import fetch_all_rows, run_parallel
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
@@ -118,22 +119,26 @@ async def _list(
     photo_counts: Counter = Counter()
     doc_counts: Counter = Counter()
     if ids:
+        # Paged reads: these rows are COUNTED per customer, and a page of customers
+        # can collectively have >1000 inquiries/appointments/documents — a plain
+        # .execute() would cap at 1000 and silently undercount (e.g. show "2" calls
+        # when there are 50). fetch_all_rows pages past the cap.
         def _fetch_inq():
-            return (
-                client.table("inquiries").select("customer_id").eq("org_id", org_id)
-                .neq("status", "deleted").in_("customer_id", ids).execute().data or []
+            return fetch_all_rows(
+                lambda: client.table("inquiries").select("customer_id").eq("org_id", org_id)
+                .neq("status", "deleted").in_("customer_id", ids)
             )
 
         def _fetch_appt():
-            return (
-                client.table("appointments").select("customer_id").eq("org_id", org_id)
-                .in_("customer_id", ids).execute().data or []
+            return fetch_all_rows(
+                lambda: client.table("appointments").select("customer_id").eq("org_id", org_id)
+                .in_("customer_id", ids)
             )
 
         def _fetch_docs():
-            return (
-                client.table("documents").select("customer_id, is_image").eq("org_id", org_id)
-                .in_("customer_id", ids).execute().data or []
+            return fetch_all_rows(
+                lambda: client.table("documents").select("customer_id, is_image").eq("org_id", org_id)
+                .in_("customer_id", ids)
             )
 
         # Enrichment counts depend on the page ids but not on each other → parallel.
@@ -174,47 +179,47 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     if not rows:
         return None
     customer = rows[0]
-    customer["inquiries"] = (
-        client.table("inquiries")
-        .select("id, number, title, type, status, created_at, project_id")
-        .eq("org_id", org_id)
-        .eq("customer_id", customer_id)
-        .neq("status", "deleted")
-        .order("created_at", desc=True)
-        .execute()
-        .data
-        or []
-    )
-    customer["appointments"] = (
-        client.table("appointments")
-        .select("id, title, scheduled_at, status, category")
-        .eq("org_id", org_id)
-        .eq("customer_id", customer_id)
-        .order("scheduled_at", desc=True)
-        .execute()
-        .data
-        or []
-    )
-    customer["calls"] = (
-        client.table("calls")
-        .select("id, summary_title, direction, duration_seconds, started_at")
-        .eq("org_id", org_id)
-        .eq("customer_id", customer_id)
-        .is_("deleted_at", "null")
-        .order("started_at", desc=True)
-        .execute()
-        .data
-        or []
-    )
-    customer["cost_estimates"] = (
-        client.table("cost_estimates")
-        .select("id, number, status, total, valid_until, created_at")
-        .eq("org_id", org_id)
-        .eq("customer_id", customer_id)
-        .order("created_at", desc=True)
-        .execute()
-        .data
-        or []
+
+    # Four independent enrichment reads (none depends on another) — run them
+    # concurrently instead of serially. `run_parallel` uses a private thread pool,
+    # so it keeps this helper sync (it's already invoked via run_in_threadpool) and
+    # can't starve the request pool.
+    def _inq():
+        return (
+            client.table("inquiries")
+            .select("id, number, title, type, status, created_at, project_id")
+            .eq("org_id", org_id).eq("customer_id", customer_id)
+            .neq("status", "deleted").order("created_at", desc=True)
+            .execute().data or []
+        )
+
+    def _appt():
+        return (
+            client.table("appointments")
+            .select("id, title, scheduled_at, status, category")
+            .eq("org_id", org_id).eq("customer_id", customer_id)
+            .order("scheduled_at", desc=True).execute().data or []
+        )
+
+    def _calls():
+        return (
+            client.table("calls")
+            .select("id, summary_title, direction, duration_seconds, started_at")
+            .eq("org_id", org_id).eq("customer_id", customer_id)
+            .is_("deleted_at", "null").order("started_at", desc=True)
+            .execute().data or []
+        )
+
+    def _kvas():
+        return (
+            client.table("cost_estimates")
+            .select("id, number, status, total, valid_until, created_at")
+            .eq("org_id", org_id).eq("customer_id", customer_id)
+            .order("created_at", desc=True).execute().data or []
+        )
+
+    customer["inquiries"], customer["appointments"], customer["calls"], customer["cost_estimates"] = (
+        run_parallel(_inq, _appt, _calls, _kvas)
     )
     return customer
 

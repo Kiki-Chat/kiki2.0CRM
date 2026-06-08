@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom'
 import { Modal } from '../components/ui/Modal'
 import { apiBlobUrl, apiFetch } from '../lib/api'
 import { useMe } from '../lib/useMe'
+import { useToast } from '../lib/useToast'
 import { cn } from '../lib/utils'
 
 interface Invoice {
@@ -63,11 +64,7 @@ export function InvoicesPage() {
   const [status, setStatus] = useState('all')
   const [year, setYear] = useState(String(new Date().getFullYear()))
   const [sendFor, setSendFor] = useState<Invoice | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
-  const flash = (m: string) => {
-    setToast(m)
-    setTimeout(() => setToast(null), 4000)
-  }
+  const { toast, flash } = useToast()
 
   const { data: invoices = [] } = useQuery({
     queryKey: ['invoices'],

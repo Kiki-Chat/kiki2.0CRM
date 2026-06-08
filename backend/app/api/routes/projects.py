@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import ProjectEmployeeAdd, ProjectPatch, ProjectUpsert
-from app.services.common import now_berlin
+from app.services.common import fetch_all_rows, now_berlin, run_parallel, validate_fk_in_org
 from app.services.invoices import maybe_create_invoice_for_project
 from app.services.projects import gen_project_number
 
@@ -74,26 +74,41 @@ def _list(org_id: str, status: str | None, customer_id: str | None, search: str 
     cids = list({p["customer_id"] for p in projects if p.get("customer_id")})
 
     def rows(table: str, sel: str) -> list[dict]:
-        return (
-            client.table(table).select(sel).eq("org_id", org_id)
-            .in_("project_id", pids).execute().data or []
+        # Paged: these feed per-project COUNTS, so a silent 1000-row truncation
+        # would undercount stats for orgs with many projects/rows.
+        return fetch_all_rows(
+            lambda: client.table(table).select(sel).eq("org_id", org_id).in_("project_id", pids)
         )
 
-    inq = rows("inquiries", "project_id, status")
-    appts = rows("appointments", "project_id, status")
-    kvas = rows("cost_estimates", "project_id")
-    invs = rows("invoices", "project_id, total, status")
-    pe = (
-        client.table("project_employees").select("project_id, employee_id")
-        .in_("project_id", pids).execute().data or []
+    # Five independent enrichment reads — run them concurrently instead of serially.
+    inq, appts, kvas, invs, pe = run_parallel(
+        lambda: rows("inquiries", "project_id, status"),
+        lambda: rows("appointments", "project_id, status"),
+        lambda: rows("cost_estimates", "project_id"),
+        lambda: rows("invoices", "project_id, total, status"),
+        lambda: fetch_all_rows(
+            lambda: client.table("project_employees")
+            .select("project_id, employee_id")
+            .in_("project_id", pids)
+        ),
     )
 
     customers: dict[str, str] = {}
     calls_by_cust: dict[str, int] = {}
     if cids:
-        for c in client.table("customers").select("id, full_name").eq("org_id", org_id).in_("id", cids).execute().data or []:
+        cust_rows, call_rows = run_parallel(
+            lambda: fetch_all_rows(
+                lambda: client.table("customers").select("id, full_name")
+                .eq("org_id", org_id).in_("id", cids)
+            ),
+            lambda: fetch_all_rows(
+                lambda: client.table("calls").select("customer_id")
+                .eq("org_id", org_id).in_("customer_id", cids)
+            ),
+        )
+        for c in cust_rows:
             customers[c["id"]] = c.get("full_name")
-        for cl in client.table("calls").select("customer_id").eq("org_id", org_id).in_("customer_id", cids).execute().data or []:
+        for cl in call_rows:
             calls_by_cust[cl["customer_id"]] = calls_by_cust.get(cl["customer_id"], 0) + 1
 
     def count(rs: list[dict]) -> dict[str, int]:
@@ -161,6 +176,9 @@ async def list_projects(
 # ─── Create ──────────────────────────────────────────────────────────────────
 def _create(org_id: str, user_id: str | None, payload: ProjectUpsert) -> dict:
     client = get_service_client()
+    # Service-role bypasses RLS — verify a client-supplied customer_id actually
+    # belongs to this org before linking it (cross-tenant integrity / IDOR).
+    validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
     row = {
         "org_id": org_id,
         "customer_id": payload.customer_id,

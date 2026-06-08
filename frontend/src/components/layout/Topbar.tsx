@@ -1,4 +1,4 @@
-import { Bell, ChevronLeft, Moon, Sun } from 'lucide-react'
+import { Bell, ChevronLeft, Menu, Moon, Sun } from 'lucide-react'
 
 import { useTheme } from '../../lib/theme'
 import { cn } from '../../lib/utils'
@@ -6,17 +6,28 @@ import { cn } from '../../lib/utils'
 export function Topbar({
   collapsed,
   onToggleCollapse,
+  onOpenNav,
 }: {
   collapsed: boolean
   onToggleCollapse: () => void
+  onOpenNav?: () => void
 }) {
   const { theme, toggle } = useTheme()
 
   return (
-    <header className="sticky top-0 z-10 flex h-14 items-center gap-3.5 border-b border-border bg-sidebar px-7">
+    <header className="sticky top-0 z-10 flex h-14 items-center gap-3.5 border-b border-border bg-sidebar px-5 sm:px-7 lg:px-8">
+      {/* Mobile: open the nav drawer. */}
+      <button
+        onClick={onOpenNav}
+        className="flex rounded-md p-1.5 text-muted hover:bg-alt md:hidden"
+        aria-label="Menü öffnen"
+      >
+        <Menu size={18} />
+      </button>
+      {/* Desktop: collapse the rail. */}
       <button
         onClick={onToggleCollapse}
-        className="flex rounded-md p-1.5 text-muted hover:bg-alt"
+        className="hidden rounded-md p-1.5 text-muted hover:bg-alt md:inline-flex"
         aria-label="Seitenleiste umschalten"
       >
         <ChevronLeft

@@ -135,7 +135,7 @@ export function CustomerDetailPage() {
   const refresh = () => qc.invalidateQueries({ queryKey: ['customerDetail', id] })
 
   return (
-    <div className="mx-auto max-w-[1440px] space-y-5 p-8">
+    <div className="mx-auto max-w-7xl space-y-5 p-4 md:p-6 lg:p-8">
       <button
         onClick={() => navigate('/customers')}
         className="flex items-center gap-1.5 text-sm text-muted hover:text-body"

@@ -42,6 +42,7 @@ import {
 } from '../lib/dashApi'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../lib/theme'
+import { useToast } from '../lib/useToast'
 import { cn } from '../lib/utils'
 
 const STALE = 5 * 60 * 1000
@@ -154,8 +155,7 @@ export function SettingsPage() {
     enabled: isAdmin,
   })
 
-  const [toast, setToast] = useState<string | null>(null)
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 4000) }
+  const { toast, flash } = useToast()
 
   if (!ALL_SLUGS.has(section)) return <Navigate to="/settings/stammdaten" replace />
 
@@ -798,19 +798,31 @@ function startOAuthConnect(
     flash('Bitte Popups für diese Seite erlauben und erneut versuchen.')
     return
   }
+  // Guaranteed, idempotent teardown — the message listener must never leak,
+  // even if the user closes the popup early or no callback ever arrives.
+  let cleaned = false
+  let safetyTimer: ReturnType<typeof setTimeout> | undefined
+  const cleanup = () => {
+    if (cleaned) return
+    cleaned = true
+    window.removeEventListener('message', onMessage)
+    if (safetyTimer) clearTimeout(safetyTimer)
+  }
   const onMessage = (e: MessageEvent) => {
     if (!e.data || e.data.source !== 'heykiki-oauth') return
-    window.removeEventListener('message', onMessage)
+    cleanup()
     flash(e.data.message || (e.data.success ? 'Verbunden.' : 'Verbindung fehlgeschlagen.'))
     if (e.data.success) qc.invalidateQueries({ queryKey: ['oauth-connections'] })
   }
   window.addEventListener('message', onMessage)
+  // Safety net: drop the listener after 30s if no callback ever posts back.
+  safetyTimer = setTimeout(cleanup, 30000)
   apiFetch<{ url: string }>(`/api/settings/oauth/${provider}/authorize?purpose=${purpose}`)
     .then(({ url }) => {
       popup.location.href = url
     })
     .catch((err: Error) => {
-      window.removeEventListener('message', onMessage)
+      cleanup()
       popup.close()
       flash(err.message || 'OAuth nicht verfügbar.')
     })

@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom'
 import { Modal } from '../components/ui/Modal'
 import { apiBlobUrl, apiFetch } from '../lib/api'
 import { useMe } from '../lib/useMe'
+import { useToast } from '../lib/useToast'
 import { cn } from '../lib/utils'
 
 interface Estimate {
@@ -63,11 +64,7 @@ export function CostEstimatesPage() {
   const [status, setStatus] = useState('all')
   const [type, setType] = useState('all')
   const [sendFor, setSendFor] = useState<Estimate | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
-  const flash = (m: string) => {
-    setToast(m)
-    setTimeout(() => setToast(null), 4000)
-  }
+  const { toast, flash } = useToast()
 
   const { data: estimates = [] } = useQuery({
     queryKey: ['cost-estimates'],
@@ -211,11 +208,11 @@ export function CostEstimatesPage() {
           <thead>
             <tr className="border-b border-border text-left text-xs font-semibold uppercase tracking-wide text-muted">
               <th className="px-4 py-3">Nr.</th>
-              <th className="px-4 py-3">Typ</th>
+              <th className="hidden px-4 py-3 md:table-cell">Typ</th>
               <th className="px-4 py-3">Kunde</th>
-              <th className="px-4 py-3">Anfrage</th>
-              <th className="px-4 py-3">Datum</th>
-              <th className="px-4 py-3">Gültig bis</th>
+              <th className="hidden px-4 py-3 md:table-cell">Anfrage</th>
+              <th className="hidden px-4 py-3 md:table-cell">Datum</th>
+              <th className="hidden px-4 py-3 md:table-cell">Gültig bis</th>
               <th className="px-4 py-3 text-right">Betrag</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3 text-right">Aktionen</th>
@@ -228,7 +225,7 @@ export function CostEstimatesPage() {
               return (
                 <tr key={e.id} className="cursor-pointer border-b border-border-faint last:border-0 hover:bg-alt/40" onClick={() => navigate(`/cost-estimates/${e.id}`)}>
                   <td className="px-4 py-3 font-semibold text-text">{e.number}</td>
-                  <td className="px-4 py-3">
+                  <td className="hidden px-4 py-3 md:table-cell">
                     <span className="rounded bg-alt px-2 py-0.5 text-xs font-medium text-body">{TYPE_LABEL[e.type] ?? e.type}</span>
                     {e.type === 'kva' && <div className="mt-0.5 text-[10px] text-muted">{e.is_binding ? 'verbindlich' : 'unverbindlich'}</div>}
                   </td>
@@ -239,9 +236,9 @@ export function CostEstimatesPage() {
                       </button>
                     ) : <span className="text-muted">—</span>}
                   </td>
-                  <td className="max-w-[220px] truncate px-4 py-3 text-body">{e.subject || e.inquiry_title || '—'}</td>
-                  <td className="px-4 py-3 text-muted">{fmtDate(e.created_at)}</td>
-                  <td className="px-4 py-3 text-muted">{fmtDate(e.valid_until)}</td>
+                  <td className="hidden max-w-[220px] truncate px-4 py-3 text-body md:table-cell">{e.subject || e.inquiry_title || '—'}</td>
+                  <td className="hidden px-4 py-3 text-muted md:table-cell">{fmtDate(e.created_at)}</td>
+                  <td className="hidden px-4 py-3 text-muted md:table-cell">{fmtDate(e.valid_until)}</td>
                   <td className="px-4 py-3 text-right font-semibold text-text">{money(e.total)}</td>
                   <td className="px-4 py-3">
                     <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-medium', sm.cls)}>{sm.label}</span>

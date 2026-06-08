@@ -1,12 +1,13 @@
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
+from app.services.common import run_parallel
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
 
@@ -163,11 +164,12 @@ def _detail(org_id: str, call_id: str) -> dict | None:
 
 @router.get("")
 async def list_calls(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     customer_id: str | None = None,
     user: CurrentUser = Depends(require_org),
 ) -> dict:
+    # Bound limit/offset so a hand-crafted ?limit=99999 can't force a huge scan.
     return await run_in_threadpool(_list, user.org_id, limit, offset, customer_id)
 
 
@@ -240,6 +242,21 @@ def _mark_read(org_id: str, call_id: str) -> dict | None:
     """Idempotent mark-read: sets read_at = now() ONLY if currently NULL,
     so the original 'first opened at' timestamp is preserved on reopens."""
     client = get_service_client()
+    # Common case (first open) = ONE round-trip: conditionally stamp read_at only
+    # where it's still NULL and let PostgREST return the row it actually updated.
+    updated = (
+        client.table("calls")
+        .update({"read_at": datetime.now(timezone.utc).isoformat()})
+        .eq("org_id", org_id)
+        .eq("id", call_id)
+        .is_("read_at", "null")
+        .execute()
+        .data
+    )
+    if updated:
+        return updated[0]
+    # Nothing flipped → either already-read or no such call. One read settles it
+    # (and preserves the original 'first opened at' timestamp on reopens).
     rows = (
         client.table("calls")
         .select("id, read_at")
@@ -249,24 +266,7 @@ def _mark_read(org_id: str, call_id: str) -> dict | None:
         .execute()
         .data
     )
-    if not rows:
-        return None
-    if rows[0]["read_at"] is None:
-        client.table("calls").update(
-            {"read_at": datetime.now(timezone.utc).isoformat()}
-        ).eq("org_id", org_id).eq("id", call_id).execute()
-    # Always re-read so the response reflects the persisted timestamp,
-    # whether we just wrote it or it was already there.
-    updated = (
-        client.table("calls")
-        .select("id, read_at")
-        .eq("org_id", org_id)
-        .eq("id", call_id)
-        .limit(1)
-        .execute()
-        .data
-    )
-    return updated[0] if updated else None
+    return rows[0] if rows else None
 
 
 @router.post("/{call_id}/mark-read")
@@ -497,41 +497,45 @@ def _build_timeline(org_id: str, call_id: str) -> list[dict] | None:
                     }
                 )
 
-    # 3. appointments for these inquiries — confirm / reject / alt-proposed.
+    # 3 + 4. appointments and cost_estimates both depend only on inquiry_ids and
+    # are independent of each other → fetch them concurrently (one round-trip
+    # instead of two) after the inquiry barrier.
     appointments: list[dict] = []
-    if inquiry_ids:
-        appointments = (
-            client.table("appointments")
-            .select(
-                "id, inquiry_id, title, scheduled_at, created_at, status, "
-                "confirmed_at, rejected_at, rejection_reason, "
-                "alternative_start_time, alternative_proposed_at, "
-                "customer_proposed_start_time, customer_proposed_at"
-            )
-            .eq("org_id", org_id)
-            .in_("inquiry_id", inquiry_ids)
-            .execute()
-            .data
-            or []
-        )
-    for appt in appointments:
-        events.extend(_appointment_events(appt))
-
-    # 4. cost_estimates (KVA) — sent / accepted / rejected.
     cost_estimates: list[dict] = []
     if inquiry_ids:
-        cost_estimates = (
-            client.table("cost_estimates")
-            .select(
-                "id, inquiry_id, number, total, created_at, "
-                "sent_at, accepted_at, rejected_at, status"
+        def _fetch_appts():
+            return (
+                client.table("appointments")
+                .select(
+                    "id, inquiry_id, title, scheduled_at, created_at, status, "
+                    "confirmed_at, rejected_at, rejection_reason, "
+                    "alternative_start_time, alternative_proposed_at, "
+                    "customer_proposed_start_time, customer_proposed_at"
+                )
+                .eq("org_id", org_id)
+                .in_("inquiry_id", inquiry_ids)
+                .execute()
+                .data
+                or []
             )
-            .eq("org_id", org_id)
-            .in_("inquiry_id", inquiry_ids)
-            .execute()
-            .data
-            or []
-        )
+
+        def _fetch_kvas():
+            return (
+                client.table("cost_estimates")
+                .select(
+                    "id, inquiry_id, number, total, created_at, "
+                    "sent_at, accepted_at, rejected_at, status"
+                )
+                .eq("org_id", org_id)
+                .in_("inquiry_id", inquiry_ids)
+                .execute()
+                .data
+                or []
+            )
+
+        appointments, cost_estimates = run_parallel(_fetch_appts, _fetch_kvas)
+    for appt in appointments:
+        events.extend(_appointment_events(appt))
     for kva in cost_estimates:
         events.extend(_kva_events(kva))
 
@@ -555,12 +559,45 @@ def build_customer_timeline(org_id: str, customer_id: str) -> list[dict] | None:
 
     events: list[dict] = []
 
-    for c in (
-        client.table("calls")
-        .select("id, summary_title, started_at, created_at")
-        .eq("org_id", org_id).eq("customer_id", customer_id)
-        .is_("deleted_at", "null").execute().data or []
-    ):
+    # All four reads depend only on customer_id and are independent of each other
+    # → fetch them concurrently after the tenant barrier (4 round-trips → ~1).
+    def _calls():
+        return (
+            client.table("calls")
+            .select("id, summary_title, started_at, created_at")
+            .eq("org_id", org_id).eq("customer_id", customer_id)
+            .is_("deleted_at", "null").execute().data or []
+        )
+
+    def _inqs():
+        return (
+            client.table("inquiries")
+            .select("id, status, title, created_at, updated_at")
+            .eq("org_id", org_id).eq("customer_id", customer_id)
+            .neq("status", "deleted").execute().data or []
+        )
+
+    def _appts():
+        return (
+            client.table("appointments")
+            .select(
+                "id, title, scheduled_at, created_at, status, confirmed_at, rejected_at, "
+                "rejection_reason, alternative_start_time, alternative_proposed_at, "
+                "customer_proposed_start_time, customer_proposed_at"
+            )
+            .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
+        )
+
+    def _kvas():
+        return (
+            client.table("cost_estimates")
+            .select("id, number, total, sent_at, accepted_at, rejected_at")
+            .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
+        )
+
+    call_rows, inq_rows, appt_rows, kva_rows = run_parallel(_calls, _inqs, _appts, _kvas)
+
+    for c in call_rows:
         ts = c.get("started_at") or c.get("created_at")
         if ts:
             events.append({
@@ -570,12 +607,7 @@ def build_customer_timeline(org_id: str, customer_id: str) -> list[dict] | None:
                 "entity_id": c["id"], "extras": {},
             })
 
-    for inq in (
-        client.table("inquiries")
-        .select("id, status, title, created_at, updated_at")
-        .eq("org_id", org_id).eq("customer_id", customer_id)
-        .neq("status", "deleted").execute().data or []
-    ):
+    for inq in inq_rows:
         status = inq.get("status")
         if status and status != "open":
             ts = inq.get("updated_at") or inq.get("created_at")
@@ -588,22 +620,10 @@ def build_customer_timeline(org_id: str, customer_id: str) -> list[dict] | None:
                     "entity_id": inq["id"], "extras": {"status": status, "title": inq.get("title")},
                 })
 
-    for appt in (
-        client.table("appointments")
-        .select(
-            "id, title, scheduled_at, created_at, status, confirmed_at, rejected_at, "
-            "rejection_reason, alternative_start_time, alternative_proposed_at, "
-            "customer_proposed_start_time, customer_proposed_at"
-        )
-        .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
-    ):
+    for appt in appt_rows:
         events.extend(_appointment_events(appt))
 
-    for kva in (
-        client.table("cost_estimates")
-        .select("id, number, total, sent_at, accepted_at, rejected_at")
-        .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
-    ):
+    for kva in kva_rows:
         events.extend(_kva_events(kva))
 
     events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)

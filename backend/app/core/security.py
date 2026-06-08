@@ -9,7 +9,6 @@ from app.core.config import settings
 # keys. We verify against the project's published JWKS. Legacy projects that
 # still use a shared HS256 secret are handled via SUPABASE_JWT_SECRET.
 
-_JWKS_TTL = 3600
 _jwks_cache: dict = {"keys": None, "ts": 0.0}
 
 
@@ -19,7 +18,9 @@ def _jwks_url() -> str:
 
 def _get_jwks(force: bool = False) -> list[dict]:
     now = time.time()
-    if not force and _jwks_cache["keys"] and now - _jwks_cache["ts"] < _JWKS_TTL:
+    # TTL is read live from settings (default 300s) so a rotated/revoked Supabase
+    # signing key stops being trusted within one short window, not up to an hour.
+    if not force and _jwks_cache["keys"] and now - _jwks_cache["ts"] < settings.jwks_ttl_seconds:
         return _jwks_cache["keys"]
     resp = httpx.get(_jwks_url(), timeout=5)
     resp.raise_for_status()

@@ -16,6 +16,7 @@ import { Modal } from '../components/ui/Modal'
 import { apiFetch } from '../lib/api'
 import { KZ, KZ_STALE, minutesAgo, SECTION_ENDPOINT_LABEL, type KzAudit, type KzHealth, type KzOverview } from '../lib/kikiApi'
 import { useMe } from '../lib/useMe'
+import { useToast } from '../lib/useToast'
 import { cn } from '../lib/utils'
 
 interface NavItem { slug: string; label: string; icon: LucideIcon }
@@ -48,10 +49,9 @@ export function KikiZentralePage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { isAdmin, isLoading: meLoading } = useMe()
-  const [toast, setToast] = useState<string | null>(null)
+  const { toast, flash } = useToast()
   const [healthOpen, setHealthOpen] = useState(false)
   const [rollbackSnap, setRollbackSnap] = useState<string | null>(null)
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 4000) }
 
   const { data, isLoading } = useQuery({
     queryKey: ['kiki-zentrale'],

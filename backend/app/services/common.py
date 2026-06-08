@@ -6,12 +6,57 @@ language). All times are handled in Europe/Berlin.
 """
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
 BERLIN = ZoneInfo("Europe/Berlin")
+
+
+def fetch_all_rows(make_query, page: int = 1000) -> list[dict]:
+    """Fetch EVERY row of a PostgREST select, paging past the silent ~1000-row cap.
+
+    PostgREST returns at most ~1000 rows for a plain ``.execute()``. Any read whose
+    *correctness* depends on seeing all rows — dedup, max-number, full counts — must
+    page explicitly or it silently truncates (and, e.g., re-imports duplicate
+    customers). ``make_query`` must return a FRESH query builder (all filters set,
+    NO ``.range``/``.execute``) on each call, e.g.::
+
+        fetch_all_rows(lambda: client.table("customers")
+                       .select("email").eq("org_id", org_id))
+
+    The ``page`` size must stay ≤ 1000 (PostgREST's own per-request ceiling).
+    """
+    rows: list[dict] = []
+    offset = 0
+    while True:
+        chunk = make_query().range(offset, offset + page - 1).execute().data or []
+        rows.extend(chunk)
+        if len(chunk) < page:
+            return rows
+        offset += page
+
+
+def run_parallel(*funcs):
+    """Run independent zero-arg callables concurrently; return results in call order.
+
+    For fanning out independent Supabase reads inside a *sync* helper (the route
+    already runs that helper via ``run_in_threadpool``). It uses a PRIVATE
+    ``ThreadPoolExecutor`` — NOT AnyIO's request threadpool — so it can never starve
+    the pool that serves other requests. The Supabase client's underlying
+    ``httpx.Client`` is safe for concurrent request execution, and each ``.table()``
+    builds an independent query, so concurrent reads don't share mutable state.
+    Exceptions propagate exactly as they would serially (first failure raises).
+    """
+    if not funcs:
+        return []
+    if len(funcs) == 1:
+        return [funcs[0]()]
+    with ThreadPoolExecutor(max_workers=min(len(funcs), 8)) as ex:
+        futures = [ex.submit(f) for f in funcs]
+        return [f.result() for f in futures]
 
 
 def validate_fk_in_org(
@@ -311,14 +356,14 @@ def gen_customer_number(client, org_id: str) -> str:
     """Next customer number = max existing numeric customer_number + 1 (per org),
     starting at 101001. Unified across the AI-tool, manual-create, and CSV-import
     paths so call-created customers continue the same numeric sequence as the
-    imported ones (CSV rows keep their original Kundennummer)."""
-    rows = (
-        client.table("customers")
-        .select("customer_number")
-        .eq("org_id", org_id)
-        .execute()
-        .data
-        or []
+    imported ones (CSV rows keep their original Kundennummer).
+
+    Pages past the 1000-row cap: customer_number is a *text* column holding the
+    original (possibly non-numeric) Kundennummer, so we cannot ``order``/``max`` it
+    in SQL — we must read every value and take the numeric max in Python. Without
+    paging, an org with >1000 customers would re-mint an existing number."""
+    rows = fetch_all_rows(
+        lambda: client.table("customers").select("customer_number").eq("org_id", org_id)
     )
     nums = [
         int(r["customer_number"])

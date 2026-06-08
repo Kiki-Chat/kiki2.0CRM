@@ -26,7 +26,7 @@ export function Tag({
   return (
     <span
       className={cn(
-        'inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold',
+        'inline-block whitespace-normal rounded-full px-2 py-0.5 text-xs font-bold sm:whitespace-nowrap',
         variants[variant],
         className,
       )}

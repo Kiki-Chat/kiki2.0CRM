@@ -16,7 +16,7 @@ from app.schemas.admin import (
     EmployeeUpdate,
 )
 from app.services import csv_import, employee_invite
-from app.services.common import validate_fk_in_org
+from app.services.common import run_parallel, validate_fk_in_org
 
 log = logging.getLogger(__name__)
 
@@ -58,25 +58,23 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
     )
 
     user_ids = [e["user_id"] for e in employees if e.get("user_id")]
-    users: dict[str, dict] = {}
-    if user_ids:
-        for u in (
-            client.table("users")
-            .select("id, email, role, full_name")
-            .in_("id", user_ids)
-            .execute()
-            .data
-            or []
-        ):
-            users[u["id"]] = u
-
-    # Absences covering "now" → presence.
-    now_iso = _now().isoformat()
-    absent_ids = set()
-    absence_type: dict[str, str] = {}
     emp_ids = [e["id"] for e in employees]
-    if emp_ids:
-        for a in (
+    now_iso = _now().isoformat()  # absences covering "now" → presence
+
+    # The login-users read and the absences read both depend only on the employee
+    # list, not on each other → fetch them concurrently.
+    def _fetch_users():
+        if not user_ids:
+            return []
+        return (
+            client.table("users").select("id, email, role, full_name")
+            .in_("id", user_ids).execute().data or []
+        )
+
+    def _fetch_absences():
+        if not emp_ids:
+            return []
+        return (
             client.table("employee_absences")
             .select("employee_id, type, starts_at, ends_at")
             .eq("org_id", org_id)
@@ -84,12 +82,16 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
             .in_("employee_id", emp_ids)
             .lte("starts_at", now_iso)
             .gte("ends_at", now_iso)
-            .execute()
-            .data
-            or []
-        ):
-            absent_ids.add(a["employee_id"])
-            absence_type[a["employee_id"]] = a["type"]
+            .execute().data or []
+        )
+
+    user_rows, absence_rows = run_parallel(_fetch_users, _fetch_absences)
+    users: dict[str, dict] = {u["id"]: u for u in user_rows}
+    absent_ids = set()
+    absence_type: dict[str, str] = {}
+    for a in absence_rows:
+        absent_ids.add(a["employee_id"])
+        absence_type[a["employee_id"]] = a["type"]
 
     out = []
     for e in employees:

@@ -255,7 +255,8 @@ export function CopilotWidget() {
   const wrapperStyle: CSSProperties | undefined = pos
     ? (() => {
         const w = open ? PANEL_W : LAUNCHER
-        const h = open ? Math.min(560, Math.round(window.innerHeight * 0.8)) : LAUNCHER
+        // Matches the panel's CSS max height (lg cap 560, clamped to 75vh).
+        const h = open ? Math.min(560, Math.round(window.innerHeight * 0.75)) : LAUNCHER
         return {
           left: Math.max(MARGIN, Math.min(pos.x, window.innerWidth - w - MARGIN)),
           top: Math.max(MARGIN, Math.min(pos.y, window.innerHeight - h - MARGIN)),
@@ -270,7 +271,7 @@ export function CopilotWidget() {
       className={`fixed z-50 flex flex-col items-end gap-3 print:hidden ${pos ? '' : 'bottom-6 right-6'}`}
     >
       {open && (
-        <div className="flex h-[560px] max-h-[80vh] w-[370px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
+        <div className="flex h-[280px] max-h-[75vh] w-[370px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl sm:h-[400px] md:h-[480px] lg:h-[560px]">
           <div className="flex items-center gap-3 border-b border-border bg-alt px-4 py-3">
             <img src={kikiAvatar} alt="Kiki" className="h-9 w-9 rounded-full bg-white object-cover ring-1 ring-border" />
             <div className="min-w-0 flex-1">

@@ -44,7 +44,18 @@ from app.api.routes.tools import (
     transfer_call,
     update_customer,
 )
-from app.core.config import settings
+from app.core.config import settings, validate_runtime_config
+
+# Fail fast on missing security-critical config in production (empty webhook
+# secret, no DB creds). In dev these only warn so local boot stays frictionless.
+import logging as _logging
+
+_config_problems = validate_runtime_config(settings)
+if _config_problems:
+    _msg = "Invalid runtime config:\n  - " + "\n  - ".join(_config_problems)
+    if settings.is_production:
+        raise RuntimeError(_msg)
+    _logging.getLogger(__name__).warning("%s\n(non-fatal in non-production)", _msg)
 
 app = FastAPI(title="HeyKiki Portal API", version="0.1.0")
 
