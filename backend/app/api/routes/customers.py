@@ -13,6 +13,8 @@ from app.db.supabase_client import get_service_client
 from app.schemas.admin import CustomerUpsert
 from app.services import csv_import
 from app.services.common import fetch_all_rows, run_parallel
+from app.services.customers import find_existing_customer
+from app.services.identify import _to_e164
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
@@ -31,8 +33,8 @@ _CUSTOMER_TYPES = ["new", "regular", "supplier", "property_management"]
 
 # Whitelisted sort columns for the customer list (guards against arbitrary order-by
 # injection). customer_number is text but the numbering scheme is fixed-width 6-digit,
-# so a lexical sort matches numeric order.
-_SORT_COLUMNS = {"created_at", "full_name", "customer_number"}
+# so a lexical sort matches numeric order. phone is plain text (canonical E.164).
+_SORT_COLUMNS = {"created_at", "full_name", "customer_number", "phone"}
 
 
 def _resolve_sort(sort_by: str | None, sort_dir: str | None) -> tuple[str, bool]:
@@ -360,12 +362,31 @@ async def get_customer_timeline(
 
 def _create(org_id: str, payload: CustomerUpsert) -> dict:
     client = get_service_client()
+
+    # Dedup guard — the manual-create path used to insert unconditionally, so the
+    # form (esp. a double-submit) and the API could mint two customers on one
+    # mobile. Same shared rule as the AI-agent path + CSV import. A collision is a
+    # 409 (per product: block, don't silently merge) naming the existing record.
+    dup = find_existing_customer(
+        client, org_id, phone=payload.phone, name=payload.full_name, email=payload.email
+    )
+    if dup is None and payload.phone2:
+        dup = find_existing_customer(client, org_id, phone=payload.phone2, name=payload.full_name)
+    if dup:
+        num = dup.get("customer_number") or dup.get("full_name") or "vorhanden"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Es existiert bereits ein Kunde mit dieser Telefonnummer oder E-Mail (Kundennr. {num}).",
+        )
+
     row = {
         "org_id": org_id,
         "full_name": payload.full_name,
         "email": payload.email,
-        "phone": payload.phone,
-        "phone2": payload.phone2,
+        # Store canonical E.164 so the dedup guard can match this row next time
+        # (a later '0157…' vs '+49157…' create would otherwise slip through).
+        "phone": _to_e164(payload.phone),
+        "phone2": _to_e164(payload.phone2),
         "address": _addr(payload.address),
         "vat_id": payload.vat_id,
         "customer_type": payload.customer_type or "new",
@@ -413,9 +434,9 @@ def _update(org_id: str, customer_id: str, payload: CustomerUpsert) -> dict | No
     if payload.email is not None:
         fields["email"] = payload.email
     if payload.phone is not None:
-        fields["phone"] = payload.phone
+        fields["phone"] = _to_e164(payload.phone)  # keep canonical for dedup
     if payload.phone2 is not None:
-        fields["phone2"] = payload.phone2
+        fields["phone2"] = _to_e164(payload.phone2)
     if payload.address is not None:
         fields["address"] = _addr(payload.address)
     if payload.vat_id is not None:

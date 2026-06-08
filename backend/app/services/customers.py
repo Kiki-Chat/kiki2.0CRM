@@ -3,9 +3,86 @@
 from app.db.supabase_client import get_service_client
 from app.schemas.tools import UpdateCustomerDataRequest
 from app.services.common import gen_customer_number
+from app.services.csv_import import classify_phone
 from app.services.identify import _to_e164
 
-_SELECT = "id, full_name, phone, email, customer_number, address, identified_by"
+# Superset of every field a caller of get_or_create_customer expects, plus phone2
+# (so the dedup lookup can match a number stored in either phone column).
+_DEDUP_SELECT = "id, full_name, phone, phone2, email, customer_number, address, identified_by"
+
+
+def find_existing_customer(
+    client,
+    org_id: str,
+    *,
+    phone: str | None = None,
+    name: str | None = None,
+    email: str | None = None,
+) -> dict | None:
+    """Return an existing customer the given identity would duplicate, else None.
+
+    ONE dedup rule, shared by every insert path (manual-create API + AI agent),
+    mirroring the CSV importer (csv_import.py) so all three paths agree:
+      - email match → duplicate.
+      - a MOBILE number (DE 15x/16x/17x) matching phone OR phone2 → duplicate
+        (a mobile belongs to one person, so it dedups on its own).
+      - a LANDLINE / unknown number → duplicate only if the NAME also matches
+        (a shared landline — couple, business — must be name-confirmed).
+      - no phone → dedup on exact name (so retries don't duplicate).
+    Relies on stored phone/phone2 being canonical E.164 (every insert path now
+    normalizes before writing); legacy non-canonical rows may not match until
+    backfilled.
+    """
+
+    def _q():
+        return (
+            client.table("customers")
+            .select(_DEDUP_SELECT)
+            .eq("org_id", org_id)
+            .neq("status", "deleted")
+        )
+
+    if email:
+        # Case-insensitive: emails are stored verbatim across paths, so try the
+        # given casing and a lowercased form (mirrors the CSV importer, which
+        # dedups on email.lower()).
+        for cand in dict.fromkeys([email.strip(), email.strip().lower()]):
+            rows = _q().eq("email", cand).limit(1).execute().data
+            if rows:
+                return rows[0]
+
+    phone_norm = _to_e164(phone)
+    if phone_norm:
+        # Match the canonical number against BOTH phone columns — two plain eq
+        # lookups (avoids any '+' encoding ambiguity inside an or() filter).
+        rows = (_q().eq("phone", phone_norm).limit(10).execute().data or []) + (
+            _q().eq("phone2", phone_norm).limit(10).execute().data or []
+        )
+        if classify_phone(phone_norm) == "mobile":
+            # A mobile is unique to one person → dedup on the number alone.
+            if rows:
+                return rows[0]
+        elif rows:
+            # Landline / unknown — a shared landline (couple, business) is only a
+            # duplicate when the NAME also matches. But WITHOUT a name (common on
+            # the call path: a landline Caller-ID with no captured name), fall
+            # back to phone-exact so a repeat caller is not duplicated on every
+            # call — preserving the pre-helper behaviour of the call/agent path.
+            if name:
+                nl = name.strip().casefold()
+                match = next(
+                    (r for r in rows if (r.get("full_name") or "").strip().casefold() == nl),
+                    None,
+                )
+                if match:
+                    return match
+            else:
+                return rows[0]
+    elif name:
+        rows = _q().eq("full_name", name).limit(1).execute().data
+        if rows:
+            return rows[0]
+    return None
 
 
 def get_or_create_customer(
@@ -16,41 +93,21 @@ def get_or_create_customer(
     email: str | None = None,
     address: str | None = None,
 ) -> dict:
-    """Find a customer by phone within the org, or create a new one.
+    """Find a customer (shared dedup) within the org, or create a new one.
 
     P0.8 — normalize phone to E.164 on BOTH the lookup and the insert, so
     different-format renderings of the same number collapse to a single
-    customer row. Without this, '+4915734432281' and '0157 344 322 81'
-    create two rows; with this, the second call finds the first.
+    customer row. The lookup now goes through find_existing_customer, so the
+    call/agent path matches the SAME way the manual-create API and CSV import
+    do (mobile on phone OR phone2; landline+name; email) instead of the old
+    phone-exact-only match that ignored phone2.
     """
     client = get_service_client()
-    phone_norm = _to_e164(phone)
-    if phone_norm:
-        found = (
-            client.table("customers")
-            .select(_SELECT)
-            .eq("org_id", org_id)
-            .eq("phone", phone_norm)
-            .limit(1)
-            .execute()
-            .data
-        )
-        if found:
-            return found[0]
-    elif name:
-        # No phone to match on — dedupe by exact name so retries don't duplicate.
-        found = (
-            client.table("customers")
-            .select(_SELECT)
-            .eq("org_id", org_id)
-            .eq("full_name", name)
-            .limit(1)
-            .execute()
-            .data
-        )
-        if found:
-            return found[0]
+    existing = find_existing_customer(client, org_id, phone=phone, name=name, email=email)
+    if existing:
+        return existing
 
+    phone_norm = _to_e164(phone)
     payload = {
         "org_id": org_id,
         "full_name": name,
@@ -76,7 +133,8 @@ def update_customer_data(org_id: str, payload: UpdateCustomerDataRequest) -> dic
     if payload.email:
         fields["email"] = payload.email
     if payload.phone:
-        fields["phone"] = payload.phone
+        # Store canonical E.164 so the dedup lookup can match this number later.
+        fields["phone"] = _to_e164(payload.phone) or payload.phone
     if payload.address:
         fields["address"] = {"raw": payload.address}
 

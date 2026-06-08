@@ -68,8 +68,15 @@ def _build_client(initial_customers: list[dict] | None = None) -> tuple[MagicMoc
         # capture select cols (ignored)
         chain.select.return_value = chain
 
+        # .neq("status", "deleted") — the dedup lookup excludes soft-deleted rows.
+        def _neq(col, val):
+            state.setdefault("neq_calls", []).append((col, val))
+            return chain
+
+        chain.neq.side_effect = _neq
+
         # .eq("org_id", X) → returns self, stores filter
-        # .eq("phone", Y) → returns self, stores filter
+        # .eq("phone"|"phone2"|"email"|"full_name", Y) → returns self, stores filter
         def _eq(col, val):
             state.setdefault("eq_calls", []).append((col, val))
             return chain
@@ -78,19 +85,23 @@ def _build_client(initial_customers: list[dict] | None = None) -> tuple[MagicMoc
             return chain
 
         def _execute():
-            # Find rows matching the latest "phone" eq filter
+            # Match rows against the latest single-column filter (phone, then
+            # phone2, then email, then full_name), then drop any .neq() matches.
             eq_calls = state.get("eq_calls", [])
-            phone_filter = next((v for c, v in eq_calls if c == "phone"), None)
-            name_filter = next((v for c, v in eq_calls if c == "full_name"), None)
+            neq_calls = state.get("neq_calls", [])
             rows = state["customers"]
-            if phone_filter is not None:
-                rows = [r for r in rows if r.get("phone") == phone_filter]
-            elif name_filter is not None:
-                rows = [r for r in rows if r.get("full_name") == name_filter]
+            for col in ("phone", "phone2", "email", "full_name"):
+                val = next((v for c, v in eq_calls if c == col), None)
+                if val is not None:
+                    rows = [r for r in rows if r.get(col) == val]
+                    break
             else:
                 rows = []
+            for col, val in neq_calls:
+                rows = [r for r in rows if r.get(col) != val]
             # Reset filters for the next chain
             state["eq_calls"] = []
+            state["neq_calls"] = []
             return MagicMock(data=rows)
 
         chain.eq.side_effect = _eq
@@ -186,3 +197,30 @@ def test_get_or_create_empty_phone_string_treated_as_no_phone(monkeypatch):
     cust = get_or_create_customer("org_x", phone="  ", name="Hans")
     assert cust["id"] == "cust_existing"
     assert state["last_insert"] is None
+
+
+def test_get_or_create_landline_no_name_matches_by_phone(monkeypatch):
+    """Regression: a LANDLINE caller with NO captured name must still match the
+    existing row by phone — otherwise a repeat caller gets a new row every call
+    (the landline+name rule must not regress the call path)."""
+    _stub_customer_number(monkeypatch)
+    seeded = [{"id": "cust_existing", "full_name": "Werkstatt Müller", "phone": "+4930123456"}]
+    client, state = _build_client(initial_customers=seeded)
+    monkeypatch.setattr("app.services.customers.get_service_client", lambda: client)
+
+    cust = get_or_create_customer("org_x", phone="030123456", name=None)
+    assert cust["id"] == "cust_existing"
+    assert state["last_insert"] is None, "Landline repeat caller must not duplicate"
+
+
+def test_get_or_create_skips_soft_deleted_match(monkeypatch):
+    """A soft-deleted row must NOT count as a dedup match — a returning customer
+    whose record was deleted gets a fresh row instead of resurrecting the old."""
+    _stub_customer_number(monkeypatch)
+    seeded = [{"id": "cust_deleted", "full_name": "Alt", "phone": "+4915711122233", "status": "deleted"}]
+    client, state = _build_client(initial_customers=seeded)
+    monkeypatch.setattr("app.services.customers.get_service_client", lambda: client)
+
+    cust = get_or_create_customer("org_x", phone="015711122233", name="Alt")
+    assert cust["id"] != "cust_deleted"
+    assert state["last_insert"] is not None, "Must insert a fresh row, not reuse the deleted one"

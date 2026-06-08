@@ -71,17 +71,20 @@ const FILTERS: { key: string; label: string; type?: string }[] = [
   { key: 'property_management', label: 'Hausverwaltungen', type: 'property_management' },
 ]
 
-// Records-per-page choices for the selector.
-const PAGE_SIZE_OPTIONS = [24, 48, 96, 200]
+// Records-per-page choices for the selector. (200 removed — one heavy request that
+// pulls every related row for 200 customers; the largest useful page is 96.)
+const PAGE_SIZE_OPTIONS = [24, 48, 96]
 
 // Sorting: which column + direction. Mirrors the backend whitelist.
-type SortBy = 'created_at' | 'full_name' | 'customer_number'
+type SortBy = 'created_at' | 'full_name' | 'customer_number' | 'phone'
 type SortDir = 'asc' | 'desc'
 const SORT_OPTIONS: { value: string; label: string }[] = [
   { value: 'created_at:desc', label: 'Neueste zuerst' },
   { value: 'created_at:asc', label: 'Älteste zuerst' },
   { value: 'full_name:asc', label: 'Name (A–Z)' },
   { value: 'full_name:desc', label: 'Name (Z–A)' },
+  { value: 'phone:asc', label: 'Telefon (aufsteigend)' },
+  { value: 'phone:desc', label: 'Telefon (absteigend)' },
   { value: 'customer_number:asc', label: 'Kundennr. (aufsteigend)' },
   { value: 'customer_number:desc', label: 'Kundennr. (absteigend)' },
 ]
@@ -409,7 +412,14 @@ export function CustomersPage() {
                 <th className="px-3 py-2.5 font-semibold">Typ</th>
                 <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Quelle</th>
                 <th className="hidden px-3 py-2.5 font-semibold md:table-cell">E-Mail</th>
-                <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Telefon</th>
+                <SortTh
+                  label="Telefon"
+                  col="phone"
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  thClassName="hidden md:table-cell"
+                />
                 <th className="hidden px-3 py-2.5 font-semibold md:table-cell">Adresse</th>
                 <th
                   className="px-3 py-2.5 text-right font-semibold"
