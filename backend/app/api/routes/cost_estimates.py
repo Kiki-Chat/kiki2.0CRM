@@ -19,7 +19,7 @@ from app.services.cost_estimates import (
     valid_until_for,
 )
 from app.services import email_templates
-from app.services.common import run_parallel
+from app.services.common import run_parallel, validate_fk_in_org
 from app.services.email_send import Attachment, send_email
 
 router = APIRouter(prefix="/api/cost-estimates", tags=["cost-estimates"])
@@ -137,8 +137,16 @@ def _build_row(org_id: str, payload: CostEstimateUpsert, user_id: str | None) ->
     }
 
 
+def _validate_fks(client, org_id: str, payload: CostEstimateUpsert) -> None:
+    """Reject cross-tenant customer/inquiry/project ids (service-role bypasses RLS)."""
+    validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
+    validate_fk_in_org(client, table="inquiries", fk_id=payload.inquiry_id, org_id=org_id, label="Anfrage")
+    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+
+
 def _create(org_id: str, user_id: str | None, payload: CostEstimateUpsert) -> dict:
     client = get_service_client()
+    _validate_fks(client, org_id, payload)
     row = _build_row(org_id, payload, user_id)
     row["number"] = gen_number(client, org_id, payload.type)
     row["status"] = "draft"
@@ -178,6 +186,7 @@ async def get_estimate(ce_id: str, user: CurrentUser = Depends(require_org)) -> 
 
 def _update(org_id: str, ce_id: str, payload: CostEstimateUpsert) -> dict | None:
     client = get_service_client()
+    _validate_fks(client, org_id, payload)
     row = _build_row(org_id, payload, None)
     row.pop("created_by", None)
     row["updated_at"] = _now()

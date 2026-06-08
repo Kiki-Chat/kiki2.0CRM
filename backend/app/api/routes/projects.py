@@ -265,7 +265,9 @@ def _detail(org_id: str, project_id: str) -> dict | None:
 
     inquiries, appts, kvas, invs, docs, calls = run_parallel(_inq, _appts, _kvas, _invs, _docs, _calls_count)
 
-    pe = client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id).execute().data or []
+    pe = fetch_all_rows(
+        lambda: client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id)
+    )
     employees: list[dict] = []
     if pe:
         edata = {
@@ -330,6 +332,9 @@ def _patch(org_id: str, project_id: str, payload: ProjectPatch) -> dict | None:
     fields = payload.model_dump(exclude_unset=True)
     if not fields:
         return _fetch(client, org_id, project_id)
+    # Service-role bypasses RLS — a re-pointed customer_id on the UPDATE path must
+    # still belong to this org (the create path validates; close the PATCH gap too).
+    validate_fk_in_org(client, table="customers", fk_id=fields.get("customer_id"), org_id=org_id, label="Kunde")
     if "status" in fields and fields["status"] not in _STATUSES:
         raise HTTPException(status_code=422, detail="Invalid status")
     if "internal_notes" in fields:
@@ -558,7 +563,9 @@ async def list_project_employees(project_id: str, user: CurrentUser = Depends(re
         client = get_service_client()
         if not _fetch(client, user.org_id, project_id):
             return None
-        pe = client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id).execute().data or []
+        pe = fetch_all_rows(
+            lambda: client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id)
+        )
         if not pe:
             return []
         ids = [e["employee_id"] for e in pe]

@@ -7,7 +7,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
-from app.services.common import run_parallel
+from app.services.common import fetch_all_rows, run_parallel
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
 
@@ -572,38 +572,40 @@ def build_customer_timeline(org_id: str, customer_id: str) -> list[dict] | None:
 
     # All four reads depend only on customer_id and are independent of each other
     # → fetch them concurrently after the tenant barrier (4 round-trips → ~1).
+    # Paged: a long-history customer can have >1000 calls/inquiries/etc.; a plain
+    # .execute() would silently truncate the timeline at 1000 (oldest events vanish).
     def _calls():
-        return (
-            client.table("calls")
+        return fetch_all_rows(
+            lambda: client.table("calls")
             .select("id, summary_title, started_at, created_at")
             .eq("org_id", org_id).eq("customer_id", customer_id)
-            .is_("deleted_at", "null").execute().data or []
+            .is_("deleted_at", "null")
         )
 
     def _inqs():
-        return (
-            client.table("inquiries")
+        return fetch_all_rows(
+            lambda: client.table("inquiries")
             .select("id, status, title, created_at, updated_at")
             .eq("org_id", org_id).eq("customer_id", customer_id)
-            .neq("status", "deleted").execute().data or []
+            .neq("status", "deleted")
         )
 
     def _appts():
-        return (
-            client.table("appointments")
+        return fetch_all_rows(
+            lambda: client.table("appointments")
             .select(
                 "id, title, scheduled_at, created_at, status, confirmed_at, rejected_at, "
                 "rejection_reason, alternative_start_time, alternative_proposed_at, "
                 "customer_proposed_start_time, customer_proposed_at"
             )
-            .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
+            .eq("org_id", org_id).eq("customer_id", customer_id)
         )
 
     def _kvas():
-        return (
-            client.table("cost_estimates")
+        return fetch_all_rows(
+            lambda: client.table("cost_estimates")
             .select("id, number, total, sent_at, accepted_at, rejected_at")
-            .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
+            .eq("org_id", org_id).eq("customer_id", customer_id)
         )
 
     call_rows, inq_rows, appt_rows, kva_rows = run_parallel(_calls, _inqs, _appts, _kvas)

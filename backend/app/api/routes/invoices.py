@@ -188,6 +188,10 @@ async def get_invoice(inv_id: str, user: CurrentUser = Depends(require_org)) -> 
 
 def _update(org_id: str, inv_id: str, payload: InvoiceUpsert) -> dict | None:
     client = get_service_client()
+    # Same FK-in-org guards as _create — the UPDATE path is just as exposed.
+    validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
+    validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Kostenvoranschlag")
+    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
     row = _build_row(org_id, payload, None)
     row.pop("created_by", None)
     row["updated_at"] = _now()

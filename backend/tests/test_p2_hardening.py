@@ -10,8 +10,12 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from app.api.routes import cost_estimates as ce_route
 from app.api.routes import dashboard as dash
+from app.api.routes import invoices as invoices_route
+from app.api.routes import projects as projects_route
 from app.core.config import validate_runtime_config
+from app.schemas.admin import CostEstimateUpsert, InvoiceUpsert, ProjectPatch
 from app.schemas.tools import BookAppointmentRequest
 from app.services import appointments as appt
 from app.services.common import fetch_all_rows, run_parallel
@@ -213,3 +217,49 @@ def test_book_appointment_rolls_back_inquiry_on_appointment_failure(monkeypatch)
     with pytest.raises(RuntimeError):
         appt.book_appointment("org1", payload)
     assert client.deleted == ["inquiries"]
+
+
+# ─── IDOR: write paths reject cross-tenant FK ids (POST *and* PATCH/UPDATE) ───
+class _EmptyClient:
+    """Every FK existence check returns no rows → validate_fk_in_org raises 422.
+    Proves the guard fires; the write is never reached."""
+
+    def table(self, name):
+        return _EmptyQuery()
+
+
+class _EmptyQuery:
+    def select(self, *a, **k):
+        return self
+
+    def eq(self, *a, **k):
+        return self
+
+    def neq(self, *a, **k):
+        return self
+
+    def limit(self, *a, **k):
+        return self
+
+    def execute(self):
+        return SimpleNamespace(data=[], count=0)
+
+
+@pytest.mark.parametrize(
+    "invoke",
+    [
+        lambda: projects_route._patch("org1", "p1", ProjectPatch(customer_id="foreign")),
+        lambda: invoices_route._update("org1", "i1", InvoiceUpsert(customer_id="foreign")),
+        lambda: ce_route._create("org1", None, CostEstimateUpsert(customer_id="foreign")),
+        lambda: ce_route._update("org1", "c1", CostEstimateUpsert(customer_id="foreign")),
+    ],
+    ids=["projects._patch", "invoices._update", "cost_estimates._create", "cost_estimates._update"],
+)
+def test_write_paths_reject_cross_org_fk(monkeypatch, invoke):
+    # A customer_id from ANOTHER org (not found in this org) must 422 before any write.
+    monkeypatch.setattr(projects_route, "get_service_client", lambda: _EmptyClient())
+    monkeypatch.setattr(invoices_route, "get_service_client", lambda: _EmptyClient())
+    monkeypatch.setattr(ce_route, "get_service_client", lambda: _EmptyClient())
+    with pytest.raises(HTTPException) as exc:
+        invoke()
+    assert exc.value.status_code == 422
