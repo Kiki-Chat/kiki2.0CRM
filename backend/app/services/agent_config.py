@@ -902,8 +902,14 @@ def render_prompt_for_org(
         "SERVICE_AREA": _render_service_area(),
         "BUSINESS_HOURS": _render_business_hours(kz_cfg.get("scheduling")),
         "KZ_REQUIRED_FIELDS": render_required_fields_block(required_fields),
-        "KZ_PROBLEM_DESCRIPTION": render_problem_description_block(
-            kz_cfg.get("problem_description")
+        # The problem detail is now a reorderable required field (field_key
+        # 'problem_description'), so it renders INSIDE the required-fields block at
+        # its chosen sort position. Suppress the old standalone block whenever that
+        # field exists; fall back to it for any org not yet migrated (0052).
+        "KZ_PROBLEM_DESCRIPTION": (
+            ""
+            if any(f.get("field_key") == "problem_description" for f in required_fields)
+            else render_problem_description_block(kz_cfg.get("problem_description"))
         ),
         "KZ_APPOINTMENT_CATEGORIES": render_appointment_categories_block(categories),
         "KZ_SCHEDULING_RULES": render_scheduling_rules_block(kz_cfg),

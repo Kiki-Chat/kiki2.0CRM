@@ -100,11 +100,25 @@ function useConfigPatch(path: string, flash: (m: string) => void) {
 // so locked fields can still have their description edited (2A.1).
 function FieldDescriptionInput({ field, onSave }: { field: KzRequiredField; onSave: (description: string) => void }) {
   const [val, setVal] = useState(field.description ?? '')
+  const commit = () => { if (val !== (field.description ?? '')) onSave(val) }
+  // The problem-description field holds multi-line guidance → give it a textarea;
+  // the short identification fields keep the single-line input.
+  if (field.field_key === 'problem_description') {
+    return (
+      <textarea
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        placeholder="z. B. Bei Heizungsausfall: Baujahr der Anlage, Fehlermeldung am Display, ob noch Warmwasser vorhanden ist …"
+        className={cn(inputCls, 'mt-1 min-h-[80px] text-xs')}
+      />
+    )
+  }
   return (
     <input
       value={val}
       onChange={(e) => setVal(e.target.value)}
-      onBlur={() => { if (val !== (field.description ?? '')) onSave(val) }}
+      onBlur={commit}
       placeholder="Beschreibung für den KI-Agenten (optional)"
       className={cn(inputCls, 'mt-1 text-xs')}
     />
@@ -112,7 +126,7 @@ function FieldDescriptionInput({ field, onSave }: { field: KzRequiredField; onSa
 }
 
 // ─── Pflichtfelder ───────────────────────────────────────────────────────────
-export function PflichtfelderSection({ data: overview, flash }: Props) {
+export function PflichtfelderSection({ flash }: Props) {
   const qc = useQueryClient()
   const { data } = useQuery({ queryKey: ['kiki-zentrale', 'required-fields'], queryFn: () => apiFetch<{ fields: KzRequiredField[] }>(`${KZ}/required-fields`) })
   const fields = data?.fields ?? []
@@ -210,35 +224,14 @@ export function PflichtfelderSection({ data: overview, flash }: Props) {
             </button>
           </div>
         </div>
-
-        <ProblemDescriptionField config={overview.config} flash={flash} />
       </Card>
     </div>
   )
 }
 
-// "Anliegen / Problembeschreibung" — the free-text problem detail that flows into
-// the agent prompt (2A.3). Rendered as a sub-section INSIDE the "Immer abgefragte
-// Felder" card (merged with the fields, not a separate card). Saved via PATCH
-// /problem-description. (Making it a fully drag-reorderable field row would mean
-// migrating problem_description into the agent_required_fields model — a backend
-// change, deferred.)
-function ProblemDescriptionField({ config, flash }: { config: KzOverview['config']; flash: (m: string) => void }) {
-  const patch = useConfigPatch('/problem-description', flash)
-  const [text, setText] = useState(config.problem_description ?? '')
-  return (
-    <div className="mt-4 border-t border-border pt-4">
-      <GroupLabel>Anliegen / Problembeschreibung</GroupLabel>
-      <p className="mb-2 text-sm text-muted">Hier definierst du, welche Problem-Details Kiki bei typischen Anliegen erfassen soll — dieser Text fließt in den Agenten-Prompt ein.</p>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="z. B. Bei Heizungsausfall: Baujahr der Anlage, Fehlermeldung am Display, ob noch Warmwasser vorhanden ist …" className={cn(inputCls, 'min-h-[120px]')} />
-      <div className="mt-2 flex justify-end">
-        <button onClick={() => patch.mutate({ problem_description: text || null })} disabled={patch.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
-          {patch.isPending ? 'Speichert…' : 'Speichern'}
-        </button>
-      </div>
-    </div>
-  )
-}
+// "Anliegen / Problembeschreibung" is now a locked, reorderable required field
+// (field_key 'problem_description', seeded by default + migration 0052), edited
+// inline in the "Immer abgefragte Felder" list — no longer a separate input.
 
 // ─── Branche & Kontext ───────────────────────────────────────────────────────
 export function BrancheKontextSection({ data, flash }: Props) {

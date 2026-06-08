@@ -322,9 +322,12 @@ def test_seed_required_fields_inserts_name_phone_address():
     inserts = [r for (t, r) in client.store["inserts"] if t == "agent_required_fields"]
     assert len(inserts) == 1
     rows = inserts[0]
-    assert {r["field_key"] for r in rows} == {"name", "phone", "address"}
+    assert {r["field_key"] for r in rows} == {"name", "phone", "address", "problem_description"}
     addr = next(r for r in rows if r["field_key"] == "address")
     assert addr["identification_role"] == "address" and addr["sort_order"] == 2
+    # The customer concern is now a default required field too (locked, last).
+    pd = next(r for r in rows if r["field_key"] == "problem_description")
+    assert pd["sort_order"] == 3 and pd["is_locked"] and pd["label"].startswith("Anliegen")
     assert all(r["is_duty"] and r["is_locked"] for r in rows)
 
 

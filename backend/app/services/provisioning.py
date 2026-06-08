@@ -28,6 +28,11 @@ _DEFAULT_REQUIRED_FIELDS = [
     ("name", "Name", "Vor- und Nachname", True, True, None, 0),
     ("phone", "Telefonnummer", "Rückrufnummer", True, True, "caller_id", 1),
     ("address", "Adresse", "Anschrift des Kunden / Einsatzorts", True, True, "address", 2),
+    # The customer's concern, now a (locked, reorderable, editable) required field
+    # instead of a separate config — so the org controls WHERE in the ask order
+    # Kiki captures the problem details. is_locked → can't be deleted, only
+    # reordered + its description edited. (Migration 0052 backfills existing orgs.)
+    ("problem_description", "Anliegen / Problembeschreibung", "Das Anliegen des Kunden — welche Problem-Details Kiki erfassen soll.", True, True, None, 3),
 ]
 
 
