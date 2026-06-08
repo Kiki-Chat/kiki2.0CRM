@@ -171,4 +171,10 @@ def report_call_usage(*, call_id: str, org_id: str) -> dict:
     # 5) Link the call → its usage report (renders 'billed' per call in Anrufe).
     if report_id:
         client.table("calls").update({"billing_usage_report_id": report_id}).eq("id", call_id).execute()
+    # 6) Soft-stop: if this call pushed the org over quota, record one alert (deduped).
+    try:
+        from app.services.billing_notifications import check_and_notify_over_quota
+        check_and_notify_over_quota(org_id)
+    except Exception:  # noqa: BLE001
+        pass
     return result

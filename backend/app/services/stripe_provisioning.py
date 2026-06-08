@@ -1,0 +1,151 @@
+"""Phase 2 — provision a CRM org into Stripe: customer + Checkout subscribe flow.
+
+ensure_stripe_customer: idempotent (org.stripe_customer_id short-circuit + a stable
+idempotency key). create_checkout_session: a hosted Stripe Checkout (mode=subscription)
+pre-filled from the org's customer, with the base + metered line items, optional trial,
+and automatic_tax (Kleinunternehmer → 0% VAT). All writes go through stripe_call_safely.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from app.core.config import settings
+from app.db.supabase_client import get_service_client
+from app.services.stripe_billing import (
+    StripeBillingError,
+    get_stripe,
+    stripe_call_safely,
+)
+from app.services.stripe_catalog import find_plan_prices
+
+DEFAULT_TRIAL_DAYS = 14  # ⚠️ confirm with Amber before go-live
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _org(db, org_id: str) -> dict:
+    rows = db.table("organizations").select("*").eq("id", str(org_id)).limit(1).execute().data
+    return rows[0] if rows else {}
+
+
+def _org_address_to_stripe(addr: dict | None) -> dict | None:
+    """Best-effort map the org's address jsonb → a Stripe address (DE keys tolerated)."""
+    a = addr or {}
+    line1 = a.get("line1") or a.get("street") or a.get("strasse")
+    city = a.get("city") or a.get("ort") or a.get("stadt")
+    postal = a.get("postal_code") or a.get("zip") or a.get("plz")
+    out = {
+        "line1": line1,
+        "line2": a.get("line2"),
+        "city": city,
+        "postal_code": postal,
+        "country": (a.get("country") or "DE")[:2].upper(),
+    }
+    out = {k: v for k, v in out.items() if v}
+    return out if out.get("line1") else None  # Stripe wants at least line1
+
+
+def ensure_stripe_customer(org_id: str, actor_id: str | None = None) -> str:
+    """Return the org's Stripe customer id, creating + linking it if missing."""
+    db = get_service_client()
+    org = _org(db, org_id)
+    if not org:
+        raise StripeBillingError(f"org {org_id} not found")
+    if org.get("stripe_customer_id"):
+        return org["stripe_customer_id"]
+
+    params: dict = {
+        "name": org.get("name"),
+        "email": org.get("email"),
+        "preferred_locales": ["de"],
+        "metadata": {
+            "heykiki_org_id": org.get("heykiki_org_id"),
+            "org_id": str(org_id),
+        },
+    }
+    stripe_addr = _org_address_to_stripe(org.get("address"))
+    if stripe_addr:
+        params["address"] = stripe_addr
+
+    customer = stripe_call_safely(
+        op="customer.create",
+        org_id=org_id,
+        actor_id=actor_id,
+        request_payload={k: v for k, v in params.items() if k != "metadata"},
+        idempotency_payload={"org_id": str(org_id)},
+        builder=lambda idem, meta: get_stripe().Customer.create(idempotency_key=idem, **params),
+    )
+    cid = customer["id"]
+    db.table("organizations").update({"stripe_customer_id": cid, "billing_last_sync_at": _now()}).eq(
+        "id", str(org_id)
+    ).execute()
+    return cid
+
+
+def create_checkout_session(
+    org_id: str,
+    plan_title: str,
+    interval: str,
+    *,
+    trial_days: int | None = DEFAULT_TRIAL_DAYS,
+    actor_id: str | None = None,
+) -> dict:
+    """Create a hosted Stripe Checkout session to subscribe the org. Returns {url, session_id}."""
+    if interval not in ("month", "year"):
+        raise StripeBillingError(f"invalid interval {interval!r}")
+    db = get_service_client()
+    customer_id = ensure_stripe_customer(org_id, actor_id)
+
+    prices = find_plan_prices(plan_title, interval)
+    if not prices["base_price"] or not prices["metered_price"]:
+        raise StripeBillingError(f"no catalog prices for {plan_title!r}/{interval!r}")
+
+    line_items = [
+        {"price": prices["base_price"], "quantity": 1},
+        {"price": prices["metered_price"]},  # metered → no quantity
+    ]
+    sub_data: dict = {"metadata": {"heykiki_org_id": _org(db, org_id).get("heykiki_org_id"), "org_id": str(org_id)}}
+    if trial_days and trial_days > 0:
+        sub_data["trial_period_days"] = trial_days
+
+    base = (settings.billing_portal_return_url or settings.frontend_public_url.rstrip("/") + "/settings/abrechnung").split("?")[0]
+    success_url = f"{base}?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{base}?checkout=cancel"
+
+    session = stripe_call_safely(
+        op="checkout_session.create",
+        org_id=org_id,
+        actor_id=actor_id,
+        stripe_object=customer_id,
+        request_payload={"plan": plan_title, "interval": interval, "trial_days": trial_days},
+        builder=lambda idem, meta: get_stripe().checkout.Session.create(
+            mode="subscription",
+            customer=customer_id,
+            line_items=line_items,
+            subscription_data=sub_data,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            automatic_tax={"enabled": True},
+            customer_update={"address": "auto", "name": "auto"},
+            billing_address_collection="auto",
+            allow_promotion_codes=True,
+        ),
+    )
+
+    try:
+        db.table("billing_checkout_sessions").insert(
+            {
+                "org_id": str(org_id),
+                "stripe_session_id": session["id"],
+                "plan_title": plan_title,
+                "interval": interval,
+                "trial_days": trial_days,
+                "status": "created",
+            }
+        ).execute()
+    except Exception:  # noqa: BLE001 — table may predate 0049; the session is still valid
+        pass
+    return {"url": session.get("url"), "session_id": session["id"]}

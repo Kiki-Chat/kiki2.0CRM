@@ -54,6 +54,25 @@ class PortalSessionResponse(BaseModel):
     url: str
 
 
+class CheckoutRequest(BaseModel):
+    plan_title: str
+    interval: str = "month"
+    trial_days: int | None = None
+
+
+class CheckoutResponse(BaseModel):
+    url: str
+    session_id: str
+
+
+class PlanOption(BaseModel):
+    plan_title: str
+    included_minutes: int
+    monthly_cents: int
+    annual_cents: int
+    overage_cents_per_min: int
+
+
 # ─── Super-admin ─────────────────────────────────────────────────────────────
 class AdminBillingOverview(BaseModel):
     total_orgs: int
