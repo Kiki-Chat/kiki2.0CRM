@@ -86,6 +86,14 @@ def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str, seq: int =
         )
         reason = result.get("reason")
         ok = bool(result.get("updated")) or reason in ("manual_override", "no_agent")
+        # Notdienst-/Telefon-saves also reconfigure the native transfer_to_number
+        # system tool (the actual call-bridge mechanism), not just the prompt.
+        if endpoint_label in ("kz_emergency", "kz_phone", "kz_retry"):
+            tool_result = ac.sync_transfer_tool_for_org(org_id)
+            if not tool_result.get("updated") and tool_result.get("reason") not in (
+                "no_agent", None
+            ):
+                ok, reason = False, f"transfer_tool: {tool_result.get('reason')}"
         ac.finish_sync(org_id, seq, ok=ok, reason=reason)
     except Exception as exc:  # noqa: BLE001 — never let a background push crash
         logger.warning(

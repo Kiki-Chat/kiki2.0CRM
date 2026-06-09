@@ -708,10 +708,25 @@ def render_emergency_block(cfg: dict) -> str:
             )
 
     lines.append(
-        "  Sag dem Anrufer bei bestätigtem Notfall ZUERST kurz, dass du ihn jetzt mit "
-        "dem Notdienst verbindest, und rufe DANN `hk_transferCall` mit `emergency=true` "
-        "auf — die Weiterleitung erfolgt sofort, sprich danach nicht weiter."
+        "  Bei einem bestätigten NOTFALL buchst du KEINEN Termin — rufe weder "
+        "`hk_getAvailableAppointments` noch `hk_bookAppointment` auf. Notfall und "
+        "Terminvergabe schließen sich aus."
     )
+    if (cfg.get("emergency_number") or cfg.get("forwarding_number") or "").strip():
+        lines.append(
+            "  Sag dem Anrufer bei bestätigtem Notfall ZUERST kurz, dass du ihn jetzt mit "
+            "dem Notdienst verbindest, und rufe DANN das System-Werkzeug "
+            "`transfer_to_number` auf — die Weiterleitung erfolgt sofort, sprich danach "
+            "nicht weiter. Schlägt sie fehl, nimm sofort eine dringende Rückrufnotiz auf "
+            "(`hk_createInquiry`, `dringend=true`, `rueckrufGewuenscht=true`)."
+        )
+    else:
+        lines.append(
+            "  Es ist KEINE Notdienst-Nummer hinterlegt — leite NICHT weiter. Nimm bei "
+            "bestätigtem Notfall stattdessen sofort eine dringende Rückrufnotiz auf "
+            "(`hk_createInquiry`, `dringend=true`, `rueckrufGewuenscht=true`) und sichere "
+            "einen unverzüglichen Rückruf zu."
+        )
     return "\n".join(lines)
 
 
@@ -719,8 +734,8 @@ def render_staff_transfer_block(cfg: dict) -> str:
     """Explicit "connect me to a person" handling for the ``{{KZ_STAFF_TRANSFER}}``
     token. Live staff transfer is only offered when an ``incoming_forwarding_number``
     is configured AND it is inside business hours; otherwise the agent takes a
-    callback note (the existing default). This is distinct from the Notdienst path
-    (emergency=true) — here ``hk_transferCall`` is called with ``emergency=false``."""
+    callback note (the existing default). The transfer itself is the native
+    ``transfer_to_number`` system tool (the staff rule is configured there)."""
     number_set = bool((cfg.get("incoming_forwarding_number") or "").strip())
     if not number_set:
         return (
@@ -730,12 +745,14 @@ def render_staff_transfer_block(cfg: dict) -> str:
     return (
         "  Wenn der Anrufer AUSDRÜCKLICH darum bittet, sofort mit einem Mitarbeiter/"
         "einer Person verbunden zu werden, UND es INNERHALB der Geschäftszeiten ist:\n"
-        "  - Sage kurz, dass du verbindest, und rufe `hk_transferCall` mit "
-        "`emergency=false` auf. Die Mitarbeiter-Nummer ist im Backend hinterlegt — du "
-        "musst sie weder kennen noch ansagen.\n"
+        "  - Sage kurz, dass du verbindest, und rufe das System-Werkzeug "
+        "`transfer_to_number` auf (Mitarbeiter-Weiterleitung). Die Nummer ist dort "
+        "hinterlegt — du musst sie weder kennen noch ansagen.\n"
         "  - Außerhalb der Geschäftszeiten ODER wenn keine sofortige Verbindung "
         "gewünscht ist (reine Rückrufbitte): nimm stattdessen eine Notiz mit "
-        "`hk_createInquiry` (`rueckrufGewuenscht=true`) auf — nicht weiterleiten."
+        "`hk_createInquiry` (`rueckrufGewuenscht=true`) auf — nicht weiterleiten.\n"
+        "  - Schlägt die Weiterleitung fehl: entschuldige dich kurz und nimm eine "
+        "Rückrufnotiz mit `hk_createInquiry` (`rueckrufGewuenscht=true`) auf."
     )
 
 
@@ -1194,6 +1211,111 @@ def configure_agent(
         _stamp_agent_provisioned(org_id)
 
     return summary
+
+
+# ─── Native transfer_to_number system tool sync ──────────────────────────────
+def _dial_clean(number: str | None) -> str:
+    """Normalize to E.164: strip formatting; German local numbers (leading 0)
+    become +49…, 00-prefixed international becomes +… — Twilio rejects
+    non-E.164 transfer targets, which would surface as an audible error."""
+    n = re.sub(r"[^\d+]", "", number or "")
+    if not n or n.startswith("+"):
+        return n
+    if n.startswith("00"):
+        return "+" + n[2:]
+    if n.startswith("0"):
+        return "+49" + n[1:]
+    return "+" + n
+
+
+def build_transfer_tool(cfg: dict) -> dict | None:
+    """The agent's ``built_in_tools.transfer_to_number`` object, derived from the
+    Kiki-Zentrale numbers. None ⇒ the tool should be absent.
+
+    Replaces the raw-Twilio-redirect webhook path (services/transfer.py) as the
+    PRIMARY transfer mechanism: ElevenLabs executes the bridge natively on its
+    own call leg, which is the supported way to hand off a live call (the TwiML
+    redirect audibly errored for callers). The webhook tool stays attached as a
+    diagnostic fallback but the prompt no longer references it."""
+    transfers: list[dict] = []
+    emergency = _dial_clean(cfg.get("emergency_number") or cfg.get("forwarding_number"))
+    staff = _dial_clean(cfg.get("incoming_forwarding_number"))
+    if emergency and cfg.get("emergency_enabled"):
+        transfers.append(
+            {
+                "transfer_destination": {"type": "phone", "phone_number": emergency},
+                "condition": (
+                    "NOTDIENST: Ein bestätigter NOTFALL laut Abschnitt "
+                    "„Notfall-Definition“ liegt vor (Notfall-Stichwort bestätigt, "
+                    "Notdienst-Zeitfenster aktiv). Sofort hierhin weiterleiten."
+                ),
+                "transfer_type": "conference",
+            }
+        )
+    if staff and staff != emergency:
+        transfers.append(
+            {
+                "transfer_destination": {"type": "phone", "phone_number": staff},
+                "condition": (
+                    "MITARBEITER: Der Anrufer bittet ausdrücklich, sofort mit einem "
+                    "Mitarbeiter/Menschen verbunden zu werden, und es ist innerhalb "
+                    "der Geschäftszeiten (KEIN Notfall)."
+                ),
+                "transfer_type": "conference",
+            }
+        )
+    if not transfers:
+        return None
+    return {
+        "type": "system",
+        "name": "transfer_to_number",
+        "description": (
+            "Verbindet den Anrufer live mit einer hinterlegten Nummer (Notdienst "
+            "bzw. Mitarbeiter) gemäß den Weiterleitungs-Bedingungen. Sage dem "
+            "Anrufer VOR dem Aufruf kurz, dass du verbindest. Nur gemäß den im "
+            "Prompt definierten Regeln verwenden."
+        ),
+        "params": {
+            "system_tool_type": "transfer_to_number",
+            "transfers": transfers,
+        },
+    }
+
+
+def sync_transfer_tool_for_org(org_id: str | UUID) -> dict:
+    """Push the org's transfer_to_number system-tool config to its agent.
+
+    Called after Notdienst-/Telefon-saves (alongside the prompt repush). Same
+    best-effort contract as rerender_and_push_for_org — never raises."""
+    db = get_service_client()
+    org_rows = (
+        db.table("organizations").select("elevenlabs_agent_id")
+        .eq("id", str(org_id)).limit(1).execute().data or []
+    )
+    agent_id = (org_rows[0] if org_rows else {}).get("elevenlabs_agent_id")
+    if not agent_id:
+        return {"updated": False, "reason": "no_agent"}
+    cfg = _fetch_kz_config(org_id)
+    tool = build_transfer_tool(cfg)
+    try:
+        patch_agent_safely(
+            agent_id=agent_id,
+            field_patches={
+                "conversation_config": {
+                    "agent": {"prompt": {"built_in_tools": {"transfer_to_number": tool}}}
+                }
+            },
+            merge_arrays=[],
+            actor_id=None,
+            org_id=org_id,
+            endpoint_label="transfer_tool_sync",
+        )
+    except Exception as exc:  # noqa: BLE001 — never break the triggering save
+        logger.warning(
+            "transfer_to_number sync failed (org %s): %s", org_id, str(exc)[:200]
+        )
+        return {"updated": False, "reason": str(exc)[:200]}
+    return {"updated": True}
 
 
 # ─── Agent-sync status (frontend loader banner) ──────────────────────────────

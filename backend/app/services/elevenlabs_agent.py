@@ -311,6 +311,10 @@ def patch_agent_safely(
     changes = _diff(current, merged)
     if not changes:
         return current
+    # built_in_tools entries are validated by EL as COMPLETE objects — a surgical
+    # leaf patch inside one (e.g. only params.transfers) 400s with "Field
+    # required". Widen any change under built_in_tools.<tool> to the whole tool.
+    changes = _widen_built_in_tool_changes(changes, current, merged)
 
     # 7) Snapshot the full current config BEFORE writing.
     snap = (
@@ -388,6 +392,12 @@ def _verify(
                 missing = set(map(str, new)) - set(map(str, actual or []))
                 if missing:
                     return False, f"array {path} missing {missing}"
+        elif isinstance(new, dict):
+            # Dict-valued writes (e.g. a built_in_tools system tool): EL echoes
+            # the object back enriched with server defaults — verify OUR keys
+            # landed (recursive subset), not strict equality.
+            if not _dict_subset(new, actual):
+                return False, f"{path} did not apply"
         elif actual != new:
             return False, f"{path} did not apply"
     # Defense-in-depth: pre-existing tools must not have shrunk (clobber guard).
@@ -399,6 +409,39 @@ def _verify(
     ):
         return False, "override whitelist flags not all true after write"
     return True, "ok"
+
+
+_BUILT_IN_TOOLS_MARKER = ".built_in_tools."
+
+
+def _widen_built_in_tool_changes(changes: dict, current: dict, merged: dict) -> dict:
+    """Collapse changed paths inside a built_in_tools entry to the entry itself,
+    so the PATCH body carries the complete tool object (EL requirement)."""
+    out: dict[str, dict] = {}
+    for path, ch in changes.items():
+        i = path.find(_BUILT_IN_TOOLS_MARKER)
+        if i == -1:
+            out[path] = ch
+            continue
+        rest = path[i + len(_BUILT_IN_TOOLS_MARKER):]
+        tool = rest.split(".", 1)[0]
+        wide = path[: i + len(_BUILT_IN_TOOLS_MARKER)] + tool
+        out[wide] = {"old": _get_path(current, wide), "new": _get_path(merged, wide)}
+    return out
+
+
+def _dict_subset(expected, actual) -> bool:
+    """True iff every key/value in ``expected`` is present in ``actual``
+    (recursively); ``actual`` may carry extra server-added defaults."""
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict):
+            return False
+        return all(_dict_subset(v, actual.get(k)) for k, v in expected.items())
+    if isinstance(expected, list):
+        if not isinstance(actual, list) or len(actual) < len(expected):
+            return False
+        return all(_dict_subset(e, a) for e, a in zip(expected, actual))
+    return expected == actual
 
 
 def _restore_full(agent_id: str, full_config: dict) -> None:
