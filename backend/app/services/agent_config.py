@@ -937,7 +937,20 @@ def render_prompt_for_org(
             "agent_prompt_template.txt still contains 'wkp_shared_' tokens — "
             "the tool-name mapping is incomplete."
         )
-    residue = [m for m in _IDENTITY_RESIDUE if m in text]
+    # The residue scan catches the DEMO identity left hardcoded in the template, but it
+    # must NOT trip on a real customer whose OWN name/address legitimately contains a
+    # marker word (e.g. "Husman & Dreier GmbH" → "Dreier", a common surname). Mask the
+    # values we just substituted; whatever REMAINS is genuine un-templated residue.
+    scan = text
+    for _v in (
+        tokens["COMPANY_NAME"],
+        tokens["COMPANY_TRADE"],
+        tokens["COMPANY_CONTACT"],
+        tokens["COMPANY_PROFILE"],
+    ):
+        if _v:
+            scan = scan.replace(_v, " ")
+    residue = [m for m in _IDENTITY_RESIDUE if m in scan]
     if residue:
         raise RuntimeError(f"company-identity residue after render: {residue}")
     return text

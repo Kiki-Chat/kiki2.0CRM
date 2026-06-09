@@ -116,6 +116,15 @@ def test_render_prompt_trade_fallback_when_missing():
     assert "Nur Name GmbH" in p
 
 
+def test_render_prompt_allows_customer_name_with_demo_marker_word():
+    # A real customer whose OWN name contains a demo-identity marker ("Dreier", a
+    # common surname) must render fine — the residue scan masks the substituted name
+    # first. Regression for the super-admin "Husman & Dreier GmbH" provisioning 500.
+    p = ac.render_prompt_for_org("Husman & Dreier GmbH", {"trade": "Dachdecker"})
+    assert "Husman & Dreier GmbH" in p
+    assert _leftover(p) == []
+
+
 # ─── rerender_and_push_for_org gating (fake client) ──────────────────────────
 class _Resp:
     def __init__(self, data):
