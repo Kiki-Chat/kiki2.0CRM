@@ -470,6 +470,7 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
             "id, title, scheduled_at, duration_minutes, status, category, "
             "color, location, notes, customer_id, inquiry_id, "
             "assigned_employee_id, confirmed_at, rejected_at, rejection_reason, "
+            "cancelled_at, rescheduled_at, "
             "alternative_start_time, alternative_end_time, alternative_note, "
             "alternative_proposed_at, customer_proposed_start_time, "
             "customer_proposed_end_time, customer_proposed_at, customer_proposal_source"
@@ -487,10 +488,11 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
     # there fires the outbound call+email).
     appt = appt_rows[0] if appt_rows else None
     if appt is None:
-        # Persistence (UAT): once confirmed the appointment leaves the pending set,
-        # but the card must STAY as a "Bestätigt — im Kalender" reminder + deep-link.
-        # Fall back to the most-recent CONFIRMED appointment on this call. The card
-        # reads confirmed_at to render the locked done-state (no action buttons).
+        # Persistence: once a decision is made the appointment leaves the pending set,
+        # but the card must STAY as a colour-coded status badge (Bestätigt / Storniert /
+        # Verschoben — never silently vanish). Fall back to the most-recent CONFIRMED or
+        # CANCELLED appointment on this call; the card reads confirmed_at / cancelled_at /
+        # rejected_at to render the locked done-state (no action buttons).
         done_rows = (
             client.table("appointments")
             .select(
@@ -502,9 +504,9 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
                 "customer_proposed_end_time, customer_proposed_at, customer_proposal_source"
             )
             .eq("org_id", org_id)
-            .eq("status", "confirmed")
+            .in_("status", ["confirmed", "cancelled"])
             .or_(",".join(ors))
-            .order("confirmed_at", desc=True)
+            .order("created_at", desc=True)
             .limit(1)
             .execute()
             .data

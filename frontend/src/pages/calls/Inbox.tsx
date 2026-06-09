@@ -139,13 +139,15 @@ const KIND_ICON: Record<ActionItem['kind'], LucideIcon> = {
   alt_time_proposal: CalendarClock,
   appointment_cancelled: CalendarX,
 }
-const KIND_TONE: Record<ActionItem['kind'], { tile: string; tag: 'info' | 'ai' | 'warning' }> = {
-  termin_anfrage: { tile: 'bg-info-bg text-info', tag: 'info' },
+// Lifecycle colour scheme: confirmation (open) → green, reschedule → orange,
+// cancelled → dark.
+const KIND_TONE: Record<ActionItem['kind'], { tile: string; tag: 'info' | 'ai' | 'warning' | 'success' | 'neutral' }> = {
+  termin_anfrage: { tile: 'bg-green-tint-100 text-green-deep', tag: 'success' },
   kva_to_send: { tile: 'bg-ai-bg text-ai', tag: 'ai' },
   kva_pending_acceptance: { tile: 'bg-ai-bg text-ai', tag: 'ai' },
   callback_owed: { tile: 'bg-warning-bg text-warning', tag: 'warning' },
-  alt_time_proposal: { tile: 'bg-warning-bg text-warning', tag: 'warning' },
-  appointment_cancelled: { tile: 'bg-error-bg text-error', tag: 'warning' },
+  alt_time_proposal: { tile: 'bg-orange-100 text-orange-700', tag: 'warning' },
+  appointment_cancelled: { tile: 'bg-slate-700 text-white', tag: 'neutral' },
 }
 
 export function ActionRow({ item, onSelect }: { item: ActionItem; onSelect: () => void }) {

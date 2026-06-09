@@ -50,6 +50,8 @@ export interface PendingAppointment {
   confirmed_at: string | null
   rejected_at: string | null
   rejection_reason: string | null
+  cancelled_at: string | null
+  rescheduled_at: string | null
   alternative_start_time: string | null
   alternative_end_time: string | null
   alternative_note: string | null
@@ -290,18 +292,27 @@ export function AppointmentCard({
   // Completed-action state: after Bestätigen/Ablehnen the row leaves the pending
   // set, but the card stays (parent passes `result`; the row may also carry
   // confirmed_at/rejected_at) as a reminder until removed with ✕.
-  const confirmedDone = result === 'confirmed' || !!appointment.confirmed_at
+  // The card STAYS after any decision (no vanish), colour-coded by the CURRENT
+  // lifecycle: pending=green, confirmed=dark green, reschedule=orange, cancelled/
+  // rejected=dark. Precedence matters: a 'cancelled' status wins over a historical
+  // confirmed_at (the appointment was confirmed, then cancelled → show Storniert, not
+  // Bestätigt). cancelled_at can be null for pre-migration cancellations, so key the
+  // cancelled state off the status, not the timestamp.
   const rejectedDone = result === 'rejected' || !!appointment.rejected_at
-  const isDone = confirmedDone || rejectedDone
+  const cancelledDone = !rejectedDone && appointment.status === 'cancelled'
+  const confirmedDone = !cancelledDone && !rejectedDone && (result === 'confirmed' || !!appointment.confirmed_at)
+  const isDone = confirmedDone || rejectedDone || cancelledDone
   const statusPill = confirmedDone
-    ? { label: 'Bestätigt', cls: 'bg-green-tint-100 text-green-deep' }
-    : rejectedDone
-      ? { label: 'Abgelehnt', cls: 'bg-alt text-muted' }
-      : customerProposed
-        ? { label: 'Kundenvorschlag', cls: 'bg-amber-100 text-amber-700' }
-        : altAlreadySent
-          ? { label: 'Alternative gesendet', cls: 'bg-info-bg text-info' }
-          : { label: 'Wartet auf Bestätigung', cls: 'bg-green-tint-100 text-green-deep' }
+    ? { label: 'Bestätigt', cls: 'bg-green-primary text-white' }
+    : cancelledDone
+      ? { label: 'Storniert', cls: 'bg-slate-700 text-white' }
+      : rejectedDone
+        ? { label: 'Abgelehnt', cls: 'bg-slate-600 text-white' }
+        : customerProposed
+          ? { label: 'Kundenvorschlag', cls: 'bg-orange-100 text-orange-700' }
+          : altAlreadySent
+            ? { label: 'Alternative gesendet', cls: 'bg-orange-100 text-orange-700' }
+            : { label: 'Wartet auf Bestätigung', cls: 'bg-green-tint-100 text-green-deep' }
 
   // Collapsed (Ausblenden): one-line summary, click to re-expand.
   if (collapsed) {
@@ -337,7 +348,7 @@ export function AppointmentCard({
             {confirmedDone ? <CheckCircle2 size={12} className="flex-shrink-0" /> : <Clock size={12} className="flex-shrink-0" />}
             {statusPill.label}
           </span>
-          {!confirmedDone && (
+          {!isDone && (
             <button
               onClick={onRemove}
               title="Aus der Liste entfernen"
@@ -621,7 +632,9 @@ export function AppointmentCard({
               confirmedDone ? 'border-green-tint-200 bg-green-tint-50 text-green-deep' : 'border-border bg-alt text-muted',
             )}
           >
-            <div className="font-semibold">{confirmedDone ? 'Termin bestätigt — im Kalender' : 'Termin abgelehnt'}</div>
+            <div className="font-semibold">
+              {confirmedDone ? 'Termin bestätigt — im Kalender' : cancelledDone ? 'Termin storniert' : 'Termin abgelehnt'}
+            </div>
             {confirmedDone && appointment.scheduled_at ? (
               <button
                 onClick={() =>
@@ -634,7 +647,7 @@ export function AppointmentCard({
                 Im Kalender öffnen → (Ändern/Verschieben dort)
               </button>
             ) : (
-              <div className="mt-0.5">Bleibt als Erinnerung sichtbar — mit ✕ entfernen.</div>
+              <div className="mt-0.5">Bleibt als Status in den Aktionen sichtbar.</div>
             )}
           </div>
         )}
