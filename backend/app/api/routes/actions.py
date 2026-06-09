@@ -364,6 +364,10 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
                 "created_at": r.get("created_at"),
                 "due_at": due,
                 "priority": priority,
+                # 'customer' → the customer counter-proposed a slot (the team can
+                # Genehmigen/Ablehnen it in one click); 'team' → we sent an alternative
+                # and are awaiting the customer's reply (nothing to approve yet).
+                "proposal_role": "customer" if is_cust else "team",
             }
         )
     return out

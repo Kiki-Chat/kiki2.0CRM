@@ -7,6 +7,7 @@ import { Modal } from '../../components/ui/Modal'
 import { apiFetch } from '../../lib/api'
 import { cn, initials } from '../../lib/utils'
 import {
+  absoluteTimeDe,
   type CallDetailData,
   COLORS,
   displayName,
@@ -261,6 +262,81 @@ export function CreateAppointmentModal({
         </Field>
 
         {error && <div className="text-sm text-error">{error}</div>}
+      </div>
+    </Modal>
+  )
+}
+
+// One-click approve/decline for a customer-proposed reschedule, openable straight from
+// the Aktionen tab (no need to find the call). Pre-filled with the proposed slot.
+export function RescheduleApprovalModal({
+  open,
+  appointmentId,
+  customerName,
+  proposedTime,
+  onClose,
+  onResolved,
+}: {
+  open: boolean
+  appointmentId: string | null
+  customerName: string | null
+  proposedTime: string | null
+  onClose: () => void
+  onResolved: () => void
+}) {
+  const [error, setError] = useState<string | null>(null)
+  const done = () => {
+    onResolved()
+    onClose()
+  }
+  const approve = useMutation({
+    mutationFn: () => apiFetch(`/api/appointments/${appointmentId}/approve-proposal`, { method: 'POST' }),
+    onSuccess: done,
+    onError: (e: Error) => setError(e.message || 'Genehmigung fehlgeschlagen.'),
+  })
+  const decline = useMutation({
+    mutationFn: () => apiFetch(`/api/appointments/${appointmentId}/decline-proposal`, { method: 'POST' }),
+    onSuccess: done,
+    onError: (e: Error) => setError(e.message || 'Ablehnen fehlgeschlagen.'),
+  })
+  const busy = approve.isPending || decline.isPending
+  return (
+    <Modal open={open} onOpenChange={(o) => !o && onClose()} title="Terminänderung genehmigen">
+      <div className="space-y-4">
+        <p className="text-sm text-body">
+          <span className="font-semibold">{customerName || 'Der Kunde'}</span> möchte den Termin verschieben auf:
+        </p>
+        <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-center">
+          <div className="text-lg font-bold text-orange-700">{proposedTime ? absoluteTimeDe(proposedTime) : '—'}</div>
+          <div className="text-xs text-muted">Vorgeschlagener neuer Termin (Berlin-Zeit)</div>
+        </div>
+        <p className="text-xs text-muted">
+          „Genehmigen" verschiebt den Termin auf diese Zeit, bestätigt ihn und informiert den Kunden (Anruf + E-Mail).
+          „Ablehnen" verwirft den Vorschlag — der bisherige Termin bleibt bestehen.
+        </p>
+        {error && <div className="rounded-md bg-error-bg px-3 py-2 text-xs text-error">{error}</div>}
+        <div className="flex gap-3">
+          <button
+            disabled={busy}
+            onClick={() => {
+              setError(null)
+              approve.mutate()
+            }}
+            className="flex-1 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+          >
+            {approve.isPending ? 'Genehmigt…' : 'Genehmigen'}
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => {
+              setError(null)
+              decline.mutate()
+            }}
+            className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body hover:bg-surface disabled:opacity-50"
+          >
+            {decline.isPending ? 'Lehnt ab…' : 'Ablehnen'}
+          </button>
+        </div>
       </div>
     </Modal>
   )

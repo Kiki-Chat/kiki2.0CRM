@@ -73,6 +73,9 @@ export interface ActionItem {
   created_at: string | null
   due_at: string | null
   priority: 'normal' | 'high'
+  // alt_time_proposal only: 'customer' = customer counter-proposal (approvable in one
+  // click via the reschedule popup); 'team' = we sent an alternative, awaiting reply.
+  proposal_role?: 'customer' | 'team' | null
   // To-do state overlaid from action_tasks (claim / done / delete).
   action_key: string
   state: 'open' | 'claimed' | 'done'

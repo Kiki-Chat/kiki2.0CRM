@@ -15,6 +15,7 @@ import { useMe } from '../lib/useMe'
 import { FilterPopover, PagerNumbered, Segmented } from './calls/atoms'
 import { CallDetail } from './calls/CallDetail'
 import { ActionRow, CallRow, EmptyAktionen } from './calls/Inbox'
+import { RescheduleApprovalModal } from './calls/Modals'
 import { ResizeHandle, useColumnResize } from './calls/resize'
 import { NoCallSelected } from './calls/Transcript'
 import {
@@ -36,6 +37,8 @@ export function CallLogsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  // Customer-proposed reschedule being approved/declined in the popup.
+  const [reschedule, setReschedule] = useState<{ id: string; name: string | null; time: string | null } | null>(null)
   const [rightOpen, setRightOpen] = useState(true)
   // Deep-link seeding (dashboard CTAs): ?direction=&status=&tab=.
   const [filters, setFilters] = useState<InboxFilters>(() => {
@@ -225,6 +228,13 @@ export function CallLogsPage() {
                 item={item}
                 onSetState={(status) => setActionState.mutate({ action_key: item.action_key, status })}
                 onSelect={() => {
+                  // Customer-proposed reschedule → approve/decline in a popup right
+                  // here (pre-filled with the proposed slot). One click moves +
+                  // confirms the appointment — no need to find the call.
+                  if (item.kind === 'alt_time_proposal' && item.proposal_role === 'customer') {
+                    setReschedule({ id: item.id, name: item.customer_name, time: item.due_at })
+                    return
+                  }
                   // Route each Aktion to the surface where it can actually be acted
                   // on — not blanket-to the customer card (the old fallback, which
                   // had no way to confirm an appointment or send a KVA).
@@ -278,6 +288,20 @@ export function CallLogsPage() {
       ) : (
         isWide && <NoCallSelected />
       )}
+
+      <RescheduleApprovalModal
+        open={!!reschedule}
+        appointmentId={reschedule?.id ?? null}
+        customerName={reschedule?.name ?? null}
+        proposedTime={reschedule?.time ?? null}
+        onClose={() => setReschedule(null)}
+        onResolved={() => {
+          qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
+          qc.invalidateQueries({ queryKey: ['appointments'] })
+          qc.invalidateQueries({ queryKey: ['calls'] })
+          qc.invalidateQueries({ queryKey: ['pendingAppointment'] })
+        }}
+      />
     </div>
   )
 }
