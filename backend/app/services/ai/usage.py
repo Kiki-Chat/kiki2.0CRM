@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 # fall back to the mini price so cost is never wildly under-counted.
 _PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.00015, 0.0006),
+    "gpt-4o": (0.0025, 0.01),
 }
 _DEFAULT_PRICE = (0.00015, 0.0006)
 
