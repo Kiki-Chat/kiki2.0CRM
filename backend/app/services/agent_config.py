@@ -1282,8 +1282,69 @@ def build_transfer_tool(cfg: dict) -> dict | None:
     }
 
 
-def sync_transfer_tool_for_org(org_id: str | UUID) -> dict:
-    """Push the org's transfer_to_number system-tool config to its agent.
+def build_voicemail_tool() -> dict:
+    """Hardened voicemail_detection config: the loose default description made the
+    LLM fire it on live humans right after connect — the caller then heard the
+    voicemail text ('…ist bestätigt … Auf Wiederhören!') and the call ended
+    (the reported outbound 'announces and hangs up' bug)."""
+    return {
+        "type": "system",
+        "name": "voicemail_detection",
+        "description": (
+            "Trigger ONLY when you are CERTAIN an answering machine/voicemail "
+            "picked up: a RECORDED greeting explicitly states the called party is "
+            "unavailable ('Please leave a message after the tone…', 'You have "
+            "reached the voicemail of…', 'Der Teilnehmer ist zurzeit nicht "
+            "erreichbar…'), typically followed by a beep. NEVER trigger in the "
+            "first seconds of a call, on silence, on background noise, or after a "
+            "live human has said ANYTHING — a plain 'Hallo?', 'Ja?' or a company "
+            "name IS a human. When in ANY doubt, treat the answerer as human and "
+            "simply continue the conversation. The tool plays the stored "
+            "voicemail_message in full and then ends the call."
+        ),
+        "params": {
+            "system_tool_type": "voicemail_detection",
+            "voicemail_message": "{{voicemailMessage}}",
+        },
+    }
+
+
+def build_transfer_to_agent_tool(agent_id: str) -> dict:
+    """transfer_to_agent (off-topic handoff during OUTBOUND calls). Target is the
+    org's own agent: the new leg starts WITHOUT the per-call outbound override,
+    i.e. with the standard inbound configuration and full tool access."""
+    return {
+        "type": "system",
+        "name": "transfer_to_agent",
+        "description": (
+            "Hands the conversation over to this organization's standard inbound "
+            "assistant (fresh configuration, full tools). Use EXCLUSIVELY during "
+            "OUTBOUND calls when the customer raises an issue UNRELATED to this "
+            "call's stated purpose that you cannot complete with your current "
+            "tools. NEVER invoke during inbound calls — there you already are the "
+            "primary agent. Announce the handoff briefly before transferring."
+        ),
+        "params": {
+            "system_tool_type": "transfer_to_agent",
+            "transfers": [
+                {
+                    "agent_id": agent_id,
+                    "condition": (
+                        "Only during an outbound call: the customer raises a "
+                        "DIFFERENT concern than the announced purpose of this call "
+                        "(new repair request, complaint, separate inquiry, new "
+                        "appointment on another topic, cost estimate) AND it cannot "
+                        "be completed with the currently available tools."
+                    ),
+                }
+            ],
+        },
+    }
+
+
+def sync_system_tools_for_org(org_id: str | UUID) -> dict:
+    """Push the org's system-tool configs (transfer_to_number, voicemail_detection,
+    transfer_to_agent) to its agent in one safe write.
 
     Called after Notdienst-/Telefon-saves (alongside the prompt repush). Same
     best-effort contract as rerender_and_push_for_org — never raises."""
@@ -1296,26 +1357,37 @@ def sync_transfer_tool_for_org(org_id: str | UUID) -> dict:
     if not agent_id:
         return {"updated": False, "reason": "no_agent"}
     cfg = _fetch_kz_config(org_id)
-    tool = build_transfer_tool(cfg)
     try:
         patch_agent_safely(
             agent_id=agent_id,
             field_patches={
                 "conversation_config": {
-                    "agent": {"prompt": {"built_in_tools": {"transfer_to_number": tool}}}
+                    "agent": {
+                        "prompt": {
+                            "built_in_tools": {
+                                "transfer_to_number": build_transfer_tool(cfg),
+                                "voicemail_detection": build_voicemail_tool(),
+                                "transfer_to_agent": build_transfer_to_agent_tool(agent_id),
+                            }
+                        }
+                    }
                 }
             },
             merge_arrays=[],
             actor_id=None,
             org_id=org_id,
-            endpoint_label="transfer_tool_sync",
+            endpoint_label="system_tools_sync",
         )
     except Exception as exc:  # noqa: BLE001 — never break the triggering save
         logger.warning(
-            "transfer_to_number sync failed (org %s): %s", org_id, str(exc)[:200]
+            "system tools sync failed (org %s): %s", org_id, str(exc)[:200]
         )
         return {"updated": False, "reason": str(exc)[:200]}
     return {"updated": True}
+
+
+# Backwards-compatible alias (Phase-6 call sites).
+sync_transfer_tool_for_org = sync_system_tools_for_org
 
 
 # ─── Agent-sync status (frontend loader banner) ──────────────────────────────
