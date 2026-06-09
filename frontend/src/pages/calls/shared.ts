@@ -54,6 +54,7 @@ export interface Inquiry {
 export interface Employee {
   id: string
   display_name: string | null
+  is_technician?: boolean
 }
 
 export interface ActionItem {

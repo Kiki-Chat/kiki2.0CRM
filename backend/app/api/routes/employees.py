@@ -47,7 +47,7 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
         .select(
             "id, user_id, display_name, email, access_role, is_active, calendar_color, "
             "role_in_company, vacation_days_per_year, remaining_vacation_days, "
-            "hourly_rate, activity_area, auto_assign"
+            "hourly_rate, activity_area, auto_assign, is_technician"
         )
         .eq("org_id", org_id)
         .eq("deleted", False)
@@ -115,6 +115,7 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
                 "hourly_rate": e.get("hourly_rate"),
                 "activity_area": e.get("activity_area"),
                 "auto_assign": e.get("auto_assign", False),
+                "is_technician": e.get("is_technician", False),
                 "present": e["id"] not in absent_ids,
                 "absence_type": absence_type.get(e["id"]),
             }
@@ -268,6 +269,7 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
         "calendar_color": payload.calendar_color,
         "activity_area": payload.activity_area,
         "auto_assign": payload.auto_assign,
+        "is_technician": payload.is_technician,
     }
     created = client.table("employees").insert(row).execute().data[0]
     if warning:

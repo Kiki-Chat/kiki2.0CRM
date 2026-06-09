@@ -36,6 +36,7 @@ class EmployeeCreate(BaseModel):
     calendar_color: str | None = None
     activity_area: str | None = None
     auto_assign: bool = False
+    is_technician: bool = False  # tag: does the ground work (Zuweisung/Plantafel)
 
 
 class EmployeeUpdate(BaseModel):
@@ -49,6 +50,7 @@ class EmployeeUpdate(BaseModel):
     hourly_rate: float | None = None
     activity_area: str | None = None
     auto_assign: bool | None = None
+    is_technician: bool | None = None
 
 
 class AbsenceCreate(BaseModel):
