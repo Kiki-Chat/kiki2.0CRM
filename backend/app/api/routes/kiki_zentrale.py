@@ -67,7 +67,7 @@ def _upsert_config(org_id: str, fields: dict) -> dict:
     )[0]
 
 
-def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str) -> None:
+def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str, seq: int = 0) -> None:
     """Best-effort re-render + push of the org's prompt after a config save.
 
     Runs as a FastAPI BackgroundTask AFTER the HTTP response is sent, so the
@@ -75,16 +75,33 @@ def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str) -> None:
     happens synchronously in the handler, so the returned row reflects the saved
     state; only the EL push is deferred. Wrapped so a push failure (un-provisioned
     org, EL outage, manual override) NEVER surfaces — rerender_and_push_for_org
-    already swallows its own errors; this is belt-and-braces + a log line."""
+    already swallows its own errors; this is belt-and-braces + a log line.
+
+    `seq` (from ac.begin_sync) resolves the frontend sync banner: applied on
+    success AND on legit no-ops (manual override / no agent — nothing to push is
+    not a failure), failed on a real EL error."""
     try:
-        ac.rerender_and_push_for_org(
+        result = ac.rerender_and_push_for_org(
             org_id=org_id, actor_id=user_id, endpoint_label=endpoint_label
         )
+        reason = result.get("reason")
+        ok = bool(result.get("updated")) or reason in ("manual_override", "no_agent")
+        ac.finish_sync(org_id, seq, ok=ok, reason=reason)
     except Exception as exc:  # noqa: BLE001 — never let a background push crash
         logger.warning(
             "background prompt re-push failed (org=%s, label=%s): %s",
             org_id, endpoint_label, str(exc)[:200],
         )
+        ac.finish_sync(org_id, seq, ok=False, reason=str(exc)[:300])
+
+
+def _schedule_repush(
+    background: BackgroundTasks, user: CurrentUser, endpoint_label: str
+) -> None:
+    """begin_sync (synchronous, so the first poll already sees 'pending') +
+    deferred re-push. The single entry point for ALL config-mutating handlers."""
+    seq = ac.begin_sync(user.org_id, endpoint_label)
+    background.add_task(_repush_bg, user.org_id, user.id, endpoint_label, seq)
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -344,6 +361,55 @@ async def get_overview(user: CurrentUser = Depends(require_org)) -> dict:
     return await run_in_threadpool(_get_overview, user.org_id)
 
 
+# ─── Agent-sync status (frontend loader banner) ──────────────────────────────
+_SYNC_STALE_SECONDS = 300  # a pending sync older than this = process died mid-push
+
+
+def _get_sync_status(org_id: str) -> dict:
+    client = get_service_client()
+    row = (
+        client.table("agent_configs")
+        .select(
+            "agent_sync_status, agent_sync_label, agent_sync_error, "
+            "agent_sync_seq, agent_sync_requested_at, agent_sync_finished_at"
+        )
+        .eq("org_id", org_id).limit(1).execute().data or [{}]
+    )[0]
+    status = row.get("agent_sync_status") or "idle"
+    requested_at = row.get("agent_sync_requested_at")
+    error = row.get("agent_sync_error")
+    # Stale coercion (read-side, no DB write): a backend restart mid-push would
+    # otherwise leave the banner spinning forever.
+    if status == "pending" and requested_at:
+        try:
+            ts = datetime.fromisoformat(requested_at.replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age > _SYNC_STALE_SECONDS:
+                status, error = "failed", "timeout"
+        except ValueError:
+            pass
+    return {
+        "status": status,
+        "label": row.get("agent_sync_label"),
+        "error": error,
+        "seq": row.get("agent_sync_seq") or 0,
+        "requested_at": requested_at,
+        "finished_at": row.get("agent_sync_finished_at"),
+    }
+
+
+@router.get("/sync-status")
+async def get_sync_status(user: CurrentUser = Depends(require_org)) -> dict:
+    return await run_in_threadpool(_get_sync_status, user.org_id)
+
+
+@router.post("/sync-status/retry")
+async def retry_sync(background: BackgroundTasks, user: CurrentUser = Depends(require_org)) -> dict:
+    _require_admin(user)
+    _schedule_repush(background, user, "kz_retry")
+    return {"success": True}
+
+
 @router.get("/agent-health")
 async def get_agent_health(user: CurrentUser = Depends(require_org)) -> dict:
     agent_id = await run_in_threadpool(ea.get_org_agent_id, user.org_id)
@@ -429,7 +495,7 @@ async def update_verhalten(
     # The per-capability autonomy (and welcome) feed the agent prompt → re-render
     # and push to ElevenLabs in the background, like the other config sections.
     if supa:
-        background.add_task(_repush_bg, user.org_id, user.id, "kz_verhalten")
+        _schedule_repush(background, user, "kz_verhalten")
     return result
 
 
@@ -539,7 +605,7 @@ async def create_required_field(
         return client.table("agent_required_fields").insert(row).execute().data[0]
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    _schedule_repush(background, user, "kz_required_fields")
     return result
 
 
@@ -562,7 +628,7 @@ async def update_required_field(
         )[0]
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    _schedule_repush(background, user, "kz_required_fields")
     return result
 
 
@@ -593,7 +659,7 @@ async def delete_required_field(
     if res == "locked":
         raise HTTPException(status_code=400, detail="Pflichtfeld ist gesperrt und kann nicht gelöscht werden.")
     # Only re-push after a real delete (not on missing/locked no-ops).
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    _schedule_repush(background, user, "kz_required_fields")
     return {"success": True}
 
 
@@ -612,7 +678,7 @@ async def reorder_required_fields(
         return {"success": True}
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    _schedule_repush(background, user, "kz_required_fields")
     return result
 
 
@@ -628,7 +694,7 @@ async def update_context(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_identity")
+    _schedule_repush(background, user, "kz_identity")
     return result
 
 
@@ -647,7 +713,7 @@ async def update_problem_description(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_problem_description")
+    _schedule_repush(background, user, "kz_problem_description")
     return result
 
 
@@ -788,7 +854,7 @@ async def update_scheduling_rules(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_scheduling")
+    _schedule_repush(background, user, "kz_scheduling")
     return result
 
 
@@ -822,7 +888,7 @@ async def create_category(
         return client.table("appointment_categories").insert(row).execute().data[0]
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_categories")
+    _schedule_repush(background, user, "kz_categories")
     return result
 
 
@@ -845,7 +911,7 @@ async def update_category(
         )[0]
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_categories")
+    _schedule_repush(background, user, "kz_categories")
     return result
 
 
@@ -862,21 +928,31 @@ async def delete_category(
         return {"success": True}
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_categories")
+    _schedule_repush(background, user, "kz_categories")
     return result
 
 
 # ─── KVA-Automatisierung / Preisauskunft ─────────────────────────────────────
 @router.patch("/kva-automation")
 async def update_kva_automation(payload: TogglePayload, user: CurrentUser = Depends(require_org)) -> dict:
+    # Legacy toggle (no frontend caller; the field does not feed the prompt) —
+    # deliberately no repush here.
     _require_admin(user)
     return await run_in_threadpool(_upsert_config, user.org_id, {"kva_automation_enabled": payload.enabled})
 
 
 @router.patch("/price-info")
-async def update_price_info(payload: TogglePayload, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_price_info(
+    payload: TogglePayload, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
-    return await run_in_threadpool(_upsert_config, user.org_id, {"price_info_enabled": payload.enabled})
+    result = await run_in_threadpool(
+        _upsert_config, user.org_id, {"price_info_enabled": payload.enabled}
+    )
+    # This PATCH previously never re-pushed the prompt — the toggle changed the
+    # DB but the live agent kept its old price behaviour. Repush is the fix.
+    _schedule_repush(background, user, "kz_price_info")
+    return result
 
 
 # ─── Leistungsangebot ────────────────────────────────────────────────────────
@@ -946,13 +1022,15 @@ async def update_emergency(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_emergency")
+    _schedule_repush(background, user, "kz_emergency")
     return result
 
 
 # ─── Telefon ─────────────────────────────────────────────────────────────────
 @router.patch("/phone")
-async def update_phone(payload: PhoneUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_phone(
+    payload: PhoneUpdate, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     """Update the org's Telefon section.
 
     - `forwarding_number` / `incoming_forwarding_number` → `agent_configs`
@@ -995,7 +1073,11 @@ async def update_phone(payload: PhoneUpdate, user: CurrentUser = Depends(require
         )[0]
         return {**cfg, "existing_business_number": org.get("existing_business_number")}
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    # incoming_forwarding_number feeds the KZ_STAFF_TRANSFER prompt block — the
+    # agent must learn about a changed/removed staff-transfer number immediately.
+    _schedule_repush(background, user, "kz_phone")
+    return result
 
 
 # ─── Ausgehende Anrufe ───────────────────────────────────────────────────────

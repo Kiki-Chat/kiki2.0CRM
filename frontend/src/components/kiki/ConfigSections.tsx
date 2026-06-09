@@ -82,9 +82,9 @@ export function deriveFieldKey(explicitKey: string, label: string): string {
   return explicitKey || label.toLowerCase().replace(/\s+/g, '_')
 }
 
-// Appended to save toasts so the user knows the (slow) agent sync continues in
-// the background after the row is persisted.
-const AGENT_SYNC_SUFFIX = ' — Änderungen werden an den Agenten übertragen.'
+// The live AgentSyncBanner (KikiZentralePage) now shows the pending→applied
+// state of the background agent sync, so toasts stay short.
+const AGENT_SYNC_SUFFIX = ''
 
 function useConfigPatch(path: string, flash: (m: string) => void) {
   const qc = useQueryClient()

@@ -52,6 +52,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -1181,6 +1182,61 @@ def configure_agent(
         _stamp_agent_provisioned(org_id)
 
     return summary
+
+
+# ─── Agent-sync status (frontend loader banner) ──────────────────────────────
+# Every Kiki-Zentrale save flips the org's agent_configs row to 'pending' BEFORE
+# the HTTP response returns, and the background re-push resolves it to
+# 'applied'/'failed'. agent_sync_seq is a per-org request id: finish_sync only
+# writes when its seq is still the latest, so overlapping saves are
+# last-write-wins and a slow old push can never overwrite a newer pending state.
+
+def begin_sync(org_id: str | UUID, label: str) -> int:
+    """Mark the org's agent sync as pending; returns the new sync seq.
+
+    Upserts the config row first so orgs that never saved a config still get
+    sync tracking. Never raises — a tracking failure must not block the save."""
+    db = get_service_client()
+    try:
+        existing = (
+            db.table("agent_configs").select("org_id").eq("org_id", str(org_id))
+            .limit(1).execute().data or []
+        )
+        if not existing:
+            db.table("agent_configs").upsert(
+                {"org_id": str(org_id)}, on_conflict="org_id"
+            ).execute()
+        res = db.rpc(
+            "kz_begin_agent_sync", {"p_org": str(org_id), "p_label": label}
+        ).execute()
+        data = res.data
+        if isinstance(data, list):
+            data = data[0] if data else 0
+        return int(data or 0)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("begin_sync(%s, %s) failed: %s", org_id, label, str(exc)[:200])
+        return 0
+
+
+def finish_sync(org_id: str | UUID, seq: int, *, ok: bool, reason: str | None = None) -> None:
+    """Resolve a pending sync — guarded by seq (stale completions no-op)."""
+    if not seq:
+        return
+    db = get_service_client()
+    try:
+        (
+            db.table("agent_configs")
+            .update({
+                "agent_sync_status": "applied" if ok else "failed",
+                "agent_sync_error": (reason or None) if not ok else (reason or None),
+                "agent_sync_finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("org_id", str(org_id))
+            .eq("agent_sync_seq", seq)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("finish_sync(%s, seq=%s) failed: %s", org_id, seq, str(exc)[:200])
 
 
 # ─── Live re-render + push (Kiki-Zentrale config changes) ────────────────────
