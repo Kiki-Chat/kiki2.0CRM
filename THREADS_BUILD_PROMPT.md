@@ -21,8 +21,9 @@ under one human-readable **case number**. A customer can have several concurrent
 
 ## Data model
 Anchor the case on the existing `inquiries` table (it already carries a number) — elevate it to the Vorgang:
-- `inquiries.case_number` — `VG-<year>-<NNNN>` per org, the id read out on the phone. `[DECIDE: reuse existing ANF-… vs new VG-… — RECOMMEND new VG-]`
-- `inquiries.subject` (short topic, e.g. "Heizung Badezimmer") + `status` lifecycle (`open|in_progress|waiting|resolved|closed`).
+- `inquiries.case_number` — `VG-<year>-<NNNN>` per org. **INTERNAL / staff-facing only** (CRM list, search, audit). **NEVER read out to the customer.** *(DECIDED: keep an internal number for staff; customers never use it.)*
+- `inquiries.subject` — a SHORT human topic, e.g. "Heizung Badezimmer" / "Dach undicht". **This is the EXTERNAL / customer-facing label** the agent uses. Customers recognise their matter by topic, not a number.
+- `inquiries.status` lifecycle (`open|in_progress|waiting|resolved|closed`).
 - Carry the case id on every related record:
   - `calls.inquiry_id` — the call's case. Inbound intake creates/links it; outbound inherits it. **(This is the key gap today — calls aren't reliably linked, which is why action buttons are dead.)**
   - `appointments.inquiry_id` (exists — ensure ALWAYS set, incl. agent bookings).
@@ -32,10 +33,18 @@ Anchor the case on the existing `inquiries` table (it already carries a number) 
 ## Threading rules (how a call gets its case)
 1. **Outbound** (Kiki → customer, triggered by an appointment/case event): ALWAYS inherit the triggering case's `inquiry_id`, stamped at initiation. *(Deterministic — fixes scattered outbound + the `call_id✗` dead buttons.)*
 2. **Transfer-to-agent mid-outbound** (confirm → "actually, reschedule"): continue on the SAME case. New matter raised mid-call → open a new **linked** case.
-3. **Inbound**: `[DECIDE: simple vs smart]`
-   - **SIMPLE (recommended first):** every inbound opens a NEW case; staff Link/Merge later. Surface "possible related open cases" (same customer + fuzzy subject) as a suggestion.
-   - **SMART (later phase):** the agent looks up the customer's open cases and asks "Is this about your heating appointment on the 14th?" → attaches to the match.
+3. **Inbound** *(DECIDED: simple default + a topic helper):*
+   - System default = open a NEW case (never auto-merge).
+   - BUT the agent first checks the caller's OPEN cases and, if any, asks **by topic name** — "Geht es um [subject]?" (Is this about [the heating in the bathroom]?). If they confirm → attach to that case; if new → new case + capture a short subject.
+   - Staff can Link/Merge afterwards. No customer-facing case numbers anywhere.
 4. **Recurring problem after a gap:** matched case closed & recent → reopen; old → new case **linked** to the original.
+
+## Agent prompt (external / customer-facing) — REQUIRED change
+The ElevenLabs agent prompt must reference matters by **short topic, never a number**:
+- **Returning caller** (recognised by phone/customer): look up their OPEN cases; if any, greet by name + ask by topic — *"Schön, dass Sie wieder anrufen, Herr X. Geht es um [subject], oder um etwas Neues?"* Pull their name/address from the case so they don't repeat themselves.
+- Confirm an existing topic → continue on that case (reschedule / cancel / update). New → open a new case and capture a **short subject** (3–5 words) for next time.
+- The agent NEVER asks for or reads out a case number. Internally everything is tagged with the case (`VG-` number / inquiry id); externally it's all topic names.
+- Keep it bilingual-safe (the caller may speak English) — match topics on meaning, not exact German strings.
 
 ## Cut-off confirmation detection
 On an **outbound** confirmation/reschedule call: if duration < ~20s OR no confirmation outcome captured → raise a case Aktion **"Bestätigung nicht abgeschlossen — nachfassen"** (high priority).
