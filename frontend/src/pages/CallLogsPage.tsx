@@ -102,6 +102,13 @@ export function CallLogsPage() {
       qc.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
     },
   })
+
+  // Aktionen to-do controls: Übernehmen / Erledigt / Löschen / reopen.
+  const setActionState = useMutation({
+    mutationFn: ({ action_key, status }: { action_key: string; status: 'open' | 'claimed' | 'done' | 'dismissed' }) =>
+      apiFetch('/api/actions/state', { method: 'POST', body: JSON.stringify({ action_key, status }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['actions', 'pending'] }),
+  })
   useEffect(() => {
     if (!selectedId) return
     const selected = calls.find((c) => c.id === selectedId)
@@ -216,6 +223,7 @@ export function CallLogsPage() {
               <ActionRow
                 key={`${item.kind}:${item.id}`}
                 item={item}
+                onSetState={(status) => setActionState.mutate({ action_key: item.action_key, status })}
                 onSelect={() => {
                   // Route each Aktion to the surface where it can actually be acted
                   // on — not blanket-to the customer card (the old fallback, which

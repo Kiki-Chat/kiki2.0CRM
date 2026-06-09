@@ -4,12 +4,15 @@ import {
   Calendar,
   CalendarClock,
   CalendarX,
+  Check,
   CheckCircle2,
-  ChevronRight,
   Info,
   Phone,
   Receipt,
+  RotateCcw,
+  Trash2,
   User,
+  UserPlus,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -150,40 +153,96 @@ const KIND_TONE: Record<ActionItem['kind'], { tile: string; tag: 'info' | 'ai' |
   appointment_cancelled: { tile: 'bg-slate-700 text-white', tag: 'neutral' },
 }
 
-export function ActionRow({ item, onSelect }: { item: ActionItem; onSelect: () => void }) {
+function TaskBtn({
+  icon: Icon,
+  label,
+  onClick,
+  variant = 'plain',
+}: {
+  icon: LucideIcon
+  label: string
+  onClick: () => void
+  variant?: 'plain' | 'accent' | 'danger'
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      className={cn(
+        'inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors',
+        variant === 'accent'
+          ? 'bg-green-primary text-white hover:brightness-110'
+          : variant === 'danger'
+            ? 'text-error hover:bg-error-bg'
+            : 'border border-border text-body hover:bg-alt',
+      )}
+    >
+      <Icon size={12} /> {label}
+    </button>
+  )
+}
+
+export function ActionRow({
+  item,
+  onSelect,
+  onSetState,
+}: {
+  item: ActionItem
+  onSelect: () => void
+  onSetState: (status: 'open' | 'claimed' | 'done' | 'dismissed') => void
+}) {
   const tone = KIND_TONE[item.kind] ?? { tile: 'bg-alt text-muted', tag: 'info' as const }
   const Icon = KIND_ICON[item.kind] ?? Info
   const high = item.priority === 'high'
   const time = item.due_at || item.created_at
+  const done = item.state === 'done'
+  const claimed = item.state === 'claimed'
   return (
-    <button
-      onClick={onSelect}
-      className="flex w-full flex-shrink-0 items-start gap-3 rounded-2xl bg-surface py-3.5 pl-3.5 pr-3 text-left shadow-[inset_0_0_0_1px_var(--border)] transition-colors hover:bg-alt"
+    <div
+      className={cn(
+        'flex w-full flex-shrink-0 flex-col gap-2 rounded-2xl bg-surface p-3 shadow-[inset_0_0_0_1px_var(--border)] transition-colors',
+        done && 'opacity-60',
+      )}
     >
-      <span className={cn('relative flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-xl', tone.tile)}>
-        <Icon size={18} />
-        {high && (
-          <span className="absolute -right-1 -top-1 h-3 w-3 animate-pulse rounded-full border-2 border-surface bg-error" />
-        )}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center gap-2">
-          <span className="flex-shrink-0">
-            <Tag variant={tone.tag}>{ACTION_KIND_LABEL[item.kind]}</Tag>
-          </span>
-          {high && (
-            <span className="flex-shrink-0 text-[10.5px] font-extrabold uppercase tracking-wide text-error">Dringend</span>
+      <button onClick={onSelect} className="flex items-start gap-3 text-left">
+        <span className={cn('relative flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-xl', tone.tile)}>
+          <Icon size={18} />
+          {high && !done && (
+            <span className="absolute -right-1 -top-1 h-3 w-3 animate-pulse rounded-full border-2 border-surface bg-error" />
           )}
-          <span className="ml-auto truncate text-[11px] text-faint">{fmtTime(time)}</span>
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <Tag variant={tone.tag}>{ACTION_KIND_LABEL[item.kind]}</Tag>
+            {done && <Tag variant="success">Erledigt</Tag>}
+            {claimed && item.claimed_by_name && (
+              <span className="rounded-full bg-info-bg px-1.5 py-0.5 text-[10px] font-semibold text-info">
+                Übernommen: {item.claimed_by_name}
+              </span>
+            )}
+            {high && !done && (
+              <span className="text-[10.5px] font-extrabold uppercase tracking-wide text-error">Dringend</span>
+            )}
+            <span className="ml-auto truncate text-[11px] text-faint">{fmtTime(time)}</span>
+          </div>
+          <div className={cn('truncate text-[13.5px] font-bold leading-snug text-text', done && 'text-muted line-through')}>
+            {item.summary}
+          </div>
+          <div className="mt-1 flex items-center gap-1.5 truncate text-xs text-muted">
+            <User size={12} className="text-faint" />
+            {item.customer_name || 'Unbekannter Kunde'}
+          </div>
         </div>
-        <div className="truncate text-[13.5px] font-bold leading-snug text-text">{item.summary}</div>
-        <div className="mt-1 flex items-center gap-1.5 truncate text-xs text-muted">
-          <User size={12} className="text-faint" />
-          {item.customer_name || 'Unbekannter Kunde'}
-        </div>
+      </button>
+      <div className="flex items-center gap-1.5 border-t border-border pt-2">
+        {!done && !claimed && <TaskBtn icon={UserPlus} label="Übernehmen" onClick={() => onSetState('claimed')} />}
+        {!done && <TaskBtn icon={Check} label="Erledigt" variant="accent" onClick={() => onSetState('done')} />}
+        {done && <TaskBtn icon={RotateCcw} label="Wiederöffnen" onClick={() => onSetState('open')} />}
+        <TaskBtn icon={Trash2} label="Löschen" variant="danger" onClick={() => onSetState('dismissed')} />
       </div>
-      <ChevronRight size={16} className="self-center text-faint" />
-    </button>
+    </div>
   )
 }
 

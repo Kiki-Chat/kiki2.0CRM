@@ -73,7 +73,14 @@ export interface ActionItem {
   created_at: string | null
   due_at: string | null
   priority: 'normal' | 'high'
+  // To-do state overlaid from action_tasks (claim / done / delete).
+  action_key: string
+  state: 'open' | 'claimed' | 'done'
+  claimed_by_name: string | null
+  done_at_task: string | null
 }
+
+export type ActionTaskStatus = 'open' | 'claimed' | 'done' | 'dismissed'
 
 export type TimelineEventKind =
   | 'call_created'

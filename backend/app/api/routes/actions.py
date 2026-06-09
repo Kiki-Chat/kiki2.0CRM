@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
@@ -443,6 +444,55 @@ def _sort_key(row: dict) -> tuple[int, int, str, str]:
     )
 
 
+# Struck-through (done) tasks linger this long after they were marked done, then drop.
+_DONE_VISIBLE_DAYS = 3
+
+
+def _apply_task_states(client, org_id: str, items: list[dict]) -> list[dict]:
+    """Overlay the manual to-do state (action_tasks) onto the derived actions.
+
+    dismissed → hidden · done → struck (state='done') until 3 days after done_at, then
+    dropped · claimed → state='claimed' + claimer name · else state='open'."""
+    if not items:
+        return items
+    keys = [it["action_key"] for it in items]
+    rows = (
+        client.table("action_tasks")
+        .select("action_key, status, claimed_by, done_at")
+        .eq("org_id", org_id).in_("action_key", keys).execute().data
+        or []
+    )
+    by_key = {r["action_key"]: r for r in rows}
+    claimer_ids = list({r.get("claimed_by") for r in rows if r.get("claimed_by")})
+    name_by_user: dict[str, str | None] = {}
+    if claimer_ids:
+        for u in (
+            client.table("users").select("id, full_name")
+            .in_("id", claimer_ids).execute().data or []
+        ):
+            name_by_user[u["id"]] = u.get("full_name")
+    cutoff = _iso_minus_days(_DONE_VISIBLE_DAYS)
+    out: list[dict] = []
+    for it in items:
+        st = by_key.get(it["action_key"])
+        it["state"], it["claimed_by_name"], it["done_at_task"] = "open", None, None
+        if not st:
+            out.append(it)
+            continue
+        status = st.get("status")
+        if status == "dismissed":
+            continue  # deleted by the user
+        if status == "done":
+            if (st.get("done_at") or "") < cutoff:
+                continue  # struck > 3 days ago → drop
+            it["state"], it["done_at_task"] = "done", st.get("done_at")
+        elif status == "claimed":
+            it["state"] = "claimed"
+            it["claimed_by_name"] = name_by_user.get(st.get("claimed_by"))
+        out.append(it)
+    return out
+
+
 def _aggregate(org_id: str) -> list[dict[str, Any]]:
     client = get_service_client()
     items: list[dict[str, Any]] = []
@@ -453,6 +503,11 @@ def _aggregate(org_id: str) -> list[dict[str, Any]]:
     items.extend(_alt_time_proposal(client, org_id))
     items.extend(_appointment_cancelled(client, org_id))
 
+    # Stable per-action key so the manual to-do state (claim/done/dismiss) sticks.
+    for it in items:
+        it["action_key"] = f"{it['kind']}:{it['id']}"
+    items = _apply_task_states(client, org_id, items)
+
     # Sort: priority desc, due_at asc nulls last, created_at desc.
     # Python sorted() is stable — do passes in reverse priority order:
     #   1) created_at desc (least significant)
@@ -461,10 +516,12 @@ def _aggregate(org_id: str) -> list[dict[str, Any]]:
     items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
     items.sort(key=lambda r: (0 if r.get("due_at") else 1, r.get("due_at") or ""))
     items.sort(key=lambda r: _PRIORITY_RANK.get(r.get("priority") or "normal", 1))
+    # Struck-through (done) tasks sink to the bottom — they stay as a 3-day record.
+    items.sort(key=lambda r: 1 if r.get("state") == "done" else 0)
     return items
 
 
-# ─── Route ──────────────────────────────────────────────────────────────────
+# ─── Routes ─────────────────────────────────────────────────────────────────
 @router.get("/pending")
 async def list_pending_actions(
     user: CurrentUser = Depends(require_org),
@@ -475,3 +532,39 @@ async def list_pending_actions(
     the org has nothing pending. Org-scoped via require_org.
     """
     return await run_in_threadpool(_aggregate, user.org_id)
+
+
+class ActionStateRequest(BaseModel):
+    action_key: str
+    status: Literal["open", "claimed", "done", "dismissed"]
+
+
+def _set_action_state(user: CurrentUser, payload: ActionStateRequest) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    row: dict[str, Any] = {
+        "org_id": user.org_id,
+        "action_key": payload.action_key,
+        "status": payload.status,
+        "updated_at": now,
+    }
+    if payload.status == "claimed":
+        row["claimed_by"] = user.id
+        row["done_at"] = None
+    elif payload.status == "done":
+        row["done_at"] = now
+    elif payload.status == "open":  # reopen — clear claim + done
+        row["claimed_by"] = None
+        row["done_at"] = None
+    get_service_client().table("action_tasks").upsert(
+        row, on_conflict="org_id,action_key"
+    ).execute()
+    return {"ok": True, "action_key": payload.action_key, "status": payload.status}
+
+
+@router.post("/state")
+async def set_action_state(
+    payload: ActionStateRequest, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Set the manual to-do state of one action (Übernehmen / Erledigt / Löschen /
+    reopen). Upserts into action_tasks keyed by (org_id, action_key)."""
+    return await run_in_threadpool(_set_action_state, user, payload)
