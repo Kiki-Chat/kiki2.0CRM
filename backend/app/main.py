@@ -7,6 +7,7 @@ from app.api.routes import (
     appointments,
     calendar_settings,
     calls,
+    cases,
     catalog,
     conversation_init,
     cost_estimates,
@@ -102,6 +103,7 @@ app.include_router(calls.router)
 app.include_router(customers.router)
 app.include_router(employees.router)
 app.include_router(inquiries.router)
+app.include_router(cases.router)
 app.include_router(appointments.router)
 app.include_router(calendar_settings.router)
 app.include_router(vehicles.router)

@@ -40,6 +40,14 @@ interface Inquiry {
   call_count?: number
   open_count?: number
   last_activity_at?: string | null
+  case_id?: string | null
+  case_confidence?: number | null
+  case_reason?: string | null
+}
+interface CaseRow {
+  id: string
+  label: string | null
+  status: string
 }
 interface Appointment {
   id: string
@@ -78,6 +86,7 @@ interface Customer {
   appointments: Appointment[]
   cost_estimates: Kva[]
   calls: CallRow[]
+  cases?: CaseRow[]
 }
 interface DocRow {
   id: string

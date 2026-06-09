@@ -195,7 +195,7 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     def _inq():
         return (
             client.table("inquiries")
-            .select("id, number, subject, title, type, status, created_at, updated_at, project_id")
+            .select("id, number, subject, title, type, status, created_at, updated_at, project_id, case_id, case_confidence, case_reason")
             .eq("org_id", org_id).eq("customer_id", customer_id)
             .neq("status", "deleted").order("created_at", desc=True)
             .execute().data or []
@@ -258,6 +258,10 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
         inq["open_count"] = open_count.get(iid, 0)
         inq["last_activity_at"] = last_act.get(iid) or inq.get("updated_at") or inq.get("created_at")
 
+    customer["cases"] = (
+        client.table("cases").select("id, label, status, created_at")
+        .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
+    )
     return customer
 
 
