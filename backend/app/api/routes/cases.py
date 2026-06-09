@@ -14,7 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.services.cases.grouper import propose_cases_for_customer
-from app.services.common import validate_fk_in_org
+from app.services.common import gen_case_number, validate_fk_in_org
 
 router = APIRouter(prefix="/api", tags=["cases"])
 
@@ -80,6 +80,7 @@ async def apply_cases(payload: ApplyIn, user: CurrentUser = Depends(require_org)
             case = client.table("cases").insert({
                 "org_id": org_id, "customer_id": payload.customer_id,
                 "label": (g.label or "Vorgang")[:120], "created_by": _uid(user),
+                "number": gen_case_number(client, org_id),
             }).execute().data[0]
             client.table("inquiries").update({
                 "case_id": case["id"],
@@ -118,6 +119,7 @@ async def move_inquiry_case(
             case = client.table("cases").insert({
                 "org_id": org_id, "customer_id": inq[0].get("customer_id"),
                 "label": payload.new_case_label[:120], "created_by": _uid(user),
+                "number": gen_case_number(client, org_id),
             }).execute().data[0]
             target = case["id"]
         elif target:
@@ -133,3 +135,36 @@ async def move_inquiry_case(
     if res is None:
         raise HTTPException(status_code=404, detail="Inquiry not found")
     return res
+
+
+@router.get("/cases/{case_id}")
+async def get_case(case_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+    """The case tab: header + member inquiries + ONE umbrella timeline across them all."""
+    from app.api.routes.calls import build_case_umbrella
+
+    bundle = await run_in_threadpool(build_case_umbrella, user.org_id, case_id)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Fall not found")
+    return bundle
+
+
+class CaseCreateIn(BaseModel):
+    label: str | None = None
+
+
+@router.post("/customers/{customer_id}/cases")
+async def create_case(
+    customer_id: str, payload: CaseCreateIn, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Create a new empty case (Fall) for a customer; inquiries are moved into it via
+    the per-inquiry move action."""
+    def _run():
+        client = get_service_client()
+        validate_fk_in_org(client, table="customers", fk_id=customer_id, org_id=user.org_id, label="Kunde")
+        return client.table("cases").insert({
+            "org_id": user.org_id, "customer_id": customer_id,
+            "label": (payload.label or "Neuer Fall")[:120], "created_by": _uid(user),
+            "number": gen_case_number(client, user.org_id),
+        }).execute().data[0]
+
+    return await run_in_threadpool(_run)

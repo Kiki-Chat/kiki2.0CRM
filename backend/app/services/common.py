@@ -352,6 +352,19 @@ def gen_inquiry_number(client, org_id: str) -> str:
     return f"ANF-{year}-{(res.count or 0) + 1:04d}"
 
 
+def gen_case_number(client, org_id: str) -> str:
+    """Next staff-facing case (Fall) number: ``FALL-YYYY-NNNN`` per org."""
+    year = now_berlin().year
+    res = (
+        client.table("cases")
+        .select("id", count="exact")
+        .eq("org_id", org_id)
+        .gte("created_at", f"{year}-01-01")
+        .execute()
+    )
+    return f"FALL-{year}-{(res.count or 0) + 1:04d}"
+
+
 CUSTOMER_NUMBER_PREFIX = "KI-"
 
 

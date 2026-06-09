@@ -27,6 +27,9 @@ export interface CallListItem {
   inquiry_status: 'open' | 'in_progress' | 'completed' | null
   inquiry_number: string | null
   inquiry_subject: string | null
+  case_id: string | null
+  case_number: string | null
+  case_label: string | null
   emergency_flag: boolean
   assigned_employee_id: string | null
   assigned_employee_initials: string | null

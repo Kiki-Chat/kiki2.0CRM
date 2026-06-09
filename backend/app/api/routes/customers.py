@@ -259,7 +259,7 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
         inq["last_activity_at"] = last_act.get(iid) or inq.get("updated_at") or inq.get("created_at")
 
     customer["cases"] = (
-        client.table("cases").select("id, label, status, created_at")
+        client.table("cases").select("id, number, label, status, created_at")
         .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
     )
     return customer

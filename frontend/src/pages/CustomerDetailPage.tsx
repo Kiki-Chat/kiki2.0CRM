@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   AtSign,
   CalendarClock,
+  ChevronRight,
   Download,
   Euro,
   FileText,
@@ -48,6 +49,7 @@ interface Inquiry {
 }
 interface CaseRow {
   id: string
+  number: string | null
   label: string | null
   status: string
 }
@@ -134,7 +136,6 @@ export function CustomerDetailPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [editOpen, setEditOpen] = useState(false)
-  const [newInquiry, setNewInquiry] = useState(false)
   const [newAppt, setNewAppt] = useState(false)
 
   const { data: customer, isLoading } = useQuery({
@@ -220,7 +221,7 @@ export function CustomerDetailPage() {
 
       {/* TWO COLUMNS */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.3fr_1fr]">
-        <InquiriesPanel customer={customer} onNew={() => setNewInquiry(true)} />
+        <InquiriesPanel customer={customer} />
         <AppointmentsPanel customer={customer} onNew={() => setNewAppt(true)} />
       </div>
 
@@ -246,15 +247,6 @@ export function CustomerDetailPage() {
           refresh()
         }}
         onDeleted={() => navigate('/customers')}
-      />
-      <NewInquiryModal
-        open={newInquiry}
-        customerId={id}
-        onClose={() => setNewInquiry(false)}
-        onSaved={() => {
-          setNewInquiry(false)
-          refresh()
-        }}
       />
       <NewAppointmentModal
         open={newAppt}
@@ -299,7 +291,8 @@ interface Proposal {
   cases: { label: string; members: string[]; confidence: number; reason: string; tier: string }[]
 }
 
-function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => void }) {
+function InquiriesPanel({ customer }: { customer: Customer }) {
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const [q, setQ] = useState('')
   const [proposal, setProposal] = useState<Proposal | null>(null)
@@ -326,6 +319,11 @@ function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => 
     mutationFn: () => apiFetch<Proposal>(`/api/customers/${customer.id}/cases/propose`, { method: 'POST' }),
     onSuccess: (p) => setProposal(p),
   })
+  const createCase = useMutation({
+    mutationFn: (label: string) =>
+      apiFetch(`/api/customers/${customer.id}/cases`, { method: 'POST', body: JSON.stringify({ label }) }),
+    onSuccess: refresh,
+  })
 
   return (
     <Panel
@@ -340,7 +338,15 @@ function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => 
           >
             <Sparkles size={14} /> {propose.isPending ? 'Analysiere…' : 'KI-Gruppierung'}
           </button>
-          <NewBtn label="Neuer Vorgang" onClick={onNew} />
+          <button
+            onClick={() => {
+              const l = window.prompt('Neuer Fall — Thema:')
+              if (l) createCase.mutate(l)
+            }}
+            className="flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+          >
+            <Plus size={14} /> Neuer Fall
+          </button>
         </div>
       }
     >
@@ -367,14 +373,21 @@ function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => 
             const c = caseById.get(cid)!
             return (
               <div key={cid} className="rounded-xl border border-ai-bg bg-ai-bg/40 p-2">
-                <div className="mb-1.5 flex items-center gap-2 px-1 pt-0.5">
+                <button
+                  onClick={() => navigate(`/fall/${cid}`)}
+                  className="mb-1.5 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition hover:bg-ai-bg"
+                  title="Fall öffnen (alle Anfragen)"
+                >
                   <Layers size={14} className="flex-shrink-0 text-ai" />
-                  <span className="flex-1 truncate text-sm font-bold text-text">{c.label || 'Fall'}</span>
-                  <span className="text-xs text-muted">{items.length} Vorgänge</span>
-                </div>
+                  <span className="truncate text-sm font-bold text-text">{c.label || 'Fall'}</span>
+                  {c.number && <span className="font-mono text-[11px] text-ai">{c.number}</span>}
+                  <span className="flex-1" />
+                  <span className="text-xs text-muted">{items.length} Anfragen</span>
+                  <ChevronRight size={14} className="text-faint" />
+                </button>
                 <div className="space-y-1.5">
                   {items.map((i) => (
-                    <InquiryRow key={i.id} i={i} cases={cases} onChanged={refresh} />
+                    <InquiryRow key={i.id} i={i} cases={cases} caseId={cid} onChanged={refresh} />
                   ))}
                 </div>
               </div>
@@ -401,13 +414,13 @@ function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => 
   )
 }
 
-function InquiryRow({ i, cases, onChanged }: { i: Inquiry; cases: CaseRow[]; onChanged: () => void }) {
+function InquiryRow({ i, cases, caseId, onChanged }: { i: Inquiry; cases: CaseRow[]; caseId?: string; onChanged: () => void }) {
   const navigate = useNavigate()
   const st = STATUS_TAG[i.status] ?? { label: i.status, variant: 'neutral' as const }
   const topic = i.subject || i.title || 'Vorgang'
   return (
     <div className="group relative rounded-lg border border-border bg-surface p-3 transition hover:border-green-primary hover:bg-alt">
-      <div onClick={() => navigate(`/vorgang/${i.id}`)} className="cursor-pointer">
+      <div onClick={() => navigate(caseId ? `/fall/${caseId}` : `/vorgang/${i.id}`)} className="cursor-pointer">
         <div className="flex items-center gap-2 pr-7">
           <Tag variant={st.variant}>{st.label}</Tag>
           <span className="flex-1 truncate text-sm font-semibold text-text">{topic}</span>
@@ -740,61 +753,6 @@ function FilesPanel({ customerId, docs, onChange }: { customerId: string; docs: 
 
 const inputCls =
   'w-full rounded-md border border-border bg-alt px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary'
-
-function NewInquiryModal({ open, customerId, onClose, onSaved }: { open: boolean; customerId: string; onClose: () => void; onSaved: () => void }) {
-  const [title, setTitle] = useState('')
-  const [type, setType] = useState('info')
-  const [notes, setNotes] = useState('')
-  const save = useMutation({
-    mutationFn: () =>
-      apiFetch('/api/inquiries', {
-        method: 'POST',
-        body: JSON.stringify({ customer_id: customerId, title, type, notes }),
-      }),
-    onSuccess: onSaved,
-  })
-  return (
-    <Modal
-      open={open}
-      onOpenChange={(o) => !o && onClose()}
-      title="Neuer Vorgang"
-      footer={
-        <button
-          disabled={!title || save.isPending}
-          onClick={() => save.mutate()}
-          className="w-full rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
-        >
-          Anfrage erstellen
-        </button>
-      }
-    >
-      <div className="space-y-4">
-        <div>
-          <div className="mb-1.5 text-xs font-semibold text-body">Titel *</div>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} />
-        </div>
-        <div>
-          <div className="mb-1.5 text-xs font-semibold text-body">Kategorie</div>
-          <div className="flex flex-wrap gap-2">
-            {['appointment', 'offer', 'info', 'recall'].map((c) => (
-              <button
-                key={c}
-                onClick={() => setType(c)}
-                className={cn('rounded-md border px-3 py-1.5 text-sm font-medium capitalize', type === c ? 'border-green-primary bg-green-primary text-white' : 'border-border text-body hover:bg-alt')}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <div className="mb-1.5 text-xs font-semibold text-body">Notiz</div>
-          <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} />
-        </div>
-      </div>
-    </Modal>
-  )
-}
 
 function NewAppointmentModal({ open, customer, onClose, onSaved }: { open: boolean; customer: Customer; onClose: () => void; onSaved: () => void }) {
   const [title, setTitle] = useState('')

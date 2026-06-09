@@ -19,6 +19,7 @@ const CallLogsPage = lazy(() => import('./pages/CallLogsPage').then((m) => ({ de
 const CustomersPage = lazy(() => import('./pages/CustomersPage').then((m) => ({ default: m.CustomersPage })))
 const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage').then((m) => ({ default: m.CustomerDetailPage })))
 const VorgangThreadPage = lazy(() => import('./pages/VorgangThreadPage').then((m) => ({ default: m.VorgangThreadPage })))
+const CaseDetailPage = lazy(() => import('./pages/CaseDetailPage').then((m) => ({ default: m.CaseDetailPage })))
 const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const MyAbsencePage = lazy(() => import('./pages/MyAbsencePage').then((m) => ({ default: m.MyAbsencePage })))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((m) => ({ default: m.ProjectsPage })))
@@ -61,6 +62,7 @@ export default function App() {
               <Route path="customers" element={<CustomersPage />} />
               <Route path="customers/:id" element={<CustomerDetailPage />} />
               <Route path="vorgang/:id" element={<VorgangThreadPage />} />
+              <Route path="fall/:id" element={<CaseDetailPage />} />
               <Route path="calendar" element={<CalendarPage />} />
               {/* Business hours moved into Kiki-Zentrale (UAT); keep the old path as a redirect. */}
               <Route path="calendar/business-hours" element={<Navigate to="/kiki-zentrale/geschaeftszeiten" replace />} />
