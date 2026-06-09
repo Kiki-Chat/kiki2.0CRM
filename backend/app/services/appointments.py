@@ -196,6 +196,44 @@ def _first_employee(client, org_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def _resolve_category(client, org_id: str, name: str | None) -> dict | None:
+    """Case-insensitive exact match of the agent's `kategorie` parameter against
+    appointment_categories.name. A match drives the appointment's duration and
+    (when configured) the default employee."""
+    if not name or not str(name).strip():
+        return None
+    wanted = str(name).strip().lower()
+    rows = (
+        client.table("appointment_categories")
+        .select("id, name, duration_minutes, default_employee_id")
+        .eq("org_id", org_id)
+        .execute()
+        .data
+        or []
+    )
+    for row in rows:
+        if (row.get("name") or "").strip().lower() == wanted:
+            return row
+    return None
+
+
+def _employee_by_id(client, org_id: str, employee_id: str | None) -> dict | None:
+    if not employee_id:
+        return None
+    rows = (
+        client.table("employees")
+        .select("id, display_name, is_active")
+        .eq("org_id", org_id)
+        .eq("id", employee_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if rows and rows[0].get("is_active"):
+        return rows[0]
+    return None
+
+
 def _find_customer_by_phone(client, org_id: str, phone: str | None) -> dict | None:
     if not phone:
         return None
@@ -368,7 +406,21 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
         address=payload.address,
     )
     key = slot_key(dt)
-    emp = _first_employee(client, org_id)
+    # Category drives duration + assignment: a matched Terminkategorie supplies
+    # the default duration and (if set + active) the Standard-Mitarbeiter;
+    # otherwise fall back to 60 min / first active employee as before.
+    category = _resolve_category(client, org_id, payload.category)
+    duration_minutes = 60
+    if category and category.get("duration_minutes"):
+        try:
+            duration_minutes = max(15, int(category["duration_minutes"]))
+        except (TypeError, ValueError):
+            duration_minutes = 60
+    emp = None
+    if category:
+        emp = _employee_by_id(client, org_id, category.get("default_employee_id"))
+    if not emp:
+        emp = _first_employee(client, org_id)
 
     day_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
@@ -404,7 +456,7 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
             "fragen Sie nach freien Terminen an einem anderen Tag.",
         }
     conflicts = _slot_conflicts(
-        _appt_intervals(same_day), dt, 60, rules["buffer_minutes"]
+        _appt_intervals(same_day), dt, duration_minutes, rules["buffer_minutes"]
     )
     if conflicts >= rules["parallel"]:
         return {
@@ -480,9 +532,11 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
                     "assigned_employee_id": emp["id"] if emp else None,
                     "title": payload.inquiry_title or payload.description or "Termin",
                     "scheduled_at": dt.isoformat(),
-                    "duration_minutes": 60,
+                    "duration_minutes": duration_minutes,
                     "location": location,
-                    "category": payload.category,
+                    # Store the canonical category name so the Offene-Aktion card
+                    # can resolve it back to the configured Terminkategorie.
+                    "category": category["name"] if category else payload.category,
                     # Land as 'pending' (a reservation) so it shows in the call's
                     # "Offene Aktionen" card for a human to review/confirm. Confirming
                     # there moves it to the calendar AND fires the confirmation

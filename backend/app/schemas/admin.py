@@ -141,6 +141,7 @@ class AppointmentPatch(BaseModel):
     title: str | None = None
     scheduled_at: str | None = None
     duration_minutes: int | None = None
+    category: str | None = None
     notes: str | None = None
 
     model_config = {"extra": "ignore"}

@@ -577,7 +577,11 @@ def render_appointment_categories_block(categories: list[dict]) -> str:
             "Parameter weglassen."
         )
     lines.append(
-        "Wenn keine Kategorie eindeutig passt, wähle die naheliegendste."
+        "Gib `kategorie` bei JEDEM `hk_bookAppointment`-Aufruf an: Wähle die "
+        "Kategorie, deren Beschreibung am besten zum geschilderten Anliegen passt "
+        "— nutze dafür die Beschreibungen oben und verwende den Kategorienamen "
+        "EXAKT wie aufgeführt. Nur wenn wirklich keine passt, lasse den Parameter "
+        "weg. Die Kategorie bestimmt automatisch Dauer und Zuständigkeit."
     )
     return "\n".join(lines)
 
