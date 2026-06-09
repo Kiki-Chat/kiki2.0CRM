@@ -29,6 +29,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { cn, initials } from '../../lib/utils'
 import { useMe } from '../../lib/useMe'
@@ -150,8 +151,56 @@ function MoreMenu({ onDelete, disabled }: { onDelete: () => void; disabled: bool
   )
 }
 
+// ─── Outbound outcome panel (replaces intake actions on outbound calls) ──────
+// Spec: an OUTBOUND screen must NOT offer create-appointment / KVA / change-customer
+// (those are inbound intake). It shows a minimal outcome instead.
+const OUTCOMES: { key: string; label: string; on: string }[] = [
+  { key: 'confirmed', label: 'Bestätigt', on: 'border-success bg-success-bg text-success' },
+  { key: 'rescheduled', label: 'Verschoben', on: 'border-warning bg-warning-bg text-warning' },
+  { key: 'declined', label: 'Abgelehnt', on: 'border-error bg-error-bg text-error' },
+  { key: 'aborted', label: 'Abgebrochen', on: 'border-warning bg-warning-bg text-warning' },
+  { key: 'noreach', label: 'Nicht erreicht', on: 'border-border bg-alt text-muted' },
+]
+
+function OutcomePanel({ call }: { call: CallDetailData }) {
+  const dur = call.duration_seconds
+  // Cut-off heuristic (spec): a very short outbound confirmation/reschedule call
+  // likely didn't complete → surface "Abgebrochen — nachfassen".
+  const cutoff = dur != null && dur < 20
+  const inferred = cutoff ? 'aborted' : null
+  return (
+    <div>
+      <SectionLabel>Gesprächsergebnis</SectionLabel>
+      <div className="rounded-2xl border border-border bg-surface p-3.5">
+        <p className="mb-2.5 text-[12.5px] text-muted">
+          Ausgehender Anruf — kein Intake. Ergebnis des Bestätigungs- / Verschiebungsanrufs:
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {OUTCOMES.map((o) => (
+            <span
+              key={o.key}
+              className={cn(
+                'rounded-full border px-3 py-1.5 text-xs font-bold',
+                inferred === o.key ? o.on : 'border-border bg-surface text-muted',
+              )}
+            >
+              {o.label}
+            </span>
+          ))}
+        </div>
+        {cutoff && (
+          <div className="mt-3 flex items-center gap-2 rounded-xl border border-warning bg-warning-bg px-3 py-2 text-[12.5px] font-bold text-warning">
+            <Clock size={14} className="flex-shrink-0" /> Kurzes Gespräch ({dur}s) — Bestätigung nicht abgeschlossen, nachfassen.
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Aktionen tab ──────────────────────────────────────────────────────────
 function ActionsTab({
+  call,
   inquiry,
   employees,
   status,
@@ -164,6 +213,7 @@ function ActionsTab({
   onAppointment,
   onKva,
 }: {
+  call: CallDetailData
   inquiry: Inquiry | undefined
   employees: Employee[]
   status: string
@@ -176,6 +226,7 @@ function ActionsTab({
   onAppointment: () => void
   onKva?: () => void
 }) {
+  const isOutbound = call.direction === 'outbound'
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -186,19 +237,25 @@ function ActionsTab({
         <SectionLabel>Zugewiesen an</SectionLabel>
         <AssignField current={inquiry?.assigned_employee_id ?? null} employees={employees} onAssign={onAssign} disabled={busy || !inquiry} />
       </div>
-      {appointmentSlot && (
-        <div>
-          <SectionLabel>Offene Aktion</SectionLabel>
-          {appointmentSlot}
-        </div>
+      {isOutbound ? (
+        <OutcomePanel call={call} />
+      ) : (
+        <>
+          {appointmentSlot && (
+            <div>
+              <SectionLabel>Offene Aktion</SectionLabel>
+              {appointmentSlot}
+            </div>
+          )}
+          <div>
+            <SectionLabel>Aktion erstellen</SectionLabel>
+            <div className="flex gap-2.5">
+              <PrimaryAction icon={CalendarPlus} label="Termin erstellen" tone="green" onClick={onAppointment} />
+              <PrimaryAction icon={Receipt} label="Kostenvoranschlag" tone="money" onClick={onKva} disabled={!onKva} />
+            </div>
+          </div>
+        </>
       )}
-      <div>
-        <SectionLabel>Aktion erstellen</SectionLabel>
-        <div className="flex gap-2.5">
-          <PrimaryAction icon={CalendarPlus} label="Termin erstellen" tone="green" onClick={onAppointment} />
-          <PrimaryAction icon={Receipt} label="Kostenvoranschlag" tone="money" onClick={onKva} disabled={!onKva} />
-        </div>
-      </div>
       <div>
         <SectionLabel>Weitere</SectionLabel>
         <div className="flex gap-2.5">
@@ -450,6 +507,9 @@ export function Workspace({
   onOpenCustomer: () => void
 }) {
   const status = inquiry?.status ?? 'open'
+  const navigate = useNavigate()
+  const vgNumber = inquiry?.number ?? call.inquiry_number ?? null
+  const vgSubject = inquiry?.subject ?? call.inquiry_subject ?? null
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface">
       <div className="px-[18px] pt-4">
@@ -459,10 +519,24 @@ export function Workspace({
             {inquiry?.title ?? call.summary_title ?? 'Anruf'}
           </h2>
         </div>
-        <div className="mb-3.5 flex flex-wrap gap-1.5">
+        <div className="mb-2.5 flex flex-wrap gap-1.5">
           <StatusPill status={status} />
           {inquiry?.type && <Tag variant="green">{inquiry.type}</Tag>}
         </div>
+        {call.inquiry_id && (
+          <button
+            onClick={() => navigate(`/vorgang/${call.inquiry_id}`)}
+            title="Zum Vorgang"
+            className="mb-3.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-alt px-2.5 py-1.5 text-xs font-bold text-muted transition-colors hover:border-green-primary hover:text-green-deep"
+          >
+            <ListChecks size={13} className="flex-shrink-0" />
+            <span className="truncate">
+              Vorgang {vgNumber ?? ''}
+              {vgSubject ? ` · ${vgSubject}` : ''}
+            </span>
+            <ChevronRight size={13} className="flex-shrink-0" />
+          </button>
+        )}
       </div>
 
       <div className="flex gap-1 border-b border-border px-3.5">
@@ -489,6 +563,7 @@ export function Workspace({
       <div className="scroll flex-1 overflow-y-auto p-[18px]">
         {tab === 'actions' && (
           <ActionsTab
+            call={call}
             inquiry={inquiry}
             employees={employees}
             status={status}

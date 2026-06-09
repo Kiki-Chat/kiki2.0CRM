@@ -370,6 +370,16 @@ def _process_one(data: dict | None, fmt: str) -> dict:
         from app.services.inquiries import ensure_call_inquiry
 
         ensure_call_inquiry(client, org_id, upserted[0])
+    elif call_log_id and direction == "outbound":
+        # OUTBOUND: tie the call to the case that TRIGGERED it (via the outbound_calls
+        # ledger) so the Vorgang thread + call-log action buttons resolve. Outbound
+        # never spawns its own inquiry. Best-effort — must never break ingest.
+        try:
+            from app.services.inquiries import link_outbound_call_to_case
+
+            link_outbound_call_to_case(client, org_id, upserted[0])
+        except Exception:  # noqa: BLE001 — never break post-call ingest
+            logger.warning("outbound case-link failed (conv %s)", conversation_id)
 
     # Level-3 auto-confirmation fires POST-call (in a background thread) so the
     # outbound confirmation call never collides with the still-active booking

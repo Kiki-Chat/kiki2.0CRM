@@ -3,7 +3,7 @@ import {
   ArrowLeft,
   AtSign,
   CalendarClock,
-  ChevronDown,
+  ChevronRight,
   Download,
   Euro,
   FileText,
@@ -31,11 +31,15 @@ import type { TimelineEvent, TimelineEventKind } from './calls/shared'
 interface Inquiry {
   id: string
   number: string | null
+  subject?: string | null
   title: string | null
   type: string | null
   status: string
   notes?: string | null
   created_at: string
+  call_count?: number
+  open_count?: number
+  last_activity_at?: string | null
 }
 interface Appointment {
   id: string
@@ -278,18 +282,17 @@ function NewBtn({ label, onClick }: { label: string; onClick: () => void }) {
 }
 
 function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => void }) {
+  const navigate = useNavigate()
   const [q, setQ] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
   const inquiries = customer.inquiries ?? []
   const open = inquiries.filter((i) => i.status !== 'completed').length
   const done = inquiries.filter((i) => i.status === 'completed').length
-  const filtered = inquiries.filter((i) => (i.title ?? '').toLowerCase().includes(q.toLowerCase()))
+  const filtered = inquiries.filter((i) =>
+    `${i.subject ?? ''} ${i.title ?? ''} ${i.number ?? ''}`.toLowerCase().includes(q.toLowerCase()),
+  )
 
   return (
-    <Panel
-      title={`Anfragen (${inquiries.length})`}
-      action={<NewBtn label="Neue Anfrage" onClick={onNew} />}
-    >
+    <Panel title={`Vorgänge (${inquiries.length})`} action={<NewBtn label="Neuer Vorgang" onClick={onNew} />}>
       <>
           <div className="mb-3 flex items-center gap-2">
             <Tag variant="info">{open} offen</Tag>
@@ -299,40 +302,45 @@ function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => 
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
             <input
               type="search"
-              name="customer-inquiry-search"
+              name="customer-vorgang-search"
               autoComplete="off"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Anfragen durchsuchen…"
+              placeholder="Vorgänge durchsuchen…"
               className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
             />
           </div>
           <div className="space-y-2">
             {filtered.map((i) => {
               const st = STATUS_TAG[i.status] ?? { label: i.status, variant: 'neutral' as const }
-              const isOpen = expanded === i.id
+              const topic = i.subject || i.title || 'Vorgang'
               return (
-                <div key={i.id} className="rounded-lg border border-border">
-                  <button
-                    onClick={() => setExpanded(isOpen ? null : i.id)}
-                    className="flex w-full items-center gap-3 p-3 text-left"
-                  >
+                <button
+                  key={i.id}
+                  onClick={() => navigate(`/vorgang/${i.id}`)}
+                  className="block w-full rounded-lg border border-border p-3 text-left transition hover:border-green-primary hover:bg-alt"
+                >
+                  <div className="flex items-center gap-2">
                     <Tag variant={st.variant}>{st.label}</Tag>
-                    <span className="flex-1 truncate text-sm font-medium text-text">{i.title ?? 'Anfrage'}</span>
-                    <span className="text-xs text-faint">{fmtDay(i.created_at)}</span>
-                    <ChevronDown size={15} className={cn('text-muted transition-transform', isOpen && 'rotate-180')} />
-                  </button>
-                  {isOpen && (
-                    <div className="space-y-1.5 border-t border-border px-3 py-3 text-sm text-muted">
-                      {i.number && <div className="font-mono text-xs">{i.number}</div>}
-                      {i.type && <div>Kategorie: <span className="capitalize text-body">{i.type}</span></div>}
-                      <div className="whitespace-pre-wrap text-body">{i.notes ?? 'Keine Notizen.'}</div>
-                    </div>
-                  )}
-                </div>
+                    <span className="flex-1 truncate text-sm font-semibold text-text">{topic}</span>
+                    {(i.open_count ?? 0) > 0 && (
+                      <span className="rounded-full bg-warning-bg px-2 py-0.5 text-xs font-bold text-warning">
+                        {i.open_count} offen
+                      </span>
+                    )}
+                    <ChevronRight size={15} className="text-faint" />
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
+                    <span className="font-mono">{i.number ?? '—'}</span>
+                    <span aria-hidden>·</span>
+                    <span>{i.call_count ?? 0} Anrufe</span>
+                    <span aria-hidden>·</span>
+                    <span>Letzte Aktivität: {fmtDay(i.last_activity_at ?? i.created_at)}</span>
+                  </div>
+                </button>
               )
             })}
-            {!filtered.length && <p className="py-6 text-center text-sm text-muted">Keine Anfragen.</p>}
+            {!filtered.length && <p className="py-6 text-center text-sm text-muted">Keine Vorgänge.</p>}
           </div>
         </>
     </Panel>
@@ -530,7 +538,7 @@ function NewInquiryModal({ open, customerId, onClose, onSaved }: { open: boolean
     <Modal
       open={open}
       onOpenChange={(o) => !o && onClose()}
-      title="Neue Anfrage"
+      title="Neuer Vorgang"
       footer={
         <button
           disabled={!title || save.isPending}

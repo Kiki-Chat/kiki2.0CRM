@@ -71,8 +71,26 @@ def _compose_notes(message: str | None, additional_fields) -> str:
     return "\n".join(p for p in parts if p).strip()
 
 
+def _set_call_inquiry_id(client, org_id: str, call_id: str, inquiry_id: str) -> None:
+    """Stamp calls.inquiry_id (the Vorgang/case a call belongs to) when not already
+    set. Only fills NULLs so a deliberate re-link is never clobbered. Best-effort —
+    a failure here must never break post-call ingest."""
+    try:
+        (
+            client.table("calls")
+            .update({"inquiry_id": inquiry_id})
+            .eq("org_id", org_id)
+            .eq("id", call_id)
+            .is_("inquiry_id", "null")
+            .execute()
+        )
+    except Exception:  # noqa: BLE001 — linking is best-effort
+        pass
+
+
 def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
-    """Get-or-create the single 'request' inquiry linked to a call.
+    """Get-or-create the single 'request' inquiry linked to an INBOUND call, and
+    stamp calls.inquiry_id so the call is tied to its Vorgang (case).
 
     Every call becomes an actionable request in the Call Logs panel.
     Idempotent on call_id.
@@ -87,6 +105,7 @@ def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
         .data
     )
     if existing:
+        _set_call_inquiry_id(client, org_id, call["id"], existing[0]["id"])
         return existing[0]
 
     dc = call.get("data_collection") or {}
@@ -129,7 +148,73 @@ def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
         "notes": notes,
         "emergency_flag": emergency,
     }
-    return client.table("inquiries").insert(row).execute().data[0]
+    inquiry = client.table("inquiries").insert(row).execute().data[0]
+    _set_call_inquiry_id(client, org_id, call["id"], inquiry["id"])
+    return inquiry
+
+
+# ─── Outbound case-linking (Vorgang threading) ───────────────────────────────
+# referenz_typ is the German occasion label stored on the outbound_calls ledger.
+def _resolve_case_from_referenz(client, org_id, referenz_typ, referenz_id):
+    """Resolve the case (inquiry_id) a triggering record belongs to:
+    Termin→appointment.inquiry_id, KVA→cost_estimate.inquiry_id, Vorgang→the inquiry
+    itself, Rechnung→the invoice's KVA. Wartung/Rückruf have no case → None."""
+    if not referenz_id or not referenz_typ:
+        return None
+    t = str(referenz_typ).strip().lower()
+    try:
+        if t == "vorgang":
+            return referenz_id
+        if t == "termin":
+            rows = (client.table("appointments").select("inquiry_id")
+                    .eq("org_id", org_id).eq("id", referenz_id).limit(1).execute().data)
+            return rows[0].get("inquiry_id") if rows else None
+        if t == "kva":
+            rows = (client.table("cost_estimates").select("inquiry_id")
+                    .eq("org_id", org_id).eq("id", referenz_id).limit(1).execute().data)
+            return rows[0].get("inquiry_id") if rows else None
+        if t == "rechnung":
+            inv = (client.table("invoices").select("cost_estimate_id")
+                   .eq("org_id", org_id).eq("id", referenz_id).limit(1).execute().data)
+            ce_id = inv[0].get("cost_estimate_id") if inv else None
+            if not ce_id:
+                return None
+            rows = (client.table("cost_estimates").select("inquiry_id")
+                    .eq("org_id", org_id).eq("id", ce_id).limit(1).execute().data)
+            return rows[0].get("inquiry_id") if rows else None
+    except Exception:  # noqa: BLE001 — best-effort case resolution
+        return None
+    return None
+
+
+def link_outbound_call_to_case(client, org_id: str, call: dict) -> str | None:
+    """Tie an OUTBOUND call to the case that TRIGGERED it, via its outbound_calls
+    ledger row (matched on the ElevenLabs conversation_id). Outbound calls don't
+    spawn their own inquiry, so without this they float free of the Vorgang and the
+    call-log action buttons stay dead. Prefer the ledger's stored inquiry_id, else
+    derive it from (referenz_typ, referenz_id). Best-effort: returns the linked
+    inquiry_id, or None."""
+    conv = call.get("elevenlabs_conversation_id")
+    if not conv:
+        return None
+    rows = (
+        client.table("outbound_calls")
+        .select("inquiry_id, referenz_typ, referenz_id")
+        .eq("org_id", org_id)
+        .eq("conversation_id", conv)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not rows:
+        return None
+    led = rows[0]
+    inquiry_id = led.get("inquiry_id") or _resolve_case_from_referenz(
+        client, org_id, led.get("referenz_typ"), led.get("referenz_id")
+    )
+    if inquiry_id:
+        _set_call_inquiry_id(client, org_id, call["id"], inquiry_id)
+    return inquiry_id
 
 
 def create_inquiry(org_id: str, payload: CreateInquiryRequest) -> dict:

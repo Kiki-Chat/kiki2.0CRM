@@ -25,6 +25,8 @@ export interface CallListItem {
   customers: { full_name: string | null } | null
   inquiry_id: string | null
   inquiry_status: 'open' | 'in_progress' | 'completed' | null
+  inquiry_number: string | null
+  inquiry_subject: string | null
   emergency_flag: boolean
   assigned_employee_id: string | null
   assigned_employee_initials: string | null
@@ -44,6 +46,7 @@ export interface CallDetailData extends CallListItem {
 export interface Inquiry {
   id: string
   number: string | null
+  subject: string | null
   title: string | null
   type: string | null
   status: string

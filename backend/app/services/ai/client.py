@@ -140,3 +140,16 @@ def stream_chat(
         temperature=temperature, extra=kwargs,
     )
     return client.chat.completions.create(stream=True, **params)
+
+
+def embed(texts: list[str], *, model: str = "text-embedding-3-small") -> tuple[list[list[float]], int]:
+    """Embed ``texts`` → (vectors, total_tokens). Raises :class:`AIServiceDisabled`
+    when no client is configured. Used by the case matchmaker for a cheap similarity
+    pre-pass so the LLM only adjudicates the borderline groupings."""
+    client = _get_client()
+    if client is None:
+        raise AIServiceDisabled("OpenAI is not configured (set OPENAI_API_KEY)")
+    resp = client.embeddings.create(model=model, input=texts)
+    vectors = [d.embedding for d in resp.data]
+    total = getattr(getattr(resp, "usage", None), "total_tokens", 0) or 0
+    return vectors, total
