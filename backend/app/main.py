@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes import (
     actions,
@@ -67,6 +68,23 @@ if settings.observability_enabled:
 
     configure_logging()
     app.add_middleware(RequestContextMiddleware)
+
+# Catch unhandled exceptions and return a JSON 500. Registered BEFORE CORSMiddleware
+# so it sits INNER to it: a bare Starlette ServerErrorMiddleware 500 is emitted
+# outside the CORS layer and therefore lacks `Access-Control-Allow-Origin`, so the
+# browser reports a confusing "blocked by CORS policy" (net::ERR_FAILED) instead of a
+# readable 500 — and the frontend can't handle/retry it. By returning the error from
+# here, the response flows back out through CORSMiddleware and gets the CORS header.
+@app.middleware("http")
+async def _json_500_with_cors(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception:  # noqa: BLE001 — last-resort guard; logged with stack below
+        _logging.getLogger(__name__).exception(
+            "Unhandled error on %s %s", request.method, request.url.path
+        )
+        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+
 
 app.add_middleware(
     CORSMiddleware,
