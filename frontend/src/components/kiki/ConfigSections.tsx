@@ -13,7 +13,7 @@ import {
 import { cn } from '../../lib/utils'
 import { Modal } from '../ui/Modal'
 import { Tag } from '../ui/Tag'
-import { Card, Field, GroupLabel, inputCls, labelCls, SaveBar, StatusBadge, Toggle } from './shared'
+import { Card, Field, GroupLabel, inputCls, labelCls, SaveBar, StatusBadge, Toggle, useKikiConfirm } from './shared'
 
 type Props = { data: KzOverview; flash: (m: string) => void }
 
@@ -128,6 +128,7 @@ function FieldDescriptionInput({ field, onSave }: { field: KzRequiredField; onSa
 // ─── Pflichtfelder ───────────────────────────────────────────────────────────
 export function PflichtfelderSection({ flash }: Props) {
   const qc = useQueryClient()
+  const kc = useKikiConfirm()
   const { data } = useQuery({ queryKey: ['kiki-zentrale', 'required-fields'], queryFn: () => apiFetch<{ fields: KzRequiredField[] }>(`${KZ}/required-fields`) })
   const fields = data?.fields ?? []
   const [newKey, setNewKey] = useState('')
@@ -205,7 +206,7 @@ export function PflichtfelderSection({ flash }: Props) {
               </div>
               <button
                 disabled={f.is_locked || del.isPending}
-                onClick={() => del.mutate(f.id)}
+                onClick={() => kc.confirm(() => del.mutate(f.id))}
                 title={f.is_locked ? 'Gesperrtes Feld' : 'Entfernen'}
                 className="mt-2 text-muted hover:text-error disabled:opacity-30"
               >
@@ -218,13 +219,14 @@ export function PflichtfelderSection({ flash }: Props) {
           <Field label="Neues Feld"><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. E-Mail-Adresse" className={inputCls} /></Field>
           <Field label="Beschreibung (optional)"><input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Wofür dient das Feld? (wird dem KI-Agenten erklärt)" className={inputCls} /></Field>
           <div className="flex justify-end">
-            <button onClick={() => newLabel.trim() && create.mutate()} disabled={!newLabel.trim() || create.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+            <button onClick={() => newLabel.trim() && kc.confirm(() => create.mutate())} disabled={!newLabel.trim() || create.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
               {create.isPending && <Loader2 size={14} className="animate-spin" />}
               {create.isPending ? 'Speichert…' : 'Hinzufügen'}
             </button>
           </div>
         </div>
       </Card>
+      {kc.element}
     </div>
   )
 }
@@ -236,6 +238,7 @@ export function PflichtfelderSection({ flash }: Props) {
 // ─── Branche & Kontext ───────────────────────────────────────────────────────
 export function BrancheKontextSection({ data, flash }: Props) {
   const qc = useQueryClient()
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/context', flash)
   const [trade, setTrade] = useState(data.config.trade ?? '')
   const [knowledge, setKnowledge] = useState(data.config.knowledge_text ?? '')
@@ -269,7 +272,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
           <select
             value={trade}
             disabled={patch.isPending}
-            onChange={(e) => { setTrade(e.target.value); patch.mutate({ trade: e.target.value }) }}
+            onChange={(e) => { const v = e.target.value; kc.confirm(() => { setTrade(v); patch.mutate({ trade: v }) }) }}
             className={cn(inputCls, 'max-w-sm disabled:opacity-50')}
           >
             <option value="">— Branche wählen —</option>
@@ -285,7 +288,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
         <textarea value={knowledge} maxLength={15000} onChange={(e) => setKnowledge(e.target.value)} className={cn(inputCls, 'min-h-[160px]')} />
         <div className="mt-2 flex items-center justify-between">
           <span className="text-xs text-muted">{knowledge.length}/15.000 Zeichen</span>
-          <button onClick={() => patch.mutate({ knowledge_text: knowledge })} disabled={patch.isPending} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">
+          <button onClick={() => kc.confirm(() => patch.mutate({ knowledge_text: knowledge }))} disabled={patch.isPending} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">
             {patch.isPending && <Loader2 size={14} className="animate-spin" />}
             {patch.isPending ? 'Speichert…' : 'Text speichern'}
           </button>
@@ -335,6 +338,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
           <Field label="Anzeigename"><input value={urlName} onChange={(e) => setUrlName(e.target.value)} placeholder="z. B. Leistungsübersicht" className={inputCls} /></Field>
         </div>
       </Modal>
+      {kc.element}
     </div>
   )
 }
@@ -342,6 +346,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
 // ─── Terminregeln ────────────────────────────────────────────────────────────
 export function TerminregelnSection({ data, flash }: Props) {
   const c = data.config
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/scheduling-rules', flash)
   const [f, setF] = useState({
     scheduling_enabled: c.scheduling_enabled, buffer_minutes: c.buffer_minutes,
@@ -375,12 +380,13 @@ export function TerminregelnSection({ data, flash }: Props) {
         </div>
         <label className="mt-4 flex items-center gap-2 text-sm text-text"><Toggle on={f.lead_time_only_weekdays} onChange={(v) => set('lead_time_only_weekdays', v)} /> Vorlaufzeit nur an Werktagen zählen</label>
         <p className="mt-1 text-xs text-muted">Wochenenden werden bei der Vorlaufzeit übersprungen — eine Anfrage am Freitag landet so nicht schon am Wochenende.</p>
-        <SaveBar onReset={() => setF({ scheduling_enabled: c.scheduling_enabled, buffer_minutes: c.buffer_minutes, max_appointments_per_day: c.max_appointments_per_day, parallel_slots: c.parallel_slots, lead_time_days: c.lead_time_days, lead_time_only_weekdays: c.lead_time_only_weekdays, lead_time_earliest_clock: c.lead_time_earliest_clock ?? '' })} onSave={() => patch.mutate({ ...f, lead_time_earliest_clock: f.lead_time_earliest_clock || null })} saving={patch.isPending} />
+        <SaveBar onReset={() => setF({ scheduling_enabled: c.scheduling_enabled, buffer_minutes: c.buffer_minutes, max_appointments_per_day: c.max_appointments_per_day, parallel_slots: c.parallel_slots, lead_time_days: c.lead_time_days, lead_time_only_weekdays: c.lead_time_only_weekdays, lead_time_earliest_clock: c.lead_time_earliest_clock ?? '' })} onSave={() => kc.confirm(() => patch.mutate({ ...f, lead_time_earliest_clock: f.lead_time_earliest_clock || null }))} saving={patch.isPending} />
       </Card>
       <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
         <Info size={16} className="mt-0.5 shrink-0 text-info" />
         <span>Geschäftszeiten werden in der Kiki-Zentrale unter <a href="/kiki-zentrale/geschaeftszeiten" className="font-medium text-green-deep hover:underline">Geschäftszeiten</a> verwaltet und hier nicht dupliziert.</span>
       </div>
+      {kc.element}
     </div>
   )
 }
@@ -388,6 +394,7 @@ export function TerminregelnSection({ data, flash }: Props) {
 // ─── Terminkategorien ────────────────────────────────────────────────────────
 export function TerminkategorienSection({ flash }: Props) {
   const qc = useQueryClient()
+  const kc = useKikiConfirm()
   const { data } = useQuery({ queryKey: ['kiki-zentrale', 'categories'], queryFn: () => apiFetch<{ categories: KzCategory[] }>(`${KZ}/appointment-categories`) })
   const cats = data?.categories ?? []
   const { data: employees = [] } = useQuery({ queryKey: ['employees'], queryFn: () => apiFetch<Employee[]>('/api/employees') })
@@ -437,9 +444,9 @@ export function TerminkategorienSection({ flash }: Props) {
       )}
       <Modal open={!!edit} onOpenChange={(v) => !v && !saveCat.isPending && !delCat.isPending && setEdit(null)} title={edit?.id ? 'Kategorie bearbeiten' : 'Neue Kategorie'} footer={
         <div className="flex gap-3">
-          {edit?.id && <button disabled={delCat.isPending || saveCat.isPending} onClick={() => delCat.mutate(edit.id!)} className="inline-flex items-center gap-1.5 rounded-md border border-error px-4 py-2.5 text-sm font-medium text-error disabled:opacity-50">{delCat.isPending && <Loader2 size={14} className="animate-spin" />}{delCat.isPending ? 'Löscht…' : 'Löschen'}</button>}
+          {edit?.id && <button disabled={delCat.isPending || saveCat.isPending} onClick={() => kc.confirm(() => delCat.mutate(edit.id!))} className="inline-flex items-center gap-1.5 rounded-md border border-error px-4 py-2.5 text-sm font-medium text-error disabled:opacity-50">{delCat.isPending && <Loader2 size={14} className="animate-spin" />}{delCat.isPending ? 'Löscht…' : 'Löschen'}</button>}
           <button disabled={saveCat.isPending || delCat.isPending} onClick={() => setEdit(null)} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body disabled:opacity-50">Abbrechen</button>
-          <button disabled={!edit?.name?.trim() || saveCat.isPending || delCat.isPending} onClick={() => saveCat.mutate(edit!)} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saveCat.isPending && <Loader2 size={14} className="animate-spin" />}{saveCat.isPending ? 'Speichert…' : 'Speichern'}</button>
+          <button disabled={!edit?.name?.trim() || saveCat.isPending || delCat.isPending} onClick={() => kc.confirm(() => saveCat.mutate(edit!))} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saveCat.isPending && <Loader2 size={14} className="animate-spin" />}{saveCat.isPending ? 'Speichert…' : 'Speichern'}</button>
         </div>
       }>
         {edit && (
@@ -447,7 +454,7 @@ export function TerminkategorienSection({ flash }: Props) {
             <Field label="Name"><input value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value })} className={inputCls} /></Field>
             <Field label="Beschreibung"><input value={edit.description ?? ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} className={inputCls} /></Field>
             <Field label="Dauer (Minuten)"><input type="number" value={edit.duration_minutes ?? 60} onChange={(e) => setEdit({ ...edit, duration_minutes: Number(e.target.value) })} className={inputCls} /></Field>
-            <Field label="Standard-Mitarbeiter (informativ — beeinflusst die Buchung nicht)">
+            <Field label="Standard-Mitarbeiter (wird bei passender Kategorie automatisch zugewiesen)">
               <select value={edit.default_employee_id ?? ''} onChange={(e) => setEdit({ ...edit, default_employee_id: e.target.value || null })} className={inputCls}>
                 <option value="">— kein Mitarbeiter —</option>
                 {employees.map(employeeToOption).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -456,6 +463,7 @@ export function TerminkategorienSection({ flash }: Props) {
           </div>
         )}
       </Modal>
+      {kc.element}
     </Card>
   )
 }
@@ -463,6 +471,7 @@ export function TerminkategorienSection({ flash }: Props) {
 // ─── Preisauskunft ───────────────────────────────────────────────────────────
 export function PreisauskunftSection({ data, flash }: Props) {
   const qc = useQueryClient()
+  const kc = useKikiConfirm()
   const [on, setOn] = useState(data.config.price_info_enabled)
   const toggle = useMutation({
     mutationFn: (v: boolean) => apiFetch(`${KZ}/price-info`, { method: 'PATCH', body: JSON.stringify({ enabled: v }) }),
@@ -476,14 +485,15 @@ export function PreisauskunftSection({ data, flash }: Props) {
           <div><div className="text-sm font-bold text-text">Preisauskunft am Telefon</div><div className="text-xs text-muted">Kiki nennt Richtpreise. Standardmäßig deaktiviert.</div></div>
           <div className="flex items-center gap-2">
             {toggle.isPending && <Loader2 size={16} className="animate-spin text-muted" />}
-            <Toggle on={on} disabled={toggle.isPending} onChange={(v) => { setOn(v); toggle.mutate(v) }} />
+            <Toggle on={on} disabled={toggle.isPending} onChange={(v) => kc.confirm(() => { setOn(v); toggle.mutate(v) })} />
           </div>
         </div>
       </Card>
       <div className={cn('flex items-start gap-3 rounded-xl border p-4 text-sm', on ? 'border-warning/30 bg-warning-bg/40 text-body' : 'border-border bg-alt text-muted')}>
         <Info size={16} className={cn('mt-0.5 shrink-0', on ? 'text-warning' : 'text-faint')} />
-        <span>{on ? 'Kiki gibt telefonisch Richtpreise heraus. Achten Sie auf korrekt gepflegte Katalogpreise.' : 'Kiki gibt keine Preise heraus und verweist auf einen Kostenvoranschlag.'}</span>
+        <span>{on ? 'Kiki gibt telefonisch Richtpreise heraus. Achten Sie auf korrekt gepflegte Artikelpreise.' : 'Kiki gibt keine Preise heraus und verweist auf einen Kostenvoranschlag.'}</span>
       </div>
+      {kc.element}
     </div>
   )
 }
@@ -541,6 +551,7 @@ export function LeistungsangebotSection({ flash }: Props) {
 // ─── Notdienst ───────────────────────────────────────────────────────────────
 export function NotdienstSection({ data, flash }: Props) {
   const c = data.config
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/emergency', flash)
   const [f, setF] = useState({
     emergency_enabled: c.emergency_enabled, emergency_number: c.emergency_number ?? '',
@@ -671,8 +682,9 @@ export function NotdienstSection({ data, flash }: Props) {
         <textarea value={f.emergency_surcharge_text} onChange={(e) => set('emergency_surcharge_text', e.target.value)} placeholder="z. B. Für Notdiensteinsätze außerhalb der Geschäftszeiten fällt ein Zuschlag an." className={cn(inputCls, 'min-h-[80px]')} />
       </Card>
       <div className="rounded-xl border border-border bg-surface px-6 py-4 text-right">
-        <button onClick={() => patch.mutate({ ...f, emergency_number: f.emergency_number || null, emergency_surcharge_text: f.emergency_surcharge_text || null, emergency_extra_windows: f.emergency_extra_windows.filter((w) => w.from || w.to) })} disabled={patch.isPending} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{patch.isPending ? 'Speichert…' : 'Speichern'}</button>
+        <button onClick={() => kc.confirm(() => patch.mutate({ ...f, emergency_number: f.emergency_number || null, emergency_surcharge_text: f.emergency_surcharge_text || null, emergency_extra_windows: f.emergency_extra_windows.filter((w) => w.from || w.to) }))} disabled={patch.isPending} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{patch.isPending ? 'Speichert…' : 'Speichern'}</button>
       </div>
+      {kc.element}
     </div>
   )
 }
@@ -680,6 +692,7 @@ export function NotdienstSection({ data, flash }: Props) {
 // ─── Telefon ─────────────────────────────────────────────────────────────────
 export function TelefonSection({ data, flash }: Props) {
   const c = data.config
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/phone', flash)
   const [inc, setInc] = useState(c.incoming_forwarding_number ?? '')
   const [biz, setBiz] = useState(data.existing_business_number ?? '')
@@ -724,12 +737,13 @@ export function TelefonSection({ data, flash }: Props) {
           setInc(c.incoming_forwarding_number ?? '')
           setBiz(data.existing_business_number ?? '')
         }}
-        onSave={() => patch.mutate({
+        onSave={() => kc.confirm(() => patch.mutate({
           incoming_forwarding_number: inc || null,
           existing_business_number: biz || null,
-        })}
+        }))}
         saving={patch.isPending}
       />
+      {kc.element}
     </Card>
   )
 }
@@ -737,6 +751,7 @@ export function TelefonSection({ data, flash }: Props) {
 // ─── Ausgehende Anrufe ───────────────────────────────────────────────────────
 export function AusgehendeSection({ data, flash }: Props) {
   const c = data.config
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/outbound', flash)
   const initialF = {
     outbound_enabled: c.outbound_enabled, outbound_occasions: { ...(c.outbound_occasions || {}) } as Record<string, boolean>,
@@ -784,7 +799,7 @@ export function AusgehendeSection({ data, flash }: Props) {
             <p className="mt-2 text-[11px] text-muted">Ein Klick auf die jeweilige Aktion in den Anrufen löst nur dann einen Ausgangsanruf (+ E-Mail) aus, wenn sie hier aktiv ist.</p>
           </div>
         )}
-        <SaveBar onReset={() => setF(initialF)} onSave={() => patch.mutate(f)} saving={patch.isPending} />
+        <SaveBar onReset={() => setF(initialF)} onSave={() => kc.confirm(() => patch.mutate(f))} saving={patch.isPending} />
       </Card>
       <Card>
         <GroupLabel>Wiederholung & Rückruf</GroupLabel>
@@ -819,8 +834,9 @@ export function AusgehendeSection({ data, flash }: Props) {
             })}
           </div>
         </div>
-        <SaveBar onReset={() => setF(initialF)} onSave={() => patch.mutate(f)} saving={patch.isPending} />
+        <SaveBar onReset={() => setF(initialF)} onSave={() => kc.confirm(() => patch.mutate(f))} saving={patch.isPending} />
       </Card>
+      {kc.element}
     </div>
   )
 }

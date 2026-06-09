@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { cn } from '../../lib/utils'
 import { Modal } from '../ui/Modal'
@@ -113,6 +113,26 @@ export function ConfirmDialog({
       <div className="text-sm text-body">{message}</div>
     </Modal>
   )
+}
+
+// Every Kiki-Zentrale save funnels through confirm() so agent-affecting changes
+// are applied consciously: wrap the actual mutation in `confirm(() => …)` and
+// render `element` once in the section. Sections may pass a specific message
+// (Verhalten keeps its persona wording); the default covers all other menus.
+export function useKikiConfirm(message?: ReactNode) {
+  const [pending, setPending] = useState<(() => void) | null>(null)
+  const confirm = (action: () => void) => setPending(() => action)
+  const element = (
+    <ConfirmDialog
+      open={pending !== null}
+      onOpenChange={(v) => { if (!v) setPending(null) }}
+      title="Kiki-Änderungen bestätigen"
+      message={message ?? 'Diese Änderung wirkt sich auf das Verhalten von Kiki bei eingehenden Anrufen aus. Fortfahren?'}
+      confirmLabel="Speichern & anwenden"
+      onConfirm={() => { const run = pending; setPending(null); run?.() }}
+    />
+  )
+  return { confirm, element }
 }
 
 const RESOURCE_STATUS: Record<string, { label: string; variant: 'neutral' | 'info' | 'success' | 'error' }> = {

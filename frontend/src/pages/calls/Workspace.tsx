@@ -60,7 +60,7 @@ const STATUS_OPTS: {
   chipOff: string
 }[] = [
   { value: 'open', label: 'Offen', Icon: CircleDot, border: 'border-info', bg: 'bg-info-bg', text: 'text-info', chipOn: 'bg-info text-white', chipOff: 'bg-info-bg text-info' },
-  { value: 'in_progress', label: 'In Arbeit', Icon: Clock, border: 'border-warning', bg: 'bg-warning-bg', text: 'text-warning', chipOn: 'bg-warning text-white', chipOff: 'bg-warning-bg text-warning' },
+  { value: 'in_progress', label: 'In Bearbeitung', Icon: Clock, border: 'border-warning', bg: 'bg-warning-bg', text: 'text-warning', chipOn: 'bg-warning text-white', chipOff: 'bg-warning-bg text-warning' },
   { value: 'completed', label: 'Erledigt', Icon: CheckCircle2, border: 'border-success', bg: 'bg-success-bg', text: 'text-success', chipOn: 'bg-success text-white', chipOff: 'bg-success-bg text-success' },
 ]
 

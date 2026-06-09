@@ -318,9 +318,9 @@ export function InvoiceFormPage() {
               <button onClick={() => setPositions((p) => [...p, newPos({ kind: 'text' })])} className="text-muted hover:underline">T Textposition</button>
             </div>
           }>
-            <div className="mb-3"><div className={labelCls}>Schnellauswahl aus Katalog</div>
+            <div className="mb-3"><div className={labelCls}>Schnellauswahl aus Artikeln</div>
               <select value="" onChange={(e) => { if (e.target.value) addCatalog(e.target.value); e.currentTarget.value = '' }} className={inputCls}>
-                <option value="">Aus Katalog wählen…</option>
+                <option value="">Artikel wählen…</option>
                 {catalog.map((c) => <option key={c.id} value={c.id}>{c.name} — {money(c.unit_price)}</option>)}
               </select>
             </div>

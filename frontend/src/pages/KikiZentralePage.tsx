@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity, BadgeEuro, BookOpen, Bot, CalendarClock, Clock,
-  History, ListChecks, Lock, Phone, PhoneOutgoing, RotateCcw, Siren, Sparkles, Tags, Wrench,
+  History, ListChecks, Lock, Phone, PhoneOutgoing, RotateCcw, Siren, SlidersHorizontal, Sparkles, Tags, Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import { AusgehendeSection, BrancheKontextSection, LeistungsangebotSection, NotdienstSection, PflichtfelderSection, PreisauskunftSection, TelefonSection, TerminkategorienSection, TerminregelnSection } from '../components/kiki/ConfigSections'
+import { AutonomieSection } from '../components/kiki/AutonomieSection'
 import { ConfirmDialog } from '../components/kiki/shared'
 import { GeschaeftszeitenSection } from '../components/kiki/GeschaeftszeitenSection'
 import { VerhaltenSection } from '../components/kiki/VerhaltenSection'
@@ -23,6 +24,7 @@ interface NavItem { slug: string; label: string; icon: LucideIcon }
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: 'Konfiguration', items: [
     { slug: 'verhalten', label: 'Verhalten', icon: Sparkles },
+    { slug: 'autonomie', label: 'Autonomie', icon: SlidersHorizontal },
     { slug: 'pflichtfelder', label: 'Pflichtfelder', icon: ListChecks },
     { slug: 'branche-kontext', label: 'Branche & Kontext', icon: BookOpen },
   ] },
@@ -182,6 +184,7 @@ export function KikiZentralePage() {
 function SectionContent({ section, data, flash }: { section: string; data: KzOverview; flash: (m: string) => void }) {
   switch (section) {
     case 'verhalten': return <VerhaltenSection data={data} flash={flash} />
+    case 'autonomie': return <AutonomieSection data={data} flash={flash} />
     case 'pflichtfelder': return <PflichtfelderSection data={data} flash={flash} />
     case 'branche-kontext': return <BrancheKontextSection data={data} flash={flash} />
     case 'geschaeftszeiten': return <GeschaeftszeitenSection />

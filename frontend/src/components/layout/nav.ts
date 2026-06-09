@@ -39,7 +39,7 @@ export function isGroup(e: NavEntry): e is NavGroupDef {
 export const NAV: NavEntry[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/calls', icon: Phone, label: 'Anrufe', badgeKey: 'calls' },
-  { to: '/customers', icon: Users, label: 'Kunden' },
+  { to: '/customers', icon: Users, label: 'Kontakte' },
   { to: '/calendar', icon: Calendar, label: 'Kalender' },
   { to: '/meine-abwesenheit', icon: CalendarClock, label: 'Meine Abwesenheit', employeeOnly: true },
   {
@@ -56,7 +56,7 @@ export const NAV: NavEntry[] = [
     children: [
       { to: '/cost-estimates', label: 'Kostenvoranschläge' },
       { to: '/invoices', label: 'Rechnungen' },
-      { to: '/catalog', label: 'Katalog' },
+      { to: '/catalog', label: 'Artikel' },
     ],
   },
   { to: '/employees', icon: HardHat, label: 'Mitarbeiter', adminOnly: true },

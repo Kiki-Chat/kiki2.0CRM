@@ -212,7 +212,7 @@ export function CustomersPage() {
   const removeSelected = () => {
     const ids = [...selected]
     if (!ids.length) return
-    if (window.confirm(`${ids.length} ${ids.length > 1 ? 'Kunden' : 'Kunde'} wirklich entfernen?`)) del.mutate(ids)
+    if (window.confirm(`${ids.length} ${ids.length > 1 ? 'Kontakte' : 'Kontakt'} wirklich entfernen?`)) del.mutate(ids)
   }
 
   // Export the CURRENT view (search + active type filter) as a CSV download.
@@ -246,11 +246,11 @@ export function CustomersPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Users size={26} className="text-green-deep" />
-          <h1 className="text-2xl font-bold text-text">Kunden</h1>
+          <h1 className="text-2xl font-bold text-text">Kontakte</h1>
         </div>
         <div className="flex items-center gap-2">
           <span className="mr-2 text-sm text-muted">
-            {data?.total ?? 0} von {counts.all ?? 0} Kunden
+            {data?.total ?? 0} von {counts.all ?? 0} Kontakten
           </span>
           <div className="flex items-center rounded-md border border-border bg-surface p-0.5">
             <button
@@ -289,7 +289,7 @@ export function CustomersPage() {
             onClick={() => setNewOpen(true)}
             className="flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
           >
-            <Plus size={16} /> Neuer Kunde
+            <Plus size={16} /> Neuer Kontakt
           </button>
         </div>
       </div>
