@@ -471,10 +471,24 @@ export function TerminkategorienSection({ flash }: Props) {
 }
 
 // ─── Preisauskunft ───────────────────────────────────────────────────────────
+interface CatalogItemLite {
+  id: string
+  unit_price: number | null
+  is_active: boolean
+}
+
 export function PreisauskunftSection({ data, flash }: Props) {
   const qc = useQueryClient()
   const kc = useKikiConfirm()
   const [on, setOn] = useState(data.config.price_info_enabled)
+  // Guard: without priced Artikel the agent has nothing real to quote — the
+  // backend rejects enabling too (422), this just explains it upfront.
+  const { data: catalog } = useQuery({
+    queryKey: ['catalog', 'price-guard'],
+    queryFn: () => apiFetch<CatalogItemLite[]>('/api/catalog'),
+  })
+  const pricedCount = (catalog ?? []).filter((c) => c.is_active && (c.unit_price ?? 0) > 0).length
+  const blockEnable = !on && catalog !== undefined && pricedCount === 0
   const toggle = useMutation({
     mutationFn: (v: boolean) => apiFetch(`${KZ}/price-info`, { method: 'PATCH', body: JSON.stringify({ enabled: v }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale'] }); flash('Gespeichert.' + AGENT_SYNC_SUFFIX) },
@@ -484,16 +498,29 @@ export function PreisauskunftSection({ data, flash }: Props) {
     <div className="space-y-4">
       <Card>
         <div className="flex items-center justify-between">
-          <div><div className="text-sm font-bold text-text">Preisauskunft am Telefon</div><div className="text-xs text-muted">Kiki nennt Richtpreise. Standardmäßig deaktiviert.</div></div>
+          <div><div className="text-sm font-bold text-text">Preisauskunft am Telefon</div><div className="text-xs text-muted">Kiki nennt Richtpreise aus Ihren Artikeln. Standardmäßig deaktiviert.</div></div>
           <div className="flex items-center gap-2">
             {toggle.isPending && <Loader2 size={16} className="animate-spin text-muted" />}
-            <Toggle on={on} disabled={toggle.isPending} onChange={(v) => kc.confirm(() => { setOn(v); toggle.mutate(v) })} />
+            <Toggle on={on} disabled={toggle.isPending || blockEnable} onChange={(v) => kc.confirm(() => { setOn(v); toggle.mutate(v) })} />
           </div>
         </div>
       </Card>
+      {blockEnable && (
+        <div className="flex items-start gap-3 rounded-xl border border-error/30 bg-error-bg/40 p-4 text-sm text-body">
+          <Info size={16} className="mt-0.5 shrink-0 text-error" />
+          <span>
+            Preisauskunft kann nicht aktiviert werden: Es sind keine Artikel mit Preisen hinterlegt.
+            Bitte pflegen Sie zuerst Preise im Menü <a href="/catalog" className="font-medium text-green-deep hover:underline">Artikel</a>.
+          </span>
+        </div>
+      )}
       <div className={cn('flex items-start gap-3 rounded-xl border p-4 text-sm', on ? 'border-warning/30 bg-warning-bg/40 text-body' : 'border-border bg-alt text-muted')}>
         <Info size={16} className={cn('mt-0.5 shrink-0', on ? 'text-warning' : 'text-faint')} />
-        <span>{on ? 'Kiki gibt telefonisch Richtpreise heraus. Achten Sie auf korrekt gepflegte Artikelpreise.' : 'Kiki gibt keine Preise heraus und verweist auf einen Kostenvoranschlag.'}</span>
+        <span>
+          {on
+            ? `Kiki gibt telefonisch Richtpreise heraus — Quelle ist die automatisch erzeugte Preisliste aus Ihren Artikeln (${pricedCount} Position${pricedCount === 1 ? '' : 'en'} mit Preis). Preise, die dort nicht stehen, nennt Kiki nicht.`
+            : 'Kiki gibt keine Preise heraus und verweist auf einen Kostenvoranschlag.'}
+        </span>
       </div>
       {kc.element}
     </div>

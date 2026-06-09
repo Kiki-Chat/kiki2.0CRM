@@ -947,12 +947,36 @@ async def update_price_info(
     payload: TogglePayload, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
 ) -> dict:
     _require_admin(user)
+
+    if payload.enabled:
+        # Guard: without priced Artikel the agent has nothing real to quote —
+        # enabling would invite hallucinated prices.
+        def _priced_count() -> int:
+            rows = (
+                get_service_client().table("catalog_items").select("id")
+                .eq("org_id", user.org_id).eq("is_active", True).gt("unit_price", 0)
+                .limit(1).execute().data or []
+            )
+            return len(rows)
+
+        if await run_in_threadpool(_priced_count) == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Preisauskunft kann nicht aktiviert werden: Es sind keine "
+                "Artikel mit Preisen hinterlegt. Bitte pflegen Sie zuerst Preise "
+                "im Menü „Artikel“.",
+            )
+
     result = await run_in_threadpool(
         _upsert_config, user.org_id, {"price_info_enabled": payload.enabled}
     )
     # This PATCH previously never re-pushed the prompt — the toggle changed the
     # DB but the live agent kept its old price behaviour. Repush is the fix.
     _schedule_repush(background, user, "kz_price_info")
+    # Keep the Preisliste KB document in step with the toggle (create/remove).
+    from app.services.price_knowledge import sync_price_list_kb
+
+    background.add_task(sync_price_list_kb, user.org_id)
     return result
 
 

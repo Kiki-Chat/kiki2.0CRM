@@ -403,8 +403,12 @@ def render_price_info_block(cfg: dict) -> str:
             "  „Gerne sage ich Ihnen, was die gewünschte Leistung ungefähr kostet. Ich\n"
             "  nenne Ihnen jeweils einen Richtpreis — der kann je nach Situation vor Ort\n"
             "  etwas abweichen.“\n"
-            "  Wenn kein belastbarer Richtpreis im Wissen vorliegt: anbieten, dass das\n"
-            "  Team einen verbindlichen Kostenvoranschlag erstellt — keine Preise raten."
+            "  Nenne AUSSCHLIESSLICH Preise aus dem Wissensbasis-Dokument „Preisliste\n"
+            "  (Richtpreise)“ — exakt den dort hinterlegten Betrag, inkl. Einheit. ERFINDE\n"
+            "  NIEMALS einen Preis und runde nicht frei. Steht die angefragte Leistung\n"
+            "  NICHT in der Preisliste: sage ehrlich, dass du dafür keinen Richtpreis\n"
+            "  nennen kannst, und biete an, dass das Team einen unverbindlichen\n"
+            "  Kostenvoranschlag erstellt — keine Preise raten."
         )
     return (
         "  Nenne am Telefon KEINE Preise oder Richtpreise — auch keine ungefähren.\n"

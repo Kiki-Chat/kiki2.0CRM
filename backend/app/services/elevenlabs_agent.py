@@ -522,6 +522,20 @@ def _kb_create_from_url(url: str, name: str) -> dict:
     return r.json()
 
 
+def kb_create_from_text(text: str, name: str) -> dict:
+    """Create a knowledge-base document from raw text (used for the auto-generated
+    Preisliste; same JSON shape as the url/file creators)."""
+    with httpx.Client(base_url=EL_BASE, timeout=_TIMEOUT) as c:
+        r = c.post(
+            "/v1/convai/knowledge-base/text",
+            headers=_headers(),
+            json={"text": text, "name": name},
+        )
+    if r.status_code >= 300:
+        raise ElevenLabsWriteError(f"KB text create failed {r.status_code}: {r.text[:300]}")
+    return r.json()
+
+
 def _kb_create_from_file(filename: str, content: bytes, name: str) -> dict:
     with httpx.Client(base_url=EL_BASE, timeout=_TIMEOUT) as c:
         r = c.post(
