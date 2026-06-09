@@ -34,7 +34,7 @@ _CONFIG_COLS = (
     "welcome_message, trade, knowledge_text, problem_description, "
     "prompt_manual_override, forwarding_number, "
     "incoming_forwarding_number, scheduling_enabled, buffer_minutes, "
-    "max_appointments_per_day, parallel_slots, lead_time_days, lead_time_only_weekdays, "
+    "max_appointments_per_day, parallel_slots, lead_time_hours, lead_time_days, lead_time_only_weekdays, "
     "lead_time_earliest_clock, price_info_enabled, kva_automation_enabled, "
     "emergency_enabled, emergency_number, emergency_only_outside_business_hours, "
     "emergency_keywords, emergency_extra_windows, emergency_surcharge_notice_enabled, "
@@ -199,11 +199,12 @@ class ServiceUpdate(BaseModel):
 
 
 class SchedulingRulesUpdate(BaseModel):
-    scheduling_enabled: bool | None = None
+    scheduling_enabled: bool | None = None  # legacy — UI gate is autonomy "Termine" now
     buffer_minutes: int | None = None
     max_appointments_per_day: int | None = None
     parallel_slots: int | None = None
-    lead_time_days: int | None = None
+    lead_time_hours: int | None = None
+    lead_time_days: int | None = None  # legacy fallback (lead_time_hours wins)
     lead_time_only_weekdays: bool | None = None
     lead_time_earliest_clock: str | None = None
     model_config = {"extra": "ignore"}

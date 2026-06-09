@@ -142,7 +142,10 @@ def _wire_book(monkeypatch, level: int) -> FakeClient:
                         lambda *a, **k: {"id": "cust1", "display_name": "Test Kunde"})
     monkeypatch.setattr(appt, "_first_employee", lambda c, o: {"id": "emp1", "display_name": "Max"})
     monkeypatch.setattr(appt, "gen_inquiry_number", lambda c, o: "ANF-TEST-1")
-    monkeypatch.setattr(appt, "_scheduling", lambda c, o: {"parallel_slots": 1})
+    monkeypatch.setattr(appt, "_scheduling_rules", lambda c, o: {
+        "business_hours": None, "lead_hours": 24, "lead_only_weekdays": False,
+        "earliest_clock": None, "buffer_minutes": 0, "max_per_day": 0, "parallel": 1,
+    })
     return client
 
 

@@ -22,6 +22,7 @@ export interface KzConfig {
   buffer_minutes: number
   max_appointments_per_day: number
   parallel_slots: number
+  lead_time_hours: number | null
   lead_time_days: number
   lead_time_only_weekdays: boolean
   lead_time_earliest_clock: string | null

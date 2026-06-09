@@ -54,16 +54,102 @@ def _parse_iso_date(s: str | None):
     return dt.astimezone(BERLIN).date() if dt else None
 
 
-def _scheduling(client, org_id: str) -> dict:
+def _scheduling_rules(client, org_id: str) -> dict:
+    """The Terminregeln the Kiki-Zentrale UI actually edits (FLAT agent_configs
+    columns) merged with the legacy `scheduling` jsonb (business_hours + the old
+    lead_days). The flat columns win — previously the slot logic only read the
+    jsonb, so buffer/max-per-day/lead-clock saves had no effect (Terminregeln
+    'not working')."""
     rows = (
         client.table("agent_configs")
-        .select("scheduling")
+        .select(
+            "scheduling, buffer_minutes, max_appointments_per_day, parallel_slots, "
+            "lead_time_hours, lead_time_days, lead_time_only_weekdays, "
+            "lead_time_earliest_clock"
+        )
         .eq("org_id", org_id)
         .limit(1)
         .execute()
         .data
     )
-    return (rows[0].get("scheduling") if rows and rows[0].get("scheduling") else {}) or {}
+    row = rows[0] if rows else {}
+    sched = row.get("scheduling") or {}
+
+    def _int(v, default):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+
+    lead_hours = row.get("lead_time_hours")
+    if lead_hours is None:
+        # Fallback chain: flat days column → legacy jsonb lead_days → 1 day.
+        lead_days = row.get("lead_time_days")
+        if lead_days is None:
+            lead_days = sched.get("lead_days", 1)
+        lead_hours = _int(lead_days, 1) * 24
+    return {
+        "business_hours": sched.get("business_hours"),
+        "lead_hours": max(0, _int(lead_hours, 24)),
+        "lead_only_weekdays": bool(row.get("lead_time_only_weekdays")),
+        "earliest_clock": row.get("lead_time_earliest_clock"),
+        "buffer_minutes": max(0, _int(row.get("buffer_minutes"), 0)),
+        "max_per_day": max(0, _int(row.get("max_appointments_per_day"), 0)),
+        "parallel": max(1, _int(row.get("parallel_slots") or sched.get("parallel_slots"), 1)),
+    }
+
+
+def _add_lead_hours(now: datetime, hours: int, weekdays_only: bool) -> datetime:
+    """now + lead time. With weekdays_only, only hours on Mon–Fri count toward
+    the lead time (a Friday-afternoon call with 24h lead lands on Monday)."""
+    hours = min(max(0, hours), 24 * 90)  # hard cap: 90 days of lead time
+    if not weekdays_only:
+        return now + timedelta(hours=hours)
+    cur = now
+    remaining = hours
+    while remaining > 0:
+        cur += timedelta(hours=1)
+        if cur.weekday() < 5:
+            remaining -= 1
+    return cur
+
+
+def _earliest_clock_hour(value) -> int | None:
+    """'10:00'/'10:00:00' → 10; None/garbage → None."""
+    if not value:
+        return None
+    try:
+        return int(str(value).split(":", 1)[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def _appt_intervals(existing: list[dict]) -> list[tuple[datetime, datetime]]:
+    out = []
+    for a in existing:
+        start = _parse_iso(a.get("scheduled_at"))
+        if not start:
+            continue
+        dur = a.get("duration_minutes") or 60
+        try:
+            dur = int(dur)
+        except (TypeError, ValueError):
+            dur = 60
+        out.append((start, start + timedelta(minutes=dur)))
+    return out
+
+
+def _slot_conflicts(
+    intervals: list[tuple[datetime, datetime]],
+    start: datetime,
+    duration_minutes: int,
+    buffer_minutes: int,
+) -> int:
+    """How many existing appointments overlap [start, start+dur) once each
+    existing appointment is padded by the configured buffer on both sides."""
+    end = start + timedelta(minutes=duration_minutes)
+    pad = timedelta(minutes=buffer_minutes)
+    return sum(1 for (s, e) in intervals if start < e + pad and end > s - pad)
 
 
 def _get_kiki_level(client, org_id: str) -> int:
@@ -128,26 +214,33 @@ def _find_customer_by_phone(client, org_id: str, phone: str | None) -> dict | No
 # ─── getAvailableAppointments ────────────────────────────────────────────────
 def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -> dict:
     client = get_service_client()
-    sched = _scheduling(client, org_id)
-    lead_days = int(sched.get("lead_days", 1) or 1)
-    parallel = int(sched.get("parallel_slots", 1) or 1)
+    rules = _scheduling_rules(client, org_id)
+    parallel = rules["parallel"]
+    buffer_min = rules["buffer_minutes"]
+    max_per_day = rules["max_per_day"]
     days = min(int(payload.days or 7), 14)
     dur = int(payload.duration_minutes or 60)
     step = max(1, round(dur / 60))
 
     now = now_berlin()
-    earliest = (now + timedelta(days=lead_days)).date()
+    # Lead time in HOURS (Kiki-Zentrale Terminregeln): the first bookable moment
+    # is now + lead_hours (optionally counting only weekday hours). On that
+    # earliest day, slots additionally start no earlier than the configured
+    # "Frühester Termin (Uhrzeit)" — later days follow normal business hours.
+    earliest_dt = _add_lead_hours(now, rules["lead_hours"], rules["lead_only_weekdays"])
+    earliest_date = earliest_dt.date()
+    earliest_clock = _earliest_clock_hour(rules["earliest_clock"])
     # Honor the caller's requested date: anchor the search window there (never
     # before the lead time) so a "next Tuesday" request returns Tuesday's slots
     # instead of always the generic earliest ones.
     pref_date = _parse_iso_date(payload.preferred_date)
     if pref_date:
-        start_date = max(pref_date, earliest)
+        start_date = max(pref_date, earliest_date)
         days = min(days, 5)
         window_end = datetime.combine(start_date, datetime.min.time(), tzinfo=BERLIN) + timedelta(days=days + 1)
     else:
-        start_date = earliest
-        window_end = now + timedelta(days=lead_days + days + 1)
+        start_date = earliest_date
+        window_end = datetime.combine(start_date, datetime.min.time(), tzinfo=BERLIN) + timedelta(days=days + 1)
     # A preferred time-of-day biases which slots surface first (and widens
     # collection so the requested hour isn't truncated away by the early break).
     pref_hour = None
@@ -159,7 +252,7 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
 
     existing = (
         client.table("appointments")
-        .select("scheduled_at, status")
+        .select("scheduled_at, duration_minutes, status")
         .eq("org_id", org_id)
         .gte("scheduled_at", now.isoformat())
         .lte("scheduled_at", window_end.isoformat())
@@ -168,13 +261,13 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
         .data
         or []
     )
-    busy: Counter = Counter()
-    for a in existing:
-        dt = _parse_iso(a.get("scheduled_at"))
-        if dt:
-            busy[slot_key(dt)] += 1
+    intervals = _appt_intervals(existing)
+    # Max. Termine pro Tag: count existing per Berlin calendar date.
+    per_day: Counter = Counter()
+    for (s, _e) in intervals:
+        per_day[s.astimezone(BERLIN).date()] += 1
 
-    business_hours = normalize_business_hours(sched.get("business_hours"))
+    business_hours = normalize_business_hours(rules["business_hours"])
     emp = _first_employee(client, org_id)
     slots: list[dict] = []
     for offset in range(days):
@@ -182,6 +275,8 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
         bh = business_hours[WEEKDAY_KEYS[day.weekday()]]
         if not bh.get("open"):  # closed day (weekend / holiday config)
             continue
+        if max_per_day and per_day.get(day, 0) >= max_per_day:
+            continue  # day already at capacity
         open_hour = _hour(bh["start"], 8)
         close_hour = _hour(bh["end"], 17)
         brk_start = _hour(bh["break_start"], -1) if bh.get("break_start") else -1
@@ -190,8 +285,12 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
             if brk_start <= hour < brk_end:  # lunch break
                 continue
             dt = datetime(day.year, day.month, day.day, hour, 0, tzinfo=BERLIN)
-            if dt <= now or busy.get(slot_key(dt), 0) >= parallel:
+            if dt <= now or dt < earliest_dt:
                 continue
+            if day == earliest_date and earliest_clock is not None and hour < earliest_clock:
+                continue  # "Frühester Termin (Uhrzeit)" on the first bookable day
+            if _slot_conflicts(intervals, dt, dur, buffer_min) >= parallel:
+                continue  # at capacity incl. Pufferzeit
             slots.append(
                 {
                     "datetime": dt.isoformat(),
@@ -275,7 +374,7 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
     day_end = day_start + timedelta(days=1)
     same_day = (
         client.table("appointments")
-        .select("id, customer_id, scheduled_at, status")
+        .select("id, customer_id, scheduled_at, duration_minutes, status")
         .eq("org_id", org_id)
         .gte("scheduled_at", day_start.isoformat())
         .lt("scheduled_at", day_end.isoformat())
@@ -293,8 +392,21 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
                 a["id"], customer["id"], None, dt, emp["display_name"] if emp else "Team"
             )
 
-    parallel = int(_scheduling(client, org_id).get("parallel_slots", 1) or 1)
-    if len(at_slot) >= parallel:
+    # Re-validate against the live Terminregeln (same rules as get_available_slots
+    # — a stale slot offer must not slip through): parallel capacity incl. buffer,
+    # plus the max-per-day cap.
+    rules = _scheduling_rules(client, org_id)
+    if rules["max_per_day"] and len(same_day) >= rules["max_per_day"]:
+        return {
+            "success": False,
+            "error": "DAY_FULL",
+            "message": "An diesem Tag sind keine weiteren Termine möglich. Bitte "
+            "fragen Sie nach freien Terminen an einem anderen Tag.",
+        }
+    conflicts = _slot_conflicts(
+        _appt_intervals(same_day), dt, 60, rules["buffer_minutes"]
+    )
+    if conflicts >= rules["parallel"]:
         return {
             "success": False,
             "error": "SLOT_TAKEN",

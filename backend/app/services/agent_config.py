@@ -375,7 +375,7 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
             "kiki_level, appointments_enabled, appointments_level, kva_enabled, kva_level, "
             "problem_description, prompt_manual_override, trade, scheduling, "
             "scheduling_enabled, buffer_minutes, max_appointments_per_day, "
-            "parallel_slots, lead_time_days, lead_time_only_weekdays, "
+            "parallel_slots, lead_time_hours, lead_time_days, lead_time_only_weekdays, "
             "lead_time_earliest_clock, emergency_enabled, emergency_number, "
             "emergency_only_outside_business_hours, emergency_keywords, "
             "emergency_extra_windows, emergency_surcharge_notice_enabled, "
@@ -583,10 +583,11 @@ def render_appointment_categories_block(categories: list[dict]) -> str:
 
 
 def render_scheduling_rules_block(cfg: dict) -> str:
-    """Prose scheduling rules for the ``{{KZ_SCHEDULING_RULES}}`` token: lead time,
-    earliest clock, buffer/parallel/max-per-day. If scheduling is disabled, instruct
-    the agent NOT to book and to take a message instead."""
-    if cfg.get("scheduling_enabled") is False:
+    """Prose scheduling rules for the ``{{KZ_SCHEDULING_RULES}}`` token: lead time
+    (hours), earliest clock on the first bookable day, buffer/parallel/max-per-day.
+    If appointment booking is disabled (autonomy "Termine" off — or the legacy
+    scheduling_enabled flag), instruct the agent NOT to book and take a message."""
+    if cfg.get("appointments_enabled") is False or cfg.get("scheduling_enabled") is False:
         return (
             "**Keine Online-Terminbuchung:** Buche in diesem Betrieb KEINE festen "
             "Termine.\n"
@@ -598,18 +599,21 @@ def render_scheduling_rules_block(cfg: dict) -> str:
         )
 
     lines = []
-    days = cfg.get("lead_time_days")
-    if isinstance(days, int) and days > 0:
-        unit = "Werktage" if cfg.get("lead_time_only_weekdays") else "Tage"
+    hours = cfg.get("lead_time_hours")
+    if hours is None and isinstance(cfg.get("lead_time_days"), int):
+        hours = cfg["lead_time_days"] * 24  # legacy orgs without the new column
+    if isinstance(hours, int) and hours > 0:
+        unit_note = " (gezählt nur über Werktage)" if cfg.get("lead_time_only_weekdays") else ""
         sentence = (
-            f"**Vorlauf:** Termine sind frühestens {days} {unit} im Voraus buchbar; "
-            "Same-Day-Termine bietest du NICHT an."
+            f"**Vorlauf:** Termine sind frühestens {hours} Stunden nach dem Anruf "
+            f"buchbar{unit_note}; frühere Zeiten bietest du NICHT an."
         )
         clock = _clock_str(cfg.get("lead_time_earliest_clock"))
         if clock:
             sentence += (
-                f" Am frühestmöglichen Tag sind Termine frühestens ab {clock} Uhr "
-                "möglich — biete dort keine früheren Zeiten an."
+                f" Am frühestmöglichen Tag beginnen Termine frühestens um {clock} Uhr "
+                "— biete dort keine früheren Zeiten an; an späteren Tagen gelten die "
+                "normalen Geschäftszeiten."
             )
         lines.append(sentence)
     else:

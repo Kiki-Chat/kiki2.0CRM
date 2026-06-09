@@ -348,39 +348,41 @@ export function TerminregelnSection({ data, flash }: Props) {
   const c = data.config
   const kc = useKikiConfirm()
   const patch = useConfigPatch('/scheduling-rules', flash)
-  const [f, setF] = useState({
-    scheduling_enabled: c.scheduling_enabled, buffer_minutes: c.buffer_minutes,
+  // "Terminvergabe aktiv" was removed: whether Kiki books at all is governed by
+  // the Autonomie section (Bereich "Termine") — no duplicate switch here.
+  const initial = () => ({
+    buffer_minutes: c.buffer_minutes,
     max_appointments_per_day: c.max_appointments_per_day, parallel_slots: c.parallel_slots,
-    lead_time_days: c.lead_time_days, lead_time_only_weekdays: c.lead_time_only_weekdays,
+    lead_time_hours: c.lead_time_hours ?? (c.lead_time_days ?? 1) * 24,
+    lead_time_only_weekdays: c.lead_time_only_weekdays,
     lead_time_earliest_clock: c.lead_time_earliest_clock ?? '',
   })
-  const set = (k: keyof typeof f, v: unknown) => setF((p) => ({ ...p, [k]: v }))
+  const [f, setF] = useState(initial)
+  const set = (k: keyof ReturnType<typeof initial>, v: unknown) => setF((p) => ({ ...p, [k]: v }))
 
   return (
     <div className="space-y-4">
-      <Card>
-        <div className="flex items-center justify-between">
-          <div><div className="text-sm font-bold text-text">Terminvergabe aktiv</div><div className="text-xs text-muted">Kiki vereinbart eigenständig Termine im Kalender.</div></div>
-          <Toggle on={f.scheduling_enabled} onChange={(v) => set('scheduling_enabled', v)} />
-        </div>
-      </Card>
+      <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
+        <Info size={16} className="mt-0.5 shrink-0 text-info" />
+        <span>Ob Kiki überhaupt Termine vergibt, steuern Sie im Bereich <a href="/kiki-zentrale/autonomie" className="font-medium text-green-deep hover:underline">Autonomie</a> (Bereich „Termine“). Hier legen Sie die Regeln fest, nach denen freie Termine angeboten werden.</span>
+      </div>
       <Card>
         <GroupLabel>Kapazität & Pufferzeiten</GroupLabel>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Pufferzeit zwischen Terminen (Min.)" hint="Kiki hält zwischen zwei Terminen so viele Minuten frei — z. B. für An- und Abfahrt."><input type="number" value={f.buffer_minutes} onChange={(e) => set('buffer_minutes', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Max. Termine pro Tag" hint="Ist diese Zahl erreicht, bietet Kiki am Telefon keine weiteren Termine an diesem Tag an."><input type="number" value={f.max_appointments_per_day} onChange={(e) => set('max_appointments_per_day', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Parallele Termine" hint="Wie viele Termine zur selben Zeit möglich sind, z. B. bei mehreren Teams."><input type="number" value={f.parallel_slots} onChange={(e) => set('parallel_slots', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Pufferzeit zwischen Terminen (Min.)" hint="Kiki hält zwischen zwei Terminen so viele Minuten frei — z. B. für An- und Abfahrt."><input type="number" min={0} value={f.buffer_minutes} onChange={(e) => set('buffer_minutes', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Max. Termine pro Tag" hint="Ist diese Zahl erreicht, bietet Kiki am Telefon keine weiteren Termine an diesem Tag an."><input type="number" min={0} value={f.max_appointments_per_day} onChange={(e) => set('max_appointments_per_day', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Parallele Termine" hint="Wie viele Termine zur selben Zeit möglich sind, z. B. bei mehreren Teams. Bei mehr als 1 erlaubt auch der Kalender mehrere Buchungen im selben Slot."><input type="number" min={1} value={f.parallel_slots} onChange={(e) => set('parallel_slots', Number(e.target.value))} className={inputCls} /></Field>
         </div>
       </Card>
       <Card>
         <GroupLabel>Vorlaufzeit & frühester Termin</GroupLabel>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Vorlaufzeit (Tage)" hint="Frühestens nach so vielen Tagen vergibt Kiki einen Termin — keine kurzfristigen Buchungen."><input type="number" value={f.lead_time_days} onChange={(e) => set('lead_time_days', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Frühester Termin (Uhrzeit)" hint="Vor dieser Uhrzeit bietet Kiki keine Termine an (z. B. nicht vor 08:00)."><input type="time" value={f.lead_time_earliest_clock} onChange={(e) => set('lead_time_earliest_clock', e.target.value)} className={inputCls} /></Field>
+          <Field label="Vorlaufzeit (Stunden)" hint="Frühestens so viele Stunden nach dem Anruf vergibt Kiki einen Termin — z. B. 24 = ab morgen zur selben Uhrzeit."><input type="number" min={0} value={f.lead_time_hours} onChange={(e) => set('lead_time_hours', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Frühester Termin (Uhrzeit)" hint="Am frühestmöglichen Tag beginnen Termine erst ab dieser Uhrzeit; an späteren Tagen gelten die normalen Geschäftszeiten."><input type="time" value={f.lead_time_earliest_clock} onChange={(e) => set('lead_time_earliest_clock', e.target.value)} className={inputCls} /></Field>
         </div>
         <label className="mt-4 flex items-center gap-2 text-sm text-text"><Toggle on={f.lead_time_only_weekdays} onChange={(v) => set('lead_time_only_weekdays', v)} /> Vorlaufzeit nur an Werktagen zählen</label>
-        <p className="mt-1 text-xs text-muted">Wochenenden werden bei der Vorlaufzeit übersprungen — eine Anfrage am Freitag landet so nicht schon am Wochenende.</p>
-        <SaveBar onReset={() => setF({ scheduling_enabled: c.scheduling_enabled, buffer_minutes: c.buffer_minutes, max_appointments_per_day: c.max_appointments_per_day, parallel_slots: c.parallel_slots, lead_time_days: c.lead_time_days, lead_time_only_weekdays: c.lead_time_only_weekdays, lead_time_earliest_clock: c.lead_time_earliest_clock ?? '' })} onSave={() => kc.confirm(() => patch.mutate({ ...f, lead_time_earliest_clock: f.lead_time_earliest_clock || null }))} saving={patch.isPending} />
+        <p className="mt-1 text-xs text-muted">Wochenend-Stunden zählen nicht zur Vorlaufzeit — eine Anfrage am Freitagnachmittag mit 24 h Vorlauf landet so erst am Montag.</p>
+        <SaveBar onReset={() => setF(initial())} onSave={() => kc.confirm(() => patch.mutate({ ...f, lead_time_earliest_clock: f.lead_time_earliest_clock || null }))} saving={patch.isPending} />
       </Card>
       <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
         <Info size={16} className="mt-0.5 shrink-0 text-info" />
