@@ -17,6 +17,7 @@ interface AuthContextValue {
   configured: boolean
   signInWithPassword: (email: string, password: string) => Promise<void>
   signInWithMagicLink: (email: string) => Promise<void>
+  resetPassword: (email: string) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -67,6 +68,17 @@ export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthConte
           // links return to prod. The origin must also be in Supabase Auth's
           // "Redirect URLs" allowlist or Supabase silently rejects it.
           options: { emailRedirectTo: window.location.origin },
+        })
+        if (error) throw error
+      },
+      async resetPassword(email) {
+        if (!client) throw new Error('Supabase not configured')
+        // Forgot-password: send a RECOVERY link to /set-password, where the user
+        // sets a NEW password via updateUser() — no old password required (the
+        // recovery session authorises it). redirectTo must be on Supabase Auth's
+        // allowlist (same as the magic-link redirect).
+        const { error } = await client.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/set-password`,
         })
         if (error) throw error
       },

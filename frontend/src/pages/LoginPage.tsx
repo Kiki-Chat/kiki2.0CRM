@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { Button } from '../components/ui/Button'
 
 export function LoginPage() {
-  const { session, configured, signInWithPassword, signInWithMagicLink } = useAuth()
+  const { session, configured, signInWithPassword, signInWithMagicLink, resetPassword } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -41,6 +41,24 @@ export function LoginPage() {
       setNotice('Check your email for a magic link.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send link')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleReset() {
+    setError(null)
+    setNotice(null)
+    if (!email) {
+      setError('Enter your email first')
+      return
+    }
+    setBusy(true)
+    try {
+      await resetPassword(email)
+      setNotice('Check your email for a link to set a new password.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send reset link')
     } finally {
       setBusy(false)
     }
@@ -102,6 +120,14 @@ export function LoginPage() {
           >
             Email me a magic link
           </Button>
+          <button
+            type="button"
+            disabled={busy || !configured}
+            onClick={handleReset}
+            className="w-full text-center text-sm text-muted underline-offset-2 hover:text-green-deep hover:underline disabled:opacity-50"
+          >
+            Forgot your password?
+          </button>
         </form>
       </div>
     </div>
