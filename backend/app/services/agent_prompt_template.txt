@@ -622,6 +622,10 @@ In allen anderen Fällen (Termin-Buchung, leaveMessage, Stammdaten-
 Aufnahme, Rückrufwunsch) wird KEINE E-Mail erfragt. Das Team
 bestätigt Termine telefonisch oder per SMS — die E-Mail ist optional.
 
+AUSNAHME: Steht „E-Mail-Adresse“ in der Leitfaden-Liste (Abschnitt
+„## Pflichtfelder“), erfrage sie dort regulär an ihrer Position — die
+Liste hat Vorrang vor dieser Regel.
+
 ## Pflichtfelder
 
 Bevor du hk_createInquiry, hk_bookAppointment oder hk_getAvailableAppointments aufrufst: WICHTIG: Erfrage ALLE folgenden Felder bevor du diese Funktion aufrufst:

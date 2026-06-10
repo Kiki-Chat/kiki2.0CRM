@@ -325,13 +325,23 @@ def test_seed_required_fields_inserts_name_phone_address():
     inserts = [r for (t, r) in client.store["inserts"] if t == "agent_required_fields"]
     assert len(inserts) == 1
     rows = inserts[0]
-    assert {r["field_key"] for r in rows} == {"name", "phone", "address", "problem_description"}
+    # Leitfaden rework: core fields + optional email + the three linked offer rows.
+    assert {r["field_key"] for r in rows} == {
+        "name", "phone", "address", "problem_description",
+        "email", "offer_appointment", "offer_kva", "offer_price_info",
+    }
     addr = next(r for r in rows if r["field_key"] == "address")
     assert addr["identification_role"] == "address" and addr["sort_order"] == 2
-    # The customer concern is now a default required field too (locked, last).
+    # The customer concern is now a default required field too (locked).
     pd = next(r for r in rows if r["field_key"] == "problem_description")
     assert pd["sort_order"] == 3 and pd["is_locked"] and pd["label"].startswith("Anliegen")
-    assert all(r["is_duty"] and r["is_locked"] for r in rows)
+    core = [r for r in rows if r["field_key"] in ("name", "phone", "address", "problem_description")]
+    assert all(r["is_duty"] and r["is_locked"] for r in core)
+    # Email is opt-in (inactive); linked rows carry their setting + are locked.
+    email = next(r for r in rows if r["field_key"] == "email")
+    assert email["is_active"] is False and not email["is_locked"]
+    offer = next(r for r in rows if r["field_key"] == "offer_appointment")
+    assert offer["linked_setting"] == "appointments_enabled" and offer["is_locked"]
 
 
 def test_seed_required_fields_idempotent_when_rows_exist():

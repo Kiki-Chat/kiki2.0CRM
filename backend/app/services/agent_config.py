@@ -323,7 +323,10 @@ def _fetch_required_fields(org_id: str | UUID) -> list[dict]:
     db = get_service_client()
     return (
         db.table("agent_required_fields")
-        .select("field_key, label, description, is_duty, identification_role, sort_order")
+        .select(
+            "field_key, label, description, is_duty, identification_role, "
+            "sort_order, is_active, linked_setting"
+        )
         .eq("org_id", str(org_id))
         .order("sort_order")
         .execute()
@@ -492,12 +495,45 @@ def _render_business_hours(scheduling: dict | None) -> str:
 
 
 # ─── Kiki-Zentrale config render helpers (German prose, empty-safe) ──────────
-def render_required_fields_block(fields: list[dict]) -> str:
-    """Pflicht/optional field list for the ``## Pflichtfelder`` body.
+# Leitfaden offer-steps: linked rows render an OFFER instruction at their dragged
+# position instead of a question. The negative case (setting off) is carried by
+# KZ_AUTONOMY / KZ_PRICE_INFO — an inactive linked row simply renders nothing.
+_LINKED_OFFER_LINES = {
+    "offer_appointment": (
+        "- **Termin anbieten** — biete an DIESER Stelle aktiv einen Termin an "
+        "(weiter mit Schritt 3 — Termin)."
+    ),
+    "offer_kva": (
+        "- **Kostenvoranschlag anbieten** — biete an dieser Stelle aktiv einen "
+        "unverbindlichen Kostenvoranschlag an."
+    ),
+    "offer_price_info": (
+        "- **Preisauskunft** — beantworte Preisfragen an dieser Stelle gemäß "
+        "Abschnitt „# Preise“."
+    ),
+}
+
+
+def _field_effective_active(f: dict, cfg: dict | None) -> bool:
+    """Linked rows derive their active state from the live agent_configs boolean
+    (the row's own is_active is position-only); plain rows use is_active."""
+    linked = f.get("linked_setting")
+    if linked:
+        if cfg is None:
+            return True
+        return bool(cfg.get(linked))
+    active = f.get("is_active")
+    return True if active is None else bool(active)
+
+
+def render_required_fields_block(fields: list[dict], cfg: dict | None = None) -> str:
+    """The ordered Leitfaden for the ``## Pflichtfelder`` body: fields to ask plus
+    offer-steps (Termin/KVA/Preisauskunft) at their configured position.
 
     Each field → ``- **{label}**{' (optional)'} — {description}``. Fields with an
-    identification_role are noted as auto-recognised. Empty config → a sensible
-    default field set so the agent never loses its data-capture instruction."""
+    identification_role are noted as auto-recognised; inactive rows are skipped.
+    Empty config → a sensible default field set so the agent never loses its
+    data-capture instruction."""
     if not fields:
         return (
             "PFLICHTFELDER: Name, Telefonnummer, Adresse, Anliegen. "
@@ -505,6 +541,14 @@ def render_required_fields_block(fields: list[dict]) -> str:
         )
     lines = []
     for f in fields:
+        if not _field_effective_active(f, cfg):
+            continue
+        linked = f.get("linked_setting")
+        if linked:
+            offer = _LINKED_OFFER_LINES.get((f.get("field_key") or "").strip())
+            if offer:
+                lines.append(offer)
+            continue
         label = (f.get("label") or f.get("field_key") or "").strip()
         if not label:
             continue
@@ -527,10 +571,12 @@ def render_required_fields_block(fields: list[dict]) -> str:
     # hk_identifyCustomer) — only confirm it briefly. (Fixes the agent re-asking
     # for the phone number it already has.)
     lead = (
-        "Erfasse die folgenden Felder in DIESER Reihenfolge (oberstes Feld = höchste "
-        "Priorität, zuerst). Felder, die bereits bekannt sind oder automatisch erkannt "
-        "wurden (z. B. die Telefonnummer über die Anrufererkennung bzw. "
-        "hk_identifyCustomer), NICHT erneut erfragen — höchstens kurz bestätigen:"
+        "Arbeite die folgenden Punkte in DIESER Reihenfolge ab (oberster Punkt = "
+        "höchste Priorität, zuerst): Felder erfragen bzw. Angebote (Termin/KVA/"
+        "Preisauskunft) aktiv an genau dieser Stelle machen. Felder, die bereits "
+        "bekannt sind oder automatisch erkannt wurden (z. B. die Telefonnummer über "
+        "die Anrufererkennung bzw. hk_identifyCustomer), NICHT erneut erfragen — "
+        "höchstens kurz bestätigen:"
     )
     return lead + "\n" + "\n".join(lines)
 
@@ -931,7 +977,7 @@ def render_prompt_for_org(
         ),
         "SERVICE_AREA": _render_service_area(),
         "BUSINESS_HOURS": _render_business_hours(kz_cfg.get("scheduling")),
-        "KZ_REQUIRED_FIELDS": render_required_fields_block(required_fields),
+        "KZ_REQUIRED_FIELDS": render_required_fields_block(required_fields, kz_cfg),
         # The problem detail is now a reorderable required field (field_key
         # 'problem_description'), so it renders INSIDE the required-fields block at
         # its chosen sort position. Suppress the old standalone block whenever that

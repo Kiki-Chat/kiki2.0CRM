@@ -584,17 +584,105 @@ async def prompt_diff(payload: PromptDiffRequest, user: CurrentUser = Depends(re
     return await run_in_threadpool(_do)
 
 
-# ─── Pflichtfelder ───────────────────────────────────────────────────────────
+# ─── Pflichtfelder / Leitfaden ───────────────────────────────────────────────
+_LINKED_SETTINGS = ("appointments_enabled", "kva_enabled", "price_info_enabled")
+
+
 @router.get("/required-fields")
 async def list_required_fields(user: CurrentUser = Depends(require_org)) -> dict:
     def _do() -> dict:
+        client = get_service_client()
         rows = (
-            get_service_client().table("agent_required_fields").select("*")
+            client.table("agent_required_fields").select("*")
             .eq("org_id", user.org_id).order("sort_order").execute().data or []
         )
+        # Linked rows mirror the live setting — their own is_active is
+        # position-only and must never be shown/used directly.
+        if any(r.get("linked_setting") for r in rows):
+            cfg = (
+                client.table("agent_configs")
+                .select(", ".join(_LINKED_SETTINGS))
+                .eq("org_id", user.org_id).limit(1).execute().data or [{}]
+            )[0]
+            for r in rows:
+                linked = r.get("linked_setting")
+                if linked:
+                    r["is_active"] = bool(cfg.get(linked))
         return {"fields": rows}
 
     return await run_in_threadpool(_do)
+
+
+class LeitfadenItem(BaseModel):
+    id: str
+    is_active: bool = True
+
+
+class LeitfadenSave(BaseModel):
+    items: list[LeitfadenItem]
+
+
+@router.patch("/leitfaden")
+async def save_leitfaden(
+    payload: LeitfadenSave, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Batch save of the Leitfaden: the COMPLETE ordered list (index = sort_order)
+    + per-row active toggles. Linked-row toggles write through to the real
+    agent_configs setting (two-way sync with Autonomie/Preisauskunft). ONE repush
+    — replaces the old push-per-drag reorder flow."""
+    _require_admin(user)
+
+    def _do() -> str:
+        client = get_service_client()
+        rows = (
+            client.table("agent_required_fields").select("id, linked_setting")
+            .eq("org_id", user.org_id).execute().data or []
+        )
+        current_ids = {r["id"] for r in rows}
+        sent_ids = {i.id for i in payload.items}
+        if current_ids != sent_ids:
+            return "stale"
+        linked_by_id = {r["id"]: r.get("linked_setting") for r in rows}
+        cfg_updates: dict = {}
+        for idx, item in enumerate(payload.items):
+            linked = linked_by_id.get(item.id)
+            update: dict = {"sort_order": idx}
+            if linked:
+                # Active state lives on agent_configs; the row keeps position only.
+                if linked in _LINKED_SETTINGS:
+                    cfg_updates[linked] = item.is_active
+            else:
+                update["is_active"] = item.is_active
+            client.table("agent_required_fields").update(update).eq(
+                "id", item.id
+            ).eq("org_id", user.org_id).execute()
+        if cfg_updates.get("price_info_enabled"):
+            # Same guard as PATCH /price-info: no priced Artikel → no price talk.
+            priced = (
+                client.table("catalog_items").select("id")
+                .eq("org_id", user.org_id).eq("is_active", True).gt("unit_price", 0)
+                .limit(1).execute().data or []
+            )
+            if not priced:
+                return "no_prices"
+        if cfg_updates:
+            _upsert_config(user.org_id, cfg_updates)
+        return "ok"
+
+    res = await run_in_threadpool(_do)
+    if res == "stale":
+        raise HTTPException(
+            status_code=409,
+            detail="Die Liste ist veraltet — bitte Seite neu laden und erneut speichern.",
+        )
+    if res == "no_prices":
+        raise HTTPException(
+            status_code=422,
+            detail="Preisauskunft kann nicht aktiviert werden: Es sind keine Artikel "
+            "mit Preisen hinterlegt. Bitte pflegen Sie zuerst Preise im Menü „Artikel“.",
+        )
+    _schedule_repush(background, user, "kz_leitfaden")
+    return {"success": True}
 
 
 @router.post("/required-fields")

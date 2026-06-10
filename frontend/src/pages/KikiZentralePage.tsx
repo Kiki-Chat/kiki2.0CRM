@@ -26,7 +26,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: 'Konfiguration', items: [
     { slug: 'verhalten', label: 'Verhalten', icon: Sparkles },
     { slug: 'autonomie', label: 'Autonomie', icon: SlidersHorizontal },
-    { slug: 'pflichtfelder', label: 'Pflichtfelder', icon: ListChecks },
+    { slug: 'leitfaden', label: 'Leitfaden', icon: ListChecks },
     { slug: 'branche-kontext', label: 'Branche & Kontext', icon: BookOpen },
   ] },
   { label: 'Terminplanung', items: [
@@ -68,6 +68,8 @@ export function KikiZentralePage() {
     onError: (e: Error) => { setRollbackSnap(null); flash(e.message || 'Wiederherstellen fehlgeschlagen.') },
   })
 
+  // Old bookmark/link compatibility: Pflichtfelder became Leitfaden.
+  if (section === 'pflichtfelder') return <Navigate to="/kiki-zentrale/leitfaden" replace />
   if (!ALL_SLUGS.has(section)) return <Navigate to="/kiki-zentrale/verhalten" replace />
 
   // Kiki-Zentrale is the AI control surface — every mutation is admin-only on the
@@ -188,7 +190,7 @@ function SectionContent({ section, data, flash }: { section: string; data: KzOve
   switch (section) {
     case 'verhalten': return <VerhaltenSection data={data} flash={flash} />
     case 'autonomie': return <AutonomieSection data={data} flash={flash} />
-    case 'pflichtfelder': return <PflichtfelderSection data={data} flash={flash} />
+    case 'leitfaden': return <PflichtfelderSection data={data} flash={flash} />
     case 'branche-kontext': return <BrancheKontextSection data={data} flash={flash} />
     case 'geschaeftszeiten': return <GeschaeftszeitenSection />
     case 'terminregeln': return <TerminregelnSection data={data} flash={flash} />

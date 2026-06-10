@@ -102,6 +102,11 @@ export interface KzRequiredField {
   is_duty: boolean
   identification_role: string | null
   sort_order: number
+  /** Off = Kiki skips this point entirely. For linked rows this mirrors the
+   * real setting (Autonomie/Preisauskunft) — two-way sync. */
+  is_active: boolean
+  /** Set on the three offer-step rows (Termin/KVA/Preisauskunft). */
+  linked_setting: 'appointments_enabled' | 'kva_enabled' | 'price_info_enabled' | null
 }
 
 export interface KzCategory {

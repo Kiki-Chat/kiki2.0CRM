@@ -3,7 +3,7 @@ import {
   ArrowUpDown, Clock, FileText, Globe, Info, Loader2, Lock, Phone, Plus, RefreshCw,
   Siren, Trash2, X,
 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiFetch, apiUpload } from '../../lib/api'
@@ -13,7 +13,7 @@ import {
 import { cn } from '../../lib/utils'
 import { Modal } from '../ui/Modal'
 import { Tag } from '../ui/Tag'
-import { Card, Field, GroupLabel, inputCls, labelCls, SaveBar, StatusBadge, Toggle, useKikiConfirm } from './shared'
+import { Card, ConfirmDialog, Field, GroupLabel, inputCls, labelCls, SaveBar, StatusBadge, Toggle, useKikiConfirm } from './shared'
 
 type Props = { data: KzOverview; flash: (m: string) => void }
 
@@ -125,46 +125,84 @@ function FieldDescriptionInput({ field, onSave }: { field: KzRequiredField; onSa
   )
 }
 
-// ─── Pflichtfelder ───────────────────────────────────────────────────────────
-export function PflichtfelderSection({ flash }: Props) {
+// ─── Leitfaden (ehem. Pflichtfelder) ─────────────────────────────────────────
+// Local-state editor: drag + toggles only mutate local state; ONE batch PATCH on
+// Speichern (one agent push — no more push-per-drag). Linked rows (Termin/KVA/
+// Preisauskunft) mirror their real setting two-way and warn before toggling.
+const LINKED_TARGET_LABEL: Record<string, string> = {
+  appointments_enabled: 'Autonomie (Bereich „Termine“)',
+  kva_enabled: 'Autonomie (Bereich „Kostenvoranschläge“)',
+  price_info_enabled: 'Preisauskunft',
+}
+
+export function LeitfadenSection({ flash }: Props) {
   const qc = useQueryClient()
-  const kc = useKikiConfirm()
-  const { data } = useQuery({ queryKey: ['kiki-zentrale', 'required-fields'], queryFn: () => apiFetch<{ fields: KzRequiredField[] }>(`${KZ}/required-fields`) })
-  const fields = data?.fields ?? []
+  const { data, dataUpdatedAt } = useQuery({ queryKey: ['kiki-zentrale', 'required-fields'], queryFn: () => apiFetch<{ fields: KzRequiredField[] }>(`${KZ}/required-fields`) })
+  const serverFields = useMemo(() => data?.fields ?? [], [data])
+  const [items, setItems] = useState<KzRequiredField[]>([])
+  const [dirty, setDirty] = useState(false)
   const [newKey, setNewKey] = useState('')
   const [newLabel, setNewLabel] = useState('')
   const [newDesc, setNewDesc] = useState('')
   const dragIdx = useRef<number | null>(null)
+  // Linked-row toggle confirmation: which row + target value is pending.
+  const [linkedConfirm, setLinkedConfirm] = useState<{ id: string; label: string; target: string; value: boolean } | null>(null)
+
+  // Re-seed local state from the server while the user has no unsaved edits.
+  useEffect(() => {
+    if (!dirty) setItems(serverFields)
+  }, [serverFields, dataUpdatedAt, dirty])
+
+  const setActive = (id: string, value: boolean) => {
+    setItems((p) => p.map((f) => (f.id === id ? { ...f, is_active: value } : f)))
+    setDirty(true)
+  }
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiFetch(`${KZ}/leitfaden`, {
+        method: 'PATCH',
+        body: JSON.stringify({ items: items.map((f) => ({ id: f.id, is_active: f.is_active })) }),
+      }),
+    onSuccess: () => {
+      setDirty(false)
+      // Linked toggles also changed Autonomie/Preisauskunft — refresh everything.
+      qc.invalidateQueries({ queryKey: ['kiki-zentrale'] })
+      flash('Leitfaden gespeichert.')
+    },
+    onError: (e: Error) => flash(e.message || 'Speichern fehlgeschlagen.'),
+  })
 
   const create = useMutation({
     mutationFn: () => apiFetch(`${KZ}/required-fields`, { method: 'POST', body: JSON.stringify({ field_key: deriveFieldKey(newKey, newLabel), label: newLabel, description: newDesc || null }) }),
-    onSuccess: () => { setNewKey(''); setNewLabel(''); setNewDesc(''); qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }) },
+    onSuccess: () => { setNewKey(''); setNewLabel(''); setNewDesc(''); setDirty(false); qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }) },
+    onError: (e: Error) => flash(e.message || 'Hinzufügen fehlgeschlagen.'),
   })
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`${KZ}/required-fields/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }),
+    onSuccess: () => { setDirty(false); qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }) },
     onError: (e: Error) => flash(e.message || 'Löschen fehlgeschlagen.'),
   })
   const patchDesc = useMutation({
     mutationFn: ({ id, description }: { id: string; description: string }) => apiFetch(`${KZ}/required-fields/${id}`, { method: 'PATCH', body: JSON.stringify({ description: description || null }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }); flash('Gespeichert.') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }); flash('Beschreibung gespeichert.') },
     onError: (e: Error) => flash(e.message || 'Speichern fehlgeschlagen.'),
   })
-  const reorder = useMutation({
-    mutationFn: (ids: string[]) => apiFetch(`${KZ}/required-fields/reorder`, { method: 'POST', body: JSON.stringify({ ordered_ids: ids }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }),
-  })
 
+  // Drag reorder — LOCAL ONLY; persisted with Speichern.
   const onDrop = (to: number) => {
     const from = dragIdx.current
     dragIdx.current = null
     if (from === null || from === to) return
-    const ids = fields.map((f) => f.id)
-    const [m] = ids.splice(from, 1)
-    ids.splice(to, 0, m)
-    reorder.mutate(ids)
+    setItems((p) => {
+      const next = [...p]
+      const [m] = next.splice(from, 1)
+      next.splice(to, 0, m)
+      return next
+    })
+    setDirty(true)
   }
-  const idRoles = fields.filter((f) => f.identification_role)
+  const idRoles = serverFields.filter((f) => f.identification_role)
 
   return (
     <div className="space-y-4">
@@ -181,55 +219,102 @@ export function PflichtfelderSection({ flash }: Props) {
 
       <Card>
         <div className="mb-1 flex items-center justify-between">
-          <GroupLabel>Immer abgefragte Felder</GroupLabel>
-          <span className="text-xs text-muted">Ziehen zum Sortieren</span>
+          <GroupLabel>Gesprächs-Leitfaden</GroupLabel>
+          <span className="text-xs text-muted">Ziehen zum Sortieren — Reihenfolge = Frage-Reihenfolge</span>
         </div>
-        <p className="mb-3 text-xs text-muted">Die Beschreibungen werden dem KI-Agenten erklärt, wofür das Feld dient.</p>
+        <p className="mb-3 text-xs text-muted">
+          Kiki arbeitet diese Punkte im Gespräch von oben nach unten ab: Felder werden erfragt,
+          Angebots-Punkte (Termin, KVA, Preisauskunft) an ihrer Position aktiv angeboten. Der Schalter
+          legt fest, ob ein Punkt überhaupt vorkommt. Erst „Speichern“ überträgt die Änderungen an Kiki.
+        </p>
         <div className="space-y-2">
-          {fields.map((f, i) => (
+          {items.map((f, i) => (
             <div
               key={f.id}
               draggable
               onDragStart={() => (dragIdx.current = i)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => onDrop(i)}
-              className="flex items-start gap-3 rounded-lg border border-border bg-alt px-3 py-2"
+              className={cn('flex items-start gap-3 rounded-lg border border-border px-3 py-2', f.is_active ? 'bg-alt' : 'bg-alt/40 opacity-70')}
             >
               <ArrowUpDown size={15} className="mt-2 cursor-grab text-faint" />
               <div className="flex-1">
                 <div className="flex items-center gap-2 text-sm font-medium text-text">
                   {f.label}
-                  {f.is_locked && <Lock size={12} className="text-faint" />}
+                  {f.is_locked && !f.linked_setting && <Lock size={12} className="text-faint" />}
                   {f.is_duty && <Tag variant="green">Pflicht</Tag>}
+                  {f.linked_setting && (
+                    <Tag variant="info">Verknüpft · {LINKED_TARGET_LABEL[f.linked_setting]}</Tag>
+                  )}
                 </div>
-                <FieldDescriptionInput field={f} onSave={(description) => patchDesc.mutate({ id: f.id, description })} />
+                {f.linked_setting ? (
+                  <p className="mt-1 text-xs text-muted">{f.description}</p>
+                ) : (
+                  <FieldDescriptionInput field={f} onSave={(description) => patchDesc.mutate({ id: f.id, description })} />
+                )}
               </div>
-              <button
-                disabled={f.is_locked || del.isPending}
-                onClick={() => kc.confirm(() => del.mutate(f.id))}
-                title={f.is_locked ? 'Gesperrtes Feld' : 'Entfernen'}
-                className="mt-2 text-muted hover:text-error disabled:opacity-30"
-              >
-                {del.isPending && del.variables === f.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-              </button>
+              <div className="mt-1.5 flex items-center gap-2">
+                <Toggle
+                  on={f.is_active}
+                  onChange={(v) => {
+                    if (f.linked_setting) {
+                      setLinkedConfirm({ id: f.id, label: f.label, target: LINKED_TARGET_LABEL[f.linked_setting], value: v })
+                    } else {
+                      setActive(f.id, v)
+                    }
+                  }}
+                />
+                <button
+                  disabled={f.is_locked || del.isPending}
+                  onClick={() => { if (window.confirm(`„${f.label}“ wirklich entfernen?`)) del.mutate(f.id) }}
+                  title={f.is_locked ? 'Gesperrter Punkt' : 'Entfernen'}
+                  className="text-muted hover:text-error disabled:opacity-30"
+                >
+                  {del.isPending && del.variables === f.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                </button>
+              </div>
             </div>
           ))}
         </div>
+        <SaveBar
+          onReset={() => { setItems(serverFields); setDirty(false) }}
+          onSave={() => save.mutate()}
+          saving={save.isPending}
+          disabled={!dirty}
+        />
         <div className="mt-4 space-y-2 border-t border-border pt-4">
-          <Field label="Neues Feld"><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. E-Mail-Adresse" className={inputCls} /></Field>
+          <Field label="Neues Feld"><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. Kennzeichen" className={inputCls} /></Field>
           <Field label="Beschreibung (optional)"><input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Wofür dient das Feld? (wird dem KI-Agenten erklärt)" className={inputCls} /></Field>
           <div className="flex justify-end">
-            <button onClick={() => newLabel.trim() && kc.confirm(() => create.mutate())} disabled={!newLabel.trim() || create.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+            <button onClick={() => newLabel.trim() && create.mutate()} disabled={!newLabel.trim() || create.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
               {create.isPending && <Loader2 size={14} className="animate-spin" />}
               {create.isPending ? 'Speichert…' : 'Hinzufügen'}
             </button>
           </div>
         </div>
       </Card>
-      {kc.element}
+
+      <ConfirmDialog
+        open={!!linkedConfirm}
+        onOpenChange={(v) => !v && setLinkedConfirm(null)}
+        title="Kiki-Änderungen bestätigen"
+        message={
+          linkedConfirm
+            ? `„${linkedConfirm.label}“ ${linkedConfirm.value ? 'aktivieren' : 'deaktivieren'}? Diese Einstellung ist verknüpft und wirkt sich auch auf den Bereich ${linkedConfirm.target} aus (Zwei-Wege-Verbindung). Übertragen wird die Änderung erst mit „Speichern“.`
+            : ''
+        }
+        confirmLabel="Übernehmen"
+        onConfirm={() => {
+          if (linkedConfirm) setActive(linkedConfirm.id, linkedConfirm.value)
+          setLinkedConfirm(null)
+        }}
+      />
     </div>
   )
 }
+
+// Compatibility alias — KikiZentralePage routed 'pflichtfelder' here historically.
+export const PflichtfelderSection = LeitfadenSection
 
 // "Anliegen / Problembeschreibung" is now a locked, reorderable required field
 // (field_key 'problem_description', seeded by default + migration 0052), edited
