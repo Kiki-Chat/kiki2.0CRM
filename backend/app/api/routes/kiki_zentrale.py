@@ -865,6 +865,43 @@ async def preview_conversation_logic(
     return {"text": _validate_logic_or_422(payload.logic)}
 
 
+class ConversationLogicGenerate(BaseModel):
+    description: str
+    # When set, the model extends/adjusts the current rules instead of replacing.
+    existing: dict | None = None
+
+
+@router.post("/conversation-logic/generate")
+async def generate_conversation_logic(
+    payload: ConversationLogicGenerate, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Natural language → validated rule tree + compiled preview. NOTHING is
+    saved — the UI shows the generated rules in the editor and the user saves
+    via the normal PATCH (same review/confirm path as manual edits)."""
+    _require_admin(user)
+    description = (payload.description or "").strip()
+    if len(description) < 10:
+        raise HTTPException(status_code=422, detail="Bitte beschreiben Sie Ihre Regeln etwas ausführlicher.")
+    if len(description) > 4000:
+        raise HTTPException(status_code=422, detail="Die Beschreibung ist zu lang (max. 4000 Zeichen).")
+
+    from app.services.ai.client import AIServiceDisabled
+    from app.services.conversation_logic_ai import GenerationFailed, generate_logic_from_text
+
+    def _do() -> dict:
+        return generate_logic_from_text(
+            org_id=user.org_id, user_id=user.id,
+            description=description, existing=payload.existing,
+        )
+
+    try:
+        return await run_in_threadpool(_do)
+    except AIServiceDisabled:
+        raise HTTPException(status_code=503, detail="KI-Unterstützung ist derzeit nicht verfügbar.")
+    except GenerationFailed as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 # ─── Branche & Kontext ───────────────────────────────────────────────────────
 @router.patch("/context")
 async def update_context(

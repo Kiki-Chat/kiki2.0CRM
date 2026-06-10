@@ -3,7 +3,7 @@
 // The compiled German preview comes from the backend (single compiler, no TS
 // port): POST /conversation-logic/preview, debounced.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, GitBranch, Plus, Trash2 } from 'lucide-react'
+import { ArrowUpDown, GitBranch, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { apiFetch } from '../../lib/api'
@@ -124,6 +124,30 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
     return () => clearTimeout(t)
   }, [blocks])
 
+  // Natural-language path: describe the rules, the AI builds the tree. The
+  // result lands in the SAME local editor state (review + Speichern), so the
+  // generated rules go through the identical validate/compile/save pipeline.
+  const [nlText, setNlText] = useState('')
+  const [nlError, setNlError] = useState<string | null>(null)
+  const generate = useMutation({
+    mutationFn: () =>
+      apiFetch<{ logic: LogicDoc; text: string }>(`${KZ}/conversation-logic/generate`, {
+        method: 'POST',
+        body: JSON.stringify({
+          description: nlText,
+          existing: blocks.length ? { version: 1, blocks } : null,
+        }),
+      }),
+    onSuccess: (res) => {
+      setBlocks(withIds(res.logic).blocks)
+      setDirty(true)
+      setNlError(null)
+      setNlText('')
+      flash('Regeln erstellt — bitte prüfen und speichern.')
+    },
+    onError: (e: Error) => setNlError(e.message || 'Erstellen fehlgeschlagen.'),
+  })
+
   const save = useMutation({
     mutationFn: () =>
       apiFetch(`${KZ}/conversation-logic`, {
@@ -159,6 +183,40 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
             <div className="text-xs text-muted">Eigene Wenn/Dann-Regeln, die Kiki im Gespräch verbindlich abarbeitet (z. B. „Wenn kein Kunde anruft → nur Anliegen notieren“).</div>
           </div>
           <Toggle on={enabled} onChange={(v) => { setEnabled(v); setDirty(true) }} />
+        </div>
+      </Card>
+
+      <Card>
+        <div className="mb-1 flex items-center gap-2">
+          <Sparkles size={15} className="text-ai" />
+          <GroupLabel>In eigenen Worten beschreiben</GroupLabel>
+        </div>
+        <p className="mb-2 text-xs text-muted">
+          Beschreiben Sie einfach, wie Kiki sich verhalten soll — die KI baut daraus die
+          Wenn/Dann-Regeln. Sie können das Ergebnis unten noch anpassen, bevor Sie speichern.
+        </p>
+        <textarea
+          value={nlText}
+          onChange={(e) => setNlText(e.target.value)}
+          rows={3}
+          maxLength={4000}
+          placeholder={'z. B. „Als erstes nach dem Namen fragen. Wenn ein Lieferant anruft, nach der Lieferantennummer fragen. Wenn ein Kunde anruft, nach der Kundennummer fragen.“'}
+          className={cn(inputCls, 'resize-y text-sm')}
+          disabled={generate.isPending}
+        />
+        {nlError && <div className="mt-2 rounded-md bg-error-bg px-3 py-2 text-sm text-error">{nlError}</div>}
+        <div className="mt-2 flex items-center gap-3">
+          <button
+            onClick={() => generate.mutate()}
+            disabled={generate.isPending || nlText.trim().length < 10}
+            className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+          >
+            {generate.isPending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            {generate.isPending ? 'Erstellt Regeln…' : 'Regeln mit KI erstellen'}
+          </button>
+          {blocks.length > 0 && !generate.isPending && (
+            <span className="text-xs text-muted">Bestehende Regeln werden berücksichtigt und ergänzt.</span>
+          )}
         </div>
       </Card>
 
