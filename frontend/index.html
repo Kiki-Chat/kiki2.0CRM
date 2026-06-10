@@ -1,18 +1,49 @@
 <!doctype html>
 <!--
-  lang="de" + translate="no": the app is German-only. Chrome / Google Translate
-  auto-translation rewrites text nodes out from under React, which then crashes
-  reconciliation with `NotFoundError: Failed to execute 'insertBefore' on 'Node'`
-  (the "Diese Seite konnte nicht geladen werden" page break). Declaring the
-  language correctly and opting out of translation keeps the DOM stable.
+  lang="de": the app's source language is German, declared so browsers offer the
+  RIGHT translation (de → user language). Translation is deliberately ALLOWED
+  (user decision 2026-06-10): Google Translate rewrites text nodes out from
+  under React, which normally crashes reconciliation with
+  `NotFoundError: Failed to execute 'insertBefore'/'removeChild' on 'Node'`.
+  The inline script below makes those two DOM ops fail-soft for exactly the
+  translated-node case, so translation works WITHOUT the page break.
 -->
-<html lang="de" translate="no">
+<html lang="de">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="google" content="notranslate" />
     <title>HeyKiki Portal</title>
+    <script>
+      // Google-Translate guard: when the translator wraps/moves text nodes,
+      // React later calls removeChild/insertBefore with nodes that are no
+      // longer where it left them and the page crashes. Degrade those exact
+      // failures to safe no-op behavior instead of throwing (well-known
+      // workaround, see github.com/facebook/react/issues/11538).
+      (function () {
+        if (typeof Node !== 'function' || !Node.prototype) return;
+        var origRemoveChild = Node.prototype.removeChild;
+        Node.prototype.removeChild = function (child) {
+          if (child && child.parentNode !== this) {
+            if (console && console.warn) {
+              console.warn('translate-guard: removeChild on detached node ignored', child);
+            }
+            return child;
+          }
+          return origRemoveChild.apply(this, arguments);
+        };
+        var origInsertBefore = Node.prototype.insertBefore;
+        Node.prototype.insertBefore = function (newNode, referenceNode) {
+          if (referenceNode && referenceNode.parentNode !== this) {
+            if (console && console.warn) {
+              console.warn('translate-guard: insertBefore with moved reference node — appending instead', referenceNode);
+            }
+            return origInsertBefore.call(this, newNode, null);
+          }
+          return origInsertBefore.apply(this, arguments);
+        };
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
