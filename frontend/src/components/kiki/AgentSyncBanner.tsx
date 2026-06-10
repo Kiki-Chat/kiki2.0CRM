@@ -27,6 +27,9 @@ export function AgentSyncBanner() {
     queryKey: ['kiki-zentrale', 'sync-status'],
     queryFn: () => apiFetch<SyncStatus>(`${KZ}/sync-status`),
     refetchInterval: (q) => (q.state.data?.status === 'pending' ? 2_500 : false),
+    // Keep polling while the tab is hidden — the user may tab away during the
+    // ~minute-long ElevenLabs push and must still see the resolution on return.
+    refetchIntervalInBackground: true,
   })
 
   // Show the green "applied" state only briefly after a fresh completion.
