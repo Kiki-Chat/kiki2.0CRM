@@ -393,6 +393,17 @@ def run_due_outbound(
     }
     # Topic 18: process any due short-hangup re-dials on the same sweep tick.
     summary["retries"] = run_due_retries(now=now, dry_run=dry_run)
+    # Bug #3: resolve pending reschedules whose safety-timer has elapsed. Runs for
+    # ALL orgs (not just outbound-enabled ones) — L1/L2 are only flagged, L3 auto-
+    # resolves — so it lives here, outside the outbound-enabled org loop below.
+    # Best-effort: this secondary sweep must never break the primary reminder sweep.
+    try:
+        summary["reschedule_expiry"] = run_due_reschedule_expiry(
+            now=now, only_org_id=only_org_id, dry_run=dry_run
+        )
+    except Exception as e:  # noqa: BLE001
+        summary["reschedule_expiry"] = {"error": str(e)[:200]}
+        logger.warning("reschedule expiry sweep failed: %s", e)
 
     q = (
         db.table("agent_configs")
@@ -674,3 +685,79 @@ def run_due_retries(now: datetime | None = None, dry_run: bool = False) -> dict:
             errors.append({"id": rid, "error": str(e)[:200]})
             logger.warning("retry re-dial failed (%s/%s): %s", occasion, referenz_id, e)
     return {"due": len(due), "fired": fired, "errors": errors}
+
+
+def run_due_reschedule_expiry(
+    now: datetime | None = None,
+    only_org_id: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Resolve pending reschedule requests whose safety-timer has elapsed (bug #3).
+
+    A pending reschedule is the existing appointment carrying customer_proposed_*
+    plus a reschedule_expires_at deadline. The ACTION is gated by the org's
+    appointments autonomy level:
+      • L1 / L2 (team confirms) → semi-automatic: we do NOTHING here. The request
+        stays pending and the UI flags it overdue from reschedule_expires_at, so a
+        human still decides — we never auto-cancel a real booking.
+      • L3 (auto-confirm) → automatic: drop the stale proposal, and if the customer
+        had abandoned the old slot (replace_intent) cancel it (reversible) + notify.
+    Driven by the same external sweep as run_due_outbound; idempotent (clears the
+    deadline so a second tick is a no-op)."""
+    from app.services.appointments import _get_kiki_level
+    from app.services.appointment_notify import notify_appointment_outcome
+
+    now = now or datetime.now(timezone.utc)
+    db = get_service_client()
+    q = (
+        db.table("appointments")
+        .select("id, org_id, reschedule_replace_intent")
+        .not_.is_("customer_proposed_at", "null")
+        .not_.is_("reschedule_expires_at", "null")
+        .lt("reschedule_expires_at", now.astimezone(timezone.utc).isoformat())
+        .neq("status", "cancelled")
+        .limit(200)
+    )
+    if only_org_id:
+        q = q.eq("org_id", only_org_id)
+    rows = q.execute().data or []
+
+    out: dict = {"due": len(rows), "flagged": 0, "expired": 0, "cancelled": 0, "errors": []}
+    for r in rows:
+        org_id, appt_id = r.get("org_id"), r.get("id")
+        if not (org_id and appt_id):
+            continue
+        # L1/L2: leave it pending for the human (overdue badge handles the nudge).
+        if _get_kiki_level(db, org_id) < 3:
+            out["flagged"] += 1
+            continue
+        replace = bool(r.get("reschedule_replace_intent"))
+        if dry_run:
+            out["expired"] += 1
+            if replace:
+                out["cancelled"] += 1
+            continue
+        payload: dict = {
+            "customer_proposed_start_time": None,
+            "customer_proposed_end_time": None,
+            "customer_proposed_at": None,
+            "customer_proposal_source": None,
+            "reschedule_expires_at": None,
+            "reschedule_replace_intent": None,
+        }
+        if replace:
+            payload["status"] = "cancelled"
+            payload["cancelled_at"] = now.astimezone(timezone.utc).isoformat()
+        try:
+            db.table("appointments").update(payload).eq("org_id", org_id).eq("id", appt_id).execute()
+            out["expired"] += 1
+            if replace:
+                out["cancelled"] += 1
+                try:
+                    notify_appointment_outcome(org_id, appt_id, "cancel")
+                except Exception:  # pragma: no cover — notify must not block cleanup
+                    pass
+        except Exception as e:  # noqa: BLE001 — one failure must not stop the rest
+            out["errors"].append({"id": appt_id, "error": str(e)[:200]})
+            logger.warning("reschedule expiry failed (%s): %s", appt_id, e)
+    return out

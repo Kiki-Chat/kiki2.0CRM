@@ -401,3 +401,27 @@ def test_decline_proposal_clears_fields(monkeypatch):
     asyncio.run(appt_routes.decline_customer_proposal("a", user=_org_admin_user("org-1")))
     assert client._last_update_payload["customer_proposed_start_time"] is None
     assert client._last_update_payload["customer_proposed_at"] is None
+    # keep-intent (default): the original appointment is NOT cancelled.
+    assert "status" not in client._last_update_payload
+
+
+def test_decline_proposal_replace_intent_cancels_original(monkeypatch):
+    """When the customer abandoned the old slot (reschedule_replace_intent), declining
+    the move cancels the appointment (reversible) so the held slot is freed."""
+    proposed = {
+        "id": "a", "org_id": "org-1", "status": "pending",
+        "customer_proposed_start_time": "2026-06-15T12:00:00+00:00",
+        "reschedule_replace_intent": True,
+    }
+    cancelled = {**proposed, "status": "cancelled"}
+    client = _FakeClient([[proposed], [cancelled]])
+    monkeypatch.setattr(appt_routes, "get_service_client", lambda: client)
+
+    result = asyncio.run(
+        appt_routes.decline_customer_proposal("a", user=_org_admin_user("org-1"))
+    )
+    assert client._last_update_payload["status"] == "cancelled"
+    assert client._last_update_payload["cancelled_at"] is not None
+    assert client._last_update_payload["customer_proposed_at"] is None
+    # the route uses this flag to fire the cancellation notification
+    assert result.get("_replace_cancelled") is True

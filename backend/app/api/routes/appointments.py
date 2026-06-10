@@ -612,6 +612,9 @@ def _approve_proposal(org_id: str, appointment_id: str) -> dict | None:
                 "customer_proposed_at": None,
                 "customer_proposal_source": None,
                 "alternative_proposed_at": None,
+                # the reschedule is committed → the safety timer no longer applies
+                "reschedule_expires_at": None,
+                "reschedule_replace_intent": None,
             }
         )
         .eq("org_id", org_id)
@@ -623,26 +626,40 @@ def _approve_proposal(org_id: str, appointment_id: str) -> dict | None:
 
 
 def _decline_proposal(org_id: str, appointment_id: str) -> dict | None:
+    """Decline the customer's reschedule. If the customer abandoned the old slot
+    (reschedule_replace_intent), declining the MOVE means there's nothing left to
+    keep → cancel the appointment (reversible) so the slot is freed and the
+    customer can be told. Otherwise the original simply stays as it was."""
     appt = _get_appointment(org_id, appointment_id)
     if not appt:
         return None
+    replace_intent = bool(appt.get("reschedule_replace_intent"))
+    payload: dict = {
+        "customer_proposed_start_time": None,
+        "customer_proposed_end_time": None,
+        "customer_proposed_at": None,
+        "customer_proposal_source": None,
+        "reschedule_expires_at": None,
+        "reschedule_replace_intent": None,
+    }
+    if replace_intent:
+        payload["status"] = "cancelled"
+        payload["cancelled_at"] = _now_iso()
     updated = (
         get_service_client()
         .table("appointments")
-        .update(
-            {
-                "customer_proposed_start_time": None,
-                "customer_proposed_end_time": None,
-                "customer_proposed_at": None,
-                "customer_proposal_source": None,
-            }
-        )
+        .update(payload)
         .eq("org_id", org_id)
         .eq("id", appointment_id)
         .execute()
         .data
     )
-    return updated[0] if updated else None
+    if not updated:
+        return None
+    row = updated[0]
+    # Signal to the route whether a cancellation notification should fire.
+    row["_replace_cancelled"] = replace_intent
+    return row
 
 
 @router.post("/{appointment_id}/approve-proposal")
@@ -664,11 +681,16 @@ async def approve_customer_proposal(
 async def decline_customer_proposal(
     appointment_id: str, user: CurrentUser = Depends(require_org)
 ) -> dict:
-    """Decline the customer's counter-proposed slot (clears it; appointment stays
-    as-is). No outbound call is fired."""
+    """Decline the customer's reschedule. If the customer had abandoned the old
+    slot, the appointment is cancelled (slot freed) and the customer is notified
+    of the cancellation; otherwise the original stays and nothing is sent."""
     appt = await run_in_threadpool(_decline_proposal, user.org_id, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    if appt.get("_replace_cancelled"):
+        appt["_outbound"] = await run_in_threadpool(
+            notify_appointment_outcome, user.org_id, appointment_id, "cancel"
+        )
     return appt
 
 

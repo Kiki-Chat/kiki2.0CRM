@@ -42,7 +42,8 @@ _CONFIG_COLS = (
     "outbound_time_to, outbound_weekdays, outbound_appt_confirm_enabled, "
     "outbound_appt_cancel_enabled, outbound_appt_reschedule_enabled, "
     "outbound_retry_max_attempts, outbound_retry_interval_minutes, "
-    "outbound_recall_on_short_hangup, outbound_short_hangup_seconds, welcome_messages"
+    "outbound_recall_on_short_hangup, outbound_short_hangup_seconds, welcome_messages, "
+    "reschedule_request_timeout_hours"
 )
 
 
@@ -118,6 +119,8 @@ class VerhaltenUpdate(BaseModel):
     # Per-capability autonomy (topics 19/21/22)
     appointments_enabled: bool | None = None
     appointments_level: int | None = None
+    # Bug #3: hours a pending reschedule waits before the safety-timer resolves it.
+    reschedule_request_timeout_hours: int | None = None
     kva_enabled: bool | None = None
     kva_level: int | None = None
     projects_enabled: bool | None = None
@@ -466,6 +469,7 @@ async def update_verhalten(
         for k in (
             "kiki_level", "welcome_message", "welcome_messages",
             "appointments_enabled", "appointments_level",
+            "reschedule_request_timeout_hours",
             "kva_enabled", "kva_level",
             "projects_enabled", "projects_level",
             "invoices_enabled", "invoices_level",

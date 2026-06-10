@@ -274,6 +274,9 @@ export function RescheduleApprovalModal({
   appointmentId,
   customerName,
   proposedTime,
+  originalTime,
+  expiresAt,
+  replaceIntent,
   onClose,
   onResolved,
 }: {
@@ -281,9 +284,13 @@ export function RescheduleApprovalModal({
   appointmentId: string | null
   customerName: string | null
   proposedTime: string | null
+  originalTime?: string | null
+  expiresAt?: string | null
+  replaceIntent?: boolean | null
   onClose: () => void
   onResolved: () => void
 }) {
+  const overdue = !!expiresAt && new Date(expiresAt).getTime() < Date.now()
   const [error, setError] = useState<string | null>(null)
   const done = () => {
     onResolved()
@@ -304,15 +311,33 @@ export function RescheduleApprovalModal({
     <Modal open={open} onOpenChange={(o) => !o && onClose()} title="Terminänderung genehmigen">
       <div className="space-y-4">
         <p className="text-sm text-body">
-          <span className="font-semibold">{customerName || 'Der Kunde'}</span> möchte den Termin verschieben auf:
+          <span className="font-semibold">{customerName || 'Der Kunde'}</span> möchte den Termin verschieben:
         </p>
-        <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-center">
-          <div className="text-lg font-bold text-orange-700">{proposedTime ? absoluteTimeDe(proposedTime) : '—'}</div>
-          <div className="text-xs text-muted">Vorgeschlagener neuer Termin (Berlin-Zeit)</div>
+        <div className="flex items-stretch gap-2">
+          <div className="flex-1 rounded-lg border border-border bg-alt p-3 text-center">
+            <div className="text-sm font-semibold text-body line-through">
+              {originalTime ? absoluteTimeDe(originalTime) : '—'}
+            </div>
+            <div className="text-xs text-muted">Bisheriger Termin</div>
+          </div>
+          <div className="flex items-center text-muted">→</div>
+          <div className="flex-1 rounded-lg border border-orange-200 bg-orange-50 p-3 text-center">
+            <div className="text-sm font-bold text-orange-700">
+              {proposedTime ? absoluteTimeDe(proposedTime) : '—'}
+            </div>
+            <div className="text-xs text-muted">Gewünschter neuer Termin</div>
+          </div>
         </div>
+        {overdue && (
+          <div className="rounded-md bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+            Diese Anfrage ist überfällig — der Kunde wartet auf Ihre Entscheidung.
+          </div>
+        )}
         <p className="text-xs text-muted">
           „Genehmigen" verschiebt den Termin auf diese Zeit, bestätigt ihn und informiert den Kunden (Anruf + E-Mail).
-          „Ablehnen" verwirft den Vorschlag — der bisherige Termin bleibt bestehen.
+          {replaceIntent
+            ? ' „Ablehnen" — der Kunde wollte den alten Termin nicht behalten, daher wird er storniert und der Kunde informiert.'
+            : ' „Ablehnen" verwirft den Vorschlag — der bisherige Termin bleibt bestehen.'}
         </p>
         {error && <div className="rounded-md bg-error-bg px-3 py-2 text-xs text-error">{error}</div>}
         <div className="flex gap-3">

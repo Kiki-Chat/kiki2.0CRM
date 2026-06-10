@@ -96,6 +96,13 @@ class ChangeAppointmentRequest(ToolRequestBase):
     new_date: str | None = Field(default=None, alias="newDate")
     new_time: str | None = Field(default=None, alias="newTime")
     reason: str | None = None
+    # Date of the EXISTING appointment the customer wants to move. Used to pick
+    # the right one when the customer has several upcoming appointments (the agent
+    # asks for it, mirroring the cancel flow). Optional when there's only one.
+    appointment_date: str | None = Field(default=None, alias="appointmentDate")
+    # TRUE  → customer wants the new time INSTEAD of the old (abandons the old slot).
+    # FALSE/None → keep the original as a fallback; never auto-cancel it.
+    replace_original: bool | None = Field(default=None, alias="replaceOriginal")
 
 
 # 8. searchCustomerInquiries

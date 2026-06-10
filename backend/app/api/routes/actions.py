@@ -292,9 +292,10 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
     proposed a slot (awaiting a team decision — high priority) or the team sent an
     alternative (awaiting the customer)."""
     cols = (
-        "id, inquiry_id, customer_id, title, created_at, status, "
+        "id, inquiry_id, customer_id, title, created_at, status, scheduled_at, "
         "alternative_proposed_at, alternative_start_time, "
-        "customer_proposed_at, customer_proposed_start_time, source_conversation_id"
+        "customer_proposed_at, customer_proposed_start_time, source_conversation_id, "
+        "reschedule_expires_at, reschedule_replace_intent"
     )
     cust = (
         client.table("appointments").select(cols).eq("org_id", org_id)
@@ -368,6 +369,12 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
                 # Genehmigen/Ablehnen it in one click); 'team' → we sent an alternative
                 # and are awaiting the customer's reply (nothing to approve yet).
                 "proposal_role": "customer" if is_cust else "team",
+                # Reschedule context for the approval card: the current (old) slot,
+                # the safety-timer deadline, and whether the customer abandoned the
+                # old slot. expires_at lets the UI flag an overdue request.
+                "original_time": r.get("scheduled_at"),
+                "expires_at": r.get("reschedule_expires_at"),
+                "replace_intent": r.get("reschedule_replace_intent"),
             }
         )
     return out

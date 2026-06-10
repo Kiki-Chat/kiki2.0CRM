@@ -77,6 +77,12 @@ export interface ActionItem {
   // alt_time_proposal only: 'customer' = customer counter-proposal (approvable in one
   // click via the reschedule popup); 'team' = we sent an alternative, awaiting reply.
   proposal_role?: 'customer' | 'team' | null
+  // Reschedule context (alt_time_proposal / customer): the current slot, the
+  // safety-timer deadline (UI flags overdue), and whether the customer abandoned
+  // the old slot (true) or keeps it as a fallback.
+  original_time?: string | null
+  expires_at?: string | null
+  replace_intent?: boolean | null
   // To-do state overlaid from action_tasks (claim / done / delete).
   action_key: string
   state: 'open' | 'claimed' | 'done'

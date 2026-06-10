@@ -38,7 +38,14 @@ export function CallLogsPage() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   // Customer-proposed reschedule being approved/declined in the popup.
-  const [reschedule, setReschedule] = useState<{ id: string; name: string | null; time: string | null } | null>(null)
+  const [reschedule, setReschedule] = useState<{
+    id: string
+    name: string | null
+    time: string | null
+    originalTime: string | null
+    expiresAt: string | null
+    replaceIntent: boolean | null
+  } | null>(null)
   const [rightOpen, setRightOpen] = useState(true)
   // Deep-link seeding (dashboard CTAs): ?direction=&status=&tab=.
   const [filters, setFilters] = useState<InboxFilters>(() => {
@@ -232,7 +239,14 @@ export function CallLogsPage() {
                   // here (pre-filled with the proposed slot). One click moves +
                   // confirms the appointment — no need to find the call.
                   if (item.kind === 'alt_time_proposal' && item.proposal_role === 'customer') {
-                    setReschedule({ id: item.id, name: item.customer_name, time: item.due_at })
+                    setReschedule({
+                      id: item.id,
+                      name: item.customer_name,
+                      time: item.due_at,
+                      originalTime: item.original_time ?? null,
+                      expiresAt: item.expires_at ?? null,
+                      replaceIntent: item.replace_intent ?? null,
+                    })
                     return
                   }
                   // Route each Aktion to the surface where it can actually be acted
@@ -294,6 +308,9 @@ export function CallLogsPage() {
         appointmentId={reschedule?.id ?? null}
         customerName={reschedule?.name ?? null}
         proposedTime={reschedule?.time ?? null}
+        originalTime={reschedule?.originalTime ?? null}
+        expiresAt={reschedule?.expiresAt ?? null}
+        replaceIntent={reschedule?.replaceIntent ?? null}
         onClose={() => setReschedule(null)}
         onResolved={() => {
           qc.invalidateQueries({ queryKey: ['actions', 'pending'] })

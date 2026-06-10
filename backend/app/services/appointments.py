@@ -183,6 +183,26 @@ def _get_kiki_level(client, org_id: str) -> int:
         return 2
 
 
+def _reschedule_timeout_hours(client, org_id: str) -> int:
+    """Per-org hours a pending reschedule waits before the timer resolves it
+    (agent_configs.reschedule_request_timeout_hours, default 24)."""
+    rows = (
+        client.table("agent_configs")
+        .select("reschedule_request_timeout_hours")
+        .eq("org_id", org_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not rows:
+        return 24
+    try:
+        val = int(rows[0].get("reschedule_request_timeout_hours"))
+        return val if val > 0 else 24
+    except (TypeError, ValueError):
+        return 24
+
+
 def _first_employee(client, org_id: str) -> dict | None:
     rows = (
         client.table("employees")
@@ -712,7 +732,6 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
         .in_("status", ["pending", "confirmed"])
         .gte("scheduled_at", now.isoformat())
         .order("scheduled_at")
-        .limit(1)
         .execute()
         .data
         or []
@@ -723,7 +742,41 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
             "error": "NO_APPOINTMENT_FOUND",
             "message": "Es wurde kein bevorstehender Termin gefunden.",
         }
-    appt = rows[0]
+    # Pick the RIGHT appointment to move. With one upcoming appointment we take it.
+    # With several we never guess: the agent must supply the date of the one the
+    # customer means (mirrors the cancel flow) so we link the proposal to the exact
+    # appointment — this is what keeps a reschedule from drifting onto the wrong row.
+    if len(rows) == 1:
+        appt = rows[0]
+    else:
+        want = _parse_iso_date(payload.appointment_date)
+        if want is None:
+            return {
+                "success": False,
+                "error": "DATE_CONFIRMATION_REQUIRED",
+                "message": "Sie haben mehrere bevorstehende Termine. Welchen möchten "
+                "Sie verschieben? Bitte nennen Sie mir das Datum des Termins.",
+            }
+        matching = [
+            a for a in rows
+            if (_parse_iso(a["scheduled_at"])
+                and _parse_iso(a["scheduled_at"]).astimezone(BERLIN).date() == want)
+        ]
+        if len(matching) == 0:
+            return {
+                "success": False,
+                "error": "NO_APPOINTMENT_FOUND",
+                "message": "An diesem Datum wurde kein Termin gefunden. Bitte prüfen "
+                "Sie das Datum.",
+            }
+        if len(matching) > 1:
+            return {
+                "success": False,
+                "error": "MULTIPLE_MATCHES",
+                "message": "Es gibt mehrere Termine an diesem Datum. Bitte nennen Sie "
+                "zusätzlich die Uhrzeit zur eindeutigen Zuordnung.",
+            }
+        appt = matching[0]
 
     new_dt = parse_when(payload.new_date, payload.new_time)
     if new_dt is None:
@@ -759,12 +812,23 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
     # call+email). Purely additive: the appointment_change inquiry created above
     # and this tool's return contract are UNCHANGED. Best-effort — a stamp failure
     # must never change the agent-facing outcome.
+    # The reschedule is a PROPOSAL on the existing row — no new appointment is
+    # created, and NOTHING is sent to the customer here (no call, no email). The
+    # admin commits it (approve-proposal → in-place move + confirmation), or the
+    # timer resolves it after reschedule_expires_at if no one acts. replace_intent
+    # records whether the customer abandons the old slot (→ timer may release it)
+    # or keeps it as a fallback (→ never auto-cancelled).
+    expires_at = now_berlin() + timedelta(
+        hours=_reschedule_timeout_hours(client, org_id)
+    )
     try:
         client.table("appointments").update(
             {
                 "customer_proposed_start_time": new_dt.isoformat(),
                 "customer_proposed_at": now_berlin().isoformat(),
                 "customer_proposal_source": "agent_call",
+                "reschedule_expires_at": expires_at.isoformat(),
+                "reschedule_replace_intent": bool(payload.replace_original),
             }
         ).eq("org_id", org_id).eq("id", appt["id"]).execute()
     except Exception:  # pragma: no cover — never break the live change flow

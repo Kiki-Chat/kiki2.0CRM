@@ -7,6 +7,7 @@ export interface KzConfig {
   kiki_level: number // legacy (dormant) — replaced by the per-capability fields below
   appointments_enabled: boolean
   appointments_level: number
+  reschedule_request_timeout_hours: number
   kva_enabled: boolean
   kva_level: number
   projects_enabled: boolean
