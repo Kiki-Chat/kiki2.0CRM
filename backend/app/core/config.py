@@ -193,6 +193,25 @@ def validate_runtime_config(s: "Settings | None" = None) -> list[str]:
             )
         if not s.supabase_url or not s.supabase_service_role_key:
             problems.append("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY must be set in production.")
+    # Stripe go-live guards — a LIVE key charges real customers, so running it
+    # without webhook verification (subscription state-sync) is never acceptable.
+    if s.stripe_secret_key.startswith("sk_live"):
+        if not s.stripe_webhook_secret:
+            problems.append(
+                "STRIPE_SECRET_KEY is a LIVE key but STRIPE_WEBHOOK_SECRET is empty — "
+                "subscription state-sync would be unverifiable. Configure the live "
+                "webhook endpoint secret before using live billing."
+            )
+        if not s.stripe_billing_enabled:
+            problems.append(
+                "STRIPE_SECRET_KEY is a LIVE key but STRIPE_BILLING_ENABLED=0 — "
+                "remove the live key or enable billing; a half-configured live key "
+                "invites accidental ad-hoc calls."
+            )
+    if s.stripe_usage_reporting_enabled and not s.stripe_billing_enabled:
+        problems.append(
+            "STRIPE_USAGE_REPORTING_ENABLED=1 requires STRIPE_BILLING_ENABLED=1."
+        )
     return problems
 
 

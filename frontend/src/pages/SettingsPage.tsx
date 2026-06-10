@@ -651,6 +651,12 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
             </div>
           </div>
           {portal.isError && <div className="mt-3 text-sm text-error">{(portal.error as Error).message}</div>}
+          {/* Kündigungs-Policy: bewusst KEIN Self-Service-Cancel im Portal/CRM. */}
+          <p className="mt-3 border-t border-border pt-3 text-xs text-muted">
+            Kündigung: Eine Kündigung ist ausschließlich per E-Mail an{' '}
+            <a href="mailto:info.kikichat@gmail.com" className="font-medium text-green-deep underline">info.kikichat@gmail.com</a>{' '}
+            oder telefonisch möglich — nicht über das Portal.
+          </p>
         </Card>
       )}
 
@@ -671,6 +677,12 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
         <KpiCard label="Gespeicherte Dokumente" value={usage.document_count} sub={size} icon={FileText} />
       </div>
 
+      {!over && quota > 0 && pct >= 80 && (
+        <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-bg/40 p-4 text-sm text-body">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
+          <span><strong>{Math.round(pct)} % Ihres Minutenkontingents verbraucht.</strong> Ab {quota} Min. wird jede weitere Minute nach Tarif berechnet.</span>
+        </div>
+      )}
       {over && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-bg/40 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />

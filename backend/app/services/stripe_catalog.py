@@ -5,9 +5,13 @@ the included minutes are tier-1 at €0, overage is tier-2 per-minute). That gra
 shape is what makes soft-stop work: report ALL minutes to the metered item, the first
 N are free, the rest bill automatically. Monthly + annual price per product.
 
-PRICES CONFIRMED by Amber 2026-06-08 (Solo €99 / Team €249 / Premium €599 mo; minutes
-+ overage below). These now live only in the Stripe TEST sandbox — the canonical LIVE
-catalog must still be created with the live key at go-live (run ensure_catalog()).
+PRICES CONFIRMED by Amber 2026-06-10 (Solo €99 +€1.00/min / Team €179 +€0.75/min /
+Premium €499 +€0.50/min; supersedes the 2026-06-08 set). These now live only in the
+Stripe TEST sandbox — the canonical LIVE catalog must still be created with the live
+key at go-live (run ensure_catalog()). ensure_catalog() is price-drift-aware: when a
+lookup-keyed price no longer matches PLANS, a new price is created and the lookup key
+is transferred (Stripe prices are immutable), so re-running after a price change is
+safe in both TEST and LIVE.
 Metadata matches STRIPE_INTEGRATION_HANDOVER.md §4a so Phase-1 quota derivation works.
 """
 
@@ -19,9 +23,9 @@ TAX_CODE = "txcd_10103001"  # SaaS – cloud-based (handover §3)
 
 # plan_title -> included minutes, monthly base (cents), per-minute overage (cents)
 PLANS: dict[str, dict] = {
-    "Kiki Solo": {"minutes": 99, "monthly_cents": 9900, "overage_cents": 119},
-    "Kiki Team": {"minutes": 250, "monthly_cents": 24900, "overage_cents": 100},
-    "Kiki Premium": {"minutes": 750, "monthly_cents": 59900, "overage_cents": 70},
+    "Kiki Solo": {"minutes": 99, "monthly_cents": 9900, "overage_cents": 100},
+    "Kiki Team": {"minutes": 250, "monthly_cents": 17900, "overage_cents": 75},
+    "Kiki Premium": {"minutes": 750, "monthly_cents": 49900, "overage_cents": 50},
 }
 ANNUAL_MONTHS = 10  # annual = 10× monthly (2 months free)
 INTERVALS = ("month", "year")
@@ -51,11 +55,14 @@ def _metered_metadata(title: str) -> dict:
     }
 
 
-def _ensure_price(s, lookup_key: str, **params):
-    found = s.Price.list(lookup_keys=[lookup_key], limit=1).data
-    if found:
+def _ensure_price(s, lookup_key: str, *, matches=None, **params):
+    """Return the lookup-keyed price when it still matches PLANS; otherwise
+    create a replacement and transfer the lookup key (prices are immutable,
+    so a price change = new price + moved key; old subs keep their old price)."""
+    found = s.Price.list(lookup_keys=[lookup_key], limit=1, expand=["data.tiers"]).data
+    if found and (matches is None or matches(found[0])):
         return found[0]
-    return s.Price.create(lookup_key=lookup_key, **params)
+    return s.Price.create(lookup_key=lookup_key, transfer_lookup_key=True, **params)
 
 
 def ensure_catalog() -> dict:
@@ -80,12 +87,25 @@ def ensure_catalog() -> dict:
             mult = 1 if interval == "month" else ANNUAL_MONTHS
             base_price = _ensure_price(
                 s, f"{_slug(title)}_base_{interval}",
+                matches=lambda p, want=spec["monthly_cents"] * mult: p.get("unit_amount") == want,
                 product=base["id"], currency="eur",
                 unit_amount=spec["monthly_cents"] * mult,
                 recurring={"interval": interval}, tax_behavior="inclusive",
             )
+
+            def _metered_matches(p, *, minutes=spec["minutes"], overage=spec["overage_cents"]):
+                tiers = p.get("tiers") or []
+                if len(tiers) != 2:
+                    return False
+                return (
+                    tiers[0].get("up_to") == minutes
+                    and (tiers[0].get("unit_amount") or 0) == 0
+                    and tiers[1].get("unit_amount") == overage
+                )
+
             metered_price = _ensure_price(
                 s, f"{_slug(title)}_metered_{interval}",
+                matches=_metered_matches,
                 product=metered["id"], currency="eur",
                 recurring={"interval": interval, "usage_type": "metered"},
                 billing_scheme="tiered", tiers_mode="graduated",
