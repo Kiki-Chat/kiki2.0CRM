@@ -779,6 +779,88 @@ async def reorder_required_fields(
     return result
 
 
+# ─── Gesprächslogik (Wenn/Dann-Baukasten) ────────────────────────────────────
+class ConversationLogicUpdate(BaseModel):
+    enabled: bool | None = None
+    logic: dict | None = None
+    model_config = {"extra": "ignore"}
+
+
+def _validate_logic_or_422(raw: dict) -> str:
+    """Validates + compiles; returns the compiled preview text or raises 422."""
+    from app.schemas.conversation_logic import (
+        MAX_COMPILED_CHARS,
+        ConversationLogic,
+        LogicError,
+        compile_conversation_logic,
+        validate_conversation_logic,
+    )
+
+    try:
+        logic = ConversationLogic.model_validate(raw)
+        validate_conversation_logic(logic)
+        compiled = compile_conversation_logic(logic)
+    except LogicError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 — pydantic shape errors etc.
+        raise HTTPException(status_code=422, detail=f"Ungültige Gesprächslogik: {str(exc)[:200]}")
+    if len(compiled) > MAX_COMPILED_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Die Gesprächslogik ist zu lang ({len(compiled)} Zeichen, "
+            f"max. {MAX_COMPILED_CHARS}). Bitte kürzen Sie Bedingungen oder Aktionen.",
+        )
+    return compiled
+
+
+@router.get("/conversation-logic")
+async def get_conversation_logic(user: CurrentUser = Depends(require_org)) -> dict:
+    def _do() -> dict:
+        row = (
+            get_service_client().table("agent_configs")
+            .select("conversation_logic, conversation_logic_enabled")
+            .eq("org_id", user.org_id).limit(1).execute().data or [{}]
+        )[0]
+        return {
+            "enabled": row.get("conversation_logic_enabled", True),
+            "logic": row.get("conversation_logic") or {"version": 1, "blocks": []},
+        }
+
+    return await run_in_threadpool(_do)
+
+
+@router.patch("/conversation-logic")
+async def update_conversation_logic(
+    payload: ConversationLogicUpdate, background: BackgroundTasks,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    _require_admin(user)
+    fields: dict = {}
+    if payload.enabled is not None:
+        fields["conversation_logic_enabled"] = payload.enabled
+    if payload.logic is not None:
+        _validate_logic_or_422(payload.logic)
+        fields["conversation_logic"] = payload.logic
+    if not fields:
+        return {"success": True}
+    await run_in_threadpool(_upsert_config, user.org_id, fields)
+    _schedule_repush(background, user, "kz_conversation_logic")
+    return {"success": True}
+
+
+class ConversationLogicPreview(BaseModel):
+    logic: dict
+
+
+@router.post("/conversation-logic/preview")
+async def preview_conversation_logic(
+    payload: ConversationLogicPreview, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Validate + compile WITHOUT saving — the single compiler implementation
+    powers the live frontend preview (no drift-prone TS port)."""
+    return {"text": _validate_logic_or_422(payload.logic)}
+
+
 # ─── Branche & Kontext ───────────────────────────────────────────────────────
 @router.patch("/context")
 async def update_context(

@@ -382,7 +382,8 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
             "lead_time_earliest_clock, emergency_enabled, emergency_number, "
             "emergency_only_outside_business_hours, emergency_keywords, "
             "emergency_extra_windows, emergency_surcharge_notice_enabled, "
-            "emergency_surcharge_text, incoming_forwarding_number, price_info_enabled"
+            "emergency_surcharge_text, incoming_forwarding_number, price_info_enabled, "
+            "conversation_logic, conversation_logic_enabled"
         )
         .eq("org_id", str(org_id))
         .limit(1)
@@ -579,6 +580,38 @@ def render_required_fields_block(fields: list[dict], cfg: dict | None = None) ->
         "höchstens kurz bestätigen:"
     )
     return lead + "\n" + "\n".join(lines)
+
+
+def render_conversation_logic_block(cfg: dict) -> str:
+    """``{{KZ_CONVERSATION_LOGIC}}`` — the org's Wenn/Dann-Gesprächslogik as a
+    numbered block ("Schritt 1a"), compiled from agent_configs.conversation_logic.
+    Disabled/empty → "" (token vanishes, zero prompt cost)."""
+    if cfg.get("conversation_logic_enabled") is False:
+        return ""
+    raw = cfg.get("conversation_logic")
+    if not raw or not isinstance(raw, dict) or not raw.get("blocks"):
+        return ""
+    from app.schemas.conversation_logic import (
+        ConversationLogic,
+        compile_conversation_logic,
+    )
+
+    try:
+        compiled = compile_conversation_logic(ConversationLogic.model_validate(raw))
+    except Exception as exc:  # noqa: BLE001 — a bad stored tree must not kill rendering
+        logger.warning("conversation_logic compile failed: %s", str(exc)[:200])
+        return ""
+    if not compiled:
+        return ""
+    return (
+        "## Schritt 1a — Firmenspezifische Gesprächslogik (VERBINDLICH)\n\n"
+        "Diese Wenn/Dann-Regeln ERGÄNZEN Schritt 1 und gehen den allgemeinen 1–2\n"
+        "Rückfragen aus Schritt 1 vor: Trifft ein Zweig zu, arbeite ihn vollständig\n"
+        "ab und überspringe die generischen Rückfragen. Schritt 0 (Identifikation),\n"
+        "Schritt 2 (Daten) und Schritt 3 (Termin) bleiben unverändert, sofern eine\n"
+        "„Gehe zu“-Anweisung nichts anderes sagt.\n\n"
+        + compiled
+    )
 
 
 def render_problem_description_block(text: str | None) -> str:
@@ -988,6 +1021,7 @@ def render_prompt_for_org(
             else render_problem_description_block(kz_cfg.get("problem_description"))
         ),
         "KZ_APPOINTMENT_CATEGORIES": render_appointment_categories_block(categories),
+        "KZ_CONVERSATION_LOGIC": render_conversation_logic_block(kz_cfg),
         "KZ_SCHEDULING_RULES": render_scheduling_rules_block(kz_cfg),
         "KZ_EMERGENCY": render_emergency_block(kz_cfg),
         "KZ_STAFF_TRANSFER": render_staff_transfer_block(kz_cfg),

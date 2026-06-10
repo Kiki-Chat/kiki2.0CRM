@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Activity, BadgeEuro, BookOpen, Bot, CalendarClock, Clock,
+  Activity, BadgeEuro, BookOpen, Bot, CalendarClock, Clock, GitBranch,
   History, ListChecks, Lock, Phone, PhoneOutgoing, RotateCcw, Siren, SlidersHorizontal, Sparkles, Tags, Wrench,
   type LucideIcon,
 } from 'lucide-react'
@@ -10,6 +10,7 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { AusgehendeSection, BrancheKontextSection, LeistungsangebotSection, NotdienstSection, PflichtfelderSection, PreisauskunftSection, TelefonSection, TerminkategorienSection, TerminregelnSection } from '../components/kiki/ConfigSections'
 import { AgentSyncBanner } from '../components/kiki/AgentSyncBanner'
 import { AutonomieSection } from '../components/kiki/AutonomieSection'
+import { GespraechslogikSection } from '../components/kiki/GespraechslogikSection'
 import { ConfirmDialog } from '../components/kiki/shared'
 import { GeschaeftszeitenSection } from '../components/kiki/GeschaeftszeitenSection'
 import { VerhaltenSection } from '../components/kiki/VerhaltenSection'
@@ -27,6 +28,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { slug: 'verhalten', label: 'Verhalten', icon: Sparkles },
     { slug: 'autonomie', label: 'Autonomie', icon: SlidersHorizontal },
     { slug: 'leitfaden', label: 'Leitfaden', icon: ListChecks },
+    { slug: 'gespraechslogik', label: 'Gesprächslogik', icon: GitBranch },
     { slug: 'branche-kontext', label: 'Branche & Kontext', icon: BookOpen },
   ] },
   { label: 'Terminplanung', items: [
@@ -191,6 +193,7 @@ function SectionContent({ section, data, flash }: { section: string; data: KzOve
     case 'verhalten': return <VerhaltenSection data={data} flash={flash} />
     case 'autonomie': return <AutonomieSection data={data} flash={flash} />
     case 'leitfaden': return <PflichtfelderSection data={data} flash={flash} />
+    case 'gespraechslogik': return <GespraechslogikSection flash={flash} />
     case 'branche-kontext': return <BrancheKontextSection data={data} flash={flash} />
     case 'geschaeftszeiten': return <GeschaeftszeitenSection />
     case 'terminregeln': return <TerminregelnSection data={data} flash={flash} />

@@ -274,6 +274,10 @@ Wichtige Grenzen:
   Wasser im Sicherungskasten o. Ä.) — sofort Termin/Notfall-Rückruf
   anbieten und ggf. an den Menschen weiterleiten.
 
+<!-- GESPRAECHSLOGIK_V1 -->
+{{KZ_CONVERSATION_LOGIC}}
+<!-- /GESPRAECHSLOGIK_V1 -->
+
 ## Schritt 2 — Daten aufnehmen
 
 **BESTANDSKUNDE bereits identifiziert (über Caller-ID):** Sage NIEMALS
