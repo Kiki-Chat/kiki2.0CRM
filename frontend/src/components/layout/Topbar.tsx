@@ -1,4 +1,4 @@
-import { Bell, ChevronLeft, Menu, Moon, Sun } from 'lucide-react'
+import { Bell, ChevronLeft, Menu, Moon, Sparkles, Sun } from 'lucide-react'
 
 import { useTheme } from '../../lib/theme'
 import { cn } from '../../lib/utils'
@@ -7,10 +7,15 @@ export function Topbar({
   collapsed,
   onToggleCollapse,
   onOpenNav,
+  copilotOpen,
+  onToggleCopilot,
 }: {
   collapsed: boolean
   onToggleCollapse: () => void
   onOpenNav?: () => void
+  /** "Hey Kiki" side-panel toggle — undefined when the copilot is disabled. */
+  copilotOpen?: boolean
+  onToggleCopilot?: () => void
 }) {
   const { theme, toggle } = useTheme()
 
@@ -37,6 +42,24 @@ export function Topbar({
       </button>
 
       <div className="ml-auto flex items-center gap-2">
+        {onToggleCopilot && (
+          <button
+            onClick={onToggleCopilot}
+            className={cn(
+              'flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm font-semibold transition',
+              copilotOpen
+                ? 'border-ai/40 bg-ai-bg text-ai'
+                : 'border-border bg-alt text-body hover:bg-ai-bg hover:text-ai',
+            )}
+            aria-label="Hey Kiki Assistent umschalten"
+            aria-pressed={copilotOpen}
+            title="Hey Kiki — dein CRM-Assistent"
+          >
+            <Sparkles size={14} />
+            Hey Kiki
+          </button>
+        )}
+
         <button
           onClick={toggle}
           className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-alt text-body"

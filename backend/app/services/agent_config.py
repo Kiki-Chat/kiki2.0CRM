@@ -52,6 +52,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -322,7 +323,10 @@ def _fetch_required_fields(org_id: str | UUID) -> list[dict]:
     db = get_service_client()
     return (
         db.table("agent_required_fields")
-        .select("field_key, label, description, is_duty, identification_role, sort_order")
+        .select(
+            "field_key, label, description, is_duty, identification_role, "
+            "sort_order, is_active, linked_setting"
+        )
         .eq("org_id", str(org_id))
         .order("sort_order")
         .execute()
@@ -374,11 +378,12 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
             "kiki_level, appointments_enabled, appointments_level, kva_enabled, kva_level, "
             "problem_description, prompt_manual_override, trade, scheduling, "
             "scheduling_enabled, buffer_minutes, max_appointments_per_day, "
-            "parallel_slots, lead_time_days, lead_time_only_weekdays, "
+            "parallel_slots, lead_time_hours, lead_time_days, lead_time_only_weekdays, "
             "lead_time_earliest_clock, emergency_enabled, emergency_number, "
             "emergency_only_outside_business_hours, emergency_keywords, "
             "emergency_extra_windows, emergency_surcharge_notice_enabled, "
-            "emergency_surcharge_text, incoming_forwarding_number, price_info_enabled"
+            "emergency_surcharge_text, incoming_forwarding_number, price_info_enabled, "
+            "conversation_logic, conversation_logic_enabled"
         )
         .eq("org_id", str(org_id))
         .limit(1)
@@ -402,8 +407,12 @@ def render_price_info_block(cfg: dict) -> str:
             "  „Gerne sage ich Ihnen, was die gewünschte Leistung ungefähr kostet. Ich\n"
             "  nenne Ihnen jeweils einen Richtpreis — der kann je nach Situation vor Ort\n"
             "  etwas abweichen.“\n"
-            "  Wenn kein belastbarer Richtpreis im Wissen vorliegt: anbieten, dass das\n"
-            "  Team einen verbindlichen Kostenvoranschlag erstellt — keine Preise raten."
+            "  Nenne AUSSCHLIESSLICH Preise aus dem Wissensbasis-Dokument „Preisliste\n"
+            "  (Richtpreise)“ — exakt den dort hinterlegten Betrag, inkl. Einheit. ERFINDE\n"
+            "  NIEMALS einen Preis und runde nicht frei. Steht die angefragte Leistung\n"
+            "  NICHT in der Preisliste: sage ehrlich, dass du dafür keinen Richtpreis\n"
+            "  nennen kannst, und biete an, dass das Team einen unverbindlichen\n"
+            "  Kostenvoranschlag erstellt — keine Preise raten."
         )
     return (
         "  Nenne am Telefon KEINE Preise oder Richtpreise — auch keine ungefähren.\n"
@@ -487,12 +496,45 @@ def _render_business_hours(scheduling: dict | None) -> str:
 
 
 # ─── Kiki-Zentrale config render helpers (German prose, empty-safe) ──────────
-def render_required_fields_block(fields: list[dict]) -> str:
-    """Pflicht/optional field list for the ``## Pflichtfelder`` body.
+# Leitfaden offer-steps: linked rows render an OFFER instruction at their dragged
+# position instead of a question. The negative case (setting off) is carried by
+# KZ_AUTONOMY / KZ_PRICE_INFO — an inactive linked row simply renders nothing.
+_LINKED_OFFER_LINES = {
+    "offer_appointment": (
+        "- **Termin anbieten** — biete an DIESER Stelle aktiv einen Termin an "
+        "(weiter mit Schritt 3 — Termin)."
+    ),
+    "offer_kva": (
+        "- **Kostenvoranschlag anbieten** — biete an dieser Stelle aktiv einen "
+        "unverbindlichen Kostenvoranschlag an."
+    ),
+    "offer_price_info": (
+        "- **Preisauskunft** — beantworte Preisfragen an dieser Stelle gemäß "
+        "Abschnitt „# Preise“."
+    ),
+}
+
+
+def _field_effective_active(f: dict, cfg: dict | None) -> bool:
+    """Linked rows derive their active state from the live agent_configs boolean
+    (the row's own is_active is position-only); plain rows use is_active."""
+    linked = f.get("linked_setting")
+    if linked:
+        if cfg is None:
+            return True
+        return bool(cfg.get(linked))
+    active = f.get("is_active")
+    return True if active is None else bool(active)
+
+
+def render_required_fields_block(fields: list[dict], cfg: dict | None = None) -> str:
+    """The ordered Leitfaden for the ``## Pflichtfelder`` body: fields to ask plus
+    offer-steps (Termin/KVA/Preisauskunft) at their configured position.
 
     Each field → ``- **{label}**{' (optional)'} — {description}``. Fields with an
-    identification_role are noted as auto-recognised. Empty config → a sensible
-    default field set so the agent never loses its data-capture instruction."""
+    identification_role are noted as auto-recognised; inactive rows are skipped.
+    Empty config → a sensible default field set so the agent never loses its
+    data-capture instruction."""
     if not fields:
         return (
             "PFLICHTFELDER: Name, Telefonnummer, Adresse, Anliegen. "
@@ -500,6 +542,14 @@ def render_required_fields_block(fields: list[dict]) -> str:
         )
     lines = []
     for f in fields:
+        if not _field_effective_active(f, cfg):
+            continue
+        linked = f.get("linked_setting")
+        if linked:
+            offer = _LINKED_OFFER_LINES.get((f.get("field_key") or "").strip())
+            if offer:
+                lines.append(offer)
+            continue
         label = (f.get("label") or f.get("field_key") or "").strip()
         if not label:
             continue
@@ -522,12 +572,46 @@ def render_required_fields_block(fields: list[dict]) -> str:
     # hk_identifyCustomer) — only confirm it briefly. (Fixes the agent re-asking
     # for the phone number it already has.)
     lead = (
-        "Erfasse die folgenden Felder in DIESER Reihenfolge (oberstes Feld = höchste "
-        "Priorität, zuerst). Felder, die bereits bekannt sind oder automatisch erkannt "
-        "wurden (z. B. die Telefonnummer über die Anrufererkennung bzw. "
-        "hk_identifyCustomer), NICHT erneut erfragen — höchstens kurz bestätigen:"
+        "Arbeite die folgenden Punkte in DIESER Reihenfolge ab (oberster Punkt = "
+        "höchste Priorität, zuerst): Felder erfragen bzw. Angebote (Termin/KVA/"
+        "Preisauskunft) aktiv an genau dieser Stelle machen. Felder, die bereits "
+        "bekannt sind oder automatisch erkannt wurden (z. B. die Telefonnummer über "
+        "die Anrufererkennung bzw. hk_identifyCustomer), NICHT erneut erfragen — "
+        "höchstens kurz bestätigen:"
     )
     return lead + "\n" + "\n".join(lines)
+
+
+def render_conversation_logic_block(cfg: dict) -> str:
+    """``{{KZ_CONVERSATION_LOGIC}}`` — the org's Wenn/Dann-Gesprächslogik as a
+    numbered block ("Schritt 1a"), compiled from agent_configs.conversation_logic.
+    Disabled/empty → "" (token vanishes, zero prompt cost)."""
+    if cfg.get("conversation_logic_enabled") is False:
+        return ""
+    raw = cfg.get("conversation_logic")
+    if not raw or not isinstance(raw, dict) or not raw.get("blocks"):
+        return ""
+    from app.schemas.conversation_logic import (
+        ConversationLogic,
+        compile_conversation_logic,
+    )
+
+    try:
+        compiled = compile_conversation_logic(ConversationLogic.model_validate(raw))
+    except Exception as exc:  # noqa: BLE001 — a bad stored tree must not kill rendering
+        logger.warning("conversation_logic compile failed: %s", str(exc)[:200])
+        return ""
+    if not compiled:
+        return ""
+    return (
+        "## Schritt 1a — Firmenspezifische Gesprächslogik (VERBINDLICH)\n\n"
+        "Diese Wenn/Dann-Regeln ERGÄNZEN Schritt 1 und gehen den allgemeinen 1–2\n"
+        "Rückfragen aus Schritt 1 vor: Trifft ein Zweig zu, arbeite ihn vollständig\n"
+        "ab und überspringe die generischen Rückfragen. Schritt 0 (Identifikation),\n"
+        "Schritt 2 (Daten) und Schritt 3 (Termin) bleiben unverändert, sofern eine\n"
+        "„Gehe zu“-Anweisung nichts anderes sagt.\n\n"
+        + compiled
+    )
 
 
 def render_problem_description_block(text: str | None) -> str:
@@ -576,16 +660,21 @@ def render_appointment_categories_block(categories: list[dict]) -> str:
             "Parameter weglassen."
         )
     lines.append(
-        "Wenn keine Kategorie eindeutig passt, wähle die naheliegendste."
+        "Gib `kategorie` bei JEDEM `hk_bookAppointment`-Aufruf an: Wähle die "
+        "Kategorie, deren Beschreibung am besten zum geschilderten Anliegen passt "
+        "— nutze dafür die Beschreibungen oben und verwende den Kategorienamen "
+        "EXAKT wie aufgeführt. Nur wenn wirklich keine passt, lasse den Parameter "
+        "weg. Die Kategorie bestimmt automatisch Dauer und Zuständigkeit."
     )
     return "\n".join(lines)
 
 
 def render_scheduling_rules_block(cfg: dict) -> str:
-    """Prose scheduling rules for the ``{{KZ_SCHEDULING_RULES}}`` token: lead time,
-    earliest clock, buffer/parallel/max-per-day. If scheduling is disabled, instruct
-    the agent NOT to book and to take a message instead."""
-    if cfg.get("scheduling_enabled") is False:
+    """Prose scheduling rules for the ``{{KZ_SCHEDULING_RULES}}`` token: lead time
+    (hours), earliest clock on the first bookable day, buffer/parallel/max-per-day.
+    If appointment booking is disabled (autonomy "Termine" off — or the legacy
+    scheduling_enabled flag), instruct the agent NOT to book and take a message."""
+    if cfg.get("appointments_enabled") is False or cfg.get("scheduling_enabled") is False:
         return (
             "**Keine Online-Terminbuchung:** Buche in diesem Betrieb KEINE festen "
             "Termine.\n"
@@ -597,18 +686,21 @@ def render_scheduling_rules_block(cfg: dict) -> str:
         )
 
     lines = []
-    days = cfg.get("lead_time_days")
-    if isinstance(days, int) and days > 0:
-        unit = "Werktage" if cfg.get("lead_time_only_weekdays") else "Tage"
+    hours = cfg.get("lead_time_hours")
+    if hours is None and isinstance(cfg.get("lead_time_days"), int):
+        hours = cfg["lead_time_days"] * 24  # legacy orgs without the new column
+    if isinstance(hours, int) and hours > 0:
+        unit_note = " (gezählt nur über Werktage)" if cfg.get("lead_time_only_weekdays") else ""
         sentence = (
-            f"**Vorlauf:** Termine sind frühestens {days} {unit} im Voraus buchbar; "
-            "Same-Day-Termine bietest du NICHT an."
+            f"**Vorlauf:** Termine sind frühestens {hours} Stunden nach dem Anruf "
+            f"buchbar{unit_note}; frühere Zeiten bietest du NICHT an."
         )
         clock = _clock_str(cfg.get("lead_time_earliest_clock"))
         if clock:
             sentence += (
-                f" Am frühestmöglichen Tag sind Termine frühestens ab {clock} Uhr "
-                "möglich — biete dort keine früheren Zeiten an."
+                f" Am frühestmöglichen Tag beginnen Termine frühestens um {clock} Uhr "
+                "— biete dort keine früheren Zeiten an; an späteren Tagen gelten die "
+                "normalen Geschäftszeiten."
             )
         lines.append(sentence)
     else:
@@ -695,10 +787,25 @@ def render_emergency_block(cfg: dict) -> str:
             )
 
     lines.append(
-        "  Sag dem Anrufer bei bestätigtem Notfall ZUERST kurz, dass du ihn jetzt mit "
-        "dem Notdienst verbindest, und rufe DANN `hk_transferCall` mit `emergency=true` "
-        "auf — die Weiterleitung erfolgt sofort, sprich danach nicht weiter."
+        "  Bei einem bestätigten NOTFALL buchst du KEINEN Termin — rufe weder "
+        "`hk_getAvailableAppointments` noch `hk_bookAppointment` auf. Notfall und "
+        "Terminvergabe schließen sich aus."
     )
+    if (cfg.get("emergency_number") or cfg.get("forwarding_number") or "").strip():
+        lines.append(
+            "  Sag dem Anrufer bei bestätigtem Notfall ZUERST kurz, dass du ihn jetzt mit "
+            "dem Notdienst verbindest, und rufe DANN das System-Werkzeug "
+            "`transfer_to_number` auf — die Weiterleitung erfolgt sofort, sprich danach "
+            "nicht weiter. Schlägt sie fehl, nimm sofort eine dringende Rückrufnotiz auf "
+            "(`hk_createInquiry`, `dringend=true`, `rueckrufGewuenscht=true`)."
+        )
+    else:
+        lines.append(
+            "  Es ist KEINE Notdienst-Nummer hinterlegt — leite NICHT weiter. Nimm bei "
+            "bestätigtem Notfall stattdessen sofort eine dringende Rückrufnotiz auf "
+            "(`hk_createInquiry`, `dringend=true`, `rueckrufGewuenscht=true`) und sichere "
+            "einen unverzüglichen Rückruf zu."
+        )
     return "\n".join(lines)
 
 
@@ -706,8 +813,8 @@ def render_staff_transfer_block(cfg: dict) -> str:
     """Explicit "connect me to a person" handling for the ``{{KZ_STAFF_TRANSFER}}``
     token. Live staff transfer is only offered when an ``incoming_forwarding_number``
     is configured AND it is inside business hours; otherwise the agent takes a
-    callback note (the existing default). This is distinct from the Notdienst path
-    (emergency=true) — here ``hk_transferCall`` is called with ``emergency=false``."""
+    callback note (the existing default). The transfer itself is the native
+    ``transfer_to_number`` system tool (the staff rule is configured there)."""
     number_set = bool((cfg.get("incoming_forwarding_number") or "").strip())
     if not number_set:
         return (
@@ -717,12 +824,14 @@ def render_staff_transfer_block(cfg: dict) -> str:
     return (
         "  Wenn der Anrufer AUSDRÜCKLICH darum bittet, sofort mit einem Mitarbeiter/"
         "einer Person verbunden zu werden, UND es INNERHALB der Geschäftszeiten ist:\n"
-        "  - Sage kurz, dass du verbindest, und rufe `hk_transferCall` mit "
-        "`emergency=false` auf. Die Mitarbeiter-Nummer ist im Backend hinterlegt — du "
-        "musst sie weder kennen noch ansagen.\n"
+        "  - Sage kurz, dass du verbindest, und rufe das System-Werkzeug "
+        "`transfer_to_number` auf (Mitarbeiter-Weiterleitung). Die Nummer ist dort "
+        "hinterlegt — du musst sie weder kennen noch ansagen.\n"
         "  - Außerhalb der Geschäftszeiten ODER wenn keine sofortige Verbindung "
         "gewünscht ist (reine Rückrufbitte): nimm stattdessen eine Notiz mit "
-        "`hk_createInquiry` (`rueckrufGewuenscht=true`) auf — nicht weiterleiten."
+        "`hk_createInquiry` (`rueckrufGewuenscht=true`) auf — nicht weiterleiten.\n"
+        "  - Schlägt die Weiterleitung fehl: entschuldige dich kurz und nimm eine "
+        "Rückrufnotiz mit `hk_createInquiry` (`rueckrufGewuenscht=true`) auf."
     )
 
 
@@ -901,7 +1010,7 @@ def render_prompt_for_org(
         ),
         "SERVICE_AREA": _render_service_area(),
         "BUSINESS_HOURS": _render_business_hours(kz_cfg.get("scheduling")),
-        "KZ_REQUIRED_FIELDS": render_required_fields_block(required_fields),
+        "KZ_REQUIRED_FIELDS": render_required_fields_block(required_fields, kz_cfg),
         # The problem detail is now a reorderable required field (field_key
         # 'problem_description'), so it renders INSIDE the required-fields block at
         # its chosen sort position. Suppress the old standalone block whenever that
@@ -912,6 +1021,7 @@ def render_prompt_for_org(
             else render_problem_description_block(kz_cfg.get("problem_description"))
         ),
         "KZ_APPOINTMENT_CATEGORIES": render_appointment_categories_block(categories),
+        "KZ_CONVERSATION_LOGIC": render_conversation_logic_block(kz_cfg),
         "KZ_SCHEDULING_RULES": render_scheduling_rules_block(kz_cfg),
         "KZ_EMERGENCY": render_emergency_block(kz_cfg),
         "KZ_STAFF_TRANSFER": render_staff_transfer_block(kz_cfg),
@@ -1181,6 +1291,238 @@ def configure_agent(
         _stamp_agent_provisioned(org_id)
 
     return summary
+
+
+# ─── Native transfer_to_number system tool sync ──────────────────────────────
+def _dial_clean(number: str | None) -> str:
+    """Normalize to E.164: strip formatting; German local numbers (leading 0)
+    become +49…, 00-prefixed international becomes +… — Twilio rejects
+    non-E.164 transfer targets, which would surface as an audible error."""
+    n = re.sub(r"[^\d+]", "", number or "")
+    if not n or n.startswith("+"):
+        return n
+    if n.startswith("00"):
+        return "+" + n[2:]
+    if n.startswith("0"):
+        return "+49" + n[1:]
+    return "+" + n
+
+
+def build_transfer_tool(cfg: dict) -> dict | None:
+    """The agent's ``built_in_tools.transfer_to_number`` object, derived from the
+    Kiki-Zentrale numbers. None ⇒ the tool should be absent.
+
+    Replaces the raw-Twilio-redirect webhook path (services/transfer.py) as the
+    PRIMARY transfer mechanism: ElevenLabs executes the bridge natively on its
+    own call leg, which is the supported way to hand off a live call (the TwiML
+    redirect audibly errored for callers). The webhook tool stays attached as a
+    diagnostic fallback but the prompt no longer references it."""
+    transfers: list[dict] = []
+    emergency = _dial_clean(cfg.get("emergency_number") or cfg.get("forwarding_number"))
+    staff = _dial_clean(cfg.get("incoming_forwarding_number"))
+    if emergency and cfg.get("emergency_enabled"):
+        transfers.append(
+            {
+                "transfer_destination": {"type": "phone", "phone_number": emergency},
+                "condition": (
+                    "NOTDIENST: Ein bestätigter NOTFALL laut Abschnitt "
+                    "„Notfall-Definition“ liegt vor (Notfall-Stichwort bestätigt, "
+                    "Notdienst-Zeitfenster aktiv). Sofort hierhin weiterleiten."
+                ),
+                "transfer_type": "conference",
+            }
+        )
+    if staff and staff != emergency:
+        transfers.append(
+            {
+                "transfer_destination": {"type": "phone", "phone_number": staff},
+                "condition": (
+                    "MITARBEITER: Der Anrufer bittet ausdrücklich, sofort mit einem "
+                    "Mitarbeiter/Menschen verbunden zu werden, und es ist innerhalb "
+                    "der Geschäftszeiten (KEIN Notfall)."
+                ),
+                "transfer_type": "conference",
+            }
+        )
+    if not transfers:
+        return None
+    return {
+        "type": "system",
+        "name": "transfer_to_number",
+        "description": (
+            "Verbindet den Anrufer live mit einer hinterlegten Nummer (Notdienst "
+            "bzw. Mitarbeiter) gemäß den Weiterleitungs-Bedingungen. Sage dem "
+            "Anrufer VOR dem Aufruf kurz, dass du verbindest. Nur gemäß den im "
+            "Prompt definierten Regeln verwenden."
+        ),
+        "params": {
+            "system_tool_type": "transfer_to_number",
+            "transfers": transfers,
+        },
+    }
+
+
+def build_voicemail_tool() -> dict:
+    """Hardened voicemail_detection config: the loose default description made the
+    LLM fire it on live humans right after connect — the caller then heard the
+    voicemail text ('…ist bestätigt … Auf Wiederhören!') and the call ended
+    (the reported outbound 'announces and hangs up' bug)."""
+    return {
+        "type": "system",
+        "name": "voicemail_detection",
+        "description": (
+            "Trigger ONLY when you are CERTAIN an answering machine/voicemail "
+            "picked up: a RECORDED greeting explicitly states the called party is "
+            "unavailable ('Please leave a message after the tone…', 'You have "
+            "reached the voicemail of…', 'Der Teilnehmer ist zurzeit nicht "
+            "erreichbar…'), typically followed by a beep. NEVER trigger in the "
+            "first seconds of a call, on silence, on background noise, or after a "
+            "live human has said ANYTHING — a plain 'Hallo?', 'Ja?' or a company "
+            "name IS a human. When in ANY doubt, treat the answerer as human and "
+            "simply continue the conversation. The tool plays the stored "
+            "voicemail_message in full and then ends the call."
+        ),
+        "params": {
+            "system_tool_type": "voicemail_detection",
+            "voicemail_message": "{{voicemailMessage}}",
+        },
+    }
+
+
+def build_transfer_to_agent_tool(agent_id: str) -> dict:
+    """transfer_to_agent (off-topic handoff during OUTBOUND calls). Target is the
+    org's own agent: the new leg starts WITHOUT the per-call outbound override,
+    i.e. with the standard inbound configuration and full tool access."""
+    return {
+        "type": "system",
+        "name": "transfer_to_agent",
+        "description": (
+            "Hands the conversation over to this organization's standard inbound "
+            "assistant (fresh configuration, full tools). Use EXCLUSIVELY during "
+            "OUTBOUND calls when the customer raises an issue UNRELATED to this "
+            "call's stated purpose that you cannot complete with your current "
+            "tools. NEVER invoke during inbound calls — there you already are the "
+            "primary agent. Announce the handoff briefly before transferring."
+        ),
+        "params": {
+            "system_tool_type": "transfer_to_agent",
+            "transfers": [
+                {
+                    "agent_id": agent_id,
+                    "condition": (
+                        "Only during an outbound call: the customer raises a "
+                        "DIFFERENT concern than the announced purpose of this call "
+                        "(new repair request, complaint, separate inquiry, new "
+                        "appointment on another topic, cost estimate) AND it cannot "
+                        "be completed with the currently available tools."
+                    ),
+                }
+            ],
+        },
+    }
+
+
+def sync_system_tools_for_org(org_id: str | UUID) -> dict:
+    """Push the org's system-tool configs (transfer_to_number, voicemail_detection,
+    transfer_to_agent) to its agent in one safe write.
+
+    Called after Notdienst-/Telefon-saves (alongside the prompt repush). Same
+    best-effort contract as rerender_and_push_for_org — never raises."""
+    db = get_service_client()
+    org_rows = (
+        db.table("organizations").select("elevenlabs_agent_id")
+        .eq("id", str(org_id)).limit(1).execute().data or []
+    )
+    agent_id = (org_rows[0] if org_rows else {}).get("elevenlabs_agent_id")
+    if not agent_id:
+        return {"updated": False, "reason": "no_agent"}
+    cfg = _fetch_kz_config(org_id)
+    try:
+        patch_agent_safely(
+            agent_id=agent_id,
+            field_patches={
+                "conversation_config": {
+                    "agent": {
+                        "prompt": {
+                            "built_in_tools": {
+                                "transfer_to_number": build_transfer_tool(cfg),
+                                "voicemail_detection": build_voicemail_tool(),
+                                "transfer_to_agent": build_transfer_to_agent_tool(agent_id),
+                            }
+                        }
+                    }
+                }
+            },
+            merge_arrays=[],
+            actor_id=None,
+            org_id=org_id,
+            endpoint_label="system_tools_sync",
+        )
+    except Exception as exc:  # noqa: BLE001 — never break the triggering save
+        logger.warning(
+            "system tools sync failed (org %s): %s", org_id, str(exc)[:200]
+        )
+        return {"updated": False, "reason": str(exc)[:200]}
+    return {"updated": True}
+
+
+# Backwards-compatible alias (Phase-6 call sites).
+sync_transfer_tool_for_org = sync_system_tools_for_org
+
+
+# ─── Agent-sync status (frontend loader banner) ──────────────────────────────
+# Every Kiki-Zentrale save flips the org's agent_configs row to 'pending' BEFORE
+# the HTTP response returns, and the background re-push resolves it to
+# 'applied'/'failed'. agent_sync_seq is a per-org request id: finish_sync only
+# writes when its seq is still the latest, so overlapping saves are
+# last-write-wins and a slow old push can never overwrite a newer pending state.
+
+def begin_sync(org_id: str | UUID, label: str) -> int:
+    """Mark the org's agent sync as pending; returns the new sync seq.
+
+    Upserts the config row first so orgs that never saved a config still get
+    sync tracking. Never raises — a tracking failure must not block the save."""
+    db = get_service_client()
+    try:
+        existing = (
+            db.table("agent_configs").select("org_id").eq("org_id", str(org_id))
+            .limit(1).execute().data or []
+        )
+        if not existing:
+            db.table("agent_configs").upsert(
+                {"org_id": str(org_id)}, on_conflict="org_id"
+            ).execute()
+        res = db.rpc(
+            "kz_begin_agent_sync", {"p_org": str(org_id), "p_label": label}
+        ).execute()
+        data = res.data
+        if isinstance(data, list):
+            data = data[0] if data else 0
+        return int(data or 0)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("begin_sync(%s, %s) failed: %s", org_id, label, str(exc)[:200])
+        return 0
+
+
+def finish_sync(org_id: str | UUID, seq: int, *, ok: bool, reason: str | None = None) -> None:
+    """Resolve a pending sync — guarded by seq (stale completions no-op)."""
+    if not seq:
+        return
+    db = get_service_client()
+    try:
+        (
+            db.table("agent_configs")
+            .update({
+                "agent_sync_status": "applied" if ok else "failed",
+                "agent_sync_error": (reason or None) if not ok else (reason or None),
+                "agent_sync_finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+            .eq("org_id", str(org_id))
+            .eq("agent_sync_seq", seq)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("finish_sync(%s, seq=%s) failed: %s", org_id, seq, str(exc)[:200])
 
 
 # ─── Live re-render + push (Kiki-Zentrale config changes) ────────────────────

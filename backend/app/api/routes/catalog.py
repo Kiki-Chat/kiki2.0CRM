@@ -1,12 +1,13 @@
 import csv
 import io
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Response, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import CatalogItemUpsert
+from app.services.price_knowledge import sync_price_list_kb
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 # Legacy alias still used by the KVA quick-select until it is repointed.
@@ -76,9 +77,13 @@ def _create(org_id: str, payload: CatalogItemUpsert) -> dict:
 
 @router.post("")
 async def create_catalog(
-    payload: CatalogItemUpsert, user: CurrentUser = Depends(require_org_admin)
+    payload: CatalogItemUpsert, background: BackgroundTasks,
+    user: CurrentUser = Depends(require_org_admin),
 ) -> dict:
-    return await run_in_threadpool(_create, user.org_id, payload)
+    row = await run_in_threadpool(_create, user.org_id, payload)
+    # Keep the agent's Preisliste KB doc fresh (no-op while Preisauskunft is off).
+    background.add_task(sync_price_list_kb, user.org_id)
+    return row
 
 
 def _export_csv(org_id: str) -> str:
@@ -158,10 +163,13 @@ def _import_csv(org_id: str, content: bytes) -> dict:
 
 @router.post("/import")
 async def import_catalog(
-    file: UploadFile = File(...), user: CurrentUser = Depends(require_org_admin)
+    background: BackgroundTasks,
+    file: UploadFile = File(...), user: CurrentUser = Depends(require_org_admin),
 ) -> dict:
     content = await file.read()
-    return await run_in_threadpool(_import_csv, user.org_id, content)
+    result = await run_in_threadpool(_import_csv, user.org_id, content)
+    background.add_task(sync_price_list_kb, user.org_id)
+    return result
 
 
 def _update(org_id: str, item_id: str, payload: CatalogItemUpsert) -> dict | None:
@@ -182,16 +190,20 @@ def _update(org_id: str, item_id: str, payload: CatalogItemUpsert) -> dict | Non
 
 @router.patch("/{item_id}")
 async def update_catalog(
-    item_id: str, payload: CatalogItemUpsert, user: CurrentUser = Depends(require_org_admin)
+    item_id: str, payload: CatalogItemUpsert, background: BackgroundTasks,
+    user: CurrentUser = Depends(require_org_admin),
 ) -> dict:
     row = await run_in_threadpool(_update, user.org_id, item_id, payload)
     if not row:
         raise HTTPException(status_code=404, detail="Catalog item not found")
+    background.add_task(sync_price_list_kb, user.org_id)
     return row
 
 
 @router.delete("/{item_id}")
-async def delete_catalog(item_id: str, user: CurrentUser = Depends(require_org_admin)) -> dict:
+async def delete_catalog(
+    item_id: str, background: BackgroundTasks, user: CurrentUser = Depends(require_org_admin)
+) -> dict:
     def _delete() -> bool:
         client = get_service_client()
         res = (
@@ -203,4 +215,5 @@ async def delete_catalog(item_id: str, user: CurrentUser = Depends(require_org_a
     ok = await run_in_threadpool(_delete)
     if not ok:
         raise HTTPException(status_code=404, detail="Catalog item not found")
+    background.add_task(sync_price_list_kb, user.org_id)
     return {"success": True}

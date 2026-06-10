@@ -371,6 +371,18 @@ def _process_one(data: dict | None, fmt: str) -> dict:
 
         ensure_call_inquiry(client, org_id, upserted[0])
 
+    # Category back-fill: when the agent booked without (or with an unknown)
+    # `kategorie`, classify the call summary against the org's Terminkategorien
+    # so the Offene-Aktion card arrives pre-filled. Best-effort, never breaks
+    # ingest — and it runs BEFORE level-3 confirmation so an auto-confirmed
+    # appointment already carries its category/duration/employee.
+    try:
+        from app.services.appointment_classifier import classify_and_apply
+
+        classify_and_apply(client, org_id, conversation_id, row.get("summary"))
+    except Exception:  # noqa: BLE001 — never break post-call ingest
+        logger.warning("appointment auto-categorization failed (conv %s)", conversation_id)
+
     # Level-3 auto-confirmation fires POST-call (in a background thread) so the
     # outbound confirmation call never collides with the still-active booking
     # call. No-op unless the org is at autonomy level 3. The `already_processed`

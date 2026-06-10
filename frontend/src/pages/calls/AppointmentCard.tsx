@@ -30,7 +30,7 @@ import {
   MapPin,
   X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { apiFetch } from '../../lib/api'
@@ -145,9 +145,9 @@ export function AppointmentCard({
   const [actionError, setActionError] = useState<string | null>(null)
 
   // Editable fields inside the expandable "Kategorie, Dauer & Zuweisung" section.
-  // Seeded from the appointment row; the spec doesn't include a PATCH-on-card
-  // surface for these — the user picks them as part of the Bestätigen flow,
-  // and a follow-up endpoint can persist them. For v1 they're advisory.
+  // Pre-filled from the appointment row (the agent/auto-classifier already set
+  // category, duration + employee at booking time); every edit here PERSISTS via
+  // PATCH /api/appointments/{id}.
   const [categoryId, setCategoryId] = useState<string>('')
   const [duration, setDuration] = useState<number>(appointment.duration_minutes ?? 60)
   const [customDuration, setCustomDuration] = useState<number | null>(null)
@@ -175,9 +175,41 @@ export function AppointmentCard({
     [categories, categoryId],
   )
 
+  // Seed the category select from the stored appointment.category (a name) once
+  // the category list arrives — exactly once per appointment, so a manual pick
+  // is never stomped by a refetch.
+  const seededForRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (seededForRef.current === appointment.id || !categories.length) return
+    seededForRef.current = appointment.id
+    setDuration(appointment.duration_minutes ?? 60)
+    setCustomDuration(null)
+    setAssignedEmployeeId(appointment.assigned_employee_id ?? '')
+    const stored = (appointment.category ?? '').trim().toLowerCase()
+    if (stored) {
+      const match = categories.find((c) => c.name.trim().toLowerCase() === stored)
+      if (match) setCategoryId(match.id)
+    }
+  }, [appointment.id, appointment.category, appointment.duration_minutes, appointment.assigned_employee_id, categories])
+
+  // Persist category/duration/employee edits immediately (the card is the
+  // editing surface while the appointment is pending).
+  const patchAppt = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch(`/api/appointments/${appointment.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pendingAppointment', callId] })
+      qc.invalidateQueries({ queryKey: ['appointments'] })
+      qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
+    },
+    onError: (e: Error) => setActionError(e.message || 'Änderung konnte nicht gespeichert werden.'),
+  })
+
   // When the user picks a category, auto-fill duration + default employee from
-  // the category's defaults. The "Defaults für '<category>' wurden übernommen"
-  // help text only renders while these defaults are unchanged from the pick.
+  // the category's defaults and persist all three in one PATCH.
   const [defaultsApplied, setDefaultsApplied] = useState<string | null>(null)
   const onPickCategory = (id: string) => {
     setCategoryId(id)
@@ -189,8 +221,14 @@ export function AppointmentCard({
         setAssignedEmployeeId(cat.default_employee_id)
       }
       setDefaultsApplied(cat.name)
+      patchAppt.mutate({
+        category: cat.name,
+        duration_minutes: cat.duration_minutes,
+        ...(cat.default_employee_id ? { assigned_employee_id: cat.default_employee_id } : {}),
+      })
     } else {
       setDefaultsApplied(null)
+      patchAppt.mutate({ category: null })
     }
   }
 
@@ -452,6 +490,7 @@ export function AppointmentCard({
                         onClick={() => {
                           setDuration(m)
                           setCustomDuration(null)
+                          patchAppt.mutate({ duration_minutes: m })
                         }}
                         disabled={busy || altAlreadySent}
                         className={cn(
@@ -477,6 +516,11 @@ export function AppointmentCard({
                       const v = e.target.value ? Number(e.target.value) : null
                       setCustomDuration(v && v > 0 ? v : null)
                     }}
+                    onBlur={() => {
+                      if (customDuration && customDuration > 0) {
+                        patchAppt.mutate({ duration_minutes: customDuration })
+                      }
+                    }}
                     disabled={busy || altAlreadySent}
                     className="w-24 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text outline-none focus:border-green-primary disabled:opacity-60"
                   />
@@ -497,7 +541,10 @@ export function AppointmentCard({
                 <div className="mb-1 text-xs font-semibold text-body">Mitarbeiter</div>
                 <select
                   value={assignedEmployeeId}
-                  onChange={(e) => setAssignedEmployeeId(e.target.value)}
+                  onChange={(e) => {
+                    setAssignedEmployeeId(e.target.value)
+                    patchAppt.mutate({ assigned_employee_id: e.target.value || null })
+                  }}
                   disabled={busy || altAlreadySent}
                   className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-green-primary disabled:opacity-60"
                 >

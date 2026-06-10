@@ -24,15 +24,23 @@ DEFAULT_AGENT_CONFIG = {
 # 'concern' field (the agent always captures the concern; it's not a stored field
 # the way name/phone/address are). Tuple order: (field_key, label, description,
 # is_locked, is_duty, identification_role, sort_order).
+# (field_key, label, description, is_locked, is_duty, identification_role,
+#  sort_order, is_active, linked_setting)
 _DEFAULT_REQUIRED_FIELDS = [
-    ("name", "Name", "Vor- und Nachname", True, True, None, 0),
-    ("phone", "Telefonnummer", "Rückrufnummer", True, True, "caller_id", 1),
-    ("address", "Adresse", "Anschrift des Kunden / Einsatzorts", True, True, "address", 2),
+    ("name", "Name", "Vor- und Nachname", True, True, None, 0, True, None),
+    ("phone", "Telefonnummer", "Rückrufnummer", True, True, "caller_id", 1, True, None),
+    ("address", "Adresse", "Anschrift des Kunden / Einsatzorts", True, True, "address", 2, True, None),
     # The customer's concern, now a (locked, reorderable, editable) required field
     # instead of a separate config — so the org controls WHERE in the ask order
     # Kiki captures the problem details. is_locked → can't be deleted, only
     # reordered + its description edited. (Migration 0052 backfills existing orgs.)
-    ("problem_description", "Anliegen / Problembeschreibung", "Das Anliegen des Kunden — welche Problem-Details Kiki erfassen soll.", True, True, None, 3),
+    ("problem_description", "Anliegen / Problembeschreibung", "Das Anliegen des Kunden — welche Problem-Details Kiki erfassen soll.", True, True, None, 3, True, None),
+    # Leitfaden rework (migration 0060): optional email (off by default) + the
+    # three linked offer-steps whose ACTIVE state mirrors agent_configs.
+    ("email", "E-Mail-Adresse", "E-Mail des Kunden (für Bestätigungen und Kostenvoranschläge)", False, False, None, 4, False, None),
+    ("offer_appointment", "Termin anbieten", "Kiki bietet an dieser Stelle aktiv einen Termin an", True, False, None, 5, True, "appointments_enabled"),
+    ("offer_kva", "Kostenvoranschlag anbieten", "Kiki bietet an dieser Stelle aktiv einen unverbindlichen Kostenvoranschlag an", True, False, None, 6, True, "kva_enabled"),
+    ("offer_price_info", "Preisauskunft", "Kiki beantwortet Preisfragen an dieser Stelle (Richtpreise aus den Artikeln)", True, False, None, 7, True, "price_info_enabled"),
 ]
 
 
@@ -62,8 +70,11 @@ def _seed_required_fields(client, org_id: str) -> None:
             "is_duty": is_duty,
             "identification_role": identification_role,
             "sort_order": sort_order,
+            "is_active": is_active,
+            "linked_setting": linked_setting,
         }
-        for (field_key, label, description, is_locked, is_duty, identification_role, sort_order)
+        for (field_key, label, description, is_locked, is_duty, identification_role,
+             sort_order, is_active, linked_setting)
         in _DEFAULT_REQUIRED_FIELDS
     ]
     client.table("agent_required_fields").insert(rows).execute()

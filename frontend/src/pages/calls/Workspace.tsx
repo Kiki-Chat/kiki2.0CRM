@@ -60,7 +60,7 @@ const STATUS_OPTS: {
   chipOff: string
 }[] = [
   { value: 'open', label: 'Offen', Icon: CircleDot, border: 'border-info', bg: 'bg-info-bg', text: 'text-info', chipOn: 'bg-info text-white', chipOff: 'bg-info-bg text-info' },
-  { value: 'in_progress', label: 'In Arbeit', Icon: Clock, border: 'border-warning', bg: 'bg-warning-bg', text: 'text-warning', chipOn: 'bg-warning text-white', chipOff: 'bg-warning-bg text-warning' },
+  { value: 'in_progress', label: 'In Bearbeitung', Icon: Clock, border: 'border-warning', bg: 'bg-warning-bg', text: 'text-warning', chipOn: 'bg-warning text-white', chipOff: 'bg-warning-bg text-warning' },
   { value: 'completed', label: 'Erledigt', Icon: CheckCircle2, border: 'border-success', bg: 'bg-success-bg', text: 'text-success', chipOn: 'bg-success text-white', chipOff: 'bg-success-bg text-success' },
 ]
 
@@ -115,14 +115,14 @@ function AssignField({ current, employees, onAssign, disabled }: { current: stri
 }
 
 // ─── Primary action card ───────────────────────────────────────────────────
-function PrimaryAction({ icon: Icon, label, tone, onClick, disabled }: { icon: LucideIcon; label: string; tone: 'green' | 'money'; onClick?: () => void; disabled?: boolean }) {
+function PrimaryAction({ icon: Icon, label, tone, onClick, disabled }: { icon: LucideIcon; label: string; tone: 'green' | 'money' | 'steel'; onClick?: () => void; disabled?: boolean }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       className="flex flex-1 flex-col items-start gap-2.5 rounded-2xl border border-border bg-surface p-3.5 text-left transition hover:shadow-e2 disabled:opacity-50 disabled:hover:shadow-none"
     >
-      <span className={cn('flex h-[38px] w-[38px] items-center justify-center rounded-xl', tone === 'money' ? 'bg-ai-bg text-ai' : 'bg-green-tint-100 text-green-deep')}>
+      <span className={cn('flex h-[38px] w-[38px] items-center justify-center rounded-xl', tone === 'money' ? 'bg-ai-bg text-ai' : tone === 'steel' ? 'bg-info-bg text-info' : 'bg-green-tint-100 text-green-deep')}>
         <Icon size={19} />
       </span>
       <span className="text-[13px] font-extrabold leading-tight text-text">{label}</span>
@@ -157,25 +157,34 @@ function ActionsTab({
   status,
   busy,
   appointmentSlot,
+  hasAppointment,
   onStatus,
   onDelete,
   onAssign,
   onEdit,
   onAppointment,
   onKva,
+  onAssignTechnician,
 }: {
   inquiry: Inquiry | undefined
   employees: Employee[]
   status: string
   busy: boolean
   appointmentSlot?: ReactNode
+  hasAppointment?: boolean
   onStatus: (s: string) => void
   onDelete: () => void
   onAssign: (id: string | null) => void
   onEdit: () => void
   onAppointment: () => void
   onKva?: () => void
+  onAssignTechnician?: (employeeId: string) => void
 }) {
+  const [techPickerOpen, setTechPickerOpen] = useState(false)
+  // Technicians first — they do the ground work; office staff stay selectable.
+  const techSorted = [...employees].sort(
+    (a, b) => Number(b.is_technician ?? false) - Number(a.is_technician ?? false),
+  )
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -197,7 +206,38 @@ function ActionsTab({
         <div className="flex gap-2.5">
           <PrimaryAction icon={CalendarPlus} label="Termin erstellen" tone="green" onClick={onAppointment} />
           <PrimaryAction icon={Receipt} label="Kostenvoranschlag" tone="money" onClick={onKva} disabled={!onKva} />
+          <PrimaryAction
+            icon={UserPlus}
+            label="Zuweisung ergänzen"
+            tone="steel"
+            onClick={() => setTechPickerOpen((o) => !o)}
+            disabled={!onAssignTechnician || (!inquiry && !hasAppointment)}
+          />
         </div>
+        {techPickerOpen && onAssignTechnician && (
+          <div className="mt-2.5 rounded-xl border border-info/30 bg-info-bg/40 p-3">
+            <div className="mb-2 text-xs font-semibold text-body">
+              Techniker/Monteur zuweisen — {hasAppointment ? 'wird dem Termin dieses Anrufs zugewiesen' : 'wird der Anfrage zugewiesen'} (sichtbar in Kalender &amp; Plantafel)
+            </div>
+            <div className="flex flex-col gap-1">
+              {techSorted.length === 0 && <span className="text-sm text-faint">Keine Mitarbeiter vorhanden.</span>}
+              {techSorted.map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => {
+                    onAssignTechnician(e.id)
+                    setTechPickerOpen(false)
+                  }}
+                  disabled={busy}
+                  className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm text-text hover:bg-alt disabled:opacity-50"
+                >
+                  <span>{e.display_name ?? '(ohne Name)'}</span>
+                  {e.is_technician && <Tag variant="info">Techniker</Tag>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div>
         <SectionLabel>Weitere</SectionLabel>
@@ -423,12 +463,14 @@ export function Workspace({
   timeline,
   timelineLoading,
   appointmentSlot,
+  hasAppointment,
   onStatus,
   onDelete,
   onAssign,
   onEdit,
   onAppointment,
   onKva,
+  onAssignTechnician,
   onOpenCustomer,
 }: {
   call: CallDetailData
@@ -441,12 +483,14 @@ export function Workspace({
   timeline: TimelineEvent[]
   timelineLoading: boolean
   appointmentSlot?: ReactNode
+  hasAppointment?: boolean
   onStatus: (s: string) => void
   onDelete: () => void
   onAssign: (id: string | null) => void
   onEdit: () => void
   onAppointment: () => void
   onKva?: () => void
+  onAssignTechnician?: (employeeId: string) => void
   onOpenCustomer: () => void
 }) {
   const status = inquiry?.status ?? 'open'
@@ -494,12 +538,14 @@ export function Workspace({
             status={status}
             busy={busy}
             appointmentSlot={appointmentSlot}
+            hasAppointment={hasAppointment}
             onStatus={onStatus}
             onDelete={onDelete}
             onAssign={onAssign}
             onEdit={onEdit}
             onAppointment={onAppointment}
             onKva={onKva}
+            onAssignTechnician={onAssignTechnician}
           />
         )}
         {tab === 'details' && <DetailsTab call={call} onOpenCustomer={onOpenCustomer} />}

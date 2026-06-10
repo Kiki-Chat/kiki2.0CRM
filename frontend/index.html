@@ -1,12 +1,12 @@
 <!doctype html>
 <!--
-  lang="de" is correct (the app is German), so the browser detects the source
-  language and offers an ACCURATE translation. Browser auto-translation is left
-  ENABLED at the owner's request. ⚠️ Trade-off (accepted): translating the live
-  page can still crash React reconciliation ("NotFoundError: insertBefore" / the
-  "Diese Seite konnte nicht geladen werden" break), because Google Translate
-  rewrites text nodes out from under React. Re-add translate="no" + the notranslate
-  meta to make the app stable again.
+  lang="de": the app's source language is German, declared so browsers offer the
+  RIGHT translation (de → user language). Translation is deliberately ALLOWED
+  (user decision 2026-06-10): Google Translate rewrites text nodes out from
+  under React, which normally crashes reconciliation with
+  `NotFoundError: Failed to execute 'insertBefore'/'removeChild' on 'Node'`.
+  The inline script below makes those two DOM ops fail-soft for exactly the
+  translated-node case, so translation works WITHOUT the page break.
 -->
 <html lang="de">
   <head>
@@ -14,6 +14,36 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HeyKiki Portal</title>
+    <script>
+      // Google-Translate guard: when the translator wraps/moves text nodes,
+      // React later calls removeChild/insertBefore with nodes that are no
+      // longer where it left them and the page crashes. Degrade those exact
+      // failures to safe no-op behavior instead of throwing (well-known
+      // workaround, see github.com/facebook/react/issues/11538).
+      (function () {
+        if (typeof Node !== 'function' || !Node.prototype) return;
+        var origRemoveChild = Node.prototype.removeChild;
+        Node.prototype.removeChild = function (child) {
+          if (child && child.parentNode !== this) {
+            if (console && console.warn) {
+              console.warn('translate-guard: removeChild on detached node ignored', child);
+            }
+            return child;
+          }
+          return origRemoveChild.apply(this, arguments);
+        };
+        var origInsertBefore = Node.prototype.insertBefore;
+        Node.prototype.insertBefore = function (newNode, referenceNode) {
+          if (referenceNode && referenceNode.parentNode !== this) {
+            if (console && console.warn) {
+              console.warn('translate-guard: insertBefore with moved reference node — appending instead', referenceNode);
+            }
+            return origInsertBefore.call(this, newNode, null);
+          }
+          return origInsertBefore.apply(this, arguments);
+        };
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -48,6 +48,7 @@ interface Employee {
   hourly_rate: number | null
   activity_area: string | null
   auto_assign: boolean
+  is_technician?: boolean
   present: boolean
   absence_type: string | null
 }
@@ -339,13 +340,20 @@ function EmployeesTab({ flash }: { flash: (m: string) => void }) {
                   )}
                 </td>
                 <td className="px-5 py-3.5">
-                  <span
-                    className={cn(
-                      'rounded-full px-2.5 py-0.5 text-xs font-medium',
-                      e.access_role === 'admin' ? 'bg-ai-bg text-ai' : 'bg-alt text-muted',
+                  <span className="inline-flex flex-wrap items-center gap-1">
+                    <span
+                      className={cn(
+                        'rounded-full px-2.5 py-0.5 text-xs font-medium',
+                        e.access_role === 'admin' ? 'bg-ai-bg text-ai' : 'bg-alt text-muted',
+                      )}
+                    >
+                      {e.access_role === 'admin' ? 'Admin' : 'Mitarbeiter'}
+                    </span>
+                    {e.is_technician && (
+                      <span className="rounded-full bg-warning-bg px-2.5 py-0.5 text-xs font-medium text-warning">
+                        Techniker
+                      </span>
                     )}
-                  >
-                    {e.access_role === 'admin' ? 'Admin' : 'Mitarbeiter'}
                   </span>
                 </td>
                 <td className="px-5 py-3.5">
@@ -645,6 +653,7 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
   const [color, setColor] = useState('')
   const [activity, setActivity] = useState('')
   const [autoAssign, setAutoAssign] = useState(false)
+  const [isTechnician, setIsTechnician] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const create = useMutation({
@@ -660,6 +669,7 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
           calendar_color: color || null,
           activity_area: activity || null,
           auto_assign: autoAssign,
+          is_technician: isTechnician,
         }),
       }) as Promise<{ warning?: string }>,
     onSuccess: (data) => {
@@ -729,6 +739,12 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
           <p className="mt-1 text-xs text-muted">Admins haben automatisch vollen Zugriff auf alle Module.</p>
         </div>
         <Check checked={active} onChange={setActive} label="Konto aktiv" sub="Inaktive Konten können sich nicht einloggen." />
+        <Check
+          checked={isTechnician}
+          onChange={setIsTechnician}
+          label="Techniker / Monteur"
+          sub="Führt die Arbeiten vor Ort aus — erscheint in der Techniker-Auswahl (Zuweisung, Plantafel). Kein Login nötig."
+        />
         <ColorPicker value={color} onChange={setColor} />
         <div className="border-t border-border pt-4">
           <div className="mb-3 text-sm font-bold text-text">Automatische Anfragezuweisung</div>
@@ -763,6 +779,7 @@ function EditEmployeeModal({ employee, onClose }: { employee: Employee; onClose:
   const [rate, setRate] = useState(employee.hourly_rate ?? 0)
   const [activity, setActivity] = useState(employee.activity_area ?? '')
   const [autoAssign, setAutoAssign] = useState(employee.auto_assign)
+  const [isTechnician, setIsTechnician] = useState(employee.is_technician ?? false)
   const [error, setError] = useState<string | null>(null)
 
   const save = useMutation({
@@ -780,6 +797,7 @@ function EditEmployeeModal({ employee, onClose }: { employee: Employee; onClose:
           hourly_rate: rate,
           activity_area: activity || null,
           auto_assign: autoAssign,
+          is_technician: isTechnician,
         }),
       }),
     onSuccess: () => {
@@ -833,6 +851,12 @@ function EditEmployeeModal({ employee, onClose }: { employee: Employee; onClose:
           </div>
         </div>
         <Check checked={active} onChange={setActive} label="Konto aktiv" sub="Inaktive Konten können sich nicht einloggen." />
+        <Check
+          checked={isTechnician}
+          onChange={setIsTechnician}
+          label="Techniker / Monteur"
+          sub="Führt die Arbeiten vor Ort aus — erscheint in der Techniker-Auswahl (Zuweisung, Plantafel)."
+        />
         <ColorPicker value={color} onChange={setColor} />
 
         <div className="border-t border-border pt-4">

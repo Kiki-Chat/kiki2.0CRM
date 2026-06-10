@@ -3,7 +3,7 @@ import {
   ArrowUpDown, Clock, FileText, Globe, Info, Loader2, Lock, Phone, Plus, RefreshCw,
   Siren, Trash2, X,
 } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { apiFetch, apiUpload } from '../../lib/api'
@@ -13,7 +13,7 @@ import {
 import { cn } from '../../lib/utils'
 import { Modal } from '../ui/Modal'
 import { Tag } from '../ui/Tag'
-import { Card, Field, GroupLabel, inputCls, labelCls, SaveBar, StatusBadge, Toggle } from './shared'
+import { Card, ConfirmDialog, Field, GroupLabel, inputCls, labelCls, SaveBar, StatusBadge, Toggle, useKikiConfirm } from './shared'
 
 type Props = { data: KzOverview; flash: (m: string) => void }
 
@@ -82,9 +82,9 @@ export function deriveFieldKey(explicitKey: string, label: string): string {
   return explicitKey || label.toLowerCase().replace(/\s+/g, '_')
 }
 
-// Appended to save toasts so the user knows the (slow) agent sync continues in
-// the background after the row is persisted.
-const AGENT_SYNC_SUFFIX = ' — Änderungen werden an den Agenten übertragen.'
+// The live AgentSyncBanner (KikiZentralePage) now shows the pending→applied
+// state of the background agent sync, so toasts stay short.
+const AGENT_SYNC_SUFFIX = ''
 
 function useConfigPatch(path: string, flash: (m: string) => void) {
   const qc = useQueryClient()
@@ -125,45 +125,84 @@ function FieldDescriptionInput({ field, onSave }: { field: KzRequiredField; onSa
   )
 }
 
-// ─── Pflichtfelder ───────────────────────────────────────────────────────────
-export function PflichtfelderSection({ flash }: Props) {
+// ─── Leitfaden (ehem. Pflichtfelder) ─────────────────────────────────────────
+// Local-state editor: drag + toggles only mutate local state; ONE batch PATCH on
+// Speichern (one agent push — no more push-per-drag). Linked rows (Termin/KVA/
+// Preisauskunft) mirror their real setting two-way and warn before toggling.
+const LINKED_TARGET_LABEL: Record<string, string> = {
+  appointments_enabled: 'Autonomie (Bereich „Termine“)',
+  kva_enabled: 'Autonomie (Bereich „Kostenvoranschläge“)',
+  price_info_enabled: 'Preisauskunft',
+}
+
+export function LeitfadenSection({ flash }: Props) {
   const qc = useQueryClient()
-  const { data } = useQuery({ queryKey: ['kiki-zentrale', 'required-fields'], queryFn: () => apiFetch<{ fields: KzRequiredField[] }>(`${KZ}/required-fields`) })
-  const fields = data?.fields ?? []
+  const { data, dataUpdatedAt } = useQuery({ queryKey: ['kiki-zentrale', 'required-fields'], queryFn: () => apiFetch<{ fields: KzRequiredField[] }>(`${KZ}/required-fields`) })
+  const serverFields = useMemo(() => data?.fields ?? [], [data])
+  const [items, setItems] = useState<KzRequiredField[]>([])
+  const [dirty, setDirty] = useState(false)
   const [newKey, setNewKey] = useState('')
   const [newLabel, setNewLabel] = useState('')
   const [newDesc, setNewDesc] = useState('')
   const dragIdx = useRef<number | null>(null)
+  // Linked-row toggle confirmation: which row + target value is pending.
+  const [linkedConfirm, setLinkedConfirm] = useState<{ id: string; label: string; target: string; value: boolean } | null>(null)
+
+  // Re-seed local state from the server while the user has no unsaved edits.
+  useEffect(() => {
+    if (!dirty) setItems(serverFields)
+  }, [serverFields, dataUpdatedAt, dirty])
+
+  const setActive = (id: string, value: boolean) => {
+    setItems((p) => p.map((f) => (f.id === id ? { ...f, is_active: value } : f)))
+    setDirty(true)
+  }
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiFetch(`${KZ}/leitfaden`, {
+        method: 'PATCH',
+        body: JSON.stringify({ items: items.map((f) => ({ id: f.id, is_active: f.is_active })) }),
+      }),
+    onSuccess: () => {
+      setDirty(false)
+      // Linked toggles also changed Autonomie/Preisauskunft — refresh everything.
+      qc.invalidateQueries({ queryKey: ['kiki-zentrale'] })
+      flash('Leitfaden gespeichert.')
+    },
+    onError: (e: Error) => flash(e.message || 'Speichern fehlgeschlagen.'),
+  })
 
   const create = useMutation({
     mutationFn: () => apiFetch(`${KZ}/required-fields`, { method: 'POST', body: JSON.stringify({ field_key: deriveFieldKey(newKey, newLabel), label: newLabel, description: newDesc || null }) }),
-    onSuccess: () => { setNewKey(''); setNewLabel(''); setNewDesc(''); qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }) },
+    onSuccess: () => { setNewKey(''); setNewLabel(''); setNewDesc(''); setDirty(false); qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }) },
+    onError: (e: Error) => flash(e.message || 'Hinzufügen fehlgeschlagen.'),
   })
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`${KZ}/required-fields/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }),
+    onSuccess: () => { setDirty(false); qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }) },
     onError: (e: Error) => flash(e.message || 'Löschen fehlgeschlagen.'),
   })
   const patchDesc = useMutation({
     mutationFn: ({ id, description }: { id: string; description: string }) => apiFetch(`${KZ}/required-fields/${id}`, { method: 'PATCH', body: JSON.stringify({ description: description || null }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }); flash('Gespeichert.') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }); flash('Beschreibung gespeichert.') },
     onError: (e: Error) => flash(e.message || 'Speichern fehlgeschlagen.'),
   })
-  const reorder = useMutation({
-    mutationFn: (ids: string[]) => apiFetch(`${KZ}/required-fields/reorder`, { method: 'POST', body: JSON.stringify({ ordered_ids: ids }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['kiki-zentrale', 'required-fields'] }),
-  })
 
+  // Drag reorder — LOCAL ONLY; persisted with Speichern.
   const onDrop = (to: number) => {
     const from = dragIdx.current
     dragIdx.current = null
     if (from === null || from === to) return
-    const ids = fields.map((f) => f.id)
-    const [m] = ids.splice(from, 1)
-    ids.splice(to, 0, m)
-    reorder.mutate(ids)
+    setItems((p) => {
+      const next = [...p]
+      const [m] = next.splice(from, 1)
+      next.splice(to, 0, m)
+      return next
+    })
+    setDirty(true)
   }
-  const idRoles = fields.filter((f) => f.identification_role)
+  const idRoles = serverFields.filter((f) => f.identification_role)
 
   return (
     <div className="space-y-4">
@@ -180,42 +219,71 @@ export function PflichtfelderSection({ flash }: Props) {
 
       <Card>
         <div className="mb-1 flex items-center justify-between">
-          <GroupLabel>Immer abgefragte Felder</GroupLabel>
-          <span className="text-xs text-muted">Ziehen zum Sortieren</span>
+          <GroupLabel>Gesprächs-Leitfaden</GroupLabel>
+          <span className="text-xs text-muted">Ziehen zum Sortieren — Reihenfolge = Frage-Reihenfolge</span>
         </div>
-        <p className="mb-3 text-xs text-muted">Die Beschreibungen werden dem KI-Agenten erklärt, wofür das Feld dient.</p>
+        <p className="mb-3 text-xs text-muted">
+          Kiki arbeitet diese Punkte im Gespräch von oben nach unten ab: Felder werden erfragt,
+          Angebots-Punkte (Termin, KVA, Preisauskunft) an ihrer Position aktiv angeboten. Der Schalter
+          legt fest, ob ein Punkt überhaupt vorkommt. Erst „Speichern“ überträgt die Änderungen an Kiki.
+        </p>
         <div className="space-y-2">
-          {fields.map((f, i) => (
+          {items.map((f, i) => (
             <div
               key={f.id}
               draggable
               onDragStart={() => (dragIdx.current = i)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => onDrop(i)}
-              className="flex items-start gap-3 rounded-lg border border-border bg-alt px-3 py-2"
+              className={cn('flex items-start gap-3 rounded-lg border border-border px-3 py-2', f.is_active ? 'bg-alt' : 'bg-alt/40 opacity-70')}
             >
               <ArrowUpDown size={15} className="mt-2 cursor-grab text-faint" />
               <div className="flex-1">
                 <div className="flex items-center gap-2 text-sm font-medium text-text">
                   {f.label}
-                  {f.is_locked && <Lock size={12} className="text-faint" />}
+                  {f.is_locked && !f.linked_setting && <Lock size={12} className="text-faint" />}
                   {f.is_duty && <Tag variant="green">Pflicht</Tag>}
+                  {f.linked_setting && (
+                    <Tag variant="info">Verknüpft · {LINKED_TARGET_LABEL[f.linked_setting]}</Tag>
+                  )}
                 </div>
-                <FieldDescriptionInput field={f} onSave={(description) => patchDesc.mutate({ id: f.id, description })} />
+                {f.linked_setting ? (
+                  <p className="mt-1 text-xs text-muted">{f.description}</p>
+                ) : (
+                  <FieldDescriptionInput field={f} onSave={(description) => patchDesc.mutate({ id: f.id, description })} />
+                )}
               </div>
-              <button
-                disabled={f.is_locked || del.isPending}
-                onClick={() => del.mutate(f.id)}
-                title={f.is_locked ? 'Gesperrtes Feld' : 'Entfernen'}
-                className="mt-2 text-muted hover:text-error disabled:opacity-30"
-              >
-                {del.isPending && del.variables === f.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-              </button>
+              <div className="mt-1.5 flex items-center gap-2">
+                <Toggle
+                  on={f.is_active}
+                  onChange={(v) => {
+                    if (f.linked_setting) {
+                      setLinkedConfirm({ id: f.id, label: f.label, target: LINKED_TARGET_LABEL[f.linked_setting], value: v })
+                    } else {
+                      setActive(f.id, v)
+                    }
+                  }}
+                />
+                <button
+                  disabled={f.is_locked || del.isPending}
+                  onClick={() => { if (window.confirm(`„${f.label}“ wirklich entfernen?`)) del.mutate(f.id) }}
+                  title={f.is_locked ? 'Gesperrter Punkt' : 'Entfernen'}
+                  className="text-muted hover:text-error disabled:opacity-30"
+                >
+                  {del.isPending && del.variables === f.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                </button>
+              </div>
             </div>
           ))}
         </div>
+        <SaveBar
+          onReset={() => { setItems(serverFields); setDirty(false) }}
+          onSave={() => save.mutate()}
+          saving={save.isPending}
+          disabled={!dirty}
+        />
         <div className="mt-4 space-y-2 border-t border-border pt-4">
-          <Field label="Neues Feld"><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. E-Mail-Adresse" className={inputCls} /></Field>
+          <Field label="Neues Feld"><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. Kennzeichen" className={inputCls} /></Field>
           <Field label="Beschreibung (optional)"><input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Wofür dient das Feld? (wird dem KI-Agenten erklärt)" className={inputCls} /></Field>
           <div className="flex justify-end">
             <button onClick={() => newLabel.trim() && create.mutate()} disabled={!newLabel.trim() || create.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
@@ -225,9 +293,28 @@ export function PflichtfelderSection({ flash }: Props) {
           </div>
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={!!linkedConfirm}
+        onOpenChange={(v) => !v && setLinkedConfirm(null)}
+        title="Kiki-Änderungen bestätigen"
+        message={
+          linkedConfirm
+            ? `„${linkedConfirm.label}“ ${linkedConfirm.value ? 'aktivieren' : 'deaktivieren'}? Diese Einstellung ist verknüpft und wirkt sich auch auf den Bereich ${linkedConfirm.target} aus (Zwei-Wege-Verbindung). Übertragen wird die Änderung erst mit „Speichern“.`
+            : ''
+        }
+        confirmLabel="Übernehmen"
+        onConfirm={() => {
+          if (linkedConfirm) setActive(linkedConfirm.id, linkedConfirm.value)
+          setLinkedConfirm(null)
+        }}
+      />
     </div>
   )
 }
+
+// Compatibility alias — KikiZentralePage routed 'pflichtfelder' here historically.
+export const PflichtfelderSection = LeitfadenSection
 
 // "Anliegen / Problembeschreibung" is now a locked, reorderable required field
 // (field_key 'problem_description', seeded by default + migration 0052), edited
@@ -236,6 +323,7 @@ export function PflichtfelderSection({ flash }: Props) {
 // ─── Branche & Kontext ───────────────────────────────────────────────────────
 export function BrancheKontextSection({ data, flash }: Props) {
   const qc = useQueryClient()
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/context', flash)
   const [trade, setTrade] = useState(data.config.trade ?? '')
   const [knowledge, setKnowledge] = useState(data.config.knowledge_text ?? '')
@@ -269,7 +357,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
           <select
             value={trade}
             disabled={patch.isPending}
-            onChange={(e) => { setTrade(e.target.value); patch.mutate({ trade: e.target.value }) }}
+            onChange={(e) => { const v = e.target.value; kc.confirm(() => { setTrade(v); patch.mutate({ trade: v }) }) }}
             className={cn(inputCls, 'max-w-sm disabled:opacity-50')}
           >
             <option value="">— Branche wählen —</option>
@@ -285,7 +373,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
         <textarea value={knowledge} maxLength={15000} onChange={(e) => setKnowledge(e.target.value)} className={cn(inputCls, 'min-h-[160px]')} />
         <div className="mt-2 flex items-center justify-between">
           <span className="text-xs text-muted">{knowledge.length}/15.000 Zeichen</span>
-          <button onClick={() => patch.mutate({ knowledge_text: knowledge })} disabled={patch.isPending} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">
+          <button onClick={() => kc.confirm(() => patch.mutate({ knowledge_text: knowledge }))} disabled={patch.isPending} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">
             {patch.isPending && <Loader2 size={14} className="animate-spin" />}
             {patch.isPending ? 'Speichert…' : 'Text speichern'}
           </button>
@@ -335,6 +423,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
           <Field label="Anzeigename"><input value={urlName} onChange={(e) => setUrlName(e.target.value)} placeholder="z. B. Leistungsübersicht" className={inputCls} /></Field>
         </div>
       </Modal>
+      {kc.element}
     </div>
   )
 }
@@ -342,45 +431,49 @@ export function BrancheKontextSection({ data, flash }: Props) {
 // ─── Terminregeln ────────────────────────────────────────────────────────────
 export function TerminregelnSection({ data, flash }: Props) {
   const c = data.config
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/scheduling-rules', flash)
-  const [f, setF] = useState({
-    scheduling_enabled: c.scheduling_enabled, buffer_minutes: c.buffer_minutes,
+  // "Terminvergabe aktiv" was removed: whether Kiki books at all is governed by
+  // the Autonomie section (Bereich "Termine") — no duplicate switch here.
+  const initial = () => ({
+    buffer_minutes: c.buffer_minutes,
     max_appointments_per_day: c.max_appointments_per_day, parallel_slots: c.parallel_slots,
-    lead_time_days: c.lead_time_days, lead_time_only_weekdays: c.lead_time_only_weekdays,
+    lead_time_hours: c.lead_time_hours ?? (c.lead_time_days ?? 1) * 24,
+    lead_time_only_weekdays: c.lead_time_only_weekdays,
     lead_time_earliest_clock: c.lead_time_earliest_clock ?? '',
   })
-  const set = (k: keyof typeof f, v: unknown) => setF((p) => ({ ...p, [k]: v }))
+  const [f, setF] = useState(initial)
+  const set = (k: keyof ReturnType<typeof initial>, v: unknown) => setF((p) => ({ ...p, [k]: v }))
 
   return (
     <div className="space-y-4">
-      <Card>
-        <div className="flex items-center justify-between">
-          <div><div className="text-sm font-bold text-text">Terminvergabe aktiv</div><div className="text-xs text-muted">Kiki vereinbart eigenständig Termine im Kalender.</div></div>
-          <Toggle on={f.scheduling_enabled} onChange={(v) => set('scheduling_enabled', v)} />
-        </div>
-      </Card>
+      <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
+        <Info size={16} className="mt-0.5 shrink-0 text-info" />
+        <span>Ob Kiki überhaupt Termine vergibt, steuern Sie im Bereich <a href="/kiki-zentrale/autonomie" className="font-medium text-green-deep hover:underline">Autonomie</a> (Bereich „Termine“). Hier legen Sie die Regeln fest, nach denen freie Termine angeboten werden.</span>
+      </div>
       <Card>
         <GroupLabel>Kapazität & Pufferzeiten</GroupLabel>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Pufferzeit zwischen Terminen (Min.)" hint="Kiki hält zwischen zwei Terminen so viele Minuten frei — z. B. für An- und Abfahrt."><input type="number" value={f.buffer_minutes} onChange={(e) => set('buffer_minutes', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Max. Termine pro Tag" hint="Ist diese Zahl erreicht, bietet Kiki am Telefon keine weiteren Termine an diesem Tag an."><input type="number" value={f.max_appointments_per_day} onChange={(e) => set('max_appointments_per_day', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Parallele Termine" hint="Wie viele Termine zur selben Zeit möglich sind, z. B. bei mehreren Teams."><input type="number" value={f.parallel_slots} onChange={(e) => set('parallel_slots', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Pufferzeit zwischen Terminen (Min.)" hint="Kiki hält zwischen zwei Terminen so viele Minuten frei — z. B. für An- und Abfahrt."><input type="number" min={0} value={f.buffer_minutes} onChange={(e) => set('buffer_minutes', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Max. Termine pro Tag" hint="Ist diese Zahl erreicht, bietet Kiki am Telefon keine weiteren Termine an diesem Tag an."><input type="number" min={0} value={f.max_appointments_per_day} onChange={(e) => set('max_appointments_per_day', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Parallele Termine" hint="Wie viele Termine zur selben Zeit möglich sind, z. B. bei mehreren Teams. Bei mehr als 1 erlaubt auch der Kalender mehrere Buchungen im selben Slot."><input type="number" min={1} value={f.parallel_slots} onChange={(e) => set('parallel_slots', Number(e.target.value))} className={inputCls} /></Field>
         </div>
       </Card>
       <Card>
         <GroupLabel>Vorlaufzeit & frühester Termin</GroupLabel>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Vorlaufzeit (Tage)" hint="Frühestens nach so vielen Tagen vergibt Kiki einen Termin — keine kurzfristigen Buchungen."><input type="number" value={f.lead_time_days} onChange={(e) => set('lead_time_days', Number(e.target.value))} className={inputCls} /></Field>
-          <Field label="Frühester Termin (Uhrzeit)" hint="Vor dieser Uhrzeit bietet Kiki keine Termine an (z. B. nicht vor 08:00)."><input type="time" value={f.lead_time_earliest_clock} onChange={(e) => set('lead_time_earliest_clock', e.target.value)} className={inputCls} /></Field>
+          <Field label="Vorlaufzeit (Stunden)" hint="Frühestens so viele Stunden nach dem Anruf vergibt Kiki einen Termin — z. B. 24 = ab morgen zur selben Uhrzeit."><input type="number" min={0} value={f.lead_time_hours} onChange={(e) => set('lead_time_hours', Number(e.target.value))} className={inputCls} /></Field>
+          <Field label="Frühester Termin (Uhrzeit)" hint="Am frühestmöglichen Tag beginnen Termine erst ab dieser Uhrzeit; an späteren Tagen gelten die normalen Geschäftszeiten."><input type="time" value={f.lead_time_earliest_clock} onChange={(e) => set('lead_time_earliest_clock', e.target.value)} className={inputCls} /></Field>
         </div>
         <label className="mt-4 flex items-center gap-2 text-sm text-text"><Toggle on={f.lead_time_only_weekdays} onChange={(v) => set('lead_time_only_weekdays', v)} /> Vorlaufzeit nur an Werktagen zählen</label>
-        <p className="mt-1 text-xs text-muted">Wochenenden werden bei der Vorlaufzeit übersprungen — eine Anfrage am Freitag landet so nicht schon am Wochenende.</p>
-        <SaveBar onReset={() => setF({ scheduling_enabled: c.scheduling_enabled, buffer_minutes: c.buffer_minutes, max_appointments_per_day: c.max_appointments_per_day, parallel_slots: c.parallel_slots, lead_time_days: c.lead_time_days, lead_time_only_weekdays: c.lead_time_only_weekdays, lead_time_earliest_clock: c.lead_time_earliest_clock ?? '' })} onSave={() => patch.mutate({ ...f, lead_time_earliest_clock: f.lead_time_earliest_clock || null })} saving={patch.isPending} />
+        <p className="mt-1 text-xs text-muted">Wochenend-Stunden zählen nicht zur Vorlaufzeit — eine Anfrage am Freitagnachmittag mit 24 h Vorlauf landet so erst am Montag.</p>
+        <SaveBar onReset={() => setF(initial())} onSave={() => kc.confirm(() => patch.mutate({ ...f, lead_time_earliest_clock: f.lead_time_earliest_clock || null }))} saving={patch.isPending} />
       </Card>
       <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
         <Info size={16} className="mt-0.5 shrink-0 text-info" />
         <span>Geschäftszeiten werden in der Kiki-Zentrale unter <a href="/kiki-zentrale/geschaeftszeiten" className="font-medium text-green-deep hover:underline">Geschäftszeiten</a> verwaltet und hier nicht dupliziert.</span>
       </div>
+      {kc.element}
     </div>
   )
 }
@@ -388,6 +481,7 @@ export function TerminregelnSection({ data, flash }: Props) {
 // ─── Terminkategorien ────────────────────────────────────────────────────────
 export function TerminkategorienSection({ flash }: Props) {
   const qc = useQueryClient()
+  const kc = useKikiConfirm()
   const { data } = useQuery({ queryKey: ['kiki-zentrale', 'categories'], queryFn: () => apiFetch<{ categories: KzCategory[] }>(`${KZ}/appointment-categories`) })
   const cats = data?.categories ?? []
   const { data: employees = [] } = useQuery({ queryKey: ['employees'], queryFn: () => apiFetch<Employee[]>('/api/employees') })
@@ -437,9 +531,9 @@ export function TerminkategorienSection({ flash }: Props) {
       )}
       <Modal open={!!edit} onOpenChange={(v) => !v && !saveCat.isPending && !delCat.isPending && setEdit(null)} title={edit?.id ? 'Kategorie bearbeiten' : 'Neue Kategorie'} footer={
         <div className="flex gap-3">
-          {edit?.id && <button disabled={delCat.isPending || saveCat.isPending} onClick={() => delCat.mutate(edit.id!)} className="inline-flex items-center gap-1.5 rounded-md border border-error px-4 py-2.5 text-sm font-medium text-error disabled:opacity-50">{delCat.isPending && <Loader2 size={14} className="animate-spin" />}{delCat.isPending ? 'Löscht…' : 'Löschen'}</button>}
+          {edit?.id && <button disabled={delCat.isPending || saveCat.isPending} onClick={() => kc.confirm(() => delCat.mutate(edit.id!))} className="inline-flex items-center gap-1.5 rounded-md border border-error px-4 py-2.5 text-sm font-medium text-error disabled:opacity-50">{delCat.isPending && <Loader2 size={14} className="animate-spin" />}{delCat.isPending ? 'Löscht…' : 'Löschen'}</button>}
           <button disabled={saveCat.isPending || delCat.isPending} onClick={() => setEdit(null)} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body disabled:opacity-50">Abbrechen</button>
-          <button disabled={!edit?.name?.trim() || saveCat.isPending || delCat.isPending} onClick={() => saveCat.mutate(edit!)} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saveCat.isPending && <Loader2 size={14} className="animate-spin" />}{saveCat.isPending ? 'Speichert…' : 'Speichern'}</button>
+          <button disabled={!edit?.name?.trim() || saveCat.isPending || delCat.isPending} onClick={() => kc.confirm(() => saveCat.mutate(edit!))} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saveCat.isPending && <Loader2 size={14} className="animate-spin" />}{saveCat.isPending ? 'Speichert…' : 'Speichern'}</button>
         </div>
       }>
         {edit && (
@@ -447,7 +541,7 @@ export function TerminkategorienSection({ flash }: Props) {
             <Field label="Name"><input value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value })} className={inputCls} /></Field>
             <Field label="Beschreibung"><input value={edit.description ?? ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} className={inputCls} /></Field>
             <Field label="Dauer (Minuten)"><input type="number" value={edit.duration_minutes ?? 60} onChange={(e) => setEdit({ ...edit, duration_minutes: Number(e.target.value) })} className={inputCls} /></Field>
-            <Field label="Standard-Mitarbeiter (informativ — beeinflusst die Buchung nicht)">
+            <Field label="Standard-Mitarbeiter (wird bei passender Kategorie automatisch zugewiesen)">
               <select value={edit.default_employee_id ?? ''} onChange={(e) => setEdit({ ...edit, default_employee_id: e.target.value || null })} className={inputCls}>
                 <option value="">— kein Mitarbeiter —</option>
                 {employees.map(employeeToOption).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -456,14 +550,30 @@ export function TerminkategorienSection({ flash }: Props) {
           </div>
         )}
       </Modal>
+      {kc.element}
     </Card>
   )
 }
 
 // ─── Preisauskunft ───────────────────────────────────────────────────────────
+interface CatalogItemLite {
+  id: string
+  unit_price: number | null
+  is_active: boolean
+}
+
 export function PreisauskunftSection({ data, flash }: Props) {
   const qc = useQueryClient()
+  const kc = useKikiConfirm()
   const [on, setOn] = useState(data.config.price_info_enabled)
+  // Guard: without priced Artikel the agent has nothing real to quote — the
+  // backend rejects enabling too (422), this just explains it upfront.
+  const { data: catalog } = useQuery({
+    queryKey: ['catalog', 'price-guard'],
+    queryFn: () => apiFetch<CatalogItemLite[]>('/api/catalog'),
+  })
+  const pricedCount = (catalog ?? []).filter((c) => c.is_active && (c.unit_price ?? 0) > 0).length
+  const blockEnable = !on && catalog !== undefined && pricedCount === 0
   const toggle = useMutation({
     mutationFn: (v: boolean) => apiFetch(`${KZ}/price-info`, { method: 'PATCH', body: JSON.stringify({ enabled: v }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['kiki-zentrale'] }); flash('Gespeichert.' + AGENT_SYNC_SUFFIX) },
@@ -473,17 +583,31 @@ export function PreisauskunftSection({ data, flash }: Props) {
     <div className="space-y-4">
       <Card>
         <div className="flex items-center justify-between">
-          <div><div className="text-sm font-bold text-text">Preisauskunft am Telefon</div><div className="text-xs text-muted">Kiki nennt Richtpreise. Standardmäßig deaktiviert.</div></div>
+          <div><div className="text-sm font-bold text-text">Preisauskunft am Telefon</div><div className="text-xs text-muted">Kiki nennt Richtpreise aus Ihren Artikeln. Standardmäßig deaktiviert.</div></div>
           <div className="flex items-center gap-2">
             {toggle.isPending && <Loader2 size={16} className="animate-spin text-muted" />}
-            <Toggle on={on} disabled={toggle.isPending} onChange={(v) => { setOn(v); toggle.mutate(v) }} />
+            <Toggle on={on} disabled={toggle.isPending || blockEnable} onChange={(v) => kc.confirm(() => { setOn(v); toggle.mutate(v) })} />
           </div>
         </div>
       </Card>
+      {blockEnable && (
+        <div className="flex items-start gap-3 rounded-xl border border-error/30 bg-error-bg/40 p-4 text-sm text-body">
+          <Info size={16} className="mt-0.5 shrink-0 text-error" />
+          <span>
+            Preisauskunft kann nicht aktiviert werden: Es sind keine Artikel mit Preisen hinterlegt.
+            Bitte pflegen Sie zuerst Preise im Menü <a href="/catalog" className="font-medium text-green-deep hover:underline">Artikel</a>.
+          </span>
+        </div>
+      )}
       <div className={cn('flex items-start gap-3 rounded-xl border p-4 text-sm', on ? 'border-warning/30 bg-warning-bg/40 text-body' : 'border-border bg-alt text-muted')}>
         <Info size={16} className={cn('mt-0.5 shrink-0', on ? 'text-warning' : 'text-faint')} />
-        <span>{on ? 'Kiki gibt telefonisch Richtpreise heraus. Achten Sie auf korrekt gepflegte Katalogpreise.' : 'Kiki gibt keine Preise heraus und verweist auf einen Kostenvoranschlag.'}</span>
+        <span>
+          {on
+            ? `Kiki gibt telefonisch Richtpreise heraus — Quelle ist die automatisch erzeugte Preisliste aus Ihren Artikeln (${pricedCount} Position${pricedCount === 1 ? '' : 'en'} mit Preis). Preise, die dort nicht stehen, nennt Kiki nicht.`
+            : 'Kiki gibt keine Preise heraus und verweist auf einen Kostenvoranschlag.'}
+        </span>
       </div>
+      {kc.element}
     </div>
   )
 }
@@ -541,6 +665,7 @@ export function LeistungsangebotSection({ flash }: Props) {
 // ─── Notdienst ───────────────────────────────────────────────────────────────
 export function NotdienstSection({ data, flash }: Props) {
   const c = data.config
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/emergency', flash)
   const [f, setF] = useState({
     emergency_enabled: c.emergency_enabled, emergency_number: c.emergency_number ?? '',
@@ -671,8 +796,9 @@ export function NotdienstSection({ data, flash }: Props) {
         <textarea value={f.emergency_surcharge_text} onChange={(e) => set('emergency_surcharge_text', e.target.value)} placeholder="z. B. Für Notdiensteinsätze außerhalb der Geschäftszeiten fällt ein Zuschlag an." className={cn(inputCls, 'min-h-[80px]')} />
       </Card>
       <div className="rounded-xl border border-border bg-surface px-6 py-4 text-right">
-        <button onClick={() => patch.mutate({ ...f, emergency_number: f.emergency_number || null, emergency_surcharge_text: f.emergency_surcharge_text || null, emergency_extra_windows: f.emergency_extra_windows.filter((w) => w.from || w.to) })} disabled={patch.isPending} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{patch.isPending ? 'Speichert…' : 'Speichern'}</button>
+        <button onClick={() => kc.confirm(() => patch.mutate({ ...f, emergency_number: f.emergency_number || null, emergency_surcharge_text: f.emergency_surcharge_text || null, emergency_extra_windows: f.emergency_extra_windows.filter((w) => w.from || w.to) }))} disabled={patch.isPending} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{patch.isPending ? 'Speichert…' : 'Speichern'}</button>
       </div>
+      {kc.element}
     </div>
   )
 }
@@ -680,6 +806,7 @@ export function NotdienstSection({ data, flash }: Props) {
 // ─── Telefon ─────────────────────────────────────────────────────────────────
 export function TelefonSection({ data, flash }: Props) {
   const c = data.config
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/phone', flash)
   const [inc, setInc] = useState(c.incoming_forwarding_number ?? '')
   const [biz, setBiz] = useState(data.existing_business_number ?? '')
@@ -724,12 +851,13 @@ export function TelefonSection({ data, flash }: Props) {
           setInc(c.incoming_forwarding_number ?? '')
           setBiz(data.existing_business_number ?? '')
         }}
-        onSave={() => patch.mutate({
+        onSave={() => kc.confirm(() => patch.mutate({
           incoming_forwarding_number: inc || null,
           existing_business_number: biz || null,
-        })}
+        }))}
         saving={patch.isPending}
       />
+      {kc.element}
     </Card>
   )
 }
@@ -737,6 +865,7 @@ export function TelefonSection({ data, flash }: Props) {
 // ─── Ausgehende Anrufe ───────────────────────────────────────────────────────
 export function AusgehendeSection({ data, flash }: Props) {
   const c = data.config
+  const kc = useKikiConfirm()
   const patch = useConfigPatch('/outbound', flash)
   const initialF = {
     outbound_enabled: c.outbound_enabled, outbound_occasions: { ...(c.outbound_occasions || {}) } as Record<string, boolean>,
@@ -784,7 +913,7 @@ export function AusgehendeSection({ data, flash }: Props) {
             <p className="mt-2 text-[11px] text-muted">Ein Klick auf die jeweilige Aktion in den Anrufen löst nur dann einen Ausgangsanruf (+ E-Mail) aus, wenn sie hier aktiv ist.</p>
           </div>
         )}
-        <SaveBar onReset={() => setF(initialF)} onSave={() => patch.mutate(f)} saving={patch.isPending} />
+        <SaveBar onReset={() => setF(initialF)} onSave={() => kc.confirm(() => patch.mutate(f))} saving={patch.isPending} />
       </Card>
       <Card>
         <GroupLabel>Wiederholung & Rückruf</GroupLabel>
@@ -819,8 +948,9 @@ export function AusgehendeSection({ data, flash }: Props) {
             })}
           </div>
         </div>
-        <SaveBar onReset={() => setF(initialF)} onSave={() => patch.mutate(f)} saving={patch.isPending} />
+        <SaveBar onReset={() => setF(initialF)} onSave={() => kc.confirm(() => patch.mutate(f))} saving={patch.isPending} />
       </Card>
+      {kc.element}
     </div>
   )
 }

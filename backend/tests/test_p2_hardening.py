@@ -207,7 +207,10 @@ def test_book_appointment_rolls_back_inquiry_on_appointment_failure(monkeypatch)
     monkeypatch.setattr(appt, "get_or_create_customer", lambda *a, **k: {"id": "cust1", "display_name": "X"})
     monkeypatch.setattr(appt, "_first_employee", lambda c, o: {"id": "emp1", "display_name": "M"})
     monkeypatch.setattr(appt, "gen_inquiry_number", lambda c, o: "ANF-1")
-    monkeypatch.setattr(appt, "_scheduling", lambda c, o: {"parallel_slots": 1})
+    monkeypatch.setattr(appt, "_scheduling_rules", lambda c, o: {
+        "business_hours": None, "lead_hours": 24, "lead_only_weekdays": False,
+        "earliest_clock": None, "buffer_minutes": 0, "max_per_day": 0, "parallel": 1,
+    })
 
     payload = BookAppointmentRequest(
         date="morgen", time="10:00", name="Test", phone="+4915112345678", conversation_id="c1"

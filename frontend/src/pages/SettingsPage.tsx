@@ -1238,7 +1238,7 @@ function GoogleReviewsSection({ org }: { org: Org }) {
 }
 
 // ─── PDS-Software ─────────────────────────────────────────────────────────────
-const PDS_ENTITIES: [string, string][] = [['customers', 'Kunden'], ['inquiries', 'Anfragen/Aufträge'], ['appointments', 'Termine'], ['projects', 'Projekte'], ['invoices', 'Rechnungen'], ['cost_estimates', 'KVAs'], ['time_entries', 'Zeiterfassung'], ['catalog', 'Katalog'], ['assets', 'Anlagen']]
+const PDS_ENTITIES: [string, string][] = [['customers', 'Kontakte'], ['inquiries', 'Anfragen/Aufträge'], ['appointments', 'Termine'], ['projects', 'Projekte'], ['invoices', 'Rechnungen'], ['cost_estimates', 'KVAs'], ['time_entries', 'Zeiterfassung'], ['catalog', 'Artikel'], ['assets', 'Anlagen']]
 const SYNC_INTERVALS: [string, string][] = [['every_15_min', '15 Minuten'], ['every_30_min', '30 Minuten'], ['hourly', 'Stündlich'], ['daily', 'Täglich']]
 const DIRECTIONS: [string, string][] = [['bidirectional', 'Bidirektional'], ['import', 'Nur Import'], ['export', 'Nur Export']]
 function PdsSection({ config, flash }: { config: PdsConfig | null; flash: (m: string) => void }) {

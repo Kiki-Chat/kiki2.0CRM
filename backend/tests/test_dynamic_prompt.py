@@ -75,12 +75,27 @@ def test_scheduling_disabled_says_no_booking():
 
 
 def test_scheduling_enabled_renders_lead_time_and_clock():
+    # lead time is rendered in HOURS now; legacy days-only configs fall back to days*24
     out = ac.render_scheduling_rules_block(
         {"scheduling_enabled": True, "lead_time_days": 2,
          "lead_time_only_weekdays": True, "lead_time_earliest_clock": "13:00"}
     )
-    assert "2" in out and "Werktage" in out
+    assert "48 Stunden" in out and "Werktage" in out
     assert "13:00" in out
+
+
+def test_scheduling_lead_time_hours_wins_over_days():
+    out = ac.render_scheduling_rules_block(
+        {"scheduling_enabled": True, "lead_time_hours": 24, "lead_time_days": 5}
+    )
+    assert "24 Stunden" in out
+
+
+def test_autonomy_appointments_off_says_no_booking():
+    # Terminvergabe-aktiv toggle removed: autonomy "Termine" off gates booking now.
+    out = ac.render_scheduling_rules_block({"appointments_enabled": False})
+    assert "hk_bookAppointment" in out
+    assert "KEINE" in out or "keine" in out
 
 
 # ─── render_emergency_block ──────────────────────────────────────────────────

@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Activity, BadgeEuro, BookOpen, Bot, CalendarClock, Clock,
-  History, ListChecks, Lock, Phone, PhoneOutgoing, RotateCcw, Siren, Sparkles, Tags, Wrench,
+  Activity, BadgeEuro, BookOpen, Bot, CalendarClock, Clock, GitBranch,
+  History, ListChecks, Lock, Phone, PhoneOutgoing, RotateCcw, Siren, SlidersHorizontal, Sparkles, Tags, Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import { AusgehendeSection, BrancheKontextSection, LeistungsangebotSection, NotdienstSection, PflichtfelderSection, PreisauskunftSection, TelefonSection, TerminkategorienSection, TerminregelnSection } from '../components/kiki/ConfigSections'
+import { AgentSyncBanner } from '../components/kiki/AgentSyncBanner'
+import { AutonomieSection } from '../components/kiki/AutonomieSection'
+import { GespraechslogikSection } from '../components/kiki/GespraechslogikSection'
 import { ConfirmDialog } from '../components/kiki/shared'
 import { GeschaeftszeitenSection } from '../components/kiki/GeschaeftszeitenSection'
 import { VerhaltenSection } from '../components/kiki/VerhaltenSection'
@@ -23,7 +26,9 @@ interface NavItem { slug: string; label: string; icon: LucideIcon }
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: 'Konfiguration', items: [
     { slug: 'verhalten', label: 'Verhalten', icon: Sparkles },
-    { slug: 'pflichtfelder', label: 'Pflichtfelder', icon: ListChecks },
+    { slug: 'autonomie', label: 'Autonomie', icon: SlidersHorizontal },
+    { slug: 'leitfaden', label: 'Leitfaden', icon: ListChecks },
+    { slug: 'gespraechslogik', label: 'Gesprächslogik', icon: GitBranch },
     { slug: 'branche-kontext', label: 'Branche & Kontext', icon: BookOpen },
   ] },
   { label: 'Terminplanung', items: [
@@ -65,6 +70,8 @@ export function KikiZentralePage() {
     onError: (e: Error) => { setRollbackSnap(null); flash(e.message || 'Wiederherstellen fehlgeschlagen.') },
   })
 
+  // Old bookmark/link compatibility: Pflichtfelder became Leitfaden.
+  if (section === 'pflichtfelder') return <Navigate to="/kiki-zentrale/leitfaden" replace />
   if (!ALL_SLUGS.has(section)) return <Navigate to="/kiki-zentrale/verhalten" replace />
 
   // Kiki-Zentrale is the AI control surface — every mutation is admin-only on the
@@ -119,6 +126,8 @@ export function KikiZentralePage() {
           <Activity size={15} /> {healthy ? 'Agent OK' : 'Agent-Problem'}
         </button>
       </div>
+
+      <AgentSyncBanner />
 
       {toast && <div className="mb-4 rounded-md bg-green-tint-50 px-3 py-2 text-sm font-medium text-green-deep">{toast}</div>}
 
@@ -182,7 +191,9 @@ export function KikiZentralePage() {
 function SectionContent({ section, data, flash }: { section: string; data: KzOverview; flash: (m: string) => void }) {
   switch (section) {
     case 'verhalten': return <VerhaltenSection data={data} flash={flash} />
-    case 'pflichtfelder': return <PflichtfelderSection data={data} flash={flash} />
+    case 'autonomie': return <AutonomieSection data={data} flash={flash} />
+    case 'leitfaden': return <PflichtfelderSection data={data} flash={flash} />
+    case 'gespraechslogik': return <GespraechslogikSection flash={flash} />
     case 'branche-kontext': return <BrancheKontextSection data={data} flash={flash} />
     case 'geschaeftszeiten': return <GeschaeftszeitenSection />
     case 'terminregeln': return <TerminregelnSection data={data} flash={flash} />

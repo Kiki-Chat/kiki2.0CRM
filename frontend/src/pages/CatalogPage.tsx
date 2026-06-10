@@ -138,7 +138,7 @@ export function CatalogPage() {
         <div className="flex items-center gap-3">
           <Box size={26} className="text-green-primary" />
           <div>
-            <h1 className="text-2xl font-bold text-text">Katalog & Vorlagen</h1>
+            <h1 className="text-2xl font-bold text-text">Artikel & Vorlagen</h1>
             <p className="mt-0.5 text-sm text-muted">Positionen und Textbausteine verwalten</p>
           </div>
         </div>

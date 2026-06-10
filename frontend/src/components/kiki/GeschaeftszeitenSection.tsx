@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 
 import { apiFetch } from '../../lib/api'
 import { cn } from '../../lib/utils'
+import { useKikiConfirm } from './shared'
 
 interface DayHours {
   open: boolean
@@ -52,6 +53,7 @@ const PRESETS: { key: string; label: string; build: () => Hours }[] = [
 
 export function GeschaeftszeitenSection() {
   const qc = useQueryClient()
+  const kc = useKikiConfirm()
   const [hours, setHours] = useState<Hours>(() => mk((i) => day({ open: i < 5 })))
   const [saved, setSaved] = useState(false)
 
@@ -189,7 +191,7 @@ export function GeschaeftszeitenSection() {
 
       <div className="flex items-center gap-3">
         <button
-          onClick={() => save.mutate()}
+          onClick={() => kc.confirm(() => save.mutate())}
           disabled={save.isPending}
           className="rounded-md bg-green-primary px-6 py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
         >
@@ -197,6 +199,7 @@ export function GeschaeftszeitenSection() {
         </button>
         {saved && <span className="text-sm font-medium text-green-deep">Gespeichert ✓</span>}
       </div>
+      {kc.element}
     </div>
   )
 }

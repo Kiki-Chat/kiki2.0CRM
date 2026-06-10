@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import type { EventDropArg } from '@fullcalendar/core'
 import deLocale from '@fullcalendar/core/locales/de'
 import dayGridPlugin from '@fullcalendar/daygrid'
-import interactionPlugin from '@fullcalendar/interaction'
+import interactionPlugin, { type EventResizeDoneArg } from '@fullcalendar/interaction'
 import listPlugin from '@fullcalendar/list'
 import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
@@ -10,6 +11,7 @@ import { Check, ChevronDown, Plus, RefreshCw, Upload } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
+import { ConfirmDialog } from '../components/kiki/shared'
 import { Modal } from '../components/ui/Modal'
 import { apiFetch, apiUpload } from '../lib/api'
 import { useMe } from '../lib/useMe'
@@ -98,6 +100,15 @@ export function CalendarPage() {
   const [editAppt, setEditAppt] = useState<Appointment | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [mode, setMode] = useState<'appointments' | 'projects'>('appointments')
+  // Drag/resize lands here until the user confirms — moving a confirmed
+  // appointment fires the real reschedule call+email server-side, so it must
+  // never happen from an accidental drag.
+  const [pendingMove, setPendingMove] = useState<{
+    appt: Appointment
+    newStart: Date
+    newDuration: number
+    revert: () => void
+  } | null>(null)
 
   const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
@@ -255,6 +266,44 @@ export function CalendarPage() {
     },
   })
 
+  // Persist a confirmed drag/resize. Until this PATCH succeeds the event sits at
+  // its dropped position; on error we revert it back.
+  const moveAppt = useMutation({
+    mutationFn: (m: { id: string; scheduled_at: string; duration_minutes: number }) =>
+      apiFetch(`/api/appointments/${m.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ scheduled_at: m.scheduled_at, duration_minutes: m.duration_minutes }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['appointments'] })
+      qc.invalidateQueries({ queryKey: ['pendingAppointment'] })
+      qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
+      setPendingMove(null)
+      setImportMsg('Termin verschoben — der Kunde wird über die Änderung informiert.')
+      setTimeout(() => setImportMsg(null), 5000)
+    },
+    onError: (e: unknown) => {
+      pendingMove?.revert()
+      setPendingMove(null)
+      setImportMsg(e instanceof Error ? e.message : 'Verschieben fehlgeschlagen.')
+      setTimeout(() => setImportMsg(null), 5000)
+    },
+  })
+
+  const onEventChange = (info: EventDropArg | EventResizeDoneArg) => {
+    const appt = info.event.extendedProps.appt as Appointment | undefined
+    const start = info.event.start
+    if (!appt || !start) {
+      info.revert()
+      return
+    }
+    const end = info.event.end
+    const newDuration = end
+      ? Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000))
+      : appt.duration_minutes ?? 60
+    setPendingMove({ appt, newStart: start, newDuration, revert: info.revert })
+  }
+
   const syncCal = useMutation({
     mutationFn: () =>
       apiFetch<{ fetched: number; created: number; updated: number; cancelled: number; detached: number }>(
@@ -384,22 +433,36 @@ export function CalendarPage() {
         <FullCalendar
           ref={calRef}
           plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
-          initialView="dayGridMonth"
+          initialView="timeGridWeek"
           locale={deLocale}
           firstDay={1}
           height="100%"
           headerToolbar={{
             left: 'prev,next today',
             center: 'title',
-            right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek',
+            right: 'timeGridWeek,dayGridMonth,timeGridDay,listWeek',
           }}
+          buttonText={{ listWeek: 'Terminübersicht' }}
           slotMinTime="06:00:00"
           slotMaxTime="21:00:00"
+          scrollTime="07:30:00"
           nowIndicator
           dayMaxEvents={3}
           eventDisplay="block"
           eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+          // Google-style column headers in week/day view: small weekday + big date.
+          dayHeaderContent={(arg) => {
+            if (!arg.view.type.startsWith('timeGrid')) return arg.text
+            return (
+              <>
+                <span className="cal-dow">{arg.date.toLocaleDateString('de-DE', { weekday: 'short' })}</span>
+                <span className="cal-day">{arg.date.getDate()}</span>
+              </>
+            )
+          }}
           events={mode === 'projects' ? projectEvents : events}
+          eventDrop={onEventChange}
+          eventResize={onEventChange}
           datesSet={(info) =>
             setRange({ from: info.start.toISOString(), to: info.end.toISOString() })
           }
@@ -434,6 +497,7 @@ export function CalendarPage() {
           at={editAppt?.scheduled_at ? new Date(editAppt.scheduled_at) : (createAt ?? new Date())}
           edit={editAppt ?? undefined}
           employees={employees}
+          appointments={appointments}
           colorFor={colorFor}
           onClose={() => { setCreateAt(null); setEditAppt(null) }}
           onCreated={() => {
@@ -446,6 +510,32 @@ export function CalendarPage() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={!!pendingMove}
+        onOpenChange={(v) => {
+          if (!v && pendingMove && !moveAppt.isPending) {
+            pendingMove.revert()
+            setPendingMove(null)
+          }
+        }}
+        title="Termin verschieben?"
+        message={
+          pendingMove
+            ? `„${pendingMove.appt.title ?? 'Termin'}“${pendingMove.appt.customer_name ? ` (${pendingMove.appt.customer_name})` : ''} auf ${pendingMove.newStart.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Europe/Berlin' })}, ${hm(pendingMove.newStart)} Uhr (${pendingMove.newDuration} Min) verschieben? Der Kunde wird über die Änderung informiert (Anruf/E-Mail je nach Einstellung in der Kiki-Zentrale).`
+            : ''
+        }
+        confirmLabel="Verschieben"
+        busy={moveAppt.isPending}
+        onConfirm={() => {
+          if (!pendingMove) return
+          moveAppt.mutate({
+            id: pendingMove.appt.id,
+            scheduled_at: pendingMove.newStart.toISOString(),
+            duration_minutes: pendingMove.newDuration,
+          })
+        }}
+      />
     </div>
   )
 }
@@ -643,6 +733,7 @@ function CreateAppointmentModal({
   at,
   edit,
   employees,
+  appointments = [],
   colorFor,
   onClose,
   onCreated,
@@ -650,6 +741,7 @@ function CreateAppointmentModal({
   at: Date
   edit?: Appointment
   employees: Employee[]
+  appointments?: Appointment[]
   colorFor: (id: string | null) => string
   onClose: () => void
   onCreated: () => void
@@ -662,6 +754,22 @@ function CreateAppointmentModal({
   const [assigned, setAssigned] = useState(edit?.assigned_employee_id ?? '')
   const [location, setLocation] = useState(edit ? (locStr(edit.location) ?? '') : '')
   const [error, setError] = useState<string | null>(null)
+
+  // Non-blocking double-booking hint: how many active appointments overlap the
+  // chosen window. Whether that is fine is governed by the Terminregeln
+  // ("Parallele Termine") — we only surface the overlap, never block.
+  const overlapCount = useMemo(() => {
+    if (!date || !time) return 0
+    const start = new Date(`${date}T${time}`).getTime()
+    const end = start + duration * 60000
+    return appointments.filter((a) => {
+      if (a.id === edit?.id || !a.scheduled_at) return false
+      if (a.status === 'cancelled' || a.status === 'completed') return false
+      const s = new Date(a.scheduled_at).getTime()
+      const e = s + (a.duration_minutes ?? 60) * 60000
+      return start < e && end > s
+    }).length
+  }, [appointments, date, time, duration, edit?.id])
 
   const { data: customerData } = useQuery({
     queryKey: ['customers-options'],
@@ -714,6 +822,12 @@ function CreateAppointmentModal({
     >
       <div className="space-y-4">
         {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
+        {overlapCount > 0 && (
+          <div className="rounded-md bg-warning-bg px-3 py-2 text-sm text-warning">
+            Zur gewählten Zeit {overlapCount === 1 ? 'existiert bereits 1 Termin' : `existieren bereits ${overlapCount} Termine`}.
+            Ob parallele Termine zulässig sind, regeln die Terminregeln („Parallele Termine“) — Sie können trotzdem speichern.
+          </div>
+        )}
         <div>
           <div className="mb-1.5 text-xs font-semibold text-body">Kunde</div>
           <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={inputCls}>

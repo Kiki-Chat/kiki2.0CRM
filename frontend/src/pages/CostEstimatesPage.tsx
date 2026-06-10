@@ -155,9 +155,9 @@ export function CostEstimatesPage() {
             </div>
           </div>
           <div>
-            <div className="mb-1 text-xs font-medium text-muted">Kunde</div>
+            <div className="mb-1 text-xs font-medium text-muted">Kontakt</div>
             <select value={customer} onChange={(e) => setCustomer(e.target.value)} className={selectCls}>
-              <option value="">Alle Kunden</option>
+              <option value="">Alle Kontakte</option>
               {customers.map((c) => <option key={c.id} value={c.id}>{c.full_name ?? 'Unbenannt'}</option>)}
             </select>
           </div>

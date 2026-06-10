@@ -147,7 +147,7 @@ function OverviewTab({ company }: { company: string }) {
             HeyKiki
           </div>
           <h2 className="mt-3 text-2xl font-extrabold leading-tight tracking-tight text-text sm:text-[28px]">
-            Kiki, die erste KI‑Bürokraft für{' '}
+            Kiki, die erste KI‑Sekretärin für{' '}
             <span className="text-green-primary">Handwerksbetriebe</span>
           </h2>
 

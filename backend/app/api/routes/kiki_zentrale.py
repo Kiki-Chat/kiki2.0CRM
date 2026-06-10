@@ -34,7 +34,7 @@ _CONFIG_COLS = (
     "welcome_message, trade, knowledge_text, problem_description, "
     "prompt_manual_override, forwarding_number, "
     "incoming_forwarding_number, scheduling_enabled, buffer_minutes, "
-    "max_appointments_per_day, parallel_slots, lead_time_days, lead_time_only_weekdays, "
+    "max_appointments_per_day, parallel_slots, lead_time_hours, lead_time_days, lead_time_only_weekdays, "
     "lead_time_earliest_clock, price_info_enabled, kva_automation_enabled, "
     "emergency_enabled, emergency_number, emergency_only_outside_business_hours, "
     "emergency_keywords, emergency_extra_windows, emergency_surcharge_notice_enabled, "
@@ -67,7 +67,7 @@ def _upsert_config(org_id: str, fields: dict) -> dict:
     )[0]
 
 
-def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str) -> None:
+def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str, seq: int = 0) -> None:
     """Best-effort re-render + push of the org's prompt after a config save.
 
     Runs as a FastAPI BackgroundTask AFTER the HTTP response is sent, so the
@@ -75,16 +75,41 @@ def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str) -> None:
     happens synchronously in the handler, so the returned row reflects the saved
     state; only the EL push is deferred. Wrapped so a push failure (un-provisioned
     org, EL outage, manual override) NEVER surfaces — rerender_and_push_for_org
-    already swallows its own errors; this is belt-and-braces + a log line."""
+    already swallows its own errors; this is belt-and-braces + a log line.
+
+    `seq` (from ac.begin_sync) resolves the frontend sync banner: applied on
+    success AND on legit no-ops (manual override / no agent — nothing to push is
+    not a failure), failed on a real EL error."""
     try:
-        ac.rerender_and_push_for_org(
+        result = ac.rerender_and_push_for_org(
             org_id=org_id, actor_id=user_id, endpoint_label=endpoint_label
         )
+        reason = result.get("reason")
+        ok = bool(result.get("updated")) or reason in ("manual_override", "no_agent")
+        # Notdienst-/Telefon-saves also reconfigure the native transfer_to_number
+        # system tool (the actual call-bridge mechanism), not just the prompt.
+        if endpoint_label in ("kz_emergency", "kz_phone", "kz_retry"):
+            tool_result = ac.sync_transfer_tool_for_org(org_id)
+            if not tool_result.get("updated") and tool_result.get("reason") not in (
+                "no_agent", None
+            ):
+                ok, reason = False, f"transfer_tool: {tool_result.get('reason')}"
+        ac.finish_sync(org_id, seq, ok=ok, reason=reason)
     except Exception as exc:  # noqa: BLE001 — never let a background push crash
         logger.warning(
             "background prompt re-push failed (org=%s, label=%s): %s",
             org_id, endpoint_label, str(exc)[:200],
         )
+        ac.finish_sync(org_id, seq, ok=False, reason=str(exc)[:300])
+
+
+def _schedule_repush(
+    background: BackgroundTasks, user: CurrentUser, endpoint_label: str
+) -> None:
+    """begin_sync (synchronous, so the first poll already sees 'pending') +
+    deferred re-push. The single entry point for ALL config-mutating handlers."""
+    seq = ac.begin_sync(user.org_id, endpoint_label)
+    background.add_task(_repush_bg, user.org_id, user.id, endpoint_label, seq)
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -182,11 +207,12 @@ class ServiceUpdate(BaseModel):
 
 
 class SchedulingRulesUpdate(BaseModel):
-    scheduling_enabled: bool | None = None
+    scheduling_enabled: bool | None = None  # legacy — UI gate is autonomy "Termine" now
     buffer_minutes: int | None = None
     max_appointments_per_day: int | None = None
     parallel_slots: int | None = None
-    lead_time_days: int | None = None
+    lead_time_hours: int | None = None
+    lead_time_days: int | None = None  # legacy fallback (lead_time_hours wins)
     lead_time_only_weekdays: bool | None = None
     lead_time_earliest_clock: str | None = None
     model_config = {"extra": "ignore"}
@@ -344,6 +370,55 @@ async def get_overview(user: CurrentUser = Depends(require_org)) -> dict:
     return await run_in_threadpool(_get_overview, user.org_id)
 
 
+# ─── Agent-sync status (frontend loader banner) ──────────────────────────────
+_SYNC_STALE_SECONDS = 300  # a pending sync older than this = process died mid-push
+
+
+def _get_sync_status(org_id: str) -> dict:
+    client = get_service_client()
+    row = (
+        client.table("agent_configs")
+        .select(
+            "agent_sync_status, agent_sync_label, agent_sync_error, "
+            "agent_sync_seq, agent_sync_requested_at, agent_sync_finished_at"
+        )
+        .eq("org_id", org_id).limit(1).execute().data or [{}]
+    )[0]
+    status = row.get("agent_sync_status") or "idle"
+    requested_at = row.get("agent_sync_requested_at")
+    error = row.get("agent_sync_error")
+    # Stale coercion (read-side, no DB write): a backend restart mid-push would
+    # otherwise leave the banner spinning forever.
+    if status == "pending" and requested_at:
+        try:
+            ts = datetime.fromisoformat(requested_at.replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age > _SYNC_STALE_SECONDS:
+                status, error = "failed", "timeout"
+        except ValueError:
+            pass
+    return {
+        "status": status,
+        "label": row.get("agent_sync_label"),
+        "error": error,
+        "seq": row.get("agent_sync_seq") or 0,
+        "requested_at": requested_at,
+        "finished_at": row.get("agent_sync_finished_at"),
+    }
+
+
+@router.get("/sync-status")
+async def get_sync_status(user: CurrentUser = Depends(require_org)) -> dict:
+    return await run_in_threadpool(_get_sync_status, user.org_id)
+
+
+@router.post("/sync-status/retry")
+async def retry_sync(background: BackgroundTasks, user: CurrentUser = Depends(require_org)) -> dict:
+    _require_admin(user)
+    _schedule_repush(background, user, "kz_retry")
+    return {"success": True}
+
+
 @router.get("/agent-health")
 async def get_agent_health(user: CurrentUser = Depends(require_org)) -> dict:
     agent_id = await run_in_threadpool(ea.get_org_agent_id, user.org_id)
@@ -429,7 +504,7 @@ async def update_verhalten(
     # The per-capability autonomy (and welcome) feed the agent prompt → re-render
     # and push to ElevenLabs in the background, like the other config sections.
     if supa:
-        background.add_task(_repush_bg, user.org_id, user.id, "kz_verhalten")
+        _schedule_repush(background, user, "kz_verhalten")
     return result
 
 
@@ -509,17 +584,105 @@ async def prompt_diff(payload: PromptDiffRequest, user: CurrentUser = Depends(re
     return await run_in_threadpool(_do)
 
 
-# ─── Pflichtfelder ───────────────────────────────────────────────────────────
+# ─── Pflichtfelder / Leitfaden ───────────────────────────────────────────────
+_LINKED_SETTINGS = ("appointments_enabled", "kva_enabled", "price_info_enabled")
+
+
 @router.get("/required-fields")
 async def list_required_fields(user: CurrentUser = Depends(require_org)) -> dict:
     def _do() -> dict:
+        client = get_service_client()
         rows = (
-            get_service_client().table("agent_required_fields").select("*")
+            client.table("agent_required_fields").select("*")
             .eq("org_id", user.org_id).order("sort_order").execute().data or []
         )
+        # Linked rows mirror the live setting — their own is_active is
+        # position-only and must never be shown/used directly.
+        if any(r.get("linked_setting") for r in rows):
+            cfg = (
+                client.table("agent_configs")
+                .select(", ".join(_LINKED_SETTINGS))
+                .eq("org_id", user.org_id).limit(1).execute().data or [{}]
+            )[0]
+            for r in rows:
+                linked = r.get("linked_setting")
+                if linked:
+                    r["is_active"] = bool(cfg.get(linked))
         return {"fields": rows}
 
     return await run_in_threadpool(_do)
+
+
+class LeitfadenItem(BaseModel):
+    id: str
+    is_active: bool = True
+
+
+class LeitfadenSave(BaseModel):
+    items: list[LeitfadenItem]
+
+
+@router.patch("/leitfaden")
+async def save_leitfaden(
+    payload: LeitfadenSave, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Batch save of the Leitfaden: the COMPLETE ordered list (index = sort_order)
+    + per-row active toggles. Linked-row toggles write through to the real
+    agent_configs setting (two-way sync with Autonomie/Preisauskunft). ONE repush
+    — replaces the old push-per-drag reorder flow."""
+    _require_admin(user)
+
+    def _do() -> str:
+        client = get_service_client()
+        rows = (
+            client.table("agent_required_fields").select("id, linked_setting")
+            .eq("org_id", user.org_id).execute().data or []
+        )
+        current_ids = {r["id"] for r in rows}
+        sent_ids = {i.id for i in payload.items}
+        if current_ids != sent_ids:
+            return "stale"
+        linked_by_id = {r["id"]: r.get("linked_setting") for r in rows}
+        cfg_updates: dict = {}
+        for idx, item in enumerate(payload.items):
+            linked = linked_by_id.get(item.id)
+            update: dict = {"sort_order": idx}
+            if linked:
+                # Active state lives on agent_configs; the row keeps position only.
+                if linked in _LINKED_SETTINGS:
+                    cfg_updates[linked] = item.is_active
+            else:
+                update["is_active"] = item.is_active
+            client.table("agent_required_fields").update(update).eq(
+                "id", item.id
+            ).eq("org_id", user.org_id).execute()
+        if cfg_updates.get("price_info_enabled"):
+            # Same guard as PATCH /price-info: no priced Artikel → no price talk.
+            priced = (
+                client.table("catalog_items").select("id")
+                .eq("org_id", user.org_id).eq("is_active", True).gt("unit_price", 0)
+                .limit(1).execute().data or []
+            )
+            if not priced:
+                return "no_prices"
+        if cfg_updates:
+            _upsert_config(user.org_id, cfg_updates)
+        return "ok"
+
+    res = await run_in_threadpool(_do)
+    if res == "stale":
+        raise HTTPException(
+            status_code=409,
+            detail="Die Liste ist veraltet — bitte Seite neu laden und erneut speichern.",
+        )
+    if res == "no_prices":
+        raise HTTPException(
+            status_code=422,
+            detail="Preisauskunft kann nicht aktiviert werden: Es sind keine Artikel "
+            "mit Preisen hinterlegt. Bitte pflegen Sie zuerst Preise im Menü „Artikel“.",
+        )
+    _schedule_repush(background, user, "kz_leitfaden")
+    return {"success": True}
 
 
 @router.post("/required-fields")
@@ -539,7 +702,7 @@ async def create_required_field(
         return client.table("agent_required_fields").insert(row).execute().data[0]
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    _schedule_repush(background, user, "kz_required_fields")
     return result
 
 
@@ -562,7 +725,7 @@ async def update_required_field(
         )[0]
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    _schedule_repush(background, user, "kz_required_fields")
     return result
 
 
@@ -593,7 +756,7 @@ async def delete_required_field(
     if res == "locked":
         raise HTTPException(status_code=400, detail="Pflichtfeld ist gesperrt und kann nicht gelöscht werden.")
     # Only re-push after a real delete (not on missing/locked no-ops).
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    _schedule_repush(background, user, "kz_required_fields")
     return {"success": True}
 
 
@@ -612,8 +775,90 @@ async def reorder_required_fields(
         return {"success": True}
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_required_fields")
+    _schedule_repush(background, user, "kz_required_fields")
     return result
+
+
+# ─── Gesprächslogik (Wenn/Dann-Baukasten) ────────────────────────────────────
+class ConversationLogicUpdate(BaseModel):
+    enabled: bool | None = None
+    logic: dict | None = None
+    model_config = {"extra": "ignore"}
+
+
+def _validate_logic_or_422(raw: dict) -> str:
+    """Validates + compiles; returns the compiled preview text or raises 422."""
+    from app.schemas.conversation_logic import (
+        MAX_COMPILED_CHARS,
+        ConversationLogic,
+        LogicError,
+        compile_conversation_logic,
+        validate_conversation_logic,
+    )
+
+    try:
+        logic = ConversationLogic.model_validate(raw)
+        validate_conversation_logic(logic)
+        compiled = compile_conversation_logic(logic)
+    except LogicError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 — pydantic shape errors etc.
+        raise HTTPException(status_code=422, detail=f"Ungültige Gesprächslogik: {str(exc)[:200]}")
+    if len(compiled) > MAX_COMPILED_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Die Gesprächslogik ist zu lang ({len(compiled)} Zeichen, "
+            f"max. {MAX_COMPILED_CHARS}). Bitte kürzen Sie Bedingungen oder Aktionen.",
+        )
+    return compiled
+
+
+@router.get("/conversation-logic")
+async def get_conversation_logic(user: CurrentUser = Depends(require_org)) -> dict:
+    def _do() -> dict:
+        row = (
+            get_service_client().table("agent_configs")
+            .select("conversation_logic, conversation_logic_enabled")
+            .eq("org_id", user.org_id).limit(1).execute().data or [{}]
+        )[0]
+        return {
+            "enabled": row.get("conversation_logic_enabled", True),
+            "logic": row.get("conversation_logic") or {"version": 1, "blocks": []},
+        }
+
+    return await run_in_threadpool(_do)
+
+
+@router.patch("/conversation-logic")
+async def update_conversation_logic(
+    payload: ConversationLogicUpdate, background: BackgroundTasks,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    _require_admin(user)
+    fields: dict = {}
+    if payload.enabled is not None:
+        fields["conversation_logic_enabled"] = payload.enabled
+    if payload.logic is not None:
+        _validate_logic_or_422(payload.logic)
+        fields["conversation_logic"] = payload.logic
+    if not fields:
+        return {"success": True}
+    await run_in_threadpool(_upsert_config, user.org_id, fields)
+    _schedule_repush(background, user, "kz_conversation_logic")
+    return {"success": True}
+
+
+class ConversationLogicPreview(BaseModel):
+    logic: dict
+
+
+@router.post("/conversation-logic/preview")
+async def preview_conversation_logic(
+    payload: ConversationLogicPreview, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Validate + compile WITHOUT saving — the single compiler implementation
+    powers the live frontend preview (no drift-prone TS port)."""
+    return {"text": _validate_logic_or_422(payload.logic)}
 
 
 # ─── Branche & Kontext ───────────────────────────────────────────────────────
@@ -628,7 +873,7 @@ async def update_context(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_identity")
+    _schedule_repush(background, user, "kz_identity")
     return result
 
 
@@ -647,7 +892,7 @@ async def update_problem_description(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_problem_description")
+    _schedule_repush(background, user, "kz_problem_description")
     return result
 
 
@@ -788,7 +1033,7 @@ async def update_scheduling_rules(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_scheduling")
+    _schedule_repush(background, user, "kz_scheduling")
     return result
 
 
@@ -822,7 +1067,7 @@ async def create_category(
         return client.table("appointment_categories").insert(row).execute().data[0]
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_categories")
+    _schedule_repush(background, user, "kz_categories")
     return result
 
 
@@ -845,7 +1090,7 @@ async def update_category(
         )[0]
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_categories")
+    _schedule_repush(background, user, "kz_categories")
     return result
 
 
@@ -862,21 +1107,55 @@ async def delete_category(
         return {"success": True}
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_categories")
+    _schedule_repush(background, user, "kz_categories")
     return result
 
 
 # ─── KVA-Automatisierung / Preisauskunft ─────────────────────────────────────
 @router.patch("/kva-automation")
 async def update_kva_automation(payload: TogglePayload, user: CurrentUser = Depends(require_org)) -> dict:
+    # Legacy toggle (no frontend caller; the field does not feed the prompt) —
+    # deliberately no repush here.
     _require_admin(user)
     return await run_in_threadpool(_upsert_config, user.org_id, {"kva_automation_enabled": payload.enabled})
 
 
 @router.patch("/price-info")
-async def update_price_info(payload: TogglePayload, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_price_info(
+    payload: TogglePayload, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     _require_admin(user)
-    return await run_in_threadpool(_upsert_config, user.org_id, {"price_info_enabled": payload.enabled})
+
+    if payload.enabled:
+        # Guard: without priced Artikel the agent has nothing real to quote —
+        # enabling would invite hallucinated prices.
+        def _priced_count() -> int:
+            rows = (
+                get_service_client().table("catalog_items").select("id")
+                .eq("org_id", user.org_id).eq("is_active", True).gt("unit_price", 0)
+                .limit(1).execute().data or []
+            )
+            return len(rows)
+
+        if await run_in_threadpool(_priced_count) == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Preisauskunft kann nicht aktiviert werden: Es sind keine "
+                "Artikel mit Preisen hinterlegt. Bitte pflegen Sie zuerst Preise "
+                "im Menü „Artikel“.",
+            )
+
+    result = await run_in_threadpool(
+        _upsert_config, user.org_id, {"price_info_enabled": payload.enabled}
+    )
+    # This PATCH previously never re-pushed the prompt — the toggle changed the
+    # DB but the live agent kept its old price behaviour. Repush is the fix.
+    _schedule_repush(background, user, "kz_price_info")
+    # Keep the Preisliste KB document in step with the toggle (create/remove).
+    from app.services.price_knowledge import sync_price_list_kb
+
+    background.add_task(sync_price_list_kb, user.org_id)
+    return result
 
 
 # ─── Leistungsangebot ────────────────────────────────────────────────────────
@@ -946,13 +1225,15 @@ async def update_emergency(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    background.add_task(_repush_bg, user.org_id, user.id, "kz_emergency")
+    _schedule_repush(background, user, "kz_emergency")
     return result
 
 
 # ─── Telefon ─────────────────────────────────────────────────────────────────
 @router.patch("/phone")
-async def update_phone(payload: PhoneUpdate, user: CurrentUser = Depends(require_org)) -> dict:
+async def update_phone(
+    payload: PhoneUpdate, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
+) -> dict:
     """Update the org's Telefon section.
 
     - `forwarding_number` / `incoming_forwarding_number` → `agent_configs`
@@ -995,7 +1276,11 @@ async def update_phone(payload: PhoneUpdate, user: CurrentUser = Depends(require
         )[0]
         return {**cfg, "existing_business_number": org.get("existing_business_number")}
 
-    return await run_in_threadpool(_do)
+    result = await run_in_threadpool(_do)
+    # incoming_forwarding_number feeds the KZ_STAFF_TRANSFER prompt block — the
+    # agent must learn about a changed/removed staff-transfer number immediately.
+    _schedule_repush(background, user, "kz_phone")
+    return result
 
 
 # ─── Ausgehende Anrufe ───────────────────────────────────────────────────────

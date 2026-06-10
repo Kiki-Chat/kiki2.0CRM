@@ -6,15 +6,22 @@ import { applyAccent } from '../../lib/accent'
 import { apiFetch } from '../../lib/api'
 import { env } from '../../lib/env'
 import { useMe } from '../../lib/useMe'
-import { CopilotWidget } from '../copilot/CopilotWidget'
+import { CopilotPanel } from '../copilot/CopilotPanel'
 import { CommandPalette } from './CommandPalette'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
+
+const COPILOT_OPEN_KEY = 'kiki-copilot-open'
 
 export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false)
   // Mobile nav drawer (md=768px breakpoint). Desktop keeps the static rail.
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  // "Hey Kiki" side panel (docked right; opened from the Topbar button).
+  const [copilotOpen, setCopilotOpen] = useState(() => localStorage.getItem(COPILOT_OPEN_KEY) === '1')
+  useEffect(() => {
+    localStorage.setItem(COPILOT_OPEN_KEY, copilotOpen ? '1' : '0')
+  }, [copilotOpen])
   const location = useLocation()
   useEffect(() => setMobileNavOpen(false), [location.pathname])
   // Global ⌘K / Ctrl-K command palette ("Kiki fragen") — searches the nav
@@ -74,6 +81,8 @@ export function AppLayout() {
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((c) => !c)}
           onOpenNav={() => setMobileNavOpen(true)}
+          copilotOpen={env.copilotEnabled ? copilotOpen : undefined}
+          onToggleCopilot={env.copilotEnabled ? () => setCopilotOpen((o) => !o) : undefined}
         />
         <main className="flex-1 overflow-y-auto">
           <Outlet />
@@ -92,8 +101,12 @@ export function AppLayout() {
           </footer>
         )}
       </div>
+      {/* Hey Kiki — docked right panel; the CRM content reflows next to it on
+          desktop (Gemini-in-Docs pattern), overlays on small screens. */}
+      {env.copilotEnabled && (
+        <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
+      )}
       <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
-      {env.copilotEnabled && <CopilotWidget />}
     </div>
   )
 }
