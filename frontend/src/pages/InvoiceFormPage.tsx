@@ -19,6 +19,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { apiFetch, apiPostBlob } from '../lib/api'
+import {
+  consumeLiveFill,
+  emitLiveFillStatus,
+  sleep,
+  type LiveFillPayload,
+} from '../lib/liveFill'
 import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
@@ -128,6 +134,129 @@ export function InvoiceFormPage() {
       importKva(kp)
     }
   }, [isEdit, params, importKva])
+
+  // ── Hey-Kiki live fill ("takeover"): a confirmed copilot create_invoice lands
+  // here via lib/liveFill — Kiki visibly fills the real form (customer →
+  // subject typed char-by-char → positions one by one), then saves and opens
+  // the finished invoice. The data is also assembled deterministically for the
+  // save, so the animation can never diverge from what is persisted.
+  const [kikiFilling, setKikiFilling] = useState(false)
+  // undefined = not yet checked; null = no live-fill requested.
+  const liveFillRef = useRef<LiveFillPayload | null | undefined>(undefined)
+  if (liveFillRef.current === undefined) {
+    // One-shot consume on first render (cleared from sessionStorage immediately).
+    liveFillRef.current = isEdit ? null : consumeLiveFill('create_invoice')
+  }
+  const liveFillStarted = useRef(false)
+  useEffect(() => {
+    const lf = liveFillRef.current
+    // Wait until the customer options are loaded (needed for name → id matching).
+    if (!lf || liveFillStarted.current || isEdit || !customerData) return
+    liveFillStarted.current = true
+
+    const run = async () => {
+      setKikiFilling(true)
+      try {
+        const args = lf.args || {}
+        await sleep(700)
+
+        // 1) Customer: UUID directly, otherwise match the loaded options by name.
+        const ref = String(args.customer_id || args.customer || '').trim()
+        let cid = ''
+        if (/^[0-9a-f-]{36}$/i.test(ref)) {
+          cid = ref
+        } else if (ref) {
+          const needle = ref.toLowerCase()
+          const hit = (customerData.customers ?? []).find((c) =>
+            (c.full_name || '').toLowerCase().includes(needle),
+          )
+          cid = hit?.id ?? ''
+        }
+        if (cid) {
+          setCustomerId(cid)
+          await sleep(600)
+        }
+
+        // 2) Subject — typed character by character.
+        const subj = String(args.subject || '').trim()
+        for (let i = 1; i <= subj.length; i++) {
+          setSubject(subj.slice(0, i))
+          await sleep(18)
+        }
+        if (subj) await sleep(400)
+
+        // 3) Positions — appear one by one; descriptions typed.
+        const wanted = (args.positions ?? []).filter((p) => p && (p.description || p.price != null))
+        const rows = wanted.map((p) => ({
+          ...newPos(),
+          description: '',
+          quantity: Number(p.quantity ?? 1),
+          unit: p.unit || 'Stk',
+          price: Number(p.price ?? 0),
+          vat: Number(p.vat ?? 19),
+        }))
+        for (let r = 0; r < rows.length; r++) {
+          const visible = rows.slice(0, r + 1)
+          setPositions(visible.map((row) => ({ ...row })))
+          const desc = String(wanted[r].description || '')
+          for (let i = 1; i <= desc.length; i++) {
+            rows[r].description = desc.slice(0, i)
+            setPositions(rows.slice(0, r + 1).map((row) => ({ ...row })))
+            await sleep(14)
+          }
+          await sleep(350)
+        }
+
+        // 4) Optional texts.
+        if (args.intro_text) setIntroText(String(args.intro_text))
+        if (args.closing_text) setClosingText(String(args.closing_text))
+        await sleep(900)
+
+        // 5) Save — payload built HERE (state closures would be stale inside
+        // this async script) and identical to what was animated.
+        const inv = await apiFetch<{ id: string; number?: string }>('/api/invoices', {
+          method: 'POST',
+          body: JSON.stringify({
+            customer_id: cid || null,
+            kva_id: null,
+            project_id: null,
+            subject: subj,
+            reference_number: '',
+            invoice_date: todayIso(),
+            performance_date: todayIso(),
+            payment_terms_days: 14,
+            discount_pct: null,
+            discount_days: null,
+            positions: rows.map(({ _id, ...p }, r) => ({ ...p, description: String(wanted[r].description || '') })),
+            intro_text: args.intro_text ? String(args.intro_text) : INVOICE_INTRO,
+            closing_text: args.closing_text ? String(args.closing_text) : INVOICE_CLOSING,
+            payment_terms_text: '',
+            surcharge: 0,
+            surcharge_description: '',
+            total_discount_pct: 0,
+          }),
+        })
+        qc.invalidateQueries({ queryKey: ['invoices'] })
+        emitLiveFillStatus({
+          tool: 'create_invoice',
+          status: 'done',
+          note: `Rechnung${inv.number ? ' ' + inv.number : ''} live ausgefüllt & gespeichert`,
+          route: `/invoices/${inv.id}`,
+        })
+        navigate(`/invoices/${inv.id}`)
+      } catch (e) {
+        emitLiveFillStatus({
+          tool: 'create_invoice',
+          status: 'failed',
+          note: e instanceof Error ? e.message : 'Formular-Ausfüllen fehlgeschlagen',
+        })
+      } finally {
+        setKikiFilling(false)
+      }
+    }
+    void run()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerData, isEdit])
 
   // Edit mode: load existing invoice.
   const { data: existing } = useQuery({
@@ -262,6 +391,12 @@ export function InvoiceFormPage() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 p-8 lg:grid-cols-[3fr_2fr]">
         {/* LEFT: form */}
         <div className="min-h-0 space-y-5 overflow-y-auto pb-24">
+          {kikiFilling && (
+            <div className="sticky top-0 z-10 flex items-center gap-2 rounded-lg border border-ai/30 bg-ai-bg px-4 py-2.5 text-sm font-semibold text-ai shadow-e1">
+              <Loader2 size={15} className="animate-spin" />
+              Kiki füllt die Rechnung aus … bitte kurz zusehen, gespeichert wird automatisch.
+            </div>
+          )}
           {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
 
           {/* Section 1 */}

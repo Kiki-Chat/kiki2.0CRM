@@ -5,6 +5,12 @@ import { useNavigate } from 'react-router-dom'
 
 import kikiAvatar from '../../assets/kiki-avatar.png'
 import { apiFetch } from '../../lib/api'
+import {
+  LIVE_FILL_EVENT,
+  requestLiveFill,
+  type LiveFillPayload,
+  type LiveFillStatus,
+} from '../../lib/liveFill'
 import { useMe } from '../../lib/useMe'
 import { cn } from '../../lib/utils'
 
@@ -196,8 +202,56 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
     }
   }
 
-  const confirmAction = async (msgId: string, idx: number, action: ActionState) => {
+  // Form-backed creates get the "takeover" treatment: navigate to the real
+  // form and let it fill itself live (see lib/liveFill.ts). Falls back to the
+  // direct API path when the live fill fails or never reports back.
+  const LIVE_FILL_TOOLS: Record<string, string> = {
+    create_invoice: '/invoices/new',
+  }
+
+  const confirmLive = (msgId: string, idx: number, action: ActionState, route: string) => {
+    updateAction(msgId, idx, 'running', 'Kiki öffnet das Formular und füllt es live aus…')
+    requestLiveFill({ tool: action.tool, args: action.args } as LiveFillPayload)
+    appendStep(msgId, `→ Formular geöffnet: ${route}`)
+    navigate(route)
+
+    let settled = false
+    const onStatus = (e: Event) => {
+      const detail = (e as CustomEvent<LiveFillStatus>).detail
+      if (!detail || detail.tool !== action.tool || settled) return
+      settled = true
+      window.removeEventListener(LIVE_FILL_EVENT, onStatus)
+      clearTimeout(timeout)
+      if (detail.status === 'done') {
+        updateAction(msgId, idx, 'done', 'Erledigt ✓')
+        appendStep(msgId, `→ ${detail.note || 'Live ausgefüllt & gespeichert'}`)
+        void qc.invalidateQueries()
+      } else {
+        // Live fill failed → run the regular API path so the action still lands.
+        appendStep(msgId, `→ Live-Ausfüllen nicht möglich (${detail.note || 'Fehler'}) — führe direkt aus…`)
+        void confirmViaApi(msgId, idx, action)
+      }
+    }
+    const timeout = setTimeout(() => {
+      if (settled) return
+      settled = true
+      window.removeEventListener(LIVE_FILL_EVENT, onStatus)
+      void confirmViaApi(msgId, idx, action)
+    }, 60_000)
+    window.addEventListener(LIVE_FILL_EVENT, onStatus)
+  }
+
+  const confirmAction = (msgId: string, idx: number, action: ActionState) => {
     setError(null)
+    const liveRoute = LIVE_FILL_TOOLS[action.tool]
+    if (liveRoute) {
+      confirmLive(msgId, idx, action, liveRoute)
+      return
+    }
+    void confirmViaApi(msgId, idx, action)
+  }
+
+  const confirmViaApi = async (msgId: string, idx: number, action: ActionState) => {
     updateAction(msgId, idx, 'running', 'Wird ausgeführt…')
     try {
       const res = await apiFetch<{ ok: boolean; result: Record<string, unknown> }>(
