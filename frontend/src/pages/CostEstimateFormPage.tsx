@@ -19,6 +19,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { apiFetch, apiPostBlob } from '../lib/api'
+import {
+  consumeLiveFill,
+  emitLiveFillStatus,
+  sleep,
+  type LiveFillPayload,
+} from '../lib/liveFill'
 import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
@@ -166,6 +172,119 @@ export function CostEstimateFormPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textDefaults, isEdit])
 
+  // ── Hey-Kiki live fill ("takeover"): a confirmed copilot create_cost_estimate
+  // lands here via lib/liveFill — same cooperative animation as the invoice form
+  // (customer → subject typed → positions one by one → auto-save → open result).
+  const [kikiFilling, setKikiFilling] = useState(false)
+  // undefined = not yet checked; null = no live-fill requested.
+  const liveFillRef = useRef<LiveFillPayload | null | undefined>(undefined)
+  if (liveFillRef.current === undefined) {
+    liveFillRef.current = isEdit ? null : consumeLiveFill('create_cost_estimate')
+  }
+  const liveFillStarted = useRef(false)
+  useEffect(() => {
+    const lf = liveFillRef.current
+    if (!lf || liveFillStarted.current || isEdit || !customerData) return
+    liveFillStarted.current = true
+
+    const run = async () => {
+      setKikiFilling(true)
+      try {
+        const args = lf.args || {}
+        await sleep(700)
+
+        const ref = String(args.customer_id || args.customer || '').trim()
+        let cid = ''
+        if (/^[0-9a-f-]{36}$/i.test(ref)) {
+          cid = ref
+        } else if (ref) {
+          const needle = ref.toLowerCase()
+          const hit = (customerData.customers ?? []).find((c) =>
+            (c.full_name || '').toLowerCase().includes(needle),
+          )
+          cid = hit?.id ?? ''
+        }
+        if (cid) {
+          setCustomerId(cid)
+          await sleep(600)
+        }
+
+        const subj = String(args.subject || '').trim()
+        for (let i = 1; i <= subj.length; i++) {
+          setSubject(subj.slice(0, i))
+          await sleep(18)
+        }
+        if (subj) await sleep(400)
+
+        const wanted = (args.positions ?? []).filter((p) => p && (p.description || p.price != null))
+        const rows = wanted.map((p) => ({
+          ...newPos(),
+          description: '',
+          quantity: Number(p.quantity ?? 1),
+          unit: p.unit || 'Stk',
+          price: Number(p.price ?? 0),
+          vat: Number(p.vat ?? 19),
+        }))
+        for (let r = 0; r < rows.length; r++) {
+          setPositions(rows.slice(0, r + 1).map((row) => ({ ...row })))
+          const desc = String(wanted[r].description || '')
+          for (let i = 1; i <= desc.length; i++) {
+            rows[r].description = desc.slice(0, i)
+            setPositions(rows.slice(0, r + 1).map((row) => ({ ...row })))
+            await sleep(14)
+          }
+          await sleep(350)
+        }
+
+        if (args.intro_text) setIntroText(String(args.intro_text))
+        if (args.closing_text) setClosingText(String(args.closing_text))
+        await sleep(900)
+
+        // Save — payload built HERE (state closures would be stale in this
+        // async script) and identical to what was animated.
+        const ce = await apiFetch<{ id: string; number?: string }>('/api/cost-estimates', {
+          method: 'POST',
+          body: JSON.stringify({
+            customer_id: cid || null,
+            inquiry_id: null,
+            project_id: null,
+            type: 'kva',
+            subject: subj,
+            reference_number: '',
+            is_binding: false,
+            tolerance_pct: 20,
+            validity_days: 30,
+            positions: rows.map(({ _id, ...p }, r) => ({ ...p, description: String(wanted[r].description || '') })),
+            intro_text: args.intro_text ? String(args.intro_text) : '',
+            closing_text: args.closing_text ? String(args.closing_text) : '',
+            payment_terms: '',
+            surcharge: 0,
+            surcharge_description: '',
+            total_discount_pct: 0,
+          }),
+        })
+        qc.invalidateQueries({ queryKey: ['cost-estimates'] })
+        emitLiveFillStatus({
+          tool: 'create_cost_estimate',
+          status: 'done',
+          note: `KVA${ce.number ? ' ' + ce.number : ''} live ausgefüllt & gespeichert`,
+          route: `/cost-estimates/${ce.id}`,
+        })
+        navigate(`/cost-estimates/${ce.id}`)
+      } catch (e) {
+        emitLiveFillStatus({
+          tool: 'create_cost_estimate',
+          status: 'failed',
+          note: e instanceof Error ? e.message : 'Formular-Ausfüllen fehlgeschlagen',
+        })
+      } finally {
+        setKikiFilling(false)
+      }
+    }
+    void run()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerData, isEdit])
+
   const totals = useMemo(() => calcTotals(positions, surcharge, discountPct), [positions, surcharge, discountPct])
 
   // ── Live PDF preview (debounced) ──
@@ -253,6 +372,12 @@ export function CostEstimateFormPage() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 p-8 lg:grid-cols-[3fr_2fr]">
         {/* LEFT: form */}
         <div className="min-h-0 space-y-5 overflow-y-auto pb-24">
+          {kikiFilling && (
+            <div className="sticky top-0 z-10 flex items-center gap-2 rounded-lg border border-ai/30 bg-ai-bg px-4 py-2.5 text-sm font-semibold text-ai shadow-e1">
+              <Loader2 size={15} className="animate-spin" />
+              Kiki füllt den Kostenvoranschlag aus … bitte kurz zusehen, gespeichert wird automatisch.
+            </div>
+          )}
           {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
 
           {/* Section 1 */}

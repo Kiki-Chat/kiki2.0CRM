@@ -340,6 +340,61 @@ def _update_org_profile(user: CurrentUser, args: dict) -> dict:
     return {"updated_fields": list(fields), "organization": {k: org.get(k) for k in _ORG_PROFILE_FIELDS}}
 
 
+def _create_employee(user: CurrentUser, args: dict) -> dict:
+    from app.api.routes import employees as emp_routes
+    from app.schemas.admin import EmployeeCreate
+
+    name = (args.get("display_name") or args.get("name") or "").strip()
+    if not name:
+        return {"error": "Name ist erforderlich."}
+    try:
+        # Record-only (no login invite) — inviting with email/password setup is a
+        # deliberate human step on the Mitarbeiter page.
+        payload = EmployeeCreate(
+            display_name=name,
+            email=args.get("email"),
+            login_access=False,
+            is_active=True,
+            activity_area=args.get("activity_area"),
+            is_technician=bool(args.get("is_technician") or False),
+        )
+        emp = emp_routes._create(user.org_id, payload)
+        return {"employee": {k: emp.get(k) for k in ("id", "display_name", "email", "is_technician")},
+                "note": "Ohne Login angelegt — eine Login-Einladung kann auf der Mitarbeiter-Seite gesendet werden."}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"Mitarbeiter nicht angelegt: {getattr(exc, 'detail', str(exc))}"}
+
+
+def _create_project(user: CurrentUser, args: dict) -> dict:
+    from app.api.routes import projects as proj_routes
+    from app.schemas.admin import ProjectUpsert
+
+    title = (args.get("title") or "").strip()
+    if not title:
+        return {"error": "Projekt-Titel ist erforderlich."}
+    customer_id = None
+    ref = (args.get("customer") or args.get("customer_id") or "").strip()
+    if ref:
+        r = _resolve_customer(user.org_id, ref)
+        if "id" not in r:
+            return r  # not found / ambiguous → ask which customer
+        customer_id = r["id"]
+    try:
+        payload = ProjectUpsert(
+            customer_id=customer_id,
+            title=title,
+            description=args.get("description"),
+            status=args.get("status") or "planning",
+            start_date=args.get("start_date"),
+            end_date=args.get("end_date"),
+            planned_budget=args.get("planned_budget"),
+        )
+        proj = proj_routes._create(user.org_id, user.id, payload)
+        return {"project": {k: proj.get(k) for k in ("id", "number", "title", "status", "customer_id")}}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"Projekt nicht angelegt: {getattr(exc, 'detail', str(exc))}"}
+
+
 def _positions_arg(args: dict) -> list:
     """Coerce the model's position list into clean dicts for the upsert schema.
     Totals/VAT are computed by the backend from these line items."""
@@ -654,6 +709,51 @@ REGISTRY: list[Tool] = [
             },
         },
         run=_update_org_profile,
+        kind="write",
+        roles=ROLES_ADMIN,
+    ),
+    Tool(
+        name="create_employee",
+        description=(
+            "Lege einen neuen Mitarbeiter/Techniker an (OHNE Login — die "
+            "Login-Einladung erfolgt manuell auf der Mitarbeiter-Seite). "
+            "Nur Admins, nach Bestätigung."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "display_name": {"type": "string", "description": "Vor- und Nachname"},
+                "email": {"type": "string"},
+                "activity_area": {"type": "string", "description": "Tätigkeitsbereich, z. B. Heizung, Sanitär"},
+                "is_technician": {"type": "boolean", "description": "True, wenn die Person die Arbeiten vor Ort ausführt (Techniker/Monteur)"},
+            },
+            "required": ["display_name"],
+        },
+        run=_create_employee,
+        kind="write",
+        roles=ROLES_ADMIN,
+    ),
+    Tool(
+        name="create_project",
+        description=(
+            "Lege ein neues Projekt an (Titel erforderlich; optional Kunde, "
+            "Beschreibung, Start-/Enddatum YYYY-MM-DD, geplantes Budget). "
+            "Nach Bestätigung."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "customer": {"type": "string", "description": "Kunden-ID oder Name (wird aufgelöst)"},
+                "description": {"type": "string"},
+                "status": {"type": "string", "enum": ["planning", "active"]},
+                "start_date": {"type": "string", "description": "YYYY-MM-DD"},
+                "end_date": {"type": "string", "description": "YYYY-MM-DD"},
+                "planned_budget": {"type": "number"},
+            },
+            "required": ["title"],
+        },
+        run=_create_project,
         kind="write",
         roles=ROLES_ADMIN,
     ),

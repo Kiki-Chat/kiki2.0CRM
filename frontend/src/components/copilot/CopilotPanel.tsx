@@ -1,5 +1,5 @@
-import { useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, Loader2, Plus, Send, Sparkles, X } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { CheckCircle2, History, Loader2, Plus, Send, Sparkles, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -43,6 +43,18 @@ interface ChatResponse {
   content: string
   actions: ProposedAction[]
   client_actions: ClientAction[]
+  conversation_id?: string | null
+}
+interface ConversationRow {
+  id: string
+  title: string | null
+  updated_at: string
+}
+interface StoredMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string | null
+  actions: { actions?: ProposedAction[] } | null
 }
 type ActionStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled'
 type ActionState = ProposedAction & { status: ActionStatus; note?: string }
@@ -111,6 +123,8 @@ function resultRoute(tool: string, result: Record<string, unknown>): { route: st
     const date = typeof appt.scheduled_at === 'string' ? appt.scheduled_at.slice(0, 10) : ''
     return { route: `/calendar${date ? `?date=${date}&appointment=${appt.id}` : ''}`, label: 'Termin im Kalender geöffnet' }
   }
+  const proj = obj('project')
+  if (tool === 'create_project' && proj?.id) return { route: `/projects/${proj.id}`, label: 'Projekt geöffnet' }
   return null
 }
 
@@ -122,8 +136,57 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Server-side chat session: every turn is persisted; previous chats reopen
+  // from the history view.
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [view, setView] = useState<'chat' | 'history'>('chat')
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  const { data: historyData, refetch: refetchHistory } = useQuery({
+    queryKey: ['copilot', 'conversations'],
+    queryFn: () => apiFetch<{ conversations: ConversationRow[] }>('/api/copilot/conversations'),
+    enabled: open && view === 'history',
+  })
+
+  const openConversation = async (id: string) => {
+    try {
+      const res = await apiFetch<{ conversation: { id: string }; messages: StoredMessage[] }>(
+        `/api/copilot/conversations/${id}`,
+      )
+      setConversationId(res.conversation.id)
+      setMessages(
+        res.messages.map((m) => ({
+          id: m.id,
+          role: m.role === 'assistant' ? ('kiki' as const) : ('user' as const),
+          content: m.content || '',
+          // Historical action cards are display-only — confirming would replay
+          // a stale write; the user re-asks if it's still needed.
+          actions: m.actions?.actions?.length
+            ? m.actions.actions.map((a) => ({
+                ...a,
+                status: 'cancelled' as const,
+                note: 'Aus früherem Chat — bei Bedarf erneut anfordern.',
+              }))
+            : undefined,
+        })),
+      )
+      setView('chat')
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Chat konnte nicht geladen werden.')
+    }
+  }
+
+  const deleteConversation = async (id: string) => {
+    try {
+      await apiFetch(`/api/copilot/conversations/${id}`, { method: 'DELETE' })
+      if (id === conversationId) newChat()
+      void refetchHistory()
+    } catch {
+      /* best-effort */
+    }
+  }
 
   const greeting = (): Msg => {
     const company = me?.org_name?.trim() || ''
@@ -151,6 +214,8 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
     setMessages([greeting()])
     setInput('')
     setError(null)
+    setConversationId(null)
+    setView('chat')
   }
 
   const updateAction = (msgId: string, idx: number, status: ActionStatus, note?: string) => {
@@ -181,8 +246,9 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
     try {
       const res = await apiFetch<ChatResponse>('/api/copilot/chat', {
         method: 'POST',
-        body: JSON.stringify({ message: text, history }),
+        body: JSON.stringify({ message: text, history, conversation_id: conversationId }),
       })
+      if (res.conversation_id) setConversationId(res.conversation_id)
       const msgId = uid()
       const actions = res.actions?.length
         ? res.actions.map((a) => ({ ...a, status: 'pending' as const }))
@@ -207,6 +273,21 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
   // direct API path when the live fill fails or never reports back.
   const LIVE_FILL_TOOLS: Record<string, string> = {
     create_invoice: '/invoices/new',
+    create_cost_estimate: '/cost-estimates/new',
+  }
+
+  // Everything else acts "in sight": Kiki first opens the page where the change
+  // will land, THEN executes — the result appears in front of the user (all
+  // queries refetch; creates additionally jump to the new object).
+  const WATCH_ROUTES: Record<string, string> = {
+    create_appointment: '/calendar',
+    create_customer: '/customers',
+    update_customer: '/customers',
+    create_inquiry: '/calls',
+    set_inquiry_status: '/calls',
+    update_org_profile: '/settings/stammdaten',
+    create_employee: '/employees',
+    create_project: '/projects',
   }
 
   const confirmLive = (msgId: string, idx: number, action: ActionState, route: string) => {
@@ -247,6 +328,11 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
     if (liveRoute) {
       confirmLive(msgId, idx, action, liveRoute)
       return
+    }
+    const watchRoute = WATCH_ROUTES[action.tool]
+    if (watchRoute && !location.pathname.startsWith(watchRoute)) {
+      navigate(watchRoute)
+      appendStep(msgId, `→ Seite geöffnet: ${watchRoute}`)
     }
     void confirmViaApi(msgId, idx, action)
   }
@@ -301,6 +387,17 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
           <div className="text-[11px] text-muted">Dein CRM-Assistent</div>
         </div>
         <button
+          onClick={() => setView((v) => (v === 'history' ? 'chat' : 'history'))}
+          className={cn(
+            'rounded-lg p-1.5 transition hover:bg-alt hover:text-text',
+            view === 'history' ? 'bg-ai-bg text-ai' : 'text-muted',
+          )}
+          aria-label="Frühere Chats"
+          title="Frühere Chats"
+        >
+          <History size={18} />
+        </button>
+        <button
           onClick={newChat}
           className="rounded-lg p-1.5 text-muted transition hover:bg-alt hover:text-text"
           aria-label="Neuer Chat"
@@ -318,8 +415,44 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
         </button>
       </div>
 
+      {/* History view */}
+      {view === 'history' && (
+        <div className="flex-1 space-y-1.5 overflow-y-auto px-3 py-4">
+          <div className="mb-2 px-1 text-xs font-bold uppercase tracking-wide text-muted">Frühere Chats</div>
+          {(historyData?.conversations ?? []).length === 0 && (
+            <p className="px-1 text-sm text-faint">Noch keine gespeicherten Chats.</p>
+          )}
+          {(historyData?.conversations ?? []).map((c) => (
+            <div
+              key={c.id}
+              className={cn(
+                'group flex items-center gap-2 rounded-lg border border-border px-3 py-2 transition hover:bg-alt',
+                c.id === conversationId && 'border-ai/40 bg-ai-bg/40',
+              )}
+            >
+              <button onClick={() => void openConversation(c.id)} className="min-w-0 flex-1 text-left">
+                <div className="truncate text-sm font-medium text-text">{c.title || 'Chat'}</div>
+                <div className="text-[11px] text-muted">
+                  {new Date(c.updated_at).toLocaleString('de-DE', {
+                    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                    timeZone: 'Europe/Berlin',
+                  })}
+                </div>
+              </button>
+              <button
+                onClick={() => void deleteConversation(c.id)}
+                title="Chat löschen"
+                className="rounded p-1 text-muted opacity-0 transition hover:text-error group-hover:opacity-100"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Thread */}
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-4">
+      <div ref={scrollRef} className={cn('flex-1 space-y-3 overflow-y-auto px-3 py-4', view !== 'chat' && 'hidden')}>
         {messages.map((m) =>
           m.role === 'user' ? (
             <div key={m.id} className="flex justify-end">
