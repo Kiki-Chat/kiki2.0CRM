@@ -100,9 +100,10 @@ class FakeClient:
 
 # ─── render_autonomy_block (pure) ─────────────────────────────────────────────
 def test_render_autonomy_block_per_level():
-    l1 = ac.render_autonomy_block(1)
-    l2 = ac.render_autonomy_block(2)
-    l3 = ac.render_autonomy_block(3)
+    # Legacy single kiki_level fallback (per-capability levels unset).
+    l1 = ac.render_autonomy_block({"kiki_level": 1})
+    l2 = ac.render_autonomy_block({"kiki_level": 2})
+    l3 = ac.render_autonomy_block({"kiki_level": 3})
     assert "KEINE Termine" in l1 and "hk_createInquiry" in l1
     assert "Reservierung" in l2 and "bestätigt" in l2
     assert "verbindlich" in l3 and "direkt" in l3
@@ -111,7 +112,18 @@ def test_render_autonomy_block_per_level():
 
 
 def test_render_autonomy_block_unknown_level_defaults_to_l2():
-    assert ac.render_autonomy_block(99) == ac.render_autonomy_block(2)
+    assert ac.render_autonomy_block({"kiki_level": 99}) == ac.render_autonomy_block(
+        {"kiki_level": 2}
+    )
+
+
+def test_render_autonomy_block_per_capability_overrides_legacy():
+    out = ac.render_autonomy_block({
+        "kiki_level": 1,
+        "appointments_enabled": True, "appointments_level": 3,
+        "kva_enabled": True, "kva_level": 2,
+    })
+    assert "verbindlich" in out and "TEAM prüft" in out
 
 
 # ─── _get_kiki_level ──────────────────────────────────────────────────────────

@@ -715,7 +715,11 @@ def _pay_db(now, attempt_rows):
         "organizations": [[_ORG_ROW]],
         "invoices": [[_INV]],
         "inquiries": [[]],
-        "outbound_calls": [attempt_rows],
+        # run_due_retries (topic 18) queries outbound_calls FIRST in the sweep —
+        # the FakeDB ignores filters, so it must get an empty result set or it
+        # would consume the attempt rows meant for _existing_attempts (and
+        # re-dial them as "due retries").
+        "outbound_calls": [[], attempt_rows],
         "customers": [[_CUST]],
     })
 

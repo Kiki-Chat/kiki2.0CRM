@@ -1582,6 +1582,10 @@ def rerender_and_push_for_org(
             org=identity,
             org_id=org_id,
         )
+        logger.info(
+            "prompt_size org=%s label=%s chars=%d tokens_est=%d",
+            org_id, endpoint_label, len(prompt_text), len(prompt_text) // 4,
+        )
         patch_agent_safely(
             agent_id=agent_id,
             field_patches={
