@@ -7,13 +7,20 @@ import interactionPlugin, { type EventResizeDoneArg } from '@fullcalendar/intera
 import listPlugin from '@fullcalendar/list'
 import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
-import { Check, ChevronDown, Plus, RefreshCw, Upload } from 'lucide-react'
+import { Check, ChevronDown, Loader2, Plus, RefreshCw, Upload } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ConfirmDialog } from '../components/kiki/shared'
 import { Modal } from '../components/ui/Modal'
 import { apiFetch, apiUpload } from '../lib/api'
+import {
+  consumeLiveFill,
+  emitLiveFillStatus,
+  LIVE_FILL_REQUEST_EVENT,
+  sleep,
+  type LiveFillPayload,
+} from '../lib/liveFill'
 import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
@@ -116,6 +123,25 @@ export function CalendarPage() {
   })
   const { me } = useMe()
   const colorFor = useEmployeeColors(employees)
+
+  // Hey-Kiki live fill: a confirmed copilot create_appointment lands here via
+  // lib/liveFill — open the real create modal and let it fill itself visibly
+  // (same takeover pattern as the invoice/KVA forms). Consumed on mount AND on
+  // the request event, because the user may already be on /calendar.
+  const [liveFill, setLiveFill] = useState<LiveFillPayload | null>(null)
+  useEffect(() => {
+    const tryConsume = () => {
+      const lf = consumeLiveFill('create_appointment')
+      if (!lf) return
+      const at = lf.args.scheduled_at ? new Date(lf.args.scheduled_at) : new Date()
+      if (calRef.current && lf.args.scheduled_at) calRef.current.getApi().gotoDate(at)
+      setLiveFill(lf)
+      setCreateAt(at)
+    }
+    tryConsume()
+    window.addEventListener(LIVE_FILL_REQUEST_EVENT, tryConsume)
+    return () => window.removeEventListener(LIVE_FILL_REQUEST_EVENT, tryConsume)
+  }, [])
 
   const myEmployeeId = useMemo(() => {
     if (!me?.full_name) return null
@@ -496,17 +522,21 @@ export function CalendarPage() {
         <CreateAppointmentModal
           at={editAppt?.scheduled_at ? new Date(editAppt.scheduled_at) : (createAt ?? new Date())}
           edit={editAppt ?? undefined}
+          liveFill={liveFill ?? undefined}
           employees={employees}
           appointments={appointments}
           colorFor={colorFor}
-          onClose={() => { setCreateAt(null); setEditAppt(null) }}
-          onCreated={() => {
+          onClose={() => { setCreateAt(null); setEditAppt(null); setLiveFill(null) }}
+          onCreated={(created) => {
             setCreateAt(null)
             setEditAppt(null)
+            setLiveFill(null)
             qc.invalidateQueries({ queryKey: ['appointments'] })
             // Reflect a calendar reschedule back to the call card + worklist.
             qc.invalidateQueries({ queryKey: ['pendingAppointment'] })
             qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
+            // A Kiki live fill ends by showing the finished appointment.
+            if (created) setDetail(created)
           }}
         />
       )}
@@ -732,6 +762,7 @@ const inputCls =
 function CreateAppointmentModal({
   at,
   edit,
+  liveFill,
   employees,
   appointments = [],
   colorFor,
@@ -740,11 +771,12 @@ function CreateAppointmentModal({
 }: {
   at: Date
   edit?: Appointment
+  liveFill?: LiveFillPayload
   employees: Employee[]
   appointments?: Appointment[]
   colorFor: (id: string | null) => string
   onClose: () => void
-  onCreated: () => void
+  onCreated: (created?: Appointment) => void
 }) {
   const [customerId, setCustomerId] = useState(edit?.customer_id ?? '')
   const [title, setTitle] = useState(edit?.title ?? '')
@@ -777,6 +809,104 @@ function CreateAppointmentModal({
   })
   const customers = customerData?.customers ?? []
 
+  // Hey-Kiki takeover: fill the form visibly (customer → title typed →
+  // employee), then save with the exact same payload that was animated.
+  const [kikiFilling, setKikiFilling] = useState(false)
+  const liveFillStarted = useRef(false)
+  useEffect(() => {
+    if (!liveFill || liveFillStarted.current || edit || !customerData) return
+    liveFillStarted.current = true
+    const run = async () => {
+      setKikiFilling(true)
+      try {
+        const args = liveFill.args || {}
+        await sleep(700)
+
+        // 1) Customer: UUID directly, otherwise match loaded options by name.
+        const ref = String(args.customer_id || args.customer || '').trim()
+        let cid = ''
+        if (/^[0-9a-f-]{36}$/i.test(ref)) {
+          cid = ref
+        } else if (ref) {
+          const needle = ref.toLowerCase()
+          const hit = (customerData.customers ?? []).find((c) =>
+            (c.full_name || '').toLowerCase().includes(needle),
+          )
+          cid = hit?.id ?? ''
+        }
+        if (cid) {
+          setCustomerId(cid)
+          await sleep(600)
+        }
+
+        // 2) Title — typed character by character.
+        const wantedTitle = String(args.title || 'Termin').trim()
+        for (let i = 1; i <= wantedTitle.length; i++) {
+          setTitle(wantedTitle.slice(0, i))
+          await sleep(18)
+        }
+        await sleep(300)
+
+        // 3) Time, duration, location, employee.
+        const start = args.scheduled_at ? new Date(args.scheduled_at) : at
+        setDate(ymd(start))
+        setTime(hm(start))
+        await sleep(400)
+        const dur = Number(args.duration_minutes ?? 60)
+        setDuration(dur)
+        const loc = String(args.location || '')
+        if (loc) {
+          setLocation(loc)
+          await sleep(300)
+        }
+        const emp = String(args.assigned_employee_id || '')
+        if (emp) {
+          setAssigned(emp)
+          await sleep(300)
+        }
+        await sleep(700)
+
+        // 4) Save — payload built here (state closures would be stale).
+        const created = await apiFetch<Appointment>('/api/appointments', {
+          method: 'POST',
+          body: JSON.stringify({
+            customer_id: cid || null,
+            title: wantedTitle,
+            scheduled_at: start.toISOString(),
+            duration_minutes: dur,
+            location: loc || null,
+            notes: args.notes ? String(args.notes) : null,
+            color: colorFor(emp || null),
+            assigned_employee_id: emp || null,
+          }),
+        })
+        // The raw insert row carries no joined names — patch them in so the
+        // detail modal that opens next shows the customer immediately.
+        if (cid && !created.customer_name) {
+          created.customer_name =
+            (customerData.customers ?? []).find((c) => c.id === cid)?.full_name ?? null
+        }
+        emitLiveFillStatus({
+          tool: 'create_appointment',
+          status: 'done',
+          note: 'Termin live ausgefüllt & gespeichert',
+        })
+        onCreated(created)
+      } catch (e) {
+        emitLiveFillStatus({
+          tool: 'create_appointment',
+          status: 'failed',
+          note: e instanceof Error ? e.message : 'Formular-Ausfüllen fehlgeschlagen',
+        })
+        onClose()
+      } finally {
+        setKikiFilling(false)
+      }
+    }
+    void run()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveFill, customerData, edit])
+
   const create = useMutation({
     mutationFn: () => {
       const body = JSON.stringify({
@@ -792,20 +922,20 @@ function CreateAppointmentModal({
         ? apiFetch(`/api/appointments/${edit.id}`, { method: 'PATCH', body })
         : apiFetch('/api/appointments', { method: 'POST', body })
     },
-    onSuccess: onCreated,
+    onSuccess: () => onCreated(),
     onError: () => setError(edit ? 'Termin konnte nicht geändert werden.' : 'Termin konnte nicht erstellt werden.'),
   })
 
   return (
     <Modal
       open
-      onOpenChange={(o) => !o && onClose()}
+      onOpenChange={(o) => !o && !kikiFilling && onClose()}
       title={edit ? 'Termin verschieben / bearbeiten' : 'Neuer Termin'}
       widthClass="max-w-xl"
       footer={
         <div className="flex gap-3">
           <button
-            disabled={!date || create.isPending}
+            disabled={!date || create.isPending || kikiFilling}
             onClick={() => create.mutate()}
             className="flex-1 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
           >
@@ -813,7 +943,8 @@ function CreateAppointmentModal({
           </button>
           <button
             onClick={onClose}
-            className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body"
+            disabled={kikiFilling}
+            className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body disabled:opacity-50"
           >
             Abbrechen
           </button>
@@ -821,6 +952,12 @@ function CreateAppointmentModal({
       }
     >
       <div className="space-y-4">
+        {kikiFilling && (
+          <div className="flex items-center gap-2 rounded-lg border border-ai/30 bg-ai-bg px-4 py-2.5 text-sm font-semibold text-ai shadow-e1">
+            <Loader2 size={15} className="animate-spin" />
+            Kiki füllt den Termin aus … bitte kurz zusehen, gespeichert wird automatisch.
+          </div>
+        )}
         {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
         {overlapCount > 0 && (
           <div className="rounded-md bg-warning-bg px-3 py-2 text-sm text-warning">

@@ -95,6 +95,10 @@ function actionSummary(a: ProposedAction): string {
       const at = s('scheduled_at').replace('T', ' ').slice(0, 16)
       return `Termin anlegen${a.args.title ? ': ' + s('title') : ''}${at ? ' (' + at + ')' : ''}`
     }
+    case 'update_appointment': {
+      const at = s('scheduled_at').replace('T', ' ').slice(0, 16)
+      return `Termin ändern${at ? ' → ' + at : ''}`
+    }
     case 'create_cost_estimate':
       return `Kostenvoranschlag erstellen${a.args.subject ? ': ' + s('subject') : ''}`
     case 'create_invoice':
@@ -119,7 +123,7 @@ function resultRoute(tool: string, result: Record<string, unknown>): { route: st
   if ((tool === 'create_customer' || tool === 'update_customer') && cust?.id)
     return { route: `/customers/${cust.id}`, label: 'Kontakt geöffnet' }
   const appt = obj('appointment')
-  if (tool === 'create_appointment' && appt?.id) {
+  if ((tool === 'create_appointment' || tool === 'update_appointment') && appt?.id) {
     const date = typeof appt.scheduled_at === 'string' ? appt.scheduled_at.slice(0, 10) : ''
     return { route: `/calendar${date ? `?date=${date}&appointment=${appt.id}` : ''}`, label: 'Termin im Kalender geöffnet' }
   }
@@ -274,13 +278,14 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
   const LIVE_FILL_TOOLS: Record<string, string> = {
     create_invoice: '/invoices/new',
     create_cost_estimate: '/cost-estimates/new',
+    create_appointment: '/calendar',
   }
 
   // Everything else acts "in sight": Kiki first opens the page where the change
-  // will land, THEN executes — the result appears in front of the user (all
-  // queries refetch; creates additionally jump to the new object).
+  // will land, THEN executes — the result appears in front of the user (the
+  // affected queries refetch; creates additionally jump to the new object).
   const WATCH_ROUTES: Record<string, string> = {
-    create_appointment: '/calendar',
+    update_appointment: '/calendar',
     create_customer: '/customers',
     update_customer: '/customers',
     create_inquiry: '/calls',
@@ -288,6 +293,30 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
     update_org_profile: '/settings/stammdaten',
     create_employee: '/employees',
     create_project: '/projects',
+  }
+
+  // Refresh only the queries a tool actually touches — a blanket invalidate
+  // reloads every open page at once, which reads as flicker mid-conversation.
+  const QUERY_KEYS_BY_TOOL: Record<string, string[][]> = {
+    create_invoice: [['invoices'], ['dashboard']],
+    create_cost_estimate: [['cost-estimates'], ['dashboard']],
+    create_appointment: [['appointments'], ['pendingAppointment'], ['actions', 'pending'], ['dashboard']],
+    update_appointment: [['appointments'], ['pendingAppointment'], ['actions', 'pending'], ['dashboard']],
+    create_customer: [['customers'], ['customers-options']],
+    update_customer: [['customers'], ['customers-options'], ['customer']],
+    create_inquiry: [['calls'], ['actions', 'pending'], ['dashboard']],
+    set_inquiry_status: [['calls'], ['actions', 'pending'], ['dashboard']],
+    update_org_profile: [['settings'], ['me']],
+    create_employee: [['employees'], ['employees-full']],
+    create_project: [['projects']],
+  }
+  const refreshAfter = (tool: string) => {
+    const keys = QUERY_KEYS_BY_TOOL[tool]
+    if (!keys) {
+      void qc.invalidateQueries()
+      return
+    }
+    for (const k of keys) void qc.invalidateQueries({ queryKey: k })
   }
 
   const confirmLive = (msgId: string, idx: number, action: ActionState, route: string) => {
@@ -306,7 +335,7 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
       if (detail.status === 'done') {
         updateAction(msgId, idx, 'done', 'Erledigt ✓')
         appendStep(msgId, `→ ${detail.note || 'Live ausgefüllt & gespeichert'}`)
-        void qc.invalidateQueries()
+        refreshAfter(action.tool)
       } else {
         // Live fill failed → run the regular API path so the action still lands.
         appendStep(msgId, `→ Live-Ausfüllen nicht möglich (${detail.note || 'Fehler'}) — führe direkt aus…`)
@@ -351,9 +380,10 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
         return
       }
       updateAction(msgId, idx, 'done', 'Erledigt ✓')
-      // Make the change VISIBLE live: refresh every query (the open page updates
-      // in place) and jump to the created object when we know where it lives.
-      void qc.invalidateQueries()
+      // Make the change VISIBLE live: refresh the affected queries (the open
+      // page updates in place) and jump to the created object when we know
+      // where it lives.
+      refreshAfter(action.tool)
       const target = resultRoute(action.tool, res.result || {})
       if (target) {
         navigate(target.route)
