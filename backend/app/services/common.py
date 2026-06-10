@@ -340,7 +340,42 @@ def slot_key(dt: datetime) -> str:
     return dt.astimezone(BERLIN).strftime("%Y-%m-%dT%H:%M")
 
 
+def get_org_code(client, org_id: str) -> str:
+    """The org's IMMUTABLE record-number prefix (Option A): ``K`` + zero-padded
+    platform registration sequence, e.g. ``K03``. Assigned once per org in
+    ``organizations.code`` (migration 0058) — registration order never changes,
+    so the code survives any company rename.
+
+    Self-heals: if the org has no code yet (created before the super-admin form
+    mandated it), derive the next free K-number and best-effort persist it."""
+    try:
+        rows = (
+            client.table("organizations")
+            .select("id, code")
+            .eq("id", org_id).limit(1).execute().data
+        )
+    except Exception:  # column not yet migrated
+        return "K00"
+    code = rows[0].get("code") if rows else None
+    if code:
+        return code
+    # Next free sequence = count of orgs that already hold a code, +1.
+    res = (
+        client.table("organizations")
+        .select("id", count="exact").not_.is_("code", "null").execute()
+    )
+    code = f"K{(res.count or 0) + 1:02d}"
+    try:  # freeze it; the unique index rejects a racing duplicate harmlessly
+        client.table("organizations").update({"code": code}).eq("id", org_id).execute()
+    except Exception:  # noqa: BLE001
+        pass
+    return code
+
+
 def gen_inquiry_number(client, org_id: str) -> str:
+    """Next Anfrage number, org-bound: ``{ORGCODE}-{YYYY}-A{NNNN}`` (e.g.
+    TD04-2026-A0007). The org code makes numbers unique ACROSS orgs; the ``A``
+    keeps Anfrage numbers visually distinct from case numbers."""
     year = now_berlin().year
     res = (
         client.table("inquiries")
@@ -349,7 +384,21 @@ def gen_inquiry_number(client, org_id: str) -> str:
         .gte("created_at", f"{year}-01-01")
         .execute()
     )
-    return f"ANF-{year}-{(res.count or 0) + 1:04d}"
+    return f"{get_org_code(client, org_id)}-{year}-A{(res.count or 0) + 1:04d}"
+
+
+def gen_case_number(client, org_id: str) -> str:
+    """Next staff-facing case (Fall) number, org-bound: ``{ORGCODE}-{YYYY}-{NNNN}``
+    (e.g. TD04-2026-0001). No 'FALL' prefix — the UI already labels it Fall."""
+    year = now_berlin().year
+    res = (
+        client.table("cases")
+        .select("id", count="exact")
+        .eq("org_id", org_id)
+        .gte("created_at", f"{year}-01-01")
+        .execute()
+    )
+    return f"{get_org_code(client, org_id)}-{year}-{(res.count or 0) + 1:04d}"
 
 
 CUSTOMER_NUMBER_PREFIX = "KI-"

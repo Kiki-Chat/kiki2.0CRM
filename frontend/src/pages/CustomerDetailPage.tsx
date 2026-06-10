@@ -3,7 +3,7 @@ import {
   ArrowLeft,
   AtSign,
   CalendarClock,
-  ChevronDown,
+  ChevronRight,
   Download,
   Euro,
   FileText,
@@ -14,7 +14,10 @@ import {
   Phone,
   Pencil,
   Plus,
+  Layers,
+  MoreVertical,
   Search,
+  Sparkles,
   Upload,
   type LucideIcon,
 } from 'lucide-react'
@@ -31,11 +34,24 @@ import type { TimelineEvent, TimelineEventKind } from './calls/shared'
 interface Inquiry {
   id: string
   number: string | null
+  subject?: string | null
   title: string | null
   type: string | null
   status: string
   notes?: string | null
   created_at: string
+  call_count?: number
+  open_count?: number
+  last_activity_at?: string | null
+  case_id?: string | null
+  case_confidence?: number | null
+  case_reason?: string | null
+}
+interface CaseRow {
+  id: string
+  number: string | null
+  label: string | null
+  status: string
 }
 interface Appointment {
   id: string
@@ -74,6 +90,7 @@ interface Customer {
   appointments: Appointment[]
   cost_estimates: Kva[]
   calls: CallRow[]
+  cases?: CaseRow[]
 }
 interface DocRow {
   id: string
@@ -119,7 +136,6 @@ export function CustomerDetailPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [editOpen, setEditOpen] = useState(false)
-  const [newInquiry, setNewInquiry] = useState(false)
   const [newAppt, setNewAppt] = useState(false)
 
   const { data: customer, isLoading } = useQuery({
@@ -205,7 +221,7 @@ export function CustomerDetailPage() {
 
       {/* TWO COLUMNS */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.3fr_1fr]">
-        <InquiriesPanel customer={customer} onNew={() => setNewInquiry(true)} />
+        <InquiriesPanel customer={customer} />
         <AppointmentsPanel customer={customer} onNew={() => setNewAppt(true)} />
       </div>
 
@@ -231,15 +247,6 @@ export function CustomerDetailPage() {
           refresh()
         }}
         onDeleted={() => navigate('/customers')}
-      />
-      <NewInquiryModal
-        open={newInquiry}
-        customerId={id}
-        onClose={() => setNewInquiry(false)}
-        onSaved={() => {
-          setNewInquiry(false)
-          refresh()
-        }}
       />
       <NewAppointmentModal
         open={newAppt}
@@ -277,65 +284,298 @@ function NewBtn({ label, onClick }: { label: string; onClick: () => void }) {
   )
 }
 
-function InquiriesPanel({ customer, onNew }: { customer: Customer; onNew: () => void }) {
+interface Proposal {
+  model: string
+  n_inquiries: number
+  cost: number
+  cases: { label: string; members: string[]; confidence: number; reason: string; tier: string }[]
+}
+
+function InquiriesPanel({ customer }: { customer: Customer }) {
+  const navigate = useNavigate()
+  const qc = useQueryClient()
   const [q, setQ] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [proposal, setProposal] = useState<Proposal | null>(null)
   const inquiries = customer.inquiries ?? []
+  const cases = customer.cases ?? []
   const open = inquiries.filter((i) => i.status !== 'completed').length
   const done = inquiries.filter((i) => i.status === 'completed').length
-  const filtered = inquiries.filter((i) => (i.title ?? '').toLowerCase().includes(q.toLowerCase()))
+  const filtered = inquiries.filter((i) =>
+    `${i.subject ?? ''} ${i.title ?? ''} ${i.number ?? ''}`.toLowerCase().includes(q.toLowerCase()),
+  )
+  const refresh = () => qc.invalidateQueries({ queryKey: ['customerDetail', customer.id] })
+
+  // Group filtered inquiries by their case (the binder); the rest stay standalone.
+  const caseById = new Map(cases.map((c) => [c.id, c]))
+  const grouped = new Map<string, Inquiry[]>()
+  const ungrouped: Inquiry[] = []
+  for (const i of filtered) {
+    if (i.case_id && caseById.has(i.case_id)) {
+      grouped.set(i.case_id, [...(grouped.get(i.case_id) ?? []), i])
+    } else ungrouped.push(i)
+  }
+
+  const propose = useMutation({
+    mutationFn: () => apiFetch<Proposal>(`/api/customers/${customer.id}/cases/propose`, { method: 'POST' }),
+    onSuccess: (p) => setProposal(p),
+  })
+  const createCase = useMutation({
+    mutationFn: (label: string) =>
+      apiFetch(`/api/customers/${customer.id}/cases`, { method: 'POST', body: JSON.stringify({ label }) }),
+    onSuccess: refresh,
+  })
 
   return (
     <Panel
-      title={`Anfragen (${inquiries.length})`}
-      action={<NewBtn label="Neue Anfrage" onClick={onNew} />}
+      title={`Vorgänge (${inquiries.length})`}
+      action={
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => propose.mutate()}
+            disabled={propose.isPending || inquiries.length < 2}
+            className="flex items-center gap-1.5 rounded-md border border-ai-bg px-3 py-1.5 text-xs font-semibold text-ai hover:bg-ai-bg disabled:opacity-50"
+            title="Ähnliche Vorgänge per KI zu Fällen bündeln"
+          >
+            <Sparkles size={14} /> {propose.isPending ? 'Analysiere…' : 'KI-Gruppierung'}
+          </button>
+          <button
+            onClick={() => {
+              const l = window.prompt('Neuer Fall — Thema:')
+              if (l) createCase.mutate(l)
+            }}
+            className="flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+          >
+            <Plus size={14} /> Neuer Fall
+          </button>
+        </div>
+      }
     >
       <>
-          <div className="mb-3 flex items-center gap-2">
-            <Tag variant="info">{open} offen</Tag>
-            <Tag variant="success">{done} erledigt</Tag>
-          </div>
-          <div className="relative mb-3">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-            <input
-              type="search"
-              name="customer-inquiry-search"
-              autoComplete="off"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Anfragen durchsuchen…"
-              className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
-            />
-          </div>
-          <div className="space-y-2">
-            {filtered.map((i) => {
-              const st = STATUS_TAG[i.status] ?? { label: i.status, variant: 'neutral' as const }
-              const isOpen = expanded === i.id
-              return (
-                <div key={i.id} className="rounded-lg border border-border">
-                  <button
-                    onClick={() => setExpanded(isOpen ? null : i.id)}
-                    className="flex w-full items-center gap-3 p-3 text-left"
-                  >
-                    <Tag variant={st.variant}>{st.label}</Tag>
-                    <span className="flex-1 truncate text-sm font-medium text-text">{i.title ?? 'Anfrage'}</span>
-                    <span className="text-xs text-faint">{fmtDay(i.created_at)}</span>
-                    <ChevronDown size={15} className={cn('text-muted transition-transform', isOpen && 'rotate-180')} />
-                  </button>
-                  {isOpen && (
-                    <div className="space-y-1.5 border-t border-border px-3 py-3 text-sm text-muted">
-                      {i.number && <div className="font-mono text-xs">{i.number}</div>}
-                      {i.type && <div>Kategorie: <span className="capitalize text-body">{i.type}</span></div>}
-                      <div className="whitespace-pre-wrap text-body">{i.notes ?? 'Keine Notizen.'}</div>
-                    </div>
-                  )}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Tag variant="info">{open} offen</Tag>
+          <Tag variant="success">{done} erledigt</Tag>
+          {cases.length > 0 && <Tag variant="ai">{cases.length} Fälle</Tag>}
+        </div>
+        <div className="relative mb-3">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
+          <input
+            type="search"
+            name="customer-vorgang-search"
+            autoComplete="off"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Vorgänge durchsuchen…"
+            className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
+          />
+        </div>
+        <div className="space-y-3">
+          {[...grouped.entries()].map(([cid, items]) => {
+            const c = caseById.get(cid)!
+            return (
+              <div key={cid} className="rounded-xl border border-ai-bg bg-ai-bg/40 p-2">
+                <button
+                  onClick={() => navigate(`/fall/${cid}`)}
+                  className="mb-1.5 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition hover:bg-ai-bg"
+                  title="Fall öffnen (alle Anfragen)"
+                >
+                  <Layers size={14} className="flex-shrink-0 text-ai" />
+                  <span className="truncate text-sm font-bold text-text">{c.label || 'Fall'}</span>
+                  {c.number && <span className="font-mono text-[11px] text-ai">{c.number}</span>}
+                  <span className="flex-1" />
+                  <span className="text-xs text-muted">{items.length} Anfragen</span>
+                  <ChevronRight size={14} className="text-faint" />
+                </button>
+                <div className="space-y-1.5">
+                  {items.map((i) => (
+                    <InquiryRow key={i.id} i={i} cases={cases} caseId={cid} onChanged={refresh} />
+                  ))}
                 </div>
-              )
-            })}
-            {!filtered.length && <p className="py-6 text-center text-sm text-muted">Keine Anfragen.</p>}
+              </div>
+            )
+          })}
+          {ungrouped.map((i) => (
+            <InquiryRow key={i.id} i={i} cases={cases} onChanged={refresh} />
+          ))}
+          {!filtered.length && <p className="py-6 text-center text-sm text-muted">Keine Vorgänge.</p>}
+        </div>
+      </>
+      {proposal && (
+        <GroupingReviewModal
+          customerId={customer.id}
+          proposal={proposal}
+          onClose={() => setProposal(null)}
+          onApplied={() => {
+            setProposal(null)
+            refresh()
+          }}
+        />
+      )}
+    </Panel>
+  )
+}
+
+function InquiryRow({ i, cases, caseId, onChanged }: { i: Inquiry; cases: CaseRow[]; caseId?: string; onChanged: () => void }) {
+  const navigate = useNavigate()
+  const st = STATUS_TAG[i.status] ?? { label: i.status, variant: 'neutral' as const }
+  const topic = i.subject || i.title || 'Vorgang'
+  return (
+    <div className="group relative rounded-lg border border-border bg-surface p-3 transition hover:border-green-primary hover:bg-alt">
+      <div onClick={() => navigate(caseId ? `/fall/${caseId}` : `/vorgang/${i.id}`)} className="cursor-pointer">
+        <div className="flex items-center gap-2 pr-7">
+          <Tag variant={st.variant}>{st.label}</Tag>
+          <span className="flex-1 truncate text-sm font-semibold text-text">{topic}</span>
+          {(i.open_count ?? 0) > 0 && (
+            <span className="rounded-full bg-warning-bg px-2 py-0.5 text-xs font-bold text-warning">{i.open_count} offen</span>
+          )}
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
+          <span className="font-mono">{i.number ?? '—'}</span>
+          <span aria-hidden>·</span>
+          <span>{i.call_count ?? 0} Anrufe</span>
+          <span aria-hidden>·</span>
+          <span>{fmtDay(i.last_activity_at ?? i.created_at)}</span>
+          {i.case_confidence != null && (
+            <>
+              <span aria-hidden>·</span>
+              <span className="rounded bg-ai-bg px-1.5 py-0.5 font-semibold text-ai" title={i.case_reason ?? ''}>
+                KI {Math.round((i.case_confidence ?? 0) * 100)}%
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+      <MoveMenu inquiry={i} cases={cases} onMoved={onChanged} />
+    </div>
+  )
+}
+
+function MoveMenu({ inquiry, cases, onMoved }: { inquiry: Inquiry; cases: CaseRow[]; onMoved: () => void }) {
+  const [open, setOpen] = useState(false)
+  const move = useMutation({
+    mutationFn: (body: { case_id?: string | null; new_case_label?: string }) =>
+      apiFetch(`/api/inquiries/${inquiry.id}/case`, { method: 'POST', body: JSON.stringify(body) }),
+    onSuccess: () => {
+      setOpen(false)
+      onMoved()
+    },
+  })
+  const others = cases.filter((c) => c.id !== inquiry.case_id)
+  return (
+    <div className="absolute right-2 top-2">
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((o) => !o)
+        }}
+        className="rounded p-1 text-faint hover:bg-border"
+        title="In anderen Fall verschieben"
+      >
+        <MoreVertical size={15} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-border bg-surface p-1 shadow-e3">
+            {inquiry.case_id && (
+              <button onClick={() => move.mutate({ case_id: null })} className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
+                Aus Fall lösen
+              </button>
+            )}
+            {others.length > 0 && <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Fall verschieben</div>}
+            {others.map((c) => (
+              <button key={c.id} onClick={() => move.mutate({ case_id: c.id })} className="block w-full truncate rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
+                → {c.label || 'Fall'}
+              </button>
+            ))}
+            <button
+              onClick={() => {
+                const l = window.prompt('Neuer Fall — Thema:')
+                if (l) move.mutate({ new_case_label: l })
+              }}
+              className="block w-full rounded px-2.5 py-1.5 text-left text-sm font-medium text-green-deep hover:bg-alt"
+            >
+              ＋ Neuer Fall…
+            </button>
           </div>
         </>
-    </Panel>
+      )}
+    </div>
+  )
+}
+
+function GroupingReviewModal({
+  customerId,
+  proposal,
+  onClose,
+  onApplied,
+}: {
+  customerId: string
+  proposal: Proposal
+  onClose: () => void
+  onApplied: () => void
+}) {
+  const merges = proposal.cases.filter((c) => c.members.length >= 2)
+  const [picked, setPicked] = useState<Set<number>>(
+    () => new Set(merges.map((_, idx) => idx).filter((idx) => merges[idx].tier !== 'low')),
+  )
+  const toggle = (idx: number) =>
+    setPicked((s) => {
+      const n = new Set(s)
+      if (n.has(idx)) n.delete(idx)
+      else n.add(idx)
+      return n
+    })
+  const apply = useMutation({
+    mutationFn: () =>
+      apiFetch('/api/cases/apply', {
+        method: 'POST',
+        body: JSON.stringify({ customer_id: customerId, groups: merges.filter((_, idx) => picked.has(idx)) }),
+      }),
+    onSuccess: onApplied,
+  })
+  const tierTag = (t: string) =>
+    t === 'auto' ? <Tag variant="success">sicher</Tag> : t === 'review' ? <Tag variant="warning">prüfen</Tag> : <Tag variant="neutral">unsicher</Tag>
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title="KI-Vorschlag: Vorgänge zu Fällen bündeln"
+      widthClass="max-w-2xl"
+      footer={
+        <button
+          onClick={() => apply.mutate()}
+          disabled={apply.isPending || picked.size === 0}
+          className="w-full rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+        >
+          {picked.size} Fälle übernehmen
+        </button>
+      }
+    >
+      <div className="space-y-2">
+        <p className="text-xs text-muted">
+          {proposal.n_inquiries} Vorgänge analysiert ({proposal.model}). Haken = als ein Fall bündeln; einzelne Vorgänge
+          kannst du danach jederzeit verschieben.
+        </p>
+        {merges.length === 0 && <p className="py-6 text-center text-sm text-muted">Kein Bündelungsvorschlag — alle Vorgänge wirken eigenständig.</p>}
+        {merges.map((c, idx) => (
+          <label
+            key={idx}
+            className={cn('flex cursor-pointer gap-3 rounded-lg border p-3', picked.has(idx) ? 'border-green-primary bg-green-tint-100' : 'border-border')}
+          >
+            <input type="checkbox" checked={picked.has(idx)} onChange={() => toggle(idx)} className="mt-1 flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="flex-1 truncate text-sm font-bold text-text">{c.label}</span>
+                {tierTag(c.tier)}
+                <span className="text-xs font-bold text-ai">{Math.round(c.confidence * 100)}%</span>
+              </div>
+              <div className="mt-1 font-mono text-xs text-muted">{c.members.join(', ')}</div>
+              <div className="mt-1 text-xs text-body">{c.reason}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+    </Modal>
   )
 }
 
@@ -513,61 +753,6 @@ function FilesPanel({ customerId, docs, onChange }: { customerId: string; docs: 
 
 const inputCls =
   'w-full rounded-md border border-border bg-alt px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary'
-
-function NewInquiryModal({ open, customerId, onClose, onSaved }: { open: boolean; customerId: string; onClose: () => void; onSaved: () => void }) {
-  const [title, setTitle] = useState('')
-  const [type, setType] = useState('info')
-  const [notes, setNotes] = useState('')
-  const save = useMutation({
-    mutationFn: () =>
-      apiFetch('/api/inquiries', {
-        method: 'POST',
-        body: JSON.stringify({ customer_id: customerId, title, type, notes }),
-      }),
-    onSuccess: onSaved,
-  })
-  return (
-    <Modal
-      open={open}
-      onOpenChange={(o) => !o && onClose()}
-      title="Neue Anfrage"
-      footer={
-        <button
-          disabled={!title || save.isPending}
-          onClick={() => save.mutate()}
-          className="w-full rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
-        >
-          Anfrage erstellen
-        </button>
-      }
-    >
-      <div className="space-y-4">
-        <div>
-          <div className="mb-1.5 text-xs font-semibold text-body">Titel *</div>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} />
-        </div>
-        <div>
-          <div className="mb-1.5 text-xs font-semibold text-body">Kategorie</div>
-          <div className="flex flex-wrap gap-2">
-            {['appointment', 'offer', 'info', 'recall'].map((c) => (
-              <button
-                key={c}
-                onClick={() => setType(c)}
-                className={cn('rounded-md border px-3 py-1.5 text-sm font-medium capitalize', type === c ? 'border-green-primary bg-green-primary text-white' : 'border-border text-body hover:bg-alt')}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <div className="mb-1.5 text-xs font-semibold text-body">Notiz</div>
-          <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} />
-        </div>
-      </div>
-    </Modal>
-  )
-}
 
 function NewAppointmentModal({ open, customer, onClose, onSaved }: { open: boolean; customer: Customer; onClose: () => void; onSaved: () => void }) {
   const [title, setTitle] = useState('')

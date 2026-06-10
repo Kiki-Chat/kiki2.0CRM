@@ -81,6 +81,8 @@ def _update(user: CurrentUser, inquiry_id: str, payload: InquiryUpdate) -> dict 
         fields["status"] = payload.status
     if payload.title is not None:
         fields["title"] = payload.title
+    if payload.subject is not None:
+        fields["subject"] = payload.subject
     if payload.type is not None:
         fields["type"] = payload.type
     if payload.notes is not None:
@@ -200,3 +202,120 @@ async def assign_inquiry(
     if row is None:
         raise HTTPException(status_code=404, detail="Inquiry not found")
     return row
+
+
+# ─── Vorgang (case) thread + Link/Merge ──────────────────────────────────────
+def _related_cases(org_id: str, inquiry_id: str) -> list[dict]:
+    """Cases linked to this one via case_links (either direction)."""
+    client = get_service_client()
+    links = (
+        client.table("case_links")
+        .select("case_id, related_case_id, relation")
+        .eq("org_id", org_id)
+        .or_(f"case_id.eq.{inquiry_id},related_case_id.eq.{inquiry_id}")
+        .execute().data or []
+    )
+    rel_by_id: dict[str, str] = {}
+    for link in links:
+        other = link["related_case_id"] if link["case_id"] == inquiry_id else link["case_id"]
+        rel_by_id[other] = link.get("relation") or "related"
+    if not rel_by_id:
+        return []
+    rows = (
+        client.table("inquiries").select("id, number, subject, title, status")
+        .eq("org_id", org_id).in_("id", list(rel_by_id.keys()))
+        .execute().data or []
+    )
+    return [{"relation": rel_by_id.get(r["id"], "related"), "case": r} for r in rows]
+
+
+@router.get("/{inquiry_id}/thread")
+async def get_inquiry_thread(
+    inquiry_id: str, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """The full Vorgang (case) thread: header + one chronological timeline of every
+    call (in/out), appointment, KVA and status change on this case, the raw record
+    lists, and any linked/duplicate cases."""
+    from app.api.routes.calls import build_case_thread
+
+    bundle = await run_in_threadpool(build_case_thread, user.org_id, inquiry_id)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="Vorgang not found")
+    bundle["related"] = await run_in_threadpool(_related_cases, user.org_id, inquiry_id)
+    return bundle
+
+
+class CaseLinkPayload(BaseModel):
+    related_case_id: str
+    relation: str = "related"  # 'related' | 'duplicate'
+
+
+def _link_case(org_id: str, inquiry_id: str, payload: "CaseLinkPayload") -> dict:
+    if payload.related_case_id == inquiry_id:
+        raise HTTPException(status_code=422, detail="Ein Vorgang kann nicht mit sich selbst verknüpft werden.")
+    if payload.relation not in ("related", "duplicate"):
+        raise HTTPException(status_code=422, detail="Ungültige Relation")
+    client = get_service_client()
+    validate_fk_in_org(client, table="inquiries", fk_id=inquiry_id, org_id=org_id, label="Vorgang")
+    validate_fk_in_org(client, table="inquiries", fk_id=payload.related_case_id, org_id=org_id, label="Vorgang")
+    # Normalise the pair order so (a,b) and (b,a) collapse to one row (unique index).
+    a, b = sorted([inquiry_id, payload.related_case_id])
+    try:
+        client.table("case_links").insert(
+            {"org_id": org_id, "case_id": a, "related_case_id": b, "relation": payload.relation}
+        ).execute()
+    except Exception:  # noqa: BLE001 — already linked → make it idempotent
+        client.table("case_links").update({"relation": payload.relation}).eq(
+            "org_id", org_id
+        ).eq("case_id", a).eq("related_case_id", b).execute()
+    return {"success": True}
+
+
+@router.post("/{inquiry_id}/link")
+async def link_case(
+    inquiry_id: str, payload: CaseLinkPayload, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Link this Vorgang to another (relation 'related' or 'duplicate') — keeps both
+    cases separate but cross-referenced (industry-standard Link)."""
+    return await run_in_threadpool(_link_case, user.org_id, inquiry_id, payload)
+
+
+class CaseMergePayload(BaseModel):
+    into_case_id: str  # the surviving (parent) case
+
+
+def _merge_case(org_id: str, child_id: str, parent_id: str) -> dict:
+    if child_id == parent_id:
+        raise HTTPException(status_code=422, detail="Ein Vorgang kann nicht mit sich selbst zusammengeführt werden.")
+    client = get_service_client()
+    validate_fk_in_org(client, table="inquiries", fk_id=child_id, org_id=org_id, label="Vorgang")
+    validate_fk_in_org(client, table="inquiries", fk_id=parent_id, org_id=org_id, label="Vorgang")
+    # Move the child's activities onto the surviving case (reversible — just FKs).
+    for table in ("calls", "appointments", "cost_estimates"):
+        client.table(table).update({"inquiry_id": parent_id}).eq("org_id", org_id).eq(
+            "inquiry_id", child_id
+        ).execute()
+    # Mark the child a duplicate of the parent and close it — reachable via the link,
+    # NOT deleted (history stays intact).
+    client.table("inquiries").update({"status": "completed", "updated_at": "now()"}).eq(
+        "org_id", org_id
+    ).eq("id", child_id).execute()
+    a, b = sorted([child_id, parent_id])
+    try:
+        client.table("case_links").insert(
+            {"org_id": org_id, "case_id": a, "related_case_id": b, "relation": "duplicate"}
+        ).execute()
+    except Exception:  # noqa: BLE001 — already linked
+        client.table("case_links").update({"relation": "duplicate"}).eq("org_id", org_id).eq(
+            "case_id", a
+        ).eq("related_case_id", b).execute()
+    return {"success": True, "into_case_id": parent_id}
+
+
+@router.post("/{inquiry_id}/merge")
+async def merge_case(
+    inquiry_id: str, payload: CaseMergePayload, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Merge this Vorgang INTO another: moves its calls/appointments/KVAs onto the
+    target case, marks this one a closed duplicate, and links them. Reversible."""
+    return await run_in_threadpool(_merge_case, user.org_id, inquiry_id, payload.into_case_id)

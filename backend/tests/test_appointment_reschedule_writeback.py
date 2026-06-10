@@ -58,6 +58,9 @@ def test_change_appointment_stamps_customer_proposal_additively(monkeypatch):
             "appointments": [[{"id": "appt-9", "scheduled_at": "2026-06-10T08:00:00+00:00"}]],
             # gen_inquiry_number reads count only (data unused), THEN the insert returns the row.
             "inquiries": [[], [{"id": "inq-1"}]],
+            # gen_inquiry_number → get_org_code reads the org's K-code (Option A
+            # numbering, migration 0058); a stored code short-circuits the self-heal.
+            "organizations": [[{"id": "org-1", "code": "K01"}]],
         },
         counts={"inquiries": 0},
     )

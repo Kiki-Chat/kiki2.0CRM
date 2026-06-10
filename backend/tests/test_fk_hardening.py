@@ -57,6 +57,10 @@ class _Q:
     def lte(self, *a, **k): return self
     def lt(self, *a, **k): return self
     def gt(self, *a, **k): return self
+    def is_(self, *a, **k): return self
+    # get_org_code's self-heal uses `.not_.is_(...)`; `.not_` is an attribute.
+    @property
+    def not_(self): return self
 
     def insert(self, row):
         self._insert = row; return self
@@ -110,6 +114,9 @@ def _tables() -> dict[str, list[dict]]:
             {"id": "emp-B", "org_id": "org-B", "deleted": False},
         ],
         "inquiries": [],  # empty → gen_inquiry_number counts 0
+        # gen_inquiry_number → get_org_code reads the org's K-code (migration 0058);
+        # a stored code short-circuits the self-heal path.
+        "organizations": [{"id": "org-A", "code": "K01"}],
     }
 
 

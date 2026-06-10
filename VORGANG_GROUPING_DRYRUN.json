@@ -1,0 +1,288 @@
+{
+  "org_id": "04acd916-b005-4f84-b4c0-9bbf4e2db934",
+  "customers": [
+    {
+      "customer_id": "3890f497-1de3-4589-93a1-b6f3c8d7e297",
+      "customer_name": "Govind Yadav",
+      "n_inquiries": 31,
+      "cases": [
+        {
+          "label": "Heating Not Working",
+          "members": [
+            "ANF-2026-0001",
+            "ANF-2026-0003",
+            "ANF-2026-0005"
+          ],
+          "confidence": 0.9,
+          "reason": "All inquiries relate to a non-functional heating system, including a cancellation related ",
+          "tier": "auto"
+        },
+        {
+          "label": "Zimmertag Problem",
+          "members": [
+            "ANF-2026-0002"
+          ],
+          "confidence": 0.8,
+          "reason": "Unique issue related to 'Zimmertag' with no other related inquiries.",
+          "tier": "single"
+        },
+        {
+          "label": "Off-topic Humor Request",
+          "members": [
+            "ANF-2026-0004"
+          ],
+          "confidence": 0.8,
+          "reason": "Unique off-topic request unrelated to any service provided.",
+          "tier": "single"
+        },
+        {
+          "label": "Roof Damage Repair",
+          "members": [
+            "ANF-2026-0006",
+            "ANF-2026-0007",
+            "ANF-2026-0034",
+            "ANF-2026-0035",
+            "ANF-2026-0037",
+            "ANF-2026-0039",
+            "ANF-2026-0040"
+          ],
+          "confidence": 0.79,
+          "reason": "All inquiries and appointments relate to roof damage and repair scheduling.",
+          "tier": "review"
+        },
+        {
+          "label": "Gas Heating Maintenance",
+          "members": [
+            "ANF-2026-0008",
+            "ANF-2026-0009",
+            "ANF-2026-0016"
+          ],
+          "confidence": 0.9,
+          "reason": "All inquiries and appointments relate to maintenance of the gas heating system.",
+          "tier": "auto"
+        },
+        {
+          "label": "Warm Water Outage",
+          "members": [
+            "ANF-2026-0010"
+          ],
+          "confidence": 0.8,
+          "reason": "Unique issue related to warm water outage with no other related inquiries.",
+          "tier": "single"
+        },
+        {
+          "label": "Leaking Ceiling",
+          "members": [
+            "ANF-2026-0011",
+            "ANF-2026-0012",
+            "ANF-2026-0013",
+            "ANF-2026-0014",
+            "ANF-2026-0019",
+            "ANF-2026-0025",
+            "ANF-2026-0028"
+          ],
+          "confidence": 0.79,
+          "reason": "All inquiries and appointments relate to a leaking ceiling issue.",
+          "tier": "review"
+        },
+        {
+          "label": "Broken Device Report",
+          "members": [
+            "ANF-2026-0017"
+          ],
+          "confidence": 0.8,
+          "reason": "Unique issue related to a broken 'Simmer Dark' device with no other related inquiries.",
+          "tier": "single"
+        },
+        {
+          "label": "PC im Badezimmer defekt",
+          "members": [
+            "ANF-2026-0021"
+          ],
+          "confidence": 0.8,
+          "reason": "Unique issue related to a broken PC in the bathroom with no other related inquiries.",
+          "tier": "single"
+        },
+        {
+          "label": "Neuinstallation Elektro",
+          "members": [
+            "ANF-2026-0022"
+          ],
+          "confidence": 0.8,
+          "reason": "Unique issue related to electrical installation with no other related inquiries.",
+          "tier": "single"
+        },
+        {
+          "label": "Cancel Appointment",
+          "members": [
+            "ANF-2026-0033"
+          ],
+          "confidence": 0.8,
+          "reason": "Unique request to cancel all appointments with no other related inquiries.",
+          "tier": "single"
+        },
+        {
+          "label": "Terminänderung",
+          "members": [
+            "ANF-2026-0015"
+          ],
+          "confidence": 1.0,
+          "reason": "nicht gruppiert",
+          "tier": "single"
+        },
+        {
+          "label": "Dach undicht bei Regen",
+          "members": [
+            "ANF-2026-0018"
+          ],
+          "confidence": 1.0,
+          "reason": "nicht gruppiert",
+          "tier": "single"
+        },
+        {
+          "label": "Termin",
+          "members": [
+            "ANF-2026-0020"
+          ],
+          "confidence": 1.0,
+          "reason": "nicht gruppiert",
+          "tier": "single"
+        },
+        {
+          "label": "Änderungswunsch für offenen Termin: alt 10. Juni um 13:00 Uh",
+          "members": [
+            "ANF-2026-0038"
+          ],
+          "confidence": 1.0,
+          "reason": "nicht gruppiert",
+          "tier": "single"
+        }
+      ],
+      "tokens": {
+        "embed": 2229,
+        "prompt": 2726,
+        "completion": 837
+      },
+      "cost": 0.01523,
+      "model": "gpt-4o",
+      "error": null
+    },
+    {
+      "customer_id": "870cbea1-b0c7-4557-a1e7-0c6b7017c6ee",
+      "customer_name": "Nikhil Yadav",
+      "n_inquiries": 4,
+      "cases": [
+        {
+          "label": "Panasonic Heizung (Modell 2015) im Badezimmer heizt nicht",
+          "members": [
+            "ANF-2026-0023",
+            "ANF-2026-0024",
+            "ANF-2026-0032"
+          ],
+          "confidence": 1.0,
+          "reason": "Anliegen betrifft die gleiche Heizung und den gleichen Termin.",
+          "tier": "auto"
+        },
+        {
+          "label": "German Greeting",
+          "members": [
+            "ANF-2026-0029"
+          ],
+          "confidence": 1.0,
+          "reason": "nicht gruppiert",
+          "tier": "single"
+        }
+      ],
+      "tokens": {
+        "embed": 306,
+        "prompt": 634,
+        "completion": 76
+      },
+      "cost": 0.000147,
+      "model": "gpt-4o-mini",
+      "error": null
+    },
+    {
+      "customer_id": "c760af6d-5fcc-4a17-a53f-34bcaa07de9c",
+      "customer_name": "Thomas Muller",
+      "n_inquiries": 3,
+      "cases": [
+        {
+          "label": "Toilette defekt - Wasseraustritt im Bad",
+          "members": [
+            "ANF-2026-0030",
+            "ANF-2026-0031"
+          ],
+          "confidence": 1.0,
+          "reason": "Beide Anfragen betreffen das gleiche Anliegen einer defekten Toilette.",
+          "tier": "auto"
+        },
+        {
+          "label": "Terminänderung",
+          "members": [
+            "ANF-2026-0036"
+          ],
+          "confidence": 1.0,
+          "reason": "Einzelne Anfrage zur Terminänderung.",
+          "tier": "single"
+        }
+      ],
+      "tokens": {
+        "embed": 155,
+        "prompt": 475,
+        "completion": 143
+      },
+      "cost": 0.00016,
+      "model": "gpt-4o-mini",
+      "error": null
+    },
+    {
+      "customer_id": "9acf2e15-db94-4209-8e8c-c3bb125404a9",
+      "customer_name": "Keshav Lalit",
+      "n_inquiries": 1,
+      "cases": [
+        {
+          "label": "Defekte Toilette mit hohem Wasserstand",
+          "members": [
+            "ANF-2026-0026"
+          ],
+          "confidence": 1.0,
+          "reason": "einzige Anfrage",
+          "tier": "single"
+        }
+      ],
+      "tokens": {
+        "embed": 0,
+        "prompt": 0,
+        "completion": 0
+      },
+      "cost": 0.0,
+      "model": "gpt-4o-mini",
+      "error": null
+    },
+    {
+      "customer_id": "8aec1f81-8a4a-4386-a172-2f00d059561f",
+      "customer_name": "Keshav Lalit",
+      "n_inquiries": 1,
+      "cases": [
+        {
+          "label": "Toilet Repair Inquiry",
+          "members": [
+            "ANF-2026-0027"
+          ],
+          "confidence": 1.0,
+          "reason": "einzige Anfrage",
+          "tier": "single"
+        }
+      ],
+      "tokens": {
+        "embed": 0,
+        "prompt": 0,
+        "completion": 0
+      },
+      "cost": 0.0,
+      "model": "gpt-4o-mini",
+      "error": null
+    }
+  ]
+}

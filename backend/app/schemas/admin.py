@@ -7,6 +7,7 @@ class InquiryUpdate(BaseModel):
     status: str | None = None  # open | in_progress | completed | deleted
     assigned_employee_id: str | None = None
     title: str | None = None
+    subject: str | None = None  # short customer-facing topic — the Vorgang label
     type: str | None = None  # appointment | offer | info | recall
     notes: str | None = None
     project_id: str | None = None

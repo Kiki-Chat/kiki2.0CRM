@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/calls", tags=["calls"])
 _LIST_SELECT = (
     "id, elevenlabs_conversation_id, caller_number, summary_title, direction, "
     "duration_seconds, started_at, status, data_collection, customer_id, read_at, "
-    "created_at, customers(full_name)"
+    "created_at, inquiry_id, customers(full_name)"
 )
 
 # Wave 2 / Agent 2.1 — list-item enrichment.
@@ -39,53 +39,53 @@ def _employee_initials(display_name: str | None) -> str | None:
 
 
 def _enrich_calls_with_inquiries(client, org_id: str, calls: list[dict]) -> list[dict]:
-    """Attach `inquiry_status`, `emergency_flag`, `assigned_employee_id`,
-    `assigned_employee_initials`, and `inquiry_id` to every call row.
+    """Attach the call's Vorgang (case) + assignment fields to every row:
+    `inquiry_id`, `inquiry_status`, `inquiry_number`, `inquiry_subject`,
+    `emergency_flag`, `assigned_employee_id`, `assigned_employee_initials`.
 
-    One inquiry per call is the common case; when multiple exist we pick the
-    earliest non-deleted one (matches the §B description: 'pick the first if
-    multiple'). Avoids per-row queries by batching: 1 SELECT for the inquiries,
-    1 SELECT for the employees they reference.
+    Primary link is `calls.inquiry_id` — stamped for INBOUND *and* OUTBOUND since
+    Vorgang threading, so outbound calls now resolve their case (which is why the
+    action buttons used to die). For any row not yet stamped we fall back to the
+    legacy `inquiries.call_id` reverse-lookup (earliest non-deleted), so pre-backfill
+    rows keep working. Batched: ≤2 SELECTs for inquiries + 1 for the employees.
     """
     if not calls:
         return calls
 
-    call_ids = [c["id"] for c in calls if c.get("id")]
-    if not call_ids:
-        # Defensive: rows without ids can't be linked to inquiries.
-        for c in calls:
-            c["inquiry_id"] = None
-            c["inquiry_status"] = None
-            c["emergency_flag"] = False
-            c["assigned_employee_id"] = None
-            c["assigned_employee_initials"] = None
-        return calls
-
-    inquiry_rows = (
-        client.table("inquiries")
-        .select("id, call_id, status, type, emergency_flag, assigned_employee_id, created_at")
-        .eq("org_id", org_id)
-        .in_("call_id", call_ids)
-        .neq("status", "deleted")
-        .order("created_at")
-        .execute()
-        .data
-        or []
+    _INQ_COLS = (
+        "id, call_id, status, type, emergency_flag, assigned_employee_id, "
+        "number, subject, title, created_at, case_id"
     )
 
-    # Pick first inquiry per call (deterministic via the ORDER BY above).
-    inquiry_by_call: dict[str, dict] = {}
-    for row in inquiry_rows:
-        cid = row.get("call_id")
-        if cid and cid not in inquiry_by_call:
-            inquiry_by_call[cid] = row
+    # Primary: resolve by the case id already stamped on the call.
+    direct_ids = {c["inquiry_id"] for c in calls if c.get("inquiry_id")}
+    # Fallback: calls with no stamped case → legacy reverse-lookup by call_id.
+    unstamped_call_ids = [c["id"] for c in calls if c.get("id") and not c.get("inquiry_id")]
 
-    # Batch-fetch employees referenced by these inquiries.
-    employee_ids = {
-        i["assigned_employee_id"]
-        for i in inquiry_by_call.values()
-        if i.get("assigned_employee_id")
-    }
+    inquiry_by_id: dict[str, dict] = {}
+    if direct_ids:
+        for row in (
+            client.table("inquiries").select(_INQ_COLS)
+            .eq("org_id", org_id).in_("id", list(direct_ids))
+            .execute().data or []
+        ):
+            inquiry_by_id[row["id"]] = row
+
+    inquiry_by_call: dict[str, dict] = {}
+    if unstamped_call_ids:
+        for row in (
+            client.table("inquiries").select(_INQ_COLS)
+            .eq("org_id", org_id).in_("call_id", unstamped_call_ids)
+            .neq("status", "deleted").order("created_at")
+            .execute().data or []
+        ):
+            cid = row.get("call_id")
+            if cid and cid not in inquiry_by_call:
+                inquiry_by_call[cid] = row
+
+    # Batch-fetch employees referenced by the chosen inquiries.
+    chosen = list(inquiry_by_id.values()) + list(inquiry_by_call.values())
+    employee_ids = {i["assigned_employee_id"] for i in chosen if i.get("assigned_employee_id")}
     employees_by_id: dict[str, dict] = {}
     if employee_ids:
         for e in (
@@ -99,11 +99,27 @@ def _enrich_calls_with_inquiries(client, org_id: str, calls: list[dict]) -> list
         ):
             employees_by_id[e["id"]] = e
 
+    # Batch-fetch the cases (Fälle) these inquiries belong to, so every call surfaces
+    # its case number/label for the Call Logs chip → case tab.
+    case_ids = {i["case_id"] for i in chosen if i.get("case_id")}
+    cases_by_id: dict[str, dict] = {}
+    if case_ids:
+        for cs in (
+            client.table("cases").select("id, number, label")
+            .eq("org_id", org_id).in_("id", list(case_ids)).execute().data or []
+        ):
+            cases_by_id[cs["id"]] = cs
+
     for c in calls:
-        inq = inquiry_by_call.get(c.get("id"))
+        inq = inquiry_by_id.get(c.get("inquiry_id")) or inquiry_by_call.get(c.get("id"))
         if inq is None:
             c["inquiry_id"] = None
             c["inquiry_status"] = None
+            c["inquiry_number"] = None
+            c["inquiry_subject"] = None
+            c["case_id"] = None
+            c["case_number"] = None
+            c["case_label"] = None
             c["emergency_flag"] = False
             c["assigned_employee_id"] = None
             c["assigned_employee_initials"] = None
@@ -111,6 +127,12 @@ def _enrich_calls_with_inquiries(client, org_id: str, calls: list[dict]) -> list
 
         c["inquiry_id"] = inq["id"]
         c["inquiry_status"] = inq.get("status")
+        c["inquiry_number"] = inq.get("number")
+        c["inquiry_subject"] = inq.get("subject")
+        cs = cases_by_id.get(inq.get("case_id"))
+        c["case_id"] = inq.get("case_id")
+        c["case_number"] = cs.get("number") if cs else None
+        c["case_label"] = cs.get("label") if cs else None
         # Flag-driven, OR category-driven for legacy/AI-classified rows.
         type_lower = (inq.get("type") or "").lower()
         c["emergency_flag"] = bool(inq.get("emergency_flag")) or (
@@ -159,7 +181,12 @@ def _detail(org_id: str, call_id: str) -> dict | None:
         .execute()
         .data
     )
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    # Enrich the single detail row too (inquiry + case fields) so the Call Logs chip
+    # can resolve the Fall (case number/label), not just the inquiry.
+    _enrich_calls_with_inquiries(client, org_id, rows)
+    return rows[0]
 
 
 @router.get("")
@@ -675,3 +702,212 @@ def build_customer_timeline(org_id: str, customer_id: str) -> list[dict] | None:
 
     events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)
     return events
+
+
+def build_case_thread(org_id: str, inquiry_id: str) -> dict | None:
+    """One Vorgang (case) = one thread. Returns the case header + a single
+    chronological timeline of EVERY call (inbound + outbound, labelled), appointment,
+    KVA and status change tied to this inquiry, plus the raw record lists the thread
+    view renders. None when the case isn't in this org. Same event shapes as the
+    per-call / customer timelines, but scoped to one case via `calls.inquiry_id` —
+    exactly the link Vorgang threading made reliable for OUTBOUND calls too."""
+    client = get_service_client()
+
+    inq_rows = (
+        client.table("inquiries")
+        .select(
+            "id, number, subject, title, type, status, notes, created_at, updated_at, "
+            "customer_id, call_id, assigned_employee_id"
+        )
+        .eq("org_id", org_id).eq("id", inquiry_id).limit(1)
+        .execute().data
+    )
+    if not inq_rows:
+        return None
+    inquiry = inq_rows[0]
+
+    def _customer():
+        cid = inquiry.get("customer_id")
+        if not cid:
+            return None
+        rows = (client.table("customers").select("id, full_name, phone, email, customer_number")
+                .eq("org_id", org_id).eq("id", cid).limit(1).execute().data)
+        return rows[0] if rows else None
+
+    def _employee():
+        eid = inquiry.get("assigned_employee_id")
+        if not eid:
+            return None
+        rows = (client.table("employees").select("id, display_name")
+                .eq("org_id", org_id).eq("id", eid).limit(1).execute().data)
+        return rows[0] if rows else None
+
+    def _calls():
+        return fetch_all_rows(
+            lambda: client.table("calls")
+            .select("id, summary_title, direction, started_at, created_at, duration_seconds, status")
+            .eq("org_id", org_id).eq("inquiry_id", inquiry_id).is_("deleted_at", "null")
+        )
+
+    def _appts():
+        return fetch_all_rows(
+            lambda: client.table("appointments")
+            .select(
+                "id, inquiry_id, title, scheduled_at, created_at, status, confirmed_at, "
+                "rejected_at, rejection_reason, cancelled_at, rescheduled_at, "
+                "alternative_start_time, alternative_proposed_at, "
+                "customer_proposed_start_time, customer_proposed_at"
+            )
+            .eq("org_id", org_id).eq("inquiry_id", inquiry_id)
+        )
+
+    def _kvas():
+        return fetch_all_rows(
+            lambda: client.table("cost_estimates")
+            .select("id, number, total, status, created_at, sent_at, accepted_at, rejected_at")
+            .eq("org_id", org_id).eq("inquiry_id", inquiry_id)
+        )
+
+    customer, employee, call_rows, appt_rows, kva_rows = run_parallel(
+        _customer, _employee, _calls, _appts, _kvas
+    )
+
+    events: list[dict] = []
+
+    # Calls — labelled inbound/outbound (the heart of the thread; outbound now links).
+    for c in call_rows:
+        ts = c.get("started_at") or c.get("created_at")
+        if not ts:
+            continue
+        label = "Ausgehender Anruf" if c.get("direction") == "outbound" else "Eingehender Anruf"
+        events.append({
+            "id": f"call:{c['id']}:created", "kind": "call_created", "timestamp": ts,
+            "actor_kind": "kiki", "actor_name": "Kiki",
+            "description": c.get("summary_title") or label, "entity_id": c["id"],
+            "extras": {"direction": c.get("direction"), "duration_seconds": c.get("duration_seconds"),
+                       "status": c.get("status")},
+        })
+
+    status = inquiry.get("status")
+    if status and status != "open":
+        ts = inquiry.get("updated_at") or inquiry.get("created_at")
+        if ts:
+            actor_kind, actor_name = _actor_for_status(status)
+            events.append({
+                "id": f"inquiry:{inquiry['id']}:status:{status}", "kind": "inquiry_status_changed",
+                "timestamp": ts, "actor_kind": actor_kind, "actor_name": actor_name,
+                "description": f"Vorgang-Status: {_STATUS_LABEL.get(status, status)}",
+                "entity_id": inquiry["id"], "extras": {"status": status, "title": inquiry.get("title")},
+            })
+
+    for a in appt_rows:
+        events.extend(_appointment_events(a))
+    for k in kva_rows:
+        events.extend(_kva_events(k))
+
+    events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)
+
+    # "Offene Punkte" = pending appointments + KVAs awaiting send/answer.
+    open_count = (
+        sum(1 for a in appt_rows if a.get("status") == "pending")
+        + sum(1 for k in kva_rows if k.get("status") in ("draft", "sent"))
+    )
+
+    return {
+        "inquiry": {
+            "id": inquiry["id"], "number": inquiry.get("number"), "subject": inquiry.get("subject"),
+            "title": inquiry.get("title"), "type": inquiry.get("type"), "status": inquiry.get("status"),
+            "notes": inquiry.get("notes"), "created_at": inquiry.get("created_at"),
+            "updated_at": inquiry.get("updated_at"),
+            "customer": customer, "assigned_employee": employee,
+        },
+        "timeline": events,
+        "calls": sorted(
+            call_rows, key=lambda c: c.get("started_at") or c.get("created_at") or "", reverse=True
+        ),
+        "appointments": sorted(appt_rows, key=lambda a: a.get("scheduled_at") or "", reverse=True),
+        "cost_estimates": sorted(kva_rows, key=lambda k: k.get("created_at") or "", reverse=True),
+        "open_count": open_count,
+    }
+
+
+def build_case_umbrella(org_id: str, case_id: str) -> dict | None:
+    """One CASE (Fall) = one umbrella over MANY inquiries. Returns the case header, its
+    member inquiries, and ONE chronological timeline across every call (in/out),
+    appointment, KVA and status change of ALL those inquiries. None if not in org."""
+    client = get_service_client()
+    rows = (
+        client.table("cases").select("id, number, label, status, customer_id, created_at")
+        .eq("org_id", org_id).eq("id", case_id).limit(1).execute().data
+    )
+    if not rows:
+        return None
+    case = rows[0]
+    inquiries = (
+        client.table("inquiries")
+        .select("id, number, subject, title, type, status, created_at, updated_at, case_confidence, case_reason")
+        .eq("org_id", org_id).eq("case_id", case_id).neq("status", "deleted")
+        .order("created_at").execute().data or []
+    )
+    inq_ids = [i["id"] for i in inquiries]
+
+    customer = None
+    if case.get("customer_id"):
+        cr = (client.table("customers").select("id, full_name, phone, email, customer_number")
+              .eq("org_id", org_id).eq("id", case["customer_id"]).limit(1).execute().data)
+        customer = cr[0] if cr else None
+
+    calls: list[dict] = []
+    appts: list[dict] = []
+    kvas: list[dict] = []
+    if inq_ids:
+        def _calls():
+            return fetch_all_rows(lambda: client.table("calls")
+                .select("id, summary_title, direction, started_at, created_at, duration_seconds, status, inquiry_id")
+                .eq("org_id", org_id).in_("inquiry_id", inq_ids).is_("deleted_at", "null"))
+
+        def _appts():
+            return fetch_all_rows(lambda: client.table("appointments")
+                .select("id, inquiry_id, title, scheduled_at, created_at, status, confirmed_at, rejected_at, "
+                        "rejection_reason, cancelled_at, rescheduled_at, alternative_start_time, "
+                        "alternative_proposed_at, customer_proposed_start_time, customer_proposed_at")
+                .eq("org_id", org_id).in_("inquiry_id", inq_ids))
+
+        def _kvas():
+            return fetch_all_rows(lambda: client.table("cost_estimates")
+                .select("id, inquiry_id, number, total, status, created_at, sent_at, accepted_at, rejected_at")
+                .eq("org_id", org_id).in_("inquiry_id", inq_ids))
+
+        calls, appts, kvas = run_parallel(_calls, _appts, _kvas)
+
+    events: list[dict] = []
+    for c in calls:
+        ts = c.get("started_at") or c.get("created_at")
+        if not ts:
+            continue
+        label = "Ausgehender Anruf" if c.get("direction") == "outbound" else "Eingehender Anruf"
+        events.append({
+            "id": f"call:{c['id']}:created", "kind": "call_created", "timestamp": ts,
+            "actor_kind": "kiki", "actor_name": "Kiki", "description": c.get("summary_title") or label,
+            "entity_id": c["id"], "extras": {"direction": c.get("direction"), "duration_seconds": c.get("duration_seconds")},
+        })
+    for a in appts:
+        events.extend(_appointment_events(a))
+    for k in kvas:
+        events.extend(_kva_events(k))
+    events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)
+
+    open_count = (
+        sum(1 for a in appts if a.get("status") == "pending")
+        + sum(1 for k in kvas if k.get("status") in ("draft", "sent"))
+    )
+    return {
+        "case": {"id": case["id"], "number": case.get("number"), "label": case.get("label"),
+                 "status": case.get("status"), "customer": customer, "created_at": case.get("created_at")},
+        "inquiries": inquiries,
+        "timeline": events,
+        "calls": sorted(calls, key=lambda c: c.get("started_at") or c.get("created_at") or "", reverse=True),
+        "appointments": sorted(appts, key=lambda a: a.get("scheduled_at") or "", reverse=True),
+        "cost_estimates": sorted(kvas, key=lambda k: k.get("created_at") or "", reverse=True),
+        "open_count": open_count,
+    }

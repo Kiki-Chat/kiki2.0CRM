@@ -195,7 +195,7 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     def _inq():
         return (
             client.table("inquiries")
-            .select("id, number, title, type, status, created_at, project_id")
+            .select("id, number, subject, title, type, status, created_at, updated_at, project_id, case_id, case_confidence, case_reason")
             .eq("org_id", org_id).eq("customer_id", customer_id)
             .neq("status", "deleted").order("created_at", desc=True)
             .execute().data or []
@@ -204,7 +204,7 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     def _appt():
         return (
             client.table("appointments")
-            .select("id, title, scheduled_at, status, category")
+            .select("id, inquiry_id, title, scheduled_at, status, category")
             .eq("org_id", org_id).eq("customer_id", customer_id)
             .order("scheduled_at", desc=True).execute().data or []
         )
@@ -212,7 +212,7 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     def _calls():
         return (
             client.table("calls")
-            .select("id, summary_title, direction, duration_seconds, started_at")
+            .select("id, inquiry_id, summary_title, direction, duration_seconds, started_at")
             .eq("org_id", org_id).eq("customer_id", customer_id)
             .is_("deleted_at", "null").order("started_at", desc=True)
             .execute().data or []
@@ -221,13 +221,46 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     def _kvas():
         return (
             client.table("cost_estimates")
-            .select("id, number, status, total, valid_until, created_at")
+            .select("id, inquiry_id, number, status, total, valid_until, created_at")
             .eq("org_id", org_id).eq("customer_id", customer_id)
             .order("created_at", desc=True).execute().data or []
         )
 
     customer["inquiries"], customer["appointments"], customer["calls"], customer["cost_estimates"] = (
         run_parallel(_inq, _appt, _calls, _kvas)
+    )
+
+    # Vorgang-card enrichment — per-case call count, last activity, and a count of
+    # open points (pending appointments + KVAs awaiting send/answer). Computed in
+    # Python from the lists already fetched above → zero extra round-trips.
+    call_count: Counter = Counter()
+    open_count: Counter = Counter()
+    last_act: dict[str, str] = {}
+    for c in customer["calls"]:
+        iid = c.get("inquiry_id")
+        if not iid:
+            continue
+        call_count[iid] += 1
+        ts = c.get("started_at")
+        if ts and ts > last_act.get(iid, ""):
+            last_act[iid] = ts
+    for a in customer["appointments"]:
+        iid = a.get("inquiry_id")
+        if iid and a.get("status") == "pending":
+            open_count[iid] += 1
+    for k in customer["cost_estimates"]:
+        iid = k.get("inquiry_id")
+        if iid and k.get("status") in ("draft", "sent"):
+            open_count[iid] += 1
+    for inq in customer["inquiries"]:
+        iid = inq["id"]
+        inq["call_count"] = call_count.get(iid, 0)
+        inq["open_count"] = open_count.get(iid, 0)
+        inq["last_activity_at"] = last_act.get(iid) or inq.get("updated_at") or inq.get("created_at")
+
+    customer["cases"] = (
+        client.table("cases").select("id, number, label, status, created_at")
+        .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
     )
     return customer
 
