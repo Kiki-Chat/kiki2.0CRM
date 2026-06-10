@@ -716,6 +716,16 @@ export function AppointmentCard({
             <button
               onClick={() => {
                 setActionError(null)
+                // A confirmed appointment must have an employee assigned. If
+                // none is set, open the assignment section and surface why,
+                // instead of silently confirming with "— nicht zugewiesen —".
+                if (!assignedEmployeeId) {
+                  setExpanded(true)
+                  setActionError(
+                    'Bitte zuerst einen Mitarbeiter zuweisen, bevor der Termin bestätigt wird.',
+                  )
+                  return
+                }
                 confirm.mutate()
               }}
               disabled={busy}

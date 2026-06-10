@@ -259,6 +259,16 @@ def _confirm(org_id: str, appointment_id: str) -> dict | None:
                 f"{appt.get('status')!r}. Nur ausstehende Termine sind bestätigbar."
             ),
         )
+    # A confirmed appointment must have a responsible employee. Enforce here too
+    # (not just in the UI) so the API can't be used to confirm an unassigned slot.
+    if not appt.get("assigned_employee_id"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Termin kann nicht bestätigt werden — es ist kein Mitarbeiter "
+                "zugewiesen. Bitte zuerst einen Mitarbeiter zuweisen."
+            ),
+        )
     now = _now_iso()
     updated = (
         get_service_client()

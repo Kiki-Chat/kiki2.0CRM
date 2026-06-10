@@ -59,7 +59,15 @@ export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthConte
       },
       async signInWithMagicLink(email) {
         if (!client) throw new Error('Supabase not configured')
-        const { error } = await client.auth.signInWithOtp({ email })
+        const { error } = await client.auth.signInWithOtp({
+          email,
+          // Without redirectTo, Supabase falls back to its globally-configured
+          // Site URL (a localhost default), so the emailed link lands on
+          // localhost. Pin it to the origin the user is actually on so prod
+          // links return to prod. The origin must also be in Supabase Auth's
+          // "Redirect URLs" allowlist or Supabase silently rejects it.
+          options: { emailRedirectTo: window.location.origin },
+        })
         if (error) throw error
       },
       async signOut() {

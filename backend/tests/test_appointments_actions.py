@@ -118,7 +118,13 @@ def test_confirm_happy_path_sets_confirmed_at_and_status(monkeypatch):
 
     # First .table().select()...execute() = _get_appointment SELECT.
     # Second .table().update()...execute() = the UPDATE returning the new row.
-    pending = {"id": appt_id, "org_id": org_id, "status": "pending"}
+    pending = {
+        "id": appt_id,
+        "org_id": org_id,
+        "status": "pending",
+        # A confirmable appointment must carry a responsible employee.
+        "assigned_employee_id": "emp-1",
+    }
     confirmed = {**pending, "status": "confirmed", "confirmed_at": "2026-05-28T10:00:00+00:00"}
     client = _FakeClient([[pending], [confirmed]])
     monkeypatch.setattr(appt_routes, "get_service_client", lambda: client)
@@ -130,6 +136,22 @@ def test_confirm_happy_path_sets_confirmed_at_and_status(monkeypatch):
     assert client._last_update_payload["status"] == "confirmed"
     assert client._last_update_payload["confirmed_at"] is not None
     assert client._last_update_payload["alternative_proposed_at"] is None
+
+
+def test_confirm_409_when_no_employee_assigned(monkeypatch):
+    """A pending appointment with no assigned employee cannot be confirmed —
+    the API rejects it with 409 so an unassigned slot never reaches 'confirmed'
+    (mirrors the UI guard that forces a Mitarbeiter selection first)."""
+    pending = {"id": "appt-1", "org_id": "org-1", "status": "pending", "assigned_employee_id": None}
+    monkeypatch.setattr(
+        appt_routes, "get_service_client", lambda: _FakeClient([[pending]])
+    )
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            appt_routes.confirm_appointment("appt-1", user=_org_admin_user("org-1"))
+        )
+    assert exc.value.status_code == 409
+    assert "Mitarbeiter" in exc.value.detail
 
 
 def test_confirm_404_when_appointment_in_other_org(monkeypatch):

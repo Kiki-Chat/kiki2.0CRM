@@ -96,7 +96,7 @@ export function CustomerFormModal({
           })
     },
     onSuccess: onSaved,
-    onError: () => setError('Speichern fehlgeschlagen.'),
+    onError: (e) => setError(e instanceof Error && e.message ? e.message : 'Speichern fehlgeschlagen.'),
   })
 
   const del = useMutation({
