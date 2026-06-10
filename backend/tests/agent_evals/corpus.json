@@ -1,0 +1,4469 @@
+{
+ "_doc": "Curated REAL call transcripts (masked) for retrospective rubric scoring. Extracted read-only from the calls table by extract_corpus.py.",
+ "calls": [
+  {
+   "call_id": "9e83013e-2174-48cb-aab6-8e992c342da6",
+   "org": "c4dbf596",
+   "bucket": "emergency",
+   "title": "Heizung Notdienst Transfer",
+   "direction": "inbound",
+   "started_at": "2026-06-09T10:21:30+00:00",
+   "duration_seconds": 228,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Guten Morgen",
+     "tool_calls": [],
+     "t": 1
+    },
+    {
+     "role": "user",
+     "message": "Guten Morgen!",
+     "tool_calls": [],
+     "t": 2
+    },
+    {
+     "role": "agent",
+     "message": "...",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "user",
+     "message": "Guten Morgen, Kiki. Ich habe ein Problem mit meiner Heizung.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 7
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 7
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Feder. Das mit Ihrer Heizung tut mir leid – können Sie mir das Problem genauer beschreiben?",
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "user",
+     "message": "Ja, die wird nicht mehr warm. Die ist komplett ausgefallen.",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": "Das klingt wirklich unangenehm,...",
+     "tool_calls": [],
+     "t": 24
+    },
+    {
+     "role": "user",
+     "message": "Nein.",
+     "tool_calls": [],
+     "t": 25
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Können Sie mir sagen, ob am Display der Heizung eine Fehlermeldung oder ein bestimmter Code angezeigt wird? Und wissen Sie zufällig, ob es sich um eine Öl- oder Gasheizung handelt?",
+     "tool_calls": [],
+     "t": 28
+    },
+    {
+     "role": "user",
+     "message": "Es ist eine Ölheizung.",
+     "tool_calls": [],
+     "t": 40
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar, eine Ölheizung. Können Sie am Gerät eine Fehlermeldung oder einen blinkenden Code sehen, und wissen Sie vielleicht noch, von welchem Hersteller die Anlage ist?",
+     "tool_calls": [],
+     "t": 43
+    },
+    {
+     "role": "user",
+     "message": "Code kann ich nicht sehen. Hersteller ist Beinand.",
+     "tool_calls": [],
+     "t": 53
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden, eine Ölheizung von Beinand ohne erkennbaren Fehlercode. Haben Sie schon einmal nach dem Druck am Manometer geschaut – befindet sich der Zeiger im grünen Bereich?",
+     "tool_calls": [],
+     "t": 60
+    },
+    {
+     "role": "user",
+     "message": "Ja, befindet sich im grünen Bereich.",
+     "tool_calls": [],
+     "t": 73
+    },
+    {
+     "role": "agent",
+     "message": "Gut, dass der Druck stimmt. Da die Heizung komplett ausgefallen ist, nehme ich das jetzt als dringendes Anliegen auf.\n\nDann nehme ich jetzt kurz Ihre Daten auf, um fortzufahren.\n\nIch notiere das auf Luca Feder, Hafenweg 22 in 48155 Münster – passt das so?",
+     "tool_calls": [],
+     "t": 77
+    },
+    {
+     "role": "user",
+     "message": "Ja, das passt.",
+     "tool_calls": [],
+     "t": 97
+    },
+    {
+     "role": "agent",
+     "message": "Möchten Sie direkt einen Termin vereinbaren?",
+     "tool_calls": [],
+     "t": 100
+    },
+    {
+     "role": "user",
+     "message": "Ja.",
+     "tool_calls": [],
+     "t": 106
+    },
+    {
+     "role": "agent",
+     "message": "Haben Sie schon ein Wunschdatum oder soll ich einen der nächsten freien Termine vorschlagen?",
+     "tool_calls": [],
+     "t": 108
+    },
+    {
+     "role": "user",
+     "message": "Gerne was vorschlagen.",
+     "tool_calls": [],
+     "t": 115
+    },
+    {
+     "role": "agent",
+     "message": "Passt es Ihnen eher vormittags oder nachmittags?",
+     "tool_calls": [],
+     "t": 119
+    },
+    {
+     "role": "user",
+     "message": "Kommen wir tags.",
+     "tool_calls": [],
+     "t": 123
+    },
+    {
+     "role": "agent",
+     "message": "...",
+     "tool_calls": [],
+     "t": 127
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 127
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 128
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 10. Juni um 9 Uhr oder den 10. Juni um 12 Uhr anbieten — welcher passt besser?",
+     "tool_calls": [],
+     "t": 129
+    },
+    {
+     "role": "user",
+     "message": "Um 12 Uhr.",
+     "tool_calls": [],
+     "t": 138
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 142
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_bookAppointment"
+     ],
+     "t": 142
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 143
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für Sie. Die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 145
+    },
+    {
+     "role": "user",
+     "message": "Kannst du mir Preise nennen?",
+     "tool_calls": [],
+     "t": 153
+    },
+    {
+     "role": "agent",
+     "message": "Gerne sage ich Ihnen, was die gewünschte Leistung ungefähr kostet. Ich nenne Ihnen jeweils einen Richtpreis — der kann je nach Situation vor Ort etwas abweichen.\n\nFür eine Reparatur berechnen wir eine Anfahrtspauschale von 49 Euro und einen Stundensatz von 75 Euro pro Monteur. Materialkosten kommen je nach Bedarf noch hinzu.\n\nKann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 157
+    },
+    {
+     "role": "user",
+     "message": "Ja, das war wirklich ein echter Notfall. Das ist wirklich sehr, sehr dringend. Und ich müsste da mal irgendwie mit dem Notdienst oder sowas sprechen.",
+     "tool_calls": [],
+     "t": 183
+    },
+    {
+     "role": "agent",
+     "message": "Das verstehe ich natürlich. Da Ihre Heizung komplett ausgefallen ist, kann ich Sie sofort mit unserem Notdienst verbinden.\n\nBitte beachten Sie, dass für den Notdienst ein entsprechender Zuschlag anfallen kann. Soll ich Sie jetzt direkt weiterverbinden?",
+     "tool_calls": [],
+     "t": 202
+    },
+    {
+     "role": "user",
+     "message": "Ähm...",
+     "tool_calls": [],
+     "t": 218
+    },
+    {
+     "role": "agent",
+     "message": "...",
+     "tool_calls": [],
+     "t": 222
+    },
+    {
+     "role": "user",
+     "message": "Ja.",
+     "tool_calls": [],
+     "t": 220
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar, ich verbinde Sie jetzt sofort mit dem...",
+     "tool_calls": [],
+     "t": 225
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_transferCall"
+     ],
+     "t": 226
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 227
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "ca2544d1-ae7f-48f2-90c8-cb528e6d63e5",
+   "org": "c4dbf596",
+   "bucket": "emergency",
+   "title": "Rohrbruch Notfall Weiterleitung",
+   "direction": "inbound",
+   "started_at": "2026-06-04T21:57:49+00:00",
+   "duration_seconds": 106,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Hallo. Dieser Anruf wird übersetzt und direkt mit Untertiteln versehen.",
+     "tool_calls": [],
+     "t": 11
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 19
+    },
+    {
+     "role": "user",
+     "message": "Hey, ich habe eine Notsituation. Meine Pfeife wurde kaputt. Bitte nehmen Sie einen Moment.",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": "Das tut mir leid zu hören. Können Sie mir kurz beschreiben, ob es sich um einen Rohrbruch handelt und ob bereits Wasser austritt?",
+     "tool_calls": [],
+     "t": 27
+    },
+    {
+     "role": "user",
+     "message": "Ich habe das Gefühl, dass Sie mir kurz erklären können, ob es ein Pfeilbruch ist und ob das Wasser schon fließt. Ja, Wasser ist bereits fließend und es ist eine emergency Situation und es stoppt nicht. Ja, Blutwasser fließt bereits aus und es ist eine Notsituation und es hört nicht auf.",
+     "tool_calls": [],
+     "t": 39
+    },
+    {
+     "role": "agent",
+     "message": "Das klingt nach einem ernsten Rohrbruch. Da wir uns aktuell außerhalb unserer Geschäftszeiten befinden, kann ich Sie direkt mit unserem Notdienst verbinden – bitte beachten Sie, dass hierfür ein Zuschlag anfallen kann. Soll ich Sie sofort weiterverbinden?",
+     "tool_calls": [],
+     "t": 66
+    },
+    {
+     "role": "user",
+     "message": "Das klingt wie ein ernstes Pfeil, weil wir gerade außerhalb unserer Geschäftszeit sind. Ich kann Sie direkt zu unserem Ursprungs-Service verbinden. Bitte beachten, dass das vielleicht durch eine Supplementation von Supplementify geübt wird, wenn ich Sie sofort verbinde.",
+     "tool_calls": [],
+     "t": 85
+    },
+    {
+     "role": "agent",
+     "message": "Ich verbinde Sie sofort.",
+     "tool_calls": [],
+     "t": 103
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_transferCall"
+     ],
+     "t": 103
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 104
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "0f659454-700d-4861-9cbe-e31e95c94144",
+   "org": "c4dbf596",
+   "bucket": "emergency",
+   "title": "Rohrbruch Notdienst",
+   "direction": "inbound",
+   "started_at": "2026-06-04T21:24:09+00:00",
+   "duration_seconds": 61,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Wir haben eine emergency situation, meine Pipe wurde gebust.",
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 13
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 13
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 14
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Agrawal. Das klingt nach einem ernsten Rohrbruch — wir sind aktuell jedoch außerhalb der Geschäftszeiten. Soll ich Sie sofort zum Notdienst weiterverbinden?",
+     "tool_calls": [],
+     "t": 16
+    },
+    {
+     "role": "user",
+     "message": "Hallo, dieser Anruf wird übersetzt und direkt mit Untertiteln versehen. Wir haben eine emergency situation, bitte verändern Sie meinen Anruf!",
+     "tool_calls": [],
+     "t": 28
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden, Herr Agrawal. Da...",
+     "tool_calls": [],
+     "t": 39
+    },
+    {
+     "role": "user",
+     "message": "Über eine Sprachnot-Situation wenden sie bitte meinen Anruf! Verstanden Herr Agrawal.",
+     "tool_calls": [],
+     "t": 40
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Da es sich um einen Rohrbruch handelt, kann ich Sie sofort mit unserem Notdienst verbinden. Soll ich die Weiterleitung jetzt für Sie einleiten?",
+     "tool_calls": [],
+     "t": 49
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "0516d1f7-240d-43b4-96d4-24a5939284f3",
+   "org": "04acd916",
+   "bucket": "emergency",
+   "title": "Toilet Emergency Inquiry",
+   "direction": "inbound",
+   "started_at": "2026-06-08T20:39:50+00:00",
+   "duration_seconds": 152,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Hey, hi, Kiki. I just want to inquire about my appointment with the company since I have an emergency situation. My toilet has been broken. The water is not leaking but flowing inside the bathroom.",
+     "tool_calls": [],
+     "t": 5
+    },
+    {
+     "role": "agent",
+     "message": "One moment, please.",
+     "tool_calls": [],
+     "t": 28
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 28
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 28
+    },
+    {
+     "role": "agent",
+     "message": "Oh, that sounds like a serious situation. Since the water is flowing into the bathroom, we should act quickly to prevent further damage.\n\nCould you please tell me your full name and the address where this is happening, including the zip code?",
+     "tool_calls": [],
+     "t": 30
+    },
+    {
+     "role": "user",
+     "message": "My name is Thomas Muller and my number is plus 49251. I don't know, I don't remember it. You take it from the call log. But I live in Berlin, street 27, flat number 2264. And the postcode is 10121.",
+     "tool_calls": [],
+     "t": 45
+    },
+    {
+     "role": "agent",
+     "message": "One moment, please.",
+     "tool_calls": [],
+     "t": 79
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 79
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 80
+    },
+    {
+     "role": "agent",
+     "message": "I've noted your details, Mr. Muller. Since water is actively flowing into your bathroom, this is indeed urgent.\n\nTo help our team prepare, could you tell me if you've already tried to turn off the main water valve?",
+     "tool_calls": [],
+     "t": 82
+    },
+    {
+     "role": "user",
+     "message": "Yes.",
+     "tool_calls": [],
+     "t": 97
+    },
+    {
+     "role": "agent",
+     "message": "Good that you've already turned off the...",
+     "tool_calls": [],
+     "t": 99
+    },
+    {
+     "role": "user",
+     "message": "I'd like",
+     "tool_calls": [],
+     "t": 101
+    },
+    {
+     "role": "agent",
+     "message": "Everything is noted, Mr. Muller. Since the water is flowing, would you like me to connect you directly to our emergency service?",
+     "tool_calls": [],
+     "t": 105
+    },
+    {
+     "role": "user",
+     "message": "No, you can just try to note it down.",
+     "tool_calls": [],
+     "t": 114
+    },
+    {
+     "role": "agent",
+     "message": "I understand. I will record this as an urgent matter for our team.\n\nSince we are currently outside of our regular business hours, I will make sure the colleagues receive your message immediately so they can get back to you as quickly as possible.\n\nIs there anything else I can do for you?",
+     "tool_calls": [],
+     "t": 121
+    },
+    {
+     "role": "user",
+     "message": "No, that's it",
+     "tool_calls": [],
+     "t": 138
+    },
+    {
+     "role": "agent",
+     "message": "I'm recording your message.",
+     "tool_calls": [],
+     "t": 142
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_createInquiry"
+     ],
+     "t": 142
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 143
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 145
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 146
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 151
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "f0ff8909-7ec7-49a6-8163-914c4d160321",
+   "org": "04acd916",
+   "bucket": "emergency",
+   "title": "Ceiling Water Leak",
+   "direction": "inbound",
+   "started_at": "2026-06-08T20:11:05+00:00",
+   "duration_seconds": 140,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Ich habe ein Problem mit meinem Dark-Simmer.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue kurz nach.",
+     "tool_calls": [],
+     "t": 12
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 12
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 13
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Können Sie mir das genauer beschreiben? Was genau funktioniert bei Ihrem Dimmer nicht?",
+     "tool_calls": [],
+     "t": 14
+    },
+    {
+     "role": "user",
+     "message": "the regnit's waster is the fluid.",
+     "tool_calls": [],
+     "t": 25
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Könnten Sie mir bitte kurz sagen, ob der Dimmer auch flackert oder ob er ungewöhnlich warm wird? Und betrifft das Problem nur eine einzelne Lampe oder mehrere?",
+     "tool_calls": [],
+     "t": 30
+    },
+    {
+     "role": "user",
+     "message": "Das Problem ist mit dark auf meiner Zimmer.",
+     "tool_calls": [],
+     "t": 42
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden, es bleibt also dunkel in Ihrem Zimmer. Haben Sie schon einmal im Sicherungskasten nachgesehen, ob dort vielleicht eine Sicherung für diesen Raum herausgesprungen ist?",
+     "tool_calls": [],
+     "t": 50
+    },
+    {
+     "role": "user",
+     "message": "Nein, das ist Wasser. Red mit Wasser.",
+     "tool_calls": [],
+     "t": 61
+    },
+    {
+     "role": "agent",
+     "message": "Das klingt ernst, wenn Wasser im Spiel ist. Tritt das Wasser direkt aus dem Dimmer oder der Steckdose aus, oder kommt es von der Decke?",
+     "tool_calls": [],
+     "t": 70
+    },
+    {
+     "role": "user",
+     "message": "Aus Decke.",
+     "tool_calls": [],
+     "t": 80
+    },
+    {
+     "role": "agent",
+     "message": "Das ist ein dringender Fall, da Wasser in der Nähe von elektrischen Leitungen sehr gefährlich sein kann. Bitte schalten Sie sicherheitshalber die Sicherung für diesen Raum aus, falls Sie das noch nicht getan haben. Da wir aktuell außerhalb der Geschäftszeiten sind, nehme ich Ihr Anliegen sofort auf, damit sich das Team schnellstmöglich bei Ihnen meldet.\n\nDann nehme ich jetzt kurz Ihre Daten auf, um fortzufahren. Ich notiere das für Sie, Herr Yadav, an der Maxstrasse 36 in Bielefeld – passt das so?...",
+     "tool_calls": [],
+     "t": 84
+    },
+    {
+     "role": "user",
+     "message": "Ja, genau. Ja, genau.",
+     "tool_calls": [],
+     "t": 113
+    },
+    {
+     "role": "agent",
+     "message": "Ich nehme das sofort auf.",
+     "tool_calls": [],
+     "t": 118
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_createInquiry"
+     ],
+     "t": 118
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 119
+    },
+    {
+     "role": "agent",
+     "message": "Ich habe alles notiert und die Kollegen werden sich so schnell wie möglich bei Ihnen melden. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 121
+    },
+    {
+     "role": "user",
+     "message": "Nein!",
+     "tool_calls": [],
+     "t": 129
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 132
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 133
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 139
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "d951e4db-1238-4c76-b61a-899c0cd76512",
+   "org": "c4dbf596",
+   "bucket": "booking",
+   "title": "Heizung Reparatur Termin",
+   "direction": "inbound",
+   "started_at": "2026-06-09T10:13:16+00:00",
+   "duration_seconds": 135,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 1
+    },
+    {
+     "role": "user",
+     "message": "Ich habe ein Problem mit meiner Heizung.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Feder. Können Sie mir das Problem mit Ihrer Heizung genauer beschreiben? Was genau funktioniert nicht?",
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "user",
+     "message": "Die wird nicht mehr warm.",
+     "tool_calls": [],
+     "t": 20
+    },
+    {
+     "role": "agent",
+     "message": "Das ist natürlich ärgerlich. Können Sie mir sagen, ob eine Fehlermeldung am Display des Geräts angezeigt wird oder ob die Heizung vielleicht ungewöhnliche Geräusche macht?",
+     "tool_calls": [],
+     "t": 22
+    },
+    {
+     "role": "user",
+     "message": "Fehlercode kann ich nicht erkennen. Ungewöhnliche Geräusche auch nicht!",
+     "tool_calls": [],
+     "t": 33
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Haben Sie schon einmal den Druck am Manometer geprüft, ob dieser sich im grünen Bereich befindet?",
+     "tool_calls": [],
+     "t": 38
+    },
+    {
+     "role": "user",
+     "message": "Ne, habe ich noch nicht.",
+     "tool_calls": [],
+     "t": 50
+    },
+    {
+     "role": "agent",
+     "message": "Schauen Sie bitte einmal nach, ob der Druck im grünen Bereich liegt. Falls das nicht hilft, nehme ich jetzt kurz Ihre Daten auf, um fortzufahren. Da Sie bereits bei uns Kunde sind, habe ich Ihre Adresse im Hafenweg 22 in Münster und Ihre Telefonnummer bereits vorliegen – passt das so?",
+     "tool_calls": [],
+     "t": 53
+    },
+    {
+     "role": "user",
+     "message": "Ja das passt.",
+     "tool_calls": [],
+     "t": 71
+    },
+    {
+     "role": "agent",
+     "message": "Möchten Sie direkt einen Termin vereinbaren?",
+     "tool_calls": [],
+     "t": 74
+    },
+    {
+     "role": "user",
+     "message": "Ja.",
+     "tool_calls": [],
+     "t": 78
+    },
+    {
+     "role": "agent",
+     "message": "Haben Sie schon ein Wunschdatum oder soll ich einen der nächsten freien Termine vorschlagen?",
+     "tool_calls": [],
+     "t": 81
+    },
+    {
+     "role": "user",
+     "message": "Gerne was vorschlagen!",
+     "tool_calls": [],
+     "t": 87
+    },
+    {
+     "role": "agent",
+     "message": "Passt es Ihnen eher vormittags oder nachmittags?",
+     "tool_calls": [],
+     "t": 91
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 91
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 92
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 10. Juni um 10 Uhr oder den 10. Juni um 12 Uhr anbieten — welcher passt besser?",
+     "tool_calls": [],
+     "t": 93
+    },
+    {
+     "role": "user",
+     "message": "10. Juni um 10 Uhr.",
+     "tool_calls": [],
+     "t": 108
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für Sie.",
+     "tool_calls": [],
+     "t": 113
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_bookAppointment"
+     ],
+     "t": 113
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 114
+    },
+    {
+     "role": "agent",
+     "message": "Die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 116
+    },
+    {
+     "role": "user",
+     "message": "Nein das wär's!",
+     "tool_calls": [],
+     "t": 123
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 127
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 128
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 133
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "526386dc-aef6-4b37-b76a-c23e5d12446c",
+   "org": "c4dbf596",
+   "bucket": "booking",
+   "title": "Heizung Reparatur Termin",
+   "direction": "inbound",
+   "started_at": "2026-06-09T10:09:01+00:00",
+   "duration_seconds": 181,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 1
+    },
+    {
+     "role": "user",
+     "message": "Ja, hallo Kiki. Ich habe ein Problem mit meiner Heizung.",
+     "tool_calls": [],
+     "t": 5
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue kurz nach.",
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 10
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 11
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Feder. Können Sie mir das Problem mit Ihrer Heizung genauer beschreiben? Was genau funktioniert nicht?",
+     "tool_calls": [],
+     "t": 13
+    },
+    {
+     "role": "user",
+     "message": "Äh, die wird nicht mehr warm.",
+     "tool_calls": [],
+     "t": 22
+    },
+    {
+     "role": "agent",
+     "message": "Verstehe. Können Sie mir sagen, ob die Heizung in allen Räumen kalt bleibt oder nur in bestimmten? Und wird das Wasser im Bad oder in der Küche noch warm?",
+     "tool_calls": [],
+     "t": 26
+    },
+    {
+     "role": "user",
+     "message": "...",
+     "tool_calls": [],
+     "t": 44
+    },
+    {
+     "role": "agent",
+     "message": "Sind Sie noch da? Es wäre hilfreich zu wissen, ob das Problem alle Räume betrifft und ob Sie noch warmes Wasser haben.",
+     "tool_calls": [],
+     "t": 46
+    },
+    {
+     "role": "user",
+     "message": "Äh, Warmwasser habe ich nicht mehr. Es betrifft alle Räume.",
+     "tool_calls": [],
+     "t": 55
+    },
+    {
+     "role": "agent",
+     "message": "Das klingt nach einem kompletten Heizungsausfall. Können Sie mir bitte noch sagen, von welchem Hersteller die Anlage ist, wie alt sie in etwa ist und ob eine Fehlermeldung auf dem Display angezeigt wird?",
+     "tool_calls": [],
+     "t": 62
+    },
+    {
+     "role": "user",
+     "message": "Ähm, kein Fehlercode. Die ist von 2015. Ähm, genau.",
+     "tool_calls": [],
+     "t": 74
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar. Haben Sie schon einmal den Druck am Manometer geprüft, ob dieser noch im grünen Bereich liegt? Und wissen Sie zufällig noch, von welchem Hersteller das Gerät ist?",
+     "tool_calls": [],
+     "t": 85
+    },
+    {
+     "role": "user",
+     "message": "habe ich noch nicht geprüft, Hersteller Weiland.",
+     "tool_calls": [],
+     "t": 97
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden, ein Gerät von Vaillant also. Dann nehme ich jetzt kurz Ihre Daten auf, um fortzufahren.\n\nIch notiere das auf Luca Feder, Hafenweg 22 in 48155 Münster – passt das so?",
+     "tool_calls": [],
+     "t": 101
+    },
+    {
+     "role": "user",
+     "message": "Das passt.",
+     "tool_calls": [],
+     "t": 114
+    },
+    {
+     "role": "agent",
+     "message": "Möchten Sie direkt einen Termin vereinbaren?",
+     "tool_calls": [],
+     "t": 117
+    },
+    {
+     "role": "user",
+     "message": "Ja, bitte.",
+     "tool_calls": [],
+     "t": 123
+    },
+    {
+     "role": "agent",
+     "message": "Haben Sie schon ein Wunschdatum oder soll ich einen der nächsten freien Termine vorschlagen?",
+     "tool_calls": [],
+     "t": 126
+    },
+    {
+     "role": "user",
+     "message": "Ich schlage gerne einen Termin vor.",
+     "tool_calls": [],
+     "t": 132
+    },
+    {
+     "role": "agent",
+     "message": "Passt es Ihnen eher vormittags oder nachmittags?",
+     "tool_calls": [],
+     "t": 135
+    },
+    {
+     "role": "user",
+     "message": "Vormittags.",
+     "tool_calls": [],
+     "t": 140
+    },
+    {
+     "role": "agent",
+     "message": "Ich schaue nach freien Terminen.",
+     "tool_calls": [],
+     "t": 142
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 142
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 143
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 10. Juni um 10 Uhr oder den 10. Juni um 11 Uhr anbieten – welcher passt besser?",
+     "tool_calls": [],
+     "t": 145
+    },
+    {
+     "role": "user",
+     "message": "11 Uhr.",
+     "tool_calls": [],
+     "t": 155
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für Sie. Die finale Bestätigung kommt von unserem Team.",
+     "tool_calls": [],
+     "t": 159
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_bookAppointment"
+     ],
+     "t": 159
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 160
+    },
+    {
+     "role": "agent",
+     "message": "Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 162
+    },
+    {
+     "role": "user",
+     "message": "Das wär's.",
+     "tool_calls": [],
+     "t": 169
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 173
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 174
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 180
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "d7ff1227-3dc4-4de0-94d2-35b8e73f5e6e",
+   "org": "c4dbf596",
+   "bucket": "booking",
+   "title": "Heater Repair Appointment",
+   "direction": "inbound",
+   "started_at": "2026-06-09T10:17:09+00:00",
+   "duration_seconds": 189,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Guten Morgen",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Guten Morgen, Kiki.",
+     "tool_calls": [],
+     "t": 6
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": "...",
+     "tool_calls": [],
+     "t": 11
+    },
+    {
+     "role": "user",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "agent",
+     "message": "Sind Sie noch da? Geben Sie mir doch bitte ein kurzes Zeichen, wie ich Ihnen heute behilflich sein kann.",
+     "tool_calls": [],
+     "t": 13
+    },
+    {
+     "role": "user",
+     "message": "Ich bin noch da. Mein Problem ist, dass meine Heizung kaputt ist.",
+     "tool_calls": [],
+     "t": 20
+    },
+    {
+     "role": "agent",
+     "message": "Das tut mir leid zu hören. Können Sie mir das genauer beschreiben? Was genau funktioniert nicht bzw. was soll gemacht werden?",
+     "tool_calls": [],
+     "t": 25
+    },
+    {
+     "role": "user",
+     "message": "Die wird nicht mehr warm.",
+     "tool_calls": [],
+     "t": 33
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Können Sie mir sagen, ob eine Fehlermeldung am Display der Heizung blinkt? Und wissen Sie zufällig, ob es sich um eine Gas- oder Ölheizung handelt?",
+     "tool_calls": [],
+     "t": 36
+    },
+    {
+     "role": "user",
+     "message": "Ähm... Es ist eine Gasheizung. Ähm... Fehlercode erscheint nicht.",
+     "tool_calls": [],
+     "t": 49
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar. Haben Sie schon einmal den Druck am Manometer geprüft, ob der Zeiger im grünen Bereich steht? Und ist nur ein bestimmter Raum betroffen oder bleibt die ganze Wohnung kalt?",
+     "tool_calls": [],
+     "t": 55
+    },
+    {
+     "role": "user",
+     "message": "Die ganze Wohnung bleibt kalt.",
+     "tool_calls": [],
+     "t": 67
+    },
+    {
+     "role": "agent",
+     "message": "Das klingt wirklich unangenehm. Dann nehme ich jetzt kurz Ihre Daten auf, um fortzufahren. Ich notiere das auf Luca Feder, Hafenweg 22 in 48155 Münster – passt das so?",
+     "tool_calls": [],
+     "t": 71
+    },
+    {
+     "role": "user",
+     "message": "Das passt.",
+     "tool_calls": [],
+     "t": 84
+    },
+    {
+     "role": "agent",
+     "message": "Möchten Sie direkt einen Termin vereinbaren?",
+     "tool_calls": [],
+     "t": 87
+    },
+    {
+     "role": "user",
+     "message": "Könntest du mir vorher noch die Preise nennen?",
+     "tool_calls": [],
+     "t": 92
+    },
+    {
+     "role": "agent",
+     "message": "Gerne sage ich Ihnen, was die gewünschte Leistung ungefähr kostet. Ich nenne Ihnen jeweils einen Richtpreis — der kann je nach Situation vor Ort etwas abweichen. Da ich für eine Reparatur keinen pauschalen Preis in meinen Unterlagen habe, kann ich Ihnen anbieten, dass unser Team einen verbindlichen Kostenvoranschlag für Sie erstellt. Möchten Sie trotzdem erst einmal direkt einen Termin zur Besichtigung reservieren?",
+     "tool_calls": [],
+     "t": 96
+    },
+    {
+     "role": "user",
+     "message": "Ja, bitte.",
+     "tool_calls": [],
+     "t": 119
+    },
+    {
+     "role": "agent",
+     "message": "Haben Sie schon ein Wunschdatum oder soll ich einen der nächsten freien Termine vorschlagen?",
+     "tool_calls": [],
+     "t": 122
+    },
+    {
+     "role": "user",
+     "message": "Gerne was vorschlagen.",
+     "tool_calls": [],
+     "t": 129
+    },
+    {
+     "role": "agent",
+     "message": "Passt es Ihnen eher vormittags oder nachmittags?",
+     "tool_calls": [],
+     "t": 132
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 132
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 133
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 10. Juni um 13 Uhr oder den 10. Juni um 14 Uhr anbieten — welcher passt besser?",
+     "tool_calls": [],
+     "t": 135
+    },
+    {
+     "role": "user",
+     "message": "Eher vormittags um 10. Juni geht das.",
+     "tool_calls": [],
+     "t": 143
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen am 10. Juni um 08:00 Uhr oder um 09:00 Uhr einen Termin anbieten – welcher davon würde Ihnen besser passen?",
+     "tool_calls": [],
+     "t": 148
+    },
+    {
+     "role": "user",
+     "message": "8 Uhr.",
+     "tool_calls": [],
+     "t": 161
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 165
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_bookAppointment"
+     ],
+     "t": 165
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 166
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für Sie. Die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 168
+    },
+    {
+     "role": "user",
+     "message": "Ne das wär's!",
+     "tool_calls": [],
+     "t": 177
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 180
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 181
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 187
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "a3a58624-cf4e-4aca-8776-2dc00d5bd5f3",
+   "org": "c4dbf596",
+   "bucket": "booking_price",
+   "title": "Heizung Reparatur Termin",
+   "direction": "inbound",
+   "started_at": "2026-06-04T15:33:39+00:00",
+   "duration_seconds": 347,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Dieser Anruf wird übersetzt und direkt mit Untertiteln versehen.",
+     "tool_calls": [],
+     "t": 3
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment...",
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "user",
+     "message": "Kiki, how can I help?",
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue kurz...",
+     "tool_calls": [],
+     "t": 11
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 11
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 11
+    },
+    {
+     "role": "user",
+     "message": "Please take a moment.",
+     "tool_calls": [],
+     "t": 12
+    },
+    {
+     "role": "agent",
+     "message": "Hallo, hier...",
+     "tool_calls": [],
+     "t": 16
+    },
+    {
+     "role": "user",
+     "message": "Please take a moment. I'll take a quick look. Hello, this is here.",
+     "tool_calls": [],
+     "t": 17
+    },
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki von Muster Heizungsbau GmbH. Wie kann ich...",
+     "tool_calls": [],
+     "t": 25
+    },
+    {
+     "role": "user",
+     "message": "Ich möchte einen Termin mit der Hitze buchen. Ich möchte einen Umborjan mit einem Heizproblem buchen.",
+     "tool_calls": [],
+     "t": 28
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue kurz nach. Können Sie mir das Problem mit Ihrer Heizung genauer beschreiben? Was genau funktioniert nicht, und wissen Sie vielleicht den Hersteller oder das Baujahr der Anlage?",
+     "tool_calls": [],
+     "t": 39
+    },
+    {
+     "role": "user",
+     "message": "Ich möchte einen Termin für den 29. Juni um 3 Uhr buchen, der mit einer Heizungsreparatur zusammenhängt. Was genau funktioniert nicht und ihr kennt den Hersteller oder das Jahr der Konstruktion der Pflanze?",
+     "tool_calls": [],
+     "t": 52
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden, eine Heizungsreparatur also. Könnten Sie mir noch kurz sagen, von welchem Hersteller die Heizung ist und ob Sie einen Fehlercode am Display sehen? Danach nehme...",
+     "tool_calls": [],
+     "t": 71
+    },
+    {
+     "role": "user",
+     "message": "Ich kenne die Produktionsstätte nicht, aber sie heizt mein Schlafzimmer nicht und es funktioniert seit drei Stunden nicht mehr. Können Sie mir für einen Moment sagen, welcher Hersteller der Heizer ist und ob Sie einen Fehlercode am Display sehen? Nachdem das passiert...",
+     "tool_calls": [],
+     "t": 80
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar, ich notiere mir, dass das Schlafzimmer nicht warm wird. Dann nehme ich jetzt kurz Ihre Daten...",
+     "tool_calls": [],
+     "t": 98
+    },
+    {
+     "role": "user",
+     "message": "Der Heizungshersteller wie Panasonic. Und der Code lautet F200. Wobei nur die Heizung angezeigt wird. Dann werde ich Ihnen Ihre Daten kurz vorlesen.",
+     "tool_calls": [],
+     "t": 103
+    },
+    {
+     "role": "agent",
+     "message": "Vielen Dank für die Informationen zum Panasonic-Gerät und dem Fehlercode F200...",
+     "tool_calls": [],
+     "t": 117
+    },
+    {
+     "role": "user",
+     "message": "Können Sie einen Termin buchen?",
+     "tool_calls": [],
+     "t": 123
+    },
+    {
+     "role": "agent",
+     "message": "Gerne. Dann nehme ich jetzt kurz Ihre Daten auf, um fortzufahren. Wie lautet Ihr vollständiger Name?",
+     "tool_calls": [],
+     "t": 133
+    },
+    {
+     "role": "user",
+     "message": "Ich wäre froh, Ihre Daten kurz voranzutragen. Was ist Ihr voller Name?",
+     "tool_calls": [],
+     "t": 143
+    },
+    {
+     "role": "agent",
+     "message": "Mein Name ist Kiki. Wie lautet denn Ihr vollständiger Vor- und Nachname, damit ich den...",
+     "tool_calls": [],
+     "t": 152
+    },
+    {
+     "role": "user",
+     "message": "Mein Name ist Herr Fehler. Thomas Thomas Müller. Mein Name ist Kiki. Was ist Ihr vollerer und letzter Name, damit ich es benutzen kann?",
+     "tool_calls": [],
+     "t": 156
+    },
+    {
+     "role": "agent",
+     "message": "Vielen Dank, Herr Müller. Ich notiere das auf Thomas Müller. Und unter welcher Telefonnummer können wir Sie für Rückfragen erreichen?",
+     "tool_calls": [],
+     "t": 168
+    },
+    {
+     "role": "user",
+     "message": "Der erste Name ist Thomas Nachname. Ich notiere das auf Thomas Müller und unter welchem Telefonnummer können wir Sie für Fragen erreichen?",
+     "tool_calls": [],
+     "t": 178
+    },
+    {
+     "role": "agent",
+     "message": "Könnten Sie mir bitte Ihre Telefonnummer für...",
+     "tool_calls": [],
+     "t": 189
+    },
+    {
+     "role": "user",
+     "message": "787-…MASKED Können Sie mir bitte Ihr Telefonnummer für mögliche Fragen geben?",
+     "tool_calls": [],
+     "t": 191
+    },
+    {
+     "role": "agent",
+     "message": "Vielen Dank. Und wie lautet Ihre Adresse inklusive Postleitzahl?",
+     "tool_calls": [],
+     "t": 201
+    },
+    {
+     "role": "user",
+     "message": "Sehr gerne. Was ist Ihre Adresse, die mit Postalcode verbunden ist?",
+     "tool_calls": [],
+     "t": 209
+    },
+    {
+     "role": "agent",
+     "message": "Könnten Sie mir bitte Ihre Adresse mit Postleitzahl nennen, damit ich den Einsatzort für die Reparatur notieren kann?",
+     "tool_calls": [],
+     "t": 216
+    },
+    {
+     "role": "user",
+     "message": "Postleitzahl. 201301 Stadt Berlin und die Adresse, die ich in Flug 221 Baker Street 221 wohne.",
+     "tool_calls": [],
+     "t": 225
+    },
+    {
+     "role": "agent",
+     "message": "Vielen Dank, Herr Müller. Ich habe die Baker Street 221 in 201301 Berlin notiert. Möchten Sie direkt einen...",
+     "tool_calls": [],
+     "t": 240
+    },
+    {
+     "role": "user",
+     "message": "Können Sie den Termin buchen?",
+     "tool_calls": [],
+     "t": 247
+    },
+    {
+     "role": "agent",
+     "message": "Möchten Sie direkt einen Termin vereinbaren?",
+     "tool_calls": [],
+     "t": 251
+    },
+    {
+     "role": "user",
+     "message": "Der Müller, Eilisit Baker Street 221 in 201 301 Berlin. Würde Sie so direkt machen? Würde Sie direkt einen Abruf machen? Ja, ich möchte den Termin direkt vereinbaren.",
+     "tool_calls": [],
+     "t": 254
+    },
+    {
+     "role": "agent",
+     "message": "Haben Sie schon ein Wunschdatum oder soll ich einen der nächsten freien Termine vorschlagen?",
+     "tool_calls": [],
+     "t": 273
+    },
+    {
+     "role": "user",
+     "message": "Sie haben einen gewünschten Tag oder sollte ich einen der nächsten freien Tage vorlesen?",
+     "tool_calls": [],
+     "t": 282
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.\n",
+     "tool_calls": [],
+     "t": 288
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 288
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 289
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den...",
+     "tool_calls": [],
+     "t": 291
+    },
+    {
+     "role": "user",
+     "message": "29. Juni 3 Uhr Ich könnte Ihnen den 29. geben.",
+     "tool_calls": [],
+     "t": 292
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin.",
+     "tool_calls": [],
+     "t": 302
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_bookAppointment"
+     ],
+     "t": 302
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 304
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für...",
+     "tool_calls": [],
+     "t": 306
+    },
+    {
+     "role": "user",
+     "message": "Ich habe die Abteilung reserviert. Ich werde die Date für Sie reservieren.",
+     "tool_calls": [],
+     "t": 307
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für Sie. Die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 315
+    },
+    {
+     "role": "user",
+     "message": "I will reserve the date for you. The final confirmation comes from our team. Is there anything else I can do for you? Nein, das bedanken Sie sich nur.",
+     "tool_calls": [],
+     "t": 326
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 339
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 340
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 345
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "5293185b-465f-4312-8fd2-615c7dd24717",
+   "org": "04acd916",
+   "bucket": "booking",
+   "title": "Toilet Repair Appointment",
+   "direction": "inbound",
+   "started_at": "2026-06-10T08:20:32+00:00",
+   "duration_seconds": 147,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Guten Morgen",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Guten Morgen.",
+     "tool_calls": [],
+     "t": 6
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue kurz nach.",
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Wie kann ich Ihnen helfen?",
+     "tool_calls": [],
+     "t": 11
+    },
+    {
+     "role": "user",
+     "message": "I need an appointment for my bathroom.",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": "Gerne. Können Sie mir das genauer beschreiben? Was genau funktioniert im Badezimmer nicht oder was soll gemacht werden?",
+     "tool_calls": [],
+     "t": 30
+    },
+    {
+     "role": "user",
+     "message": "My toilet has hot water.",
+     "tool_calls": [],
+     "t": 39
+    },
+    {
+     "role": "agent",
+     "message": "Das klingt in der Tat ungewöhnlich. Haben Sie schon bemerkt, ob das Wasser auch im Spülkasten warm ist oder betrifft es nur die Spülung selbst?",
+     "tool_calls": [],
+     "t": 45
+    },
+    {
+     "role": "user",
+     "message": "Fueling is...",
+     "tool_calls": [],
+     "t": 54
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Tropft denn zusätzlich irgendwo Wasser oder gibt es eine Fehlermeldung an Ihrer Anlage?",
+     "tool_calls": [],
+     "t": 58
+    },
+    {
+     "role": "user",
+     "message": "in the toilet.",
+     "tool_calls": [],
+     "t": 66
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar. Dann nehme ich jetzt kurz Ihre Daten auf, um fortzufahren. Da ich Ihre Adresse in der Maxstraße 36 in Bielefeld bereits vorliegen habe, passt das so für Sie?",
+     "tool_calls": [],
+     "t": 70
+    },
+    {
+     "role": "user",
+     "message": "Yeah. Exactly.",
+     "tool_calls": [],
+     "t": 81
+    },
+    {
+     "role": "agent",
+     "message": "Möchten Sie direkt einen Termin vereinbaren?",
+     "tool_calls": [],
+     "t": 86
+    },
+    {
+     "role": "user",
+     "message": "Yeah. I have to go directly to the toilet.",
+     "tool_calls": [],
+     "t": 90
+    },
+    {
+     "role": "agent",
+     "message": "Haben Sie schon ein Wunschdatum oder soll ich einen der nächsten freien Termine vorschlagen?",
+     "tool_calls": [],
+     "t": 94
+    },
+    {
+     "role": "user",
+     "message": "Yeah. Next time I'll go first",
+     "tool_calls": [],
+     "t": 102
+    },
+    {
+     "role": "agent",
+     "message": "Ich schaue nach freien Terminen.",
+     "tool_calls": [],
+     "t": 108
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 108
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 109
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 11. Juni um 08:00 Uhr oder den 11. Juni um 09:00 Uhr anbieten — welcher passt besser?",
+     "tool_calls": [],
+     "t": 111
+    },
+    {
+     "role": "user",
+     "message": ". On June 11th, 9 o'clock.",
+     "tool_calls": [],
+     "t": 119
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für Sie.",
+     "tool_calls": [],
+     "t": 126
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_bookAppointment"
+     ],
+     "t": 126
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 127
+    },
+    {
+     "role": "agent",
+     "message": "Die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 129
+    },
+    {
+     "role": "user",
+     "message": "No!",
+     "tool_calls": [],
+     "t": 135
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 138
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 139
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 145
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "92268464-a1ec-4b4f-b2a3-8ffb11d1d62e",
+   "org": "04acd916",
+   "bucket": "booking",
+   "title": "Dachreparatur Terminbuchung",
+   "direction": "inbound",
+   "started_at": "2026-06-09T08:29:03+00:00",
+   "duration_seconds": 178,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Hallo Kiki. Ich habe ein Problem mit meinem Dachsimmer.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 10
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 11
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Können Sie mir das mit Ihrem Dachzimmer genauer beschreiben? Was genau funktioniert dort nicht?",
+     "tool_calls": [],
+     "t": 13
+    },
+    {
+     "role": "user",
+     "message": "Mein Dach ist kaputt.",
+     "tool_calls": [],
+     "t": 27
+    },
+    {
+     "role": "agent",
+     "message": "Das ist natürlich ärgerlich. Können Sie mir genauer beschreiben, was am Dach kaputt ist – gibt es zum Beispiel erkennbare Schäden außen oder ist es bereits undicht?",
+     "tool_calls": [],
+     "t": 31
+    },
+    {
+     "role": "user",
+     "message": "Außen",
+     "tool_calls": [],
+     "t": 41
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Seit wann ist der Schaden denn erkennbar und wie groß ist die betroffene Fläche in etwa?",
+     "tool_calls": [],
+     "t": 45
+    },
+    {
+     "role": "user",
+     "message": "Fläche in etwa.",
+     "tool_calls": [],
+     "t": 52
+    },
+    {
+     "role": "agent",
+     "message": "Könnten Sie mir die Größe der beschädigten Fläche vielleicht in Quadratmetern oder als grobe Einschätzung nennen? Und ist das Dach an dieser Stelle bereits undicht, sodass Wasser eintritt?",
+     "tool_calls": [],
+     "t": 55
+    },
+    {
+     "role": "user",
+     "message": "Ja, Wasser eintritt, wann es regnet.",
+     "tool_calls": [],
+     "t": 67
+    },
+    {
+     "role": "agent",
+     "message": "Das klingt nach einem dringenden Problem, besonders wenn es regnet. Dann nehme ich jetzt kurz Ihre Daten auf, um fortzufahren. Ich notiere das für Govind Yadav an der Maxstrasse 36 in Bielefeld – passt das so?",
+     "tool_calls": [],
+     "t": 73
+    },
+    {
+     "role": "user",
+     "message": "Ja, das ist genau so.",
+     "tool_calls": [],
+     "t": 87
+    },
+    {
+     "role": "agent",
+     "message": "Möchten Sie direkt einen Termin vereinbaren?",
+     "tool_calls": [],
+     "t": 91
+    },
+    {
+     "role": "user",
+     "message": "Ja.",
+     "tool_calls": [],
+     "t": 95
+    },
+    {
+     "role": "agent",
+     "message": "Haben Sie schon ein Wunschdatum oder soll ich einen der nächsten freien Termine vorschlagen?",
+     "tool_calls": [],
+     "t": 97
+    },
+    {
+     "role": "user",
+     "message": "That's what I mean, Paul Sagan.",
+     "tool_calls": [],
+     "t": 104
+    },
+    {
+     "role": "agent",
+     "message": "Gerne schlage ich Ihnen einen der nächsten freien Termine vor. Passt es Ihnen eher vormittags oder nachmittags?",
+     "tool_calls": [],
+     "t": 107
+    },
+    {
+     "role": "user",
+     "message": "Cool, me down.",
+     "tool_calls": [],
+     "t": 115
+    },
+    {
+     "role": "agent",
+     "message": "Ich schaue kurz nach.",
+     "tool_calls": [],
+     "t": 119
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 119
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 119
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 10. Juni um 14 Uhr oder den 10. Juni um 15 Uhr anbieten — welcher passt besser?",
+     "tool_calls": [],
+     "t": 121
+    },
+    {
+     "role": "user",
+     "message": "Fünf den Juni. Fünf Uhr. Den Juni. Fünf Uhr. Den Juni. Is besser.",
+     "tool_calls": [],
+     "t": 131
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für Sie.",
+     "tool_calls": [],
+     "t": 151
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_bookAppointment"
+     ],
+     "t": 151
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 153
+    },
+    {
+     "role": "agent",
+     "message": "Die finale Bestätigung kommt von unserem...",
+     "tool_calls": [],
+     "t": 155
+    },
+    {
+     "role": "user",
+     "message": "Ja?",
+     "tool_calls": [],
+     "t": 155
+    },
+    {
+     "role": "agent",
+     "message": "Die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 159
+    },
+    {
+     "role": "user",
+     "message": "Nein, ich habe kein Problem.",
+     "tool_calls": [],
+     "t": 165
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 169
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 170
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 176
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "54aa00c4-bac1-4b6a-afb6-60fc58af8ca4",
+   "org": "04acd916",
+   "bucket": "booking",
+   "title": "Heizung Wartung Termin",
+   "direction": "inbound",
+   "started_at": "2026-06-03T22:08:20+00:00",
+   "duration_seconds": 134,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Ich brauche eine Heizung-Wartung.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 10
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 11
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Gerne helfe ich Ihnen mit der Wartung Ihrer Heizung.\n\nUm welchen Anlagentyp handelt es sich denn bei Ihnen – Gas, Öl, eine Wärmepumpe oder Solar?",
+     "tool_calls": [],
+     "t": 14
+    },
+    {
+     "role": "user",
+     "message": "Es ist Gas. Es ist Gas.",
+     "tool_calls": [],
+     "t": 26
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar, eine Gasheizung also. Wissen Sie zufällig auch noch den Hersteller, das Baujahr und ob eventuell ein Fehlercode am Display angezeigt wird?",
+     "tool_calls": [],
+     "t": 38
+    },
+    {
+     "role": "user",
+     "message": "Ja.",
+     "tool_calls": [],
+     "t": 48
+    },
+    {
+     "role": "agent",
+     "message": "Könnten Sie mir die Details zum Hersteller, dem Baujahr und einem eventuellen Fehlercode bitte kurz nennen?",
+     "tool_calls": [],
+     "t": 53
+    },
+    {
+     "role": "user",
+     "message": "Ja, Fehlercode.",
+     "tool_calls": [],
+     "t": 61
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Welcher Fehlercode wird Ihnen denn genau auf dem Display angezeigt?",
+     "tool_calls": [],
+     "t": 66
+    },
+    {
+     "role": "user",
+     "message": "Ja.",
+     "tool_calls": [],
+     "t": 72
+    },
+    {
+     "role": "agent",
+     "message": "Könnten Sie mir bitte die genaue Nummer oder den Code nennen, der auf dem Display steht? Das hilft unseren Technikern sehr bei der Vorbereitung.",
+     "tool_calls": [],
+     "t": 75
+    },
+    {
+     "role": "user",
+     "message": "Ich brauche einen nächsten freien Termin.",
+     "tool_calls": [],
+     "t": 84
+    },
+    {
+     "role": "agent",
+     "message": "Gerne. Möchten Sie direkt einen Termin vereinbaren?",
+     "tool_calls": [],
+     "t": 88
+    },
+    {
+     "role": "user",
+     "message": "Ja.",
+     "tool_calls": [],
+     "t": 92
+    },
+    {
+     "role": "agent",
+     "message": "Ich schaue nach freien Terminen.",
+     "tool_calls": [],
+     "t": 95
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 95
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 96
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 5. Juni um 13:00 Uhr anbieten. Passt Ihnen dieser Termin?",
+     "tool_calls": [],
+     "t": 98
+    },
+    {
+     "role": "user",
+     "message": "Ja.",
+     "tool_calls": [],
+     "t": 104
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für Sie.",
+     "tool_calls": [],
+     "t": 109
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_bookAppointment"
+     ],
+     "t": 109
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 111
+    },
+    {
+     "role": "agent",
+     "message": "Ich habe den Termin für Sie reserviert. Die finale Bestätigung kommt von unserem Team.\n\nKann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 112
+    },
+    {
+     "role": "user",
+     "message": "Okay, alles gut!",
+     "tool_calls": [],
+     "t": 121
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 125
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 126
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 132
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "bdcccb7b-db09-4c20-8d23-f46a1a0cc056",
+   "org": "04acd916",
+   "bucket": "booking",
+   "title": "Appointment Booking: Leakage",
+   "direction": "inbound",
+   "started_at": "2026-06-05T12:19:47+00:00",
+   "duration_seconds": 144,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Hallo, Kiki. I want to book an appointment.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Wie kann ich Ihnen helfen?",
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "user",
+     "message": "I want to book an appointment in order to fix my ceiling.",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": "Können Sie mir das genauer beschreiben? Was genau am Dach beziehungsweise an der Decke soll gemacht werden?",
+     "tool_calls": [],
+     "t": 24
+    },
+    {
+     "role": "user",
+     "message": "It's having a leakage during rain.",
+     "tool_calls": [],
+     "t": 32
+    },
+    {
+     "role": "agent",
+     "message": "Seit wann ist die Stelle denn schon undicht und gibt es erkennbare Schäden außen am Dach?",
+     "tool_calls": [],
+     "t": 36
+    },
+    {
+     "role": "user",
+     "message": "Yeah. Outside the ceiling.",
+     "tool_calls": [],
+     "t": 42
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Dann nehme ich jetzt kurz Ihre Daten auf, um fortzufahren. Da Sie bereits bei uns registriert sind, habe ich Ihre Adresse in der Maxstraße 36 in Bielefeld und Ihre Telefonnummer bereits vorliegen – passt das so?",
+     "tool_calls": [],
+     "t": 48
+    },
+    {
+     "role": "user",
+     "message": "Yes.",
+     "tool_calls": [],
+     "t": 62
+    },
+    {
+     "role": "agent",
+     "message": "Möchten Sie direkt einen Termin vereinbaren?",
+     "tool_calls": [],
+     "t": 66
+    },
+    {
+     "role": "user",
+     "message": "Yes, direct ointment.",
+     "tool_calls": [],
+     "t": 70
+    },
+    {
+     "role": "agent",
+     "message": "Haben Sie schon ein Wunschdatum oder soll ich einen der nächsten freien Termine vorschlagen?",
+     "tool_calls": [],
+     "t": 73
+    },
+    {
+     "role": "user",
+     "message": "Vorschlagen?",
+     "tool_calls": [],
+     "t": 81
+    },
+    {
+     "role": "agent",
+     "message": "Passt es Ihnen eher vormittags oder nachmittags?",
+     "tool_calls": [],
+     "t": 83
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 83
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 85
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den...",
+     "tool_calls": [],
+     "t": 87
+    },
+    {
+     "role": "user",
+     "message": "Nachmittag? Nachmittag?",
+     "tool_calls": [],
+     "t": 87
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 92
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 92
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 93
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 8. Juni um 14:00 Uhr oder den 8. Juni um 15:00 Uhr anbieten — welcher passt besser?",
+     "tool_calls": [],
+     "t": 95
+    },
+    {
+     "role": "user",
+     "message": "Ja, das ist besser!",
+     "tool_calls": [],
+     "t": 104
+    },
+    {
+     "role": "agent",
+     "message": "Welcher der beiden Termine am 8. Juni passt Ihnen denn besser, der um 14:00 Uhr oder der um 15:00 Uhr?",
+     "tool_calls": [],
+     "t": 108
+    },
+    {
+     "role": "user",
+     "message": "15 Uhr!",
+     "tool_calls": [],
+     "t": 116
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 120
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_bookAppointment"
+     ],
+     "t": 120
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 122
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin für Sie. Die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 124
+    },
+    {
+     "role": "user",
+     "message": "Nein!",
+     "tool_calls": [],
+     "t": 132
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 135
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 136
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 142
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "a5499965-96dc-4013-be86-129beb8605e2",
+   "org": "04acd916",
+   "bucket": "reschedule",
+   "title": "Reschedule Roof Repair",
+   "direction": "inbound",
+   "started_at": "2026-06-09T09:15:53+00:00",
+   "duration_seconds": 204,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Okay, he's not going to enter me.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Wie kann ich Ihnen helfen?",
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "user",
+     "message": "I would have issued him that.",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": "Geht es um einen bestehenden Auftrag oder um etwas Neues?",
+     "tool_calls": [],
+     "t": 22
+    },
+    {
+     "role": "user",
+     "message": "That is off the top.",
+     "tool_calls": [],
+     "t": 27
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment, ich schaue kurz nach. <",
+     "tool_calls": [],
+     "t": 30
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_searchCustomerInquiries"
+     ],
+     "t": 30
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 31
+    },
+    {
+     "role": "agent",
+     "message": "Ich sehe hier mehrere Vorgänge, unter anderem eine geplante Dachreparatur für morgen um 13 Uhr. Geht es darum oder um ein anderes Anliegen?",
+     "tool_calls": [],
+     "t": 33
+    },
+    {
+     "role": "user",
+     "message": "Yeah.",
+     "tool_calls": [],
+     "t": 45
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar. Möchten Sie den Termin für die Dachreparatur morgen um 13:00 Uhr verschieben oder stornieren, oder gibt es dazu eine andere Frage?",
+     "tool_calls": [],
+     "t": 47
+    },
+    {
+     "role": "user",
+     "message": "have to do it once before.",
+     "tool_calls": [],
+     "t": 60
+    },
+    {
+     "role": "agent",
+     "message": "Möchten Sie den Termin ändern oder stornieren?",
+     "tool_calls": [],
+     "t": 72
+    },
+    {
+     "role": "user",
+     "message": "15 o'clock?",
+     "tool_calls": [],
+     "t": 76
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment, ich schaue nach freien Terminen. <",
+     "tool_calls": [],
+     "t": 81
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 81
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 82
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 10. Juni um 15 Uhr oder den 10. Juni um 14 Uhr anbieten — welcher passt besser?",
+     "tool_calls": [],
+     "t": 84
+    },
+    {
+     "role": "user",
+     "message": "Next session? 11th of June. And then 10 o'clock is better",
+     "tool_calls": [],
+     "t": 94
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment, ich schaue kurz nach. <",
+     "tool_calls": [],
+     "t": 100
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 101
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 102
+    },
+    {
+     "role": "agent",
+     "message": "Ich könnte Ihnen den 11. Juni um 10 Uhr oder den 11. Juni um 9 Uhr anbieten — welcher passt besser?",
+     "tool_calls": [],
+     "t": 104
+    },
+    {
+     "role": "user",
+     "message": "I feel considerable.",
+     "tool_calls": [],
+     "t": 113
+    },
+    {
+     "role": "agent",
+     "message": "Soll ich den Termin am 11. Juni um 10 Uhr für Sie reservieren?",
+     "tool_calls": [],
+     "t": 118
+    },
+    {
+     "role": "user",
+     "message": "Yeah.",
+     "tool_calls": [],
+     "t": 124
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 126
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_changeAppointment"
+     ],
+     "t": 126
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 127
+    },
+    {
+     "role": "agent",
+     "message": "Ihr Termin ist bei uns noch nicht final bestätigt — ich notiere Ihren Änderungswunsch, das Team passt das beim Bestätigungs-Anruf direkt für Sie an. <",
+     "tool_calls": [],
+     "t": 129
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_createInquiry"
+     ],
+     "t": 129
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 130
+    },
+    {
+     "role": "agent",
+     "message": "Ich habe Ihren Änderungswunsch für den 11. Juni um 10 Uhr aufgenommen. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 132
+    },
+    {
+     "role": "user",
+     "message": "Mine.",
+     "tool_calls": [],
+     "t": 147
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 150
+    },
+    {
+     "role": "user",
+     "message": "Mine.",
+     "tool_calls": [],
+     "t": 154
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 157
+    },
+    {
+     "role": "user",
+     "message": "Mine. Mine.",
+     "tool_calls": [],
+     "t": 162
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 165
+    },
+    {
+     "role": "user",
+     "message": "...",
+     "tool_calls": [],
+     "t": 177
+    },
+    {
+     "role": "agent",
+     "message": "Sind Sie noch da? Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 179
+    },
+    {
+     "role": "user",
+     "message": "Mine.",
+     "tool_calls": [],
+     "t": 183
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 187
+    },
+    {
+     "role": "user",
+     "message": "No. Thank you.",
+     "tool_calls": [],
+     "t": 192
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 195
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 196
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 202
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "bf09aedb-d2aa-496d-8074-63a230afb22b",
+   "org": "04acd916",
+   "bucket": "reschedule",
+   "title": "Reschedule Appointment Heating",
+   "direction": "inbound",
+   "started_at": "2026-06-03T22:31:15+00:00",
+   "duration_seconds": 124,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 1
+    },
+    {
+     "role": "user",
+     "message": "I have an appointment booked. I want to reschedule it.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue kurz nach.",
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Geht es um einen bestehenden Auftrag oder um etwas Neues?",
+     "tool_calls": [],
+     "t": 12
+    },
+    {
+     "role": "user",
+     "message": "Ah...as is neues",
+     "tool_calls": [],
+     "t": 20
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Können Sie mir das genauer beschreiben? Was genau funktioniert nicht bzw. was soll gemacht werden?",
+     "tool_calls": [],
+     "t": 23
+    },
+    {
+     "role": "user",
+     "message": "Meine Zimmerheizung.",
+     "tool_calls": [],
+     "t": 31
+    },
+    {
+     "role": "agent",
+     "message": "Verstehe. Wird die Heizung gar nicht mehr warm oder gibt es ein anderes Problem, wie zum Beispiel ungewöhnliche Geräusche oder eine Fehlermeldung am Display? Und wissen Sie zufällig, von welchem Hersteller die Anlage ist und aus welchem Jahr sie stammt?",
+     "tool_calls": [],
+     "t": 36
+    },
+    {
+     "role": "user",
+     "message": "I already have an appointment. I want to reschedule it.",
+     "tool_calls": [],
+     "t": 53
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue kurz nach.",
+     "tool_calls": [],
+     "t": 57
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_searchCustomerInquiries"
+     ],
+     "t": 57
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 58
+    },
+    {
+     "role": "agent",
+     "message": "Ich sehe hier einen Termin für die Wartung Ihrer Gasheizung am 5. Juni um 13 Uhr. Möchten Sie diesen Termin ändern oder geht es um eine andere Buchung?",
+     "tool_calls": [],
+     "t": 60
+    },
+    {
+     "role": "user",
+     "message": "I want to reschedule it for like 6th July, June.",
+     "tool_calls": [],
+     "t": 73
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue nach freien Terminen.",
+     "tool_calls": [],
+     "t": 79
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 79
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 80
+    },
+    {
+     "role": "agent",
+     "message": "Am 6. Juni habe ich leider keine freien Termine mehr im System. Ich könnte Ihnen stattdessen den 5. Juni um 12 Uhr oder um 14 Uhr anbieten – würde einer davon für Sie passen?",
+     "tool_calls": [],
+     "t": 82
+    },
+    {
+     "role": "user",
+     "message": "12 hours will work.",
+     "tool_calls": [],
+     "t": 95
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin.",
+     "tool_calls": [],
+     "t": 101
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_changeAppointment"
+     ],
+     "t": 101
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 102
+    },
+    {
+     "role": "agent",
+     "message": "Ich habe den Termin für Sie reserviert. Die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 104
+    },
+    {
+     "role": "user",
+     "message": "Na, thank you!",
+     "tool_calls": [],
+     "t": 112
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 115
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 116
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 122
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "daee93a8-dabb-4882-8875-baa34e56d0c2",
+   "org": "04acd916",
+   "bucket": "reschedule_outbound",
+   "title": "Termin umbuchen",
+   "direction": "outbound",
+   "started_at": "2026-06-10T09:02:01+00:00",
+   "duration_seconds": 151,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Guten Tag, hier ist der Telefonassistent von TobiasDachdecker. Ich rufe an, um Ihren Termin für Govind Yadav am Donnerstag, 11. Juni um 09:00 Uhr zum Thema „Warmwasser in Toilette“ zu bestätigen. Der Termin ist fest eingeplant. Passt das so für Sie?",
+     "tool_calls": [],
+     "t": 1
+    },
+    {
+     "role": "user",
+     "message": "Nein, ich muss den Termin von 18 Uhr anrufen",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": "Ich schaue nach freien Terminen.",
+     "tool_calls": [],
+     "t": 36
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 36
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 37
+    },
+    {
+     "role": "agent",
+     "message": "Am Donnerstag, den 11. Juni, ist der späteste freie Termin um 16:00 Uhr. Würde Ihnen das stattdessen passen?",
+     "tool_calls": [],
+     "t": 40
+    },
+    {
+     "role": "user",
+     "message": "Ja, 17 Uhr ist perfekt.",
+     "tool_calls": [],
+     "t": 48
+    },
+    {
+     "role": "agent",
+     "message": "Leider ist 17:00 Uhr am Donnerstag nicht mehr verfügbar, der späteste freie Termin an diesem Tag ist um 16:00 Uhr. Soll ich diesen für Sie reservieren oder möchten Sie lieber an einem anderen Tag schauen?",
+     "tool_calls": [],
+     "t": 55
+    },
+    {
+     "role": "user",
+     "message": "17 Uhr ist perfekt.",
+     "tool_calls": [],
+     "t": 71
+    },
+    {
+     "role": "agent",
+     "message": "Es tut mir leid, aber am Donnerstag ist 16:00 Uhr wirklich der späteste verfügbare Termin. Soll ich für Sie nachsehen, ob am Freitag um 17:00 Uhr etwas frei ist?",
+     "tool_calls": [],
+     "t": 76
+    },
+    {
+     "role": "user",
+     "message": "Freitag 17 Uhr ist perfekt.",
+     "tool_calls": [],
+     "t": 90
+    },
+    {
+     "role": "agent",
+     "message": "Ich prüfe den Freitag.",
+     "tool_calls": [],
+     "t": 95
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_getAvailableAppointments"
+     ],
+     "t": 95
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 96
+    },
+    {
+     "role": "user",
+     "message": "Ja, und Freitag 17 Uhr ist gut für Termin.",
+     "tool_calls": [],
+     "t": 98
+    },
+    {
+     "role": "agent",
+     "message": "Leider ist auch am Freitag um 16:00 Uhr der späteste verfügbare Termin. Soll ich diesen Termin am 12. Juni für Sie reservieren, oder möchten Sie lieber in der nächsten Woche nach einem Termin um 17:00 Uhr suchen?",
+     "tool_calls": [],
+     "t": 111
+    },
+    {
+     "role": "user",
+     "message": "Ja, reservieren.",
+     "tool_calls": [],
+     "t": 125
+    },
+    {
+     "role": "agent",
+     "message": "Ich reserviere den Termin.",
+     "tool_calls": [],
+     "t": 129
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_changeAppointment"
+     ],
+     "t": 129
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 130
+    },
+    {
+     "role": "agent",
+     "message": "...",
+     "tool_calls": [],
+     "t": 132
+    },
+    {
+     "role": "user",
+     "message": "Ja.",
+     "tool_calls": [],
+     "t": 131
+    },
+    {
+     "role": "agent",
+     "message": "Ich habe den Termin für den 12. Juni um 16:00 Uhr für Sie reserviert; die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 133
+    },
+    {
+     "role": "user",
+     "message": "Nein.",
+     "tool_calls": [],
+     "t": 145
+    },
+    {
+     "role": "agent",
+     "message": "Gerne. Auf Wiederhören!",
+     "tool_calls": [],
+     "t": 148
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 148
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 150
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "59bf6bac-1ae6-4199-bb46-7d7ce030453f",
+   "org": "04acd916",
+   "bucket": "cancel",
+   "title": "Cancel Appointment",
+   "direction": "inbound",
+   "started_at": "2026-06-09T08:04:32+00:00",
+   "duration_seconds": 46,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Hi Kiki. Can you please cancel all my appointments?",
+     "tool_calls": [],
+     "t": 3
+    },
+    {
+     "role": "agent",
+     "message": "One moment, please.",
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Ich kümmere mich gerne darum. Darf ich fragen, warum Sie die Termine absagen möchten?",
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "user",
+     "message": "I want to cancel all the appointments that I have.",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": "I'll take care of that.",
+     "tool_calls": [],
+     "t": 23
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_cancelAppointment"
+     ],
+     "t": 23
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 23
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar, ich habe Ihren Termin am 19. Juni um 13:00 Uhr storniert. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 25
+    },
+    {
+     "role": "user",
+     "message": "No",
+     "tool_calls": [],
+     "t": 35
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 38
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 39
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 45
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "b3eb007c-2033-4c67-8b8f-cb608f89f0e5",
+   "org": "04acd916",
+   "bucket": "cancel",
+   "title": "Appointment Cancellation",
+   "direction": "inbound",
+   "started_at": "2026-06-03T16:21:19+00:00",
+   "duration_seconds": 132,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Hallo Kiki.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 7
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 7
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Wie kann ich Ihnen helfen?",
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "user",
+     "message": "I have a problem with my heater.",
+     "tool_calls": [],
+     "t": 16
+    },
+    {
+     "role": "agent",
+     "message": "Das tut mir leid zu hören. Können Sie mir das Problem genauer beschreiben – bleibt die Heizung komplett kalt oder blinkt vielleicht eine Fehlermeldung am Display?",
+     "tool_calls": [],
+     "t": 23
+    },
+    {
+     "role": "user",
+     "message": "It's completely cold. It's broken. It's not warm.",
+     "tool_calls": [],
+     "t": 32
+    },
+    {
+     "role": "agent",
+     "message": "Verstehe, das ist natürlich ärgerlich. Tritt denn irgendwo Wasser aus oder riecht es nach Gas?",
+     "tool_calls": [],
+     "t": 42
+    },
+    {
+     "role": "user",
+     "message": "I had to cancel an appointment.",
+     "tool_calls": [],
+     "t": 48
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue kurz nach.",
+     "tool_calls": [],
+     "t": 52
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_cancelAppointment"
+     ],
+     "t": 52
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 54
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar, ich habe den Termin am 4. Juni um 05:30 Uhr für Sie storniert. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 60
+    },
+    {
+     "role": "user",
+     "message": "Yeah, that's a song.",
+     "tool_calls": [],
+     "t": 68
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Kann ich denn sonst noch etwas für Sie tun, vielleicht wegen Ihrer kalten Heizung?",
+     "tool_calls": [],
+     "t": 74
+    },
+    {
+     "role": "user",
+     "message": "A ZAMZAK.",
+     "tool_calls": [],
+     "t": 80
+    },
+    {
+     "role": "agent",
+     "message": "Entschuldigung, das habe ich nicht ganz verstanden. Meinten Sie damit etwas Bestimmtes im Zusammenhang mit Ihrer Heizung oder kann ich Ihnen bei etwas anderem behilflich sein?",
+     "tool_calls": [],
+     "t": 84
+    },
+    {
+     "role": "user",
+     "message": "A Haid song.",
+     "tool_calls": [],
+     "t": 94
+    },
+    {
+     "role": "agent",
+     "message": "Ich bin mir nicht sicher, ob ich Sie richtig verstanden habe. Geht es dabei um ein technisches Detail Ihrer Heizung oder ein anderes Anliegen, bei dem ich Ihnen helfen kann?",
+     "tool_calls": [],
+     "t": 97
+    },
+    {
+     "role": "user",
+     "message": "I need help with my heating.",
+     "tool_calls": [],
+     "t": 108
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar, dann kümmern wir uns um Ihre Heizung. Können Sie mir bitte noch den Hersteller des Geräts nennen und schauen, ob ein Fehlercode auf dem Display angezeigt wird?",
+     "tool_calls": [],
+     "t": 117
+    },
+    {
+     "role": "user",
+     "message": "Yeah.",
+     "tool_calls": [],
+     "t": 129
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "c841f61c-03ec-4192-881f-2b781c883d3e",
+   "org": "04acd916",
+   "bucket": "offtopic",
+   "title": "Off-topic Humor Request",
+   "direction": "inbound",
+   "started_at": "2026-06-03T10:11:21+00:00",
+   "duration_seconds": 91,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Hi Kiki!",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte, ich schaue kurz nach.",
+     "tool_calls": [],
+     "t": 7
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 7
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 8
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Wie kann ich Ihnen helfen?",
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "user",
+     "message": "I have a problem with my bad humor.",
+     "tool_calls": [],
+     "t": 15
+    },
+    {
+     "role": "agent",
+     "message": "Das klingt ja nach einer ungewöhnlichen Herausforderung, aber ich glaube, da haben Sie mich missverstanden. Ich unterstütze das Team von TobiasDachdecker bei Fragen rund um Sanitär und Heizung – bei Humorfragen bin ich leider nicht die richtige Ansprechpartnerin.\n\nKann ich Ihnen denn bei einem Anliegen zu Ihrer Haustechnik weiterhelfen?",
+     "tool_calls": [],
+     "t": 20
+    },
+    {
+     "role": "user",
+     "message": "And nine, I have a problem with my bad humor.",
+     "tool_calls": [],
+     "t": 41
+    },
+    {
+     "role": "agent",
+     "message": "Verstehe, aber da kann ich Ihnen leider nicht weiterhelfen, da ich auf Sanitär- und Heizungsthemen spezialisiert bin. Kann ich Ihnen denn vielleicht bei etwas anderem behilflich sein, das Ihr Haus oder Ihre Heizung betrifft?",
+     "tool_calls": [],
+     "t": 47
+    },
+    {
+     "role": "user",
+     "message": "All is well. Thank you.",
+     "tool_calls": [],
+     "t": 61
+    },
+    {
+     "role": "agent",
+     "message": "Gerne. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 65
+    },
+    {
+     "role": "user",
+     "message": "Nine, thank you, it's been tough.",
+     "tool_calls": [],
+     "t": 69
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.\n",
+     "tool_calls": [],
+     "t": 82
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 83
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 89
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "08d6b319-0095-4477-a106-6127864907ea",
+   "org": "04acd916",
+   "bucket": "identification_new",
+   "title": "Broken device report",
+   "direction": "inbound",
+   "started_at": "2026-06-05T12:16:47+00:00",
+   "duration_seconds": 127,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Hello Kiki.",
+     "tool_calls": [],
+     "t": 2
+    },
+    {
+     "role": "agent",
+     "message": "One moment, please.",
+     "tool_calls": [],
+     "t": 6
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 6
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 7
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Wie kann ich Ihnen helfen?",
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "user",
+     "message": "I have a problem with my Simmer Dark.",
+     "tool_calls": [],
+     "t": 14
+    },
+    {
+     "role": "agent",
+     "message": "Können Sie mir das genauer beschreiben? Was genau funktioniert bei Ihrem Simmer Dark nicht?",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "user",
+     "message": "It's broken.",
+     "tool_calls": [],
+     "t": 25
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Können Sie mir sagen, ob vielleicht eine Sicherung rausgeflogen ist oder ob es eine Fehlermeldung am Gerät gibt? Und betrifft das Problem nur das Gerät oder auch...",
+     "tool_calls": [],
+     "t": 29
+    },
+    {
+     "role": "user",
+     "message": "I'll link that.",
+     "tool_calls": [],
+     "t": 36
+    },
+    {
+     "role": "agent",
+     "message": "Alles klar. Dann nehme ich jetzt kurz Ihre Daten auf, um fortzufahren. Ich notiere das auf Govind Yadav, Maxstrasse...",
+     "tool_calls": [],
+     "t": 42
+    },
+    {
+     "role": "user",
+     "message": "Yeah. You know,",
+     "tool_calls": [],
+     "t": 48
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden. Da...",
+     "tool_calls": [],
+     "t": 54
+    },
+    {
+     "role": "user",
+     "message": "I spoke to a man",
+     "tool_calls": [],
+     "t": 55
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment, ich nehme Ihr Anliegen direkt auf — die Kollegen aus der Disposition schauen kurz nach und melden sich zeitnah bei Ihnen zurück. Wissen Sie zufällig noch, mit welchem Kollegen Sie gesprochen haben?",
+     "tool_calls": [],
+     "t": 59
+    },
+    {
+     "role": "user",
+     "message": ", I spoke to a man.",
+     "tool_calls": [],
+     "t": 81
+    },
+    {
+     "role": "agent",
+     "message": "Alles...",
+     "tool_calls": [],
+     "t": 85
+    },
+    {
+     "role": "user",
+     "message": "12 o'clock to 13 o'clock.",
+     "tool_calls": [],
+     "t": 83
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden, ich notiere das so. Die...",
+     "tool_calls": [],
+     "t": 94
+    },
+    {
+     "role": "user",
+     "message": "on next June.",
+     "tool_calls": [],
+     "t": 94
+    },
+    {
+     "role": "agent",
+     "message": "Verstanden, ich notiere das so. Die Kollegen prüfen das und kommen umgehend auf Sie zu. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 100
+    },
+    {
+     "role": "user",
+     "message": "That's good.",
+     "tool_calls": [],
+     "t": 110
+    },
+    {
+     "role": "agent",
+     "message": "Gerne. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 112
+    },
+    {
+     "role": "user",
+     "message": "Nine.",
+     "tool_calls": [],
+     "t": 116
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 119
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 120
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 126
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "4ae1676a-9b6b-4e69-aa68-a53f7307b7ad",
+   "org": "04acd916",
+   "bucket": "identification",
+   "title": "Warm Water Outage",
+   "direction": "inbound",
+   "started_at": "2026-06-03T22:14:20+00:00",
+   "duration_seconds": 149,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "My heart beats loudly.",
+     "tool_calls": [],
+     "t": 4
+    },
+    {
+     "role": "agent",
+     "message": "Einen Moment bitte.",
+     "tool_calls": [],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "hk_identifyCustomer"
+     ],
+     "t": 9
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 10
+    },
+    {
+     "role": "agent",
+     "message": "Schön, dass Sie sich melden, Herr Yadav. Wie kann ich Ihnen helfen?",
+     "tool_calls": [],
+     "t": 12
+    },
+    {
+     "role": "user",
+     "message": "My heart beats loudly.",
+     "tool_calls": [],
+     "t": 18
+    },
+    {
+     "role": "agent",
+     "message": "Das klingt nach einem medizinischen Anliegen. Da wir ein Fachbetrieb für Sanitär und Heizung sind, kann ich Ihnen in diesem Fall leider nicht weiterhelfen. Bitte wenden Sie sich umgehend an einen Arzt oder rufen Sie im Notfall die 112 an. Kann ich ansonsten etwas im Bereich Heizung oder Sanitär für Sie tun?",
+     "tool_calls": [],
+     "t": 23
+    },
+    {
+     "role": "user",
+     "message": "Yeah.",
+     "tool_calls": [],
+     "t": 43
+    },
+    {
+     "role": "agent",
+     "message": "Was genau kann ich im Bereich Sanitär oder Heizung für Sie tun? Gibt es ein Problem mit Ihrer Anlage oder planen Sie ein neues Projekt?",
+     "tool_calls": [],
+     "t": 47
+    },
+    {
+     "role": "user",
+     "message": "I need an urgent appointment.",
+     "tool_calls": [],
+     "t": 58
+    },
+    {
+     "role": "agent",
+     "message": "Gerne. Können Sie mir genauer beschreiben, was das Problem ist? Geht es beispielsweise um einen Heizungsausfall oder tritt irgendwo Wasser...",
+     "tool_calls": [],
+     "t": 64
+    },
+    {
+     "role": "user",
+     "message": "I need warm water.",
+     "tool_calls": [],
+     "t": 71
+    },
+    {
+     "role": "agent",
+     "message": "Verstehe, Sie haben also kein warmes Wasser mehr. Handelt es sich um einen kompletten Ausfall oder...",
+     "tool_calls": [],
+     "t": 75
+    },
+    {
+     "role": "user",
+     "message": "Yeah. Outfall",
+     "tool_calls": [],
+     "t": 79
+    },
+    {
+     "role": "agent",
+     "message": "Verstehe, also ein kompletter Warmwasserausfall. Um Ihnen bestmöglich helfen zu können, müsste ich noch wissen, von welchem Hersteller Ihre Anlage ist, welches Baujahr sie hat und ob eventuell ein Fehlercode auf dem Display angezeigt wird?",
+     "tool_calls": [],
+     "t": 87
+    },
+    {
+     "role": "user",
+     "message": ". Yeah.",
+     "tool_calls": [],
+     "t": 102
+    },
+    {
+     "role": "agent",
+     "message": "Könnten Sie mir bitte noch den Hersteller und das Baujahr Ihrer Anlage nennen? Und wird Ihnen am Gerät vielleicht ein bestimmter Fehlercode angezeigt?",
+     "tool_calls": [],
+     "t": 105
+    },
+    {
+     "role": "user",
+     "message": "A lot of colds.",
+     "tool_calls": [],
+     "t": 114
+    },
+    {
+     "role": "agent",
+     "message": "Das verstehe ich. Könnten Sie mir bitte noch den Hersteller und das Baujahr Ihrer Heizungsanlage nennen? Und wird Ihnen am Gerät vielleicht ein bestimmter Fehlercode angezeigt?",
+     "tool_calls": [],
+     "t": 118
+    },
+    {
+     "role": "user",
+     "message": "Yeah. Thank you. Bye.",
+     "tool_calls": [],
+     "t": 129
+    },
+    {
+     "role": "agent",
+     "message": "Gerne. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 132
+    },
+    {
+     "role": "user",
+     "message": "No.",
+     "tool_calls": [],
+     "t": 137
+    },
+    {
+     "role": "agent",
+     "message": "Danke. Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.",
+     "tool_calls": [],
+     "t": 141
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "end_call"
+     ],
+     "t": 142
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 147
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "66792b39-542a-45c6-a04f-ae8409bfd780",
+   "org": "c4dbf596",
+   "bucket": "outbound_confirm",
+   "title": "Terminbestätigung",
+   "direction": "outbound",
+   "started_at": "2026-06-09T10:27:15+00:00",
+   "duration_seconds": 17,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Guten Tag, hier ist der Telefonassistent von Kiki Chat GmbH. Ich rufe an,...",
+     "tool_calls": [],
+     "t": 1
+    },
+    {
+     "role": "user",
+     "message": "Vielen Dank.",
+     "tool_calls": [],
+     "t": 5
+    },
+    {
+     "role": "agent",
+     "message": "Sehr gerne. Dann bleibt es bei unserem Termin am Mittwoch, den zehnten Juni um elf Uhr. Kann ich sonst noch etwas für Sie tun?",
+     "tool_calls": [],
+     "t": 7
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  },
+  {
+   "call_id": "16465428-ec43-4951-aa2d-5144419c47e9",
+   "org": "04acd916",
+   "bucket": "voicemail",
+   "title": "Appointment Confirmation Voicemail",
+   "direction": "outbound",
+   "started_at": "2026-06-09T10:19:19+00:00",
+   "duration_seconds": 31,
+   "turns": [
+    {
+     "role": "agent",
+     "message": "Guten Tag, hier ist der Telefonassistent von TobiasDachdecker...",
+     "tool_calls": [],
+     "t": 0
+    },
+    {
+     "role": "user",
+     "message": "Kann Ihren Anruf nicht entgegennehmen. Bitte hinterlassen Sie Ihre Nachricht nach dem Ton. Um Ihre Nachricht neu aufzunehmen, drücken Sie jederzeit auf Hash.",
+     "tool_calls": [],
+     "t": 3
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [
+      "voicemail_detection"
+     ],
+     "t": 14
+    },
+    {
+     "role": "agent",
+     "message": null,
+     "tool_calls": [],
+     "t": 14
+    },
+    {
+     "role": "agent",
+     "message": "Guten Tag, hier ist der Telefonassistent von TobiasDachdecker. Ihr Termin für Govind Yadav am Freitag, 5. Juni um 12:00 Uhr zum Thema „dach reparture“ ist bestätigt. Bei Fragen oder zur Verschiebung erreichen Sie uns gerne telefonisch. Auf Wiederhören!",
+     "tool_calls": [],
+     "t": 14
+    }
+   ],
+   "data_collection_keys": [
+    "customer_address",
+    "customer_name",
+    "customer_phone",
+    "customer_sentiment",
+    "issue_summary",
+    "mentioned_employee",
+    "next_action",
+    "postal_code",
+    "ultimate_summary"
+   ]
+  }
+ ]
+}

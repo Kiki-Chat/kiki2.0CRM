@@ -1,0 +1,1152 @@
+{
+  "scenario": {
+    "id": "booking_l2_reservation",
+    "bucket": "booking",
+    "source_call_title": "Heizung Reparatur Termin (c4dbf596, 2026-06-04)",
+    "persona": "Du bist Luca Tester, Bestandskunde. Deine Heizung ist ausgefallen (kein Notfall, Wasser läuft nicht aus, niemand in Gefahr — sage das, wenn gefragt). Du willst einen Termin. Nimm den ersten angebotenen Termin an und bestätige ausdrücklich. Antworte kurz, Deutsch.",
+    "mocks": {
+      "hk_identifyCustomer": "identify_known",
+      "hk_getAvailableAppointments": "slots_two",
+      "hk_bookAppointment": "book_ok"
+    },
+    "must_call": [
+      "hk_getAvailableAppointments",
+      "hk_bookAppointment"
+    ],
+    "must_not_call": [],
+    "must_contain_any": [
+      "reservier"
+    ],
+    "must_not_contain": [
+      "verbindlich gebucht"
+    ],
+    "judge_notes": "L2 autonomy: hk_getAvailableAppointments must precede hk_bookAppointment; booking only after explicit yes; agent says 'Reservierung, Team bestätigt', never 'fest gebucht'. Category must be passed on book."
+  },
+  "result": {
+    "id": "booking_l2_reservation",
+    "bucket": "booking",
+    "passed": true,
+    "failures": [],
+    "warnings": [],
+    "tools_called": [
+      "hk_identifyCustomer",
+      "hk_getAvailableAppointments",
+      "hk_bookAppointment",
+      "end_call"
+    ],
+    "agent_turns": 16,
+    "wall_seconds": 39.3,
+    "judge_notes": "L2 autonomy: hk_getAvailableAppointments must precede hk_bookAppointment; booking only after explicit yes; agent says 'Reservierung, Team bestätigt', never 'fest gebucht'. Category must be passed on book."
+  },
+  "simulation": {
+    "simulated_conversation": [
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 0,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "user",
+        "agent_metadata": null,
+        "message": "Hallo Kiki, meine Heizung ist ausgefallen.  Es ist kein Notfall, aber ich bräuchte einen Termin zur Reparatur.",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 1,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": null,
+        "multivoice_message": null,
+        "tool_calls": [
+          {
+            "type": "webhook",
+            "request_id": "hk_identifyCustomer_5b3c07f587ab4d1694811d1526b0ee4c",
+            "tool_name": "hk_identifyCustomer",
+            "params_as_json": "{\"system__message_to_speak\": \"Einen Moment bitte, ich schaue kurz nach.\"}",
+            "tool_has_been_called": false,
+            "tool_details": null
+          }
+        ],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 2,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": null,
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [
+          {
+            "request_id": "hk_identifyCustomer_5b3c07f587ab4d1694811d1526b0ee4c",
+            "tool_name": "hk_identifyCustomer",
+            "result_value": "{\"status\": \"EXISTING_CUSTOMER\", \"customerId\": \"00000000-0000-0000-0000-00000000eva1\", \"customerNumber\": \"KD-00099\", \"name\": \"Luca Tester\", \"address\": \"Hafenweg 22, 48155 Münster\", \"email\": \"luca.tester@example.com\", \"phone\": \"+4915730000001\", \"message\": \"Willkommen zurück, Luca Tester. Wie kann ich Ihnen helfen?\"}",
+            "is_error": false,
+            "is_blocked": false,
+            "tool_has_been_called": true,
+            "tool_latency_secs": 0.0,
+            "error_type": "",
+            "raw_error_message": "",
+            "dynamic_variable_updates": [],
+            "type": "webhook"
+          }
+        ],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 3,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": "Schön, dass Sie sich melden, Herr Tester.  Das mit der Heizung ist natürlich ärgerlich. Können Sie mir das Problem genauer beschreiben?  Blinkt vielleicht eine Fehleranzeige am Gerät oder macht es ungewöhnliche Geräusche?",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": {
+          "metrics": {
+            "convai_llm_service_ttf_sentence": {
+              "elapsed_time": 1.245222925907001
+            },
+            "convai_llm_service_ttfb": {
+              "elapsed_time": 1.2448195558972657
+            },
+            "convai_llm_service_tt_last_sentence": {
+              "elapsed_time": 1.4160114950500429
+            }
+          },
+          "convai_asr_provider": null,
+          "convai_tts_model": null,
+          "convai_tts_cascade": null
+        },
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 4,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "user",
+        "agent_metadata": null,
+        "message": "Nein, es blinkt nichts und es gibt auch keine ungewöhnlichen Geräusche.  Sie heizt einfach nicht mehr.",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 5,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": "Verstanden.  Haben Sie schon einmal den Druck am Manometer geprüft, ob dieser sich im grünen Bereich befindet?  Und wissen Sie zufällig, ob es sich um eine Öl- oder Gasheizung handelt und von welchem Hersteller das Gerät ist?",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": {
+          "metrics": {
+            "convai_llm_service_ttf_sentence": {
+              "elapsed_time": 1.2829220660496503
+            },
+            "convai_llm_service_ttfb": {
+              "elapsed_time": 1.2825420058798045
+            },
+            "convai_llm_service_tt_last_sentence": {
+              "elapsed_time": 1.4486008039675653
+            }
+          },
+          "convai_asr_provider": null,
+          "convai_tts_model": null,
+          "convai_tts_cascade": null
+        },
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 6,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "user",
+        "agent_metadata": null,
+        "message": "Ich bin kein Heizungsfachmann. Ich möchte einfach nur einen Termin, damit sich das jemand ansieht.  Es ist kein Notfall, aber es ist kalt.",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 7,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": "Das verstehe ich natürlich, es soll ja schnell wieder warm werden.  Da ich Ihre Daten bereits im System habe, können wir direkt nach einem Termin schauen. Möchten Sie gleich einen vereinbaren?",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": {
+          "metrics": {
+            "convai_llm_service_ttf_sentence": {
+              "elapsed_time": 1.2383587560616434
+            },
+            "convai_llm_service_ttfb": {
+              "elapsed_time": 1.23794463602826
+            },
+            "convai_llm_service_tt_last_sentence": {
+              "elapsed_time": 1.244644365971908
+            }
+          },
+          "convai_asr_provider": null,
+          "convai_tts_model": null,
+          "convai_tts_cascade": null
+        },
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 8,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "user",
+        "agent_metadata": null,
+        "message": "Ja, bitte.",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 9,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": "Haben Sie schon ein Wunschdatum oder soll ich einen der nächsten freien Termine vorschlagen? Und passt es Ihnen eher vormittags oder nachmittags?",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": {
+          "metrics": {
+            "convai_llm_service_ttf_sentence": {
+              "elapsed_time": 1.3262988049536943
+            },
+            "convai_llm_service_ttfb": {
+              "elapsed_time": 1.3187723848968744
+            },
+            "convai_llm_service_tt_last_sentence": {
+              "elapsed_time": 1.3262925648596138
+            }
+          },
+          "convai_asr_provider": null,
+          "convai_tts_model": null,
+          "convai_tts_cascade": null
+        },
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 10,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "user",
+        "agent_metadata": null,
+        "message": "Schlagen Sie einfach den nächsten freien Termin vor.  Uhrzeit ist egal.",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 11,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": null,
+        "multivoice_message": null,
+        "tool_calls": [
+          {
+            "type": "webhook",
+            "request_id": "hk_getAvailableAppointments_114eaad56918420f9fbbeacb315be023",
+            "tool_name": "hk_getAvailableAppointments",
+            "params_as_json": "{\"preferredTime\": \"10:00\", \"system__message_to_speak\": \"Ich schaue kurz nach freien Terminen.\"}",
+            "tool_has_been_called": false,
+            "tool_details": null
+          }
+        ],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 12,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": null,
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [
+          {
+            "request_id": "hk_getAvailableAppointments_114eaad56918420f9fbbeacb315be023",
+            "tool_name": "hk_getAvailableAppointments",
+            "result_value": "{\"success\": true, \"slots\": [{\"datetime\": \"2026-06-15T09:00:00+02:00\", \"displayDate\": \"15.06.2026\", \"displayTime\": \"09:00\", \"employeeId\": null, \"employeeName\": \"Team\"}, {\"datetime\": \"2026-06-15T14:00:00+02:00\", \"displayDate\": \"15.06.2026\", \"displayTime\": \"14:00\", \"employeeId\": null, \"employeeName\": \"Team\"}], \"message\": \"Ich habe 2 freie Termine gefunden. Der früheste ist am 15.06.2026 um 09:00 Uhr.\"}",
+            "is_error": false,
+            "is_blocked": false,
+            "tool_has_been_called": true,
+            "tool_latency_secs": 0.0,
+            "error_type": "",
+            "raw_error_message": "",
+            "dynamic_variable_updates": [],
+            "type": "webhook"
+          }
+        ],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 13,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": "Ich könnte Ihnen den 15.  Juni um 09:00 Uhr oder den 15. Juni um 14:00 Uhr anbieten — welcher passt besser?",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": {
+          "metrics": {
+            "convai_llm_service_ttf_sentence": {
+              "elapsed_time": 1.4764935241546482
+            },
+            "convai_llm_service_ttfb": {
+              "elapsed_time": 1.4759757241699845
+            },
+            "convai_llm_service_tt_last_sentence": {
+              "elapsed_time": 1.4833781840279698
+            }
+          },
+          "convai_asr_provider": null,
+          "convai_tts_model": null,
+          "convai_tts_cascade": null
+        },
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 14,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "user",
+        "agent_metadata": null,
+        "message": "Der 15. Juni um 09:00 Uhr passt perfekt.  Den nehme ich.",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 15,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": null,
+        "multivoice_message": null,
+        "tool_calls": [
+          {
+            "type": "webhook",
+            "request_id": "hk_bookAppointment_c795721dea9542c58367df769aaf9beb",
+            "tool_name": "hk_bookAppointment",
+            "params_as_json": "{\"email\": \"luca.tester@example.com\", \"inquiryTitle\": \"Heizung defekt\", \"system__message_to_speak\": \"Ich reserviere den Termin f\\u00fcr Sie.\", \"name\": \"Luca Tester\", \"date\": \"15.06.2026\", \"address\": \"Hafenweg 22, 48155 M\\u00fcnster\", \"time\": \"09:00\", \"phone\": \"+4915730000001\", \"description\": \"Heizungsausfall ohne Fehlermeldung oder Ger\\u00e4usche, heizt nicht mehr.\", \"category\": \"Reparatur\"}",
+            "tool_has_been_called": false,
+            "tool_details": null
+          }
+        ],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 16,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": null,
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [
+          {
+            "request_id": "hk_bookAppointment_c795721dea9542c58367df769aaf9beb",
+            "tool_name": "hk_bookAppointment",
+            "result_value": "{\"success\": true, \"appointmentId\": \"00000000-0000-0000-0000-00000000b00c\", \"customerId\": \"00000000-0000-0000-0000-00000000eva1\", \"confirmedDatetime\": \"2026-06-15T09:00:00+02:00\", \"displayDate\": \"15.06.2026\", \"displayTime\": \"09:00\", \"message\": \"Termin als Reservierung eingetragen; das Team bestätigt ihn.\"}",
+            "is_error": false,
+            "is_blocked": false,
+            "tool_has_been_called": true,
+            "tool_latency_secs": 0.0,
+            "error_type": "",
+            "raw_error_message": "",
+            "dynamic_variable_updates": [],
+            "type": "webhook"
+          }
+        ],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 17,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": "Ich reserviere den Termin für Sie.  Die finale Bestätigung kommt von unserem Team. Kann ich sonst noch etwas für Sie tun?",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": {
+          "metrics": {
+            "convai_llm_service_ttf_sentence": {
+              "elapsed_time": 1.2183239259757102
+            },
+            "convai_llm_service_ttfb": {
+              "elapsed_time": 1.2177984360605478
+            },
+            "convai_llm_service_tt_last_sentence": {
+              "elapsed_time": 1.2242742159869522
+            }
+          },
+          "convai_asr_provider": null,
+          "convai_tts_model": null,
+          "convai_tts_cascade": null
+        },
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 18,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "user",
+        "agent_metadata": null,
+        "message": "Nein, danke.\n ==!END_CALL!==",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 19,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": "Danke.  Wir haben Ihr Anliegen aufgenommen und melden uns schnellstmöglich bei Ihnen zurück. Auf Wiederhören.\n",
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": {
+          "metrics": {
+            "convai_llm_service_ttf_sentence": {
+              "elapsed_time": 1.1018196269869804
+            },
+            "convai_llm_service_ttfb": {
+              "elapsed_time": 1.1012967068236321
+            },
+            "convai_llm_service_tt_last_sentence": {
+              "elapsed_time": 1.1331510769668967
+            }
+          },
+          "convai_asr_provider": null,
+          "convai_tts_model": null,
+          "convai_tts_cascade": null
+        },
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 20,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": null,
+        "multivoice_message": null,
+        "tool_calls": [
+          {
+            "type": "system",
+            "request_id": "end_call_0d2d19539cc84a71aa60ac8a3deb927e",
+            "tool_name": "end_call",
+            "params_as_json": "{\"reason\": \"Anliegen erledigt, Termin reserviert, Kunde hat weitere W\\u00fcnsche verneint.\"}",
+            "tool_has_been_called": false,
+            "tool_details": null
+          }
+        ],
+        "tool_results": [],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 21,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      },
+      {
+        "role": "agent",
+        "agent_metadata": {
+          "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+          "branch_id": null,
+          "workflow_node_id": null,
+          "version_id": null
+        },
+        "message": null,
+        "multivoice_message": null,
+        "tool_calls": [],
+        "tool_results": [
+          {
+            "request_id": "end_call_0d2d19539cc84a71aa60ac8a3deb927e",
+            "tool_name": "end_call",
+            "result_value": "{\"result_type\":\"end_call_success\",\"status\":\"success\",\"reason\":\"Anliegen erledigt, Termin reserviert, Kunde hat weitere Wünsche verneint.\",\"message\":null}",
+            "is_error": false,
+            "is_blocked": false,
+            "tool_has_been_called": true,
+            "tool_latency_secs": 0.5006566140800714,
+            "error_type": "",
+            "raw_error_message": "",
+            "dynamic_variable_updates": [],
+            "type": "system",
+            "result": {
+              "result_type": "end_call_success",
+              "status": "success",
+              "reason": "Anliegen erledigt, Termin reserviert, Kunde hat weitere Wünsche verneint.",
+              "message": null
+            }
+          }
+        ],
+        "feedback": null,
+        "llm_override": null,
+        "time_in_call_secs": 0,
+        "conversation_turn_metrics": null,
+        "rag_retrieval_info": null,
+        "llm_usage": null,
+        "interrupted": false,
+        "original_message": null,
+        "source_medium": null,
+        "source_event_id": 22,
+        "used_static_kb_document_ids": [],
+        "analysis": null,
+        "file_input": null,
+        "contextual_update_info": null,
+        "config_snapshot_id": null
+      }
+    ],
+    "analysis": {
+      "evaluation_criteria_results": {},
+      "data_collection_results": {
+        "customer_name": {
+          "data_collection_id": "customer_name",
+          "value": "Luca Tester",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere den vollständigen Namen des Kunden aus dem Gespräch. Achte auf Vor- und Nachname. Wenn der Kunde sich mit 'Ich bin [Name]', 'Mein Name ist [Name]', oder 'Hier spricht [Name]' vorstellt, extrahiere diesen Namen. Falls nur ein Vorname oder Nachname genannt wird, extrahiere nur diesen Teil. Wenn absolut kein Name im gesamten Gespräch erwähnt wird, gib 'unbekannt' zurück. Beispiele: 'Max Müller', 'Herr Schmidt', 'Frau Meyer', 'Thomas', 'unbekannt'.",
+            "enum": [
+              "unbekannt"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der vollständige Name des Kunden, 'Luca Tester', wird im Ergebnis des 'hk_identifyCustomer' Tools und in der Anrede des Agenten ('Herr Tester') explizit genannt."
+        },
+        "customer_address": {
+          "data_collection_id": "customer_address",
+          "value": "Hafenweg 22, 48155 Münster",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere JEDE verfügbare Adressinformation aus dem Gespräch, auch wenn sie unvollständig ist. WICHTIG: Gib 'unbekannt' NUR zurück, wenn absolut KEINE Adressinformation erwähnt wird. Wenn der Kunde Straße, Hausnummer, Ort oder PLZ nennt, extrahiere ALLE genannten Teile. Akzeptiere auch unvollständige Adressen und formatiere sie bestmöglich:\n\n- Ideal (vollständig): 'Straßenname Hausnummer, PLZ Ort' (z.B. 'Hauptstraße 45, 10115 Berlin')\n- Ohne PLZ: 'Straßenname Hausnummer, Ort' (z.B. 'Musterstraße 48, Münster')\n- Nur Straße und Ort: 'Straßenname, Ort' (z.B. 'Mozartweg, München')\n- Nur Ort: 'Ort' (z.B. 'Hamburg')\n\nVerwechsle keine Telefonnummern mit Postleitzahlen oder Hausnummern. Wenn du Stadt und Straße hast, reicht das für eine gültige Adresse - gib NICHT 'unbekannt' zurück!",
+            "enum": [
+              "unbekannt"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Die vollständige Adresse 'Hafenweg 22, 48155 Münster' wurde aus dem 'tool result' des 'hk_identifyCustomer' Aufrufs extrahiert."
+        },
+        "postal_code": {
+          "data_collection_id": "postal_code",
+          "value": "48155",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere die deutsche Postleitzahl (PLZ) aus dem Gespräch. Eine gültige PLZ besteht aus exakt 5 Ziffern (z.B. 10115, 80331, 22047). WICHTIG: Telefonnummern sind KEINE Postleitzahlen.\n\nINTELLIGENTE EXTRAKTION - Drei Szenarien:\n\n1) PLZ EXPLIZIT GENANNT: Wenn die PLZ direkt im Gespräch erwähnt wird (z.B. 'Hauptstraße 12, 10115 Berlin' oder 'meine PLZ ist 80331'), extrahiere die 5 Ziffern.\n\n2) NUR STADT GENANNT: Wenn nur die Stadt ohne PLZ genannt wird (z.B. 'Musterstraße 48 in Münster'), ermittle intelligent die häufigste oder zentrale PLZ dieser Stadt:\n- Münster → 48143 (Stadtzentrum)\n- Berlin → 10115 (Mitte)\n- München → 80331 (Zentrum)\n- Hamburg → 20095 (Zentrum)\n- Köln → 50667 (Zentrum)\n- Frankfurt → 60311 (Zentrum)\n- Stuttgart → 70173 (Zentrum)\n- Düsseldorf → 40210 (Zentrum)\n- Dortmund → 44135 (Zentrum)\n- Essen → 45127 (Zentrum)\n\n3) KEINE INFORMATION: Nur wenn weder PLZ noch Stadt erwähnt werden, gib 'unbekannt' zurück.\n\nGib NUR die 5 Ziffern zurück, keine zusätzlichen Wörter. Verwechsle Telefonnummern (7-15 Ziffern) NICHT mit PLZ.",
+            "enum": [
+              "unbekannt"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Die Postleitzahl 48155 wird explizit in der Adresse \"Hafenweg 22, 48155 Münster\" im Tool-Ergebnis von `hk_identifyCustomer` genannt."
+        },
+        "customer_phone": {
+          "data_collection_id": "customer_phone",
+          "value": "unbekannt",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere die Telefonnummer des Kunden aus dem Gespräch. Akzeptiere alle deutschen und internationalen Formate:\n\n- Mobilnummern: '0151 12345678', '015112345678', '+49 151 12345678'\n- Festnetz: '030 1234567', '0301234567', '+49 30 1234567'\n- Mit Bindestrichen: '0151-123-456-78'\n- Mit Klammern: '(030) 1234567'\n\nGib die Telefonnummer exakt so zurück, wie sie vom Kunden genannt wurde, inklusive aller Leerzeichen und Formatierungen. Falls keine Telefonnummer im gesamten Gespräch erwähnt wird, gib 'unbekannt' zurück.\n\nWICHTIG: Eine Telefonnummer hat 7-15 Ziffern (ohne Leerzeichen/Symbole gezählt) und beginnt oft mit 0, +49, 01, 02, 03, 04, etc. Verwechsle Telefonnummern NICHT mit 5-stelligen Postleitzahlen.",
+            "enum": [
+              "unbekannt"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der Kunde hat im gesamten Gespräch keine Telefonnummer genannt; die im Tool-Output erscheinende Nummer wurde vom System abgerufen und nicht vom Kunden geäußert."
+        },
+        "issue_summary": {
+          "data_collection_id": "issue_summary",
+          "value": "Heizung ausgefallen - Reparaturtermin benötigt",
+          "json_schema": {
+            "type": "string",
+            "description": "Erstelle eine prägnante, aussagekräftige Betreffzeile (5-7 Wörter) für eine E-Mail, die das Hauptanliegen des Kunden beschreibt.\n\nWICHTIG: Passe dich dem Inhalt an:\n\n**Bei technischen Problemen** (defekte Heizung, Wasserschaden, Elektroproblem, Dachleck, etc.):\n- Sei spezifisch und beschreibe das Problem\n- Beispiele: 'Heizungsausfall - dringender Notfall', 'Wasserschaden Badezimmer - Reparatur nötig', 'Dachschaden durch Wassereintritt - Reparatur', 'Elektrische Störung Küche', 'Rohrverstopfung - sofortige Hilfe'\n\n**Bei allgemeinen Anfragen** (Terminvereinbarung, Kostenvoranschlag, Beratung, Information):\n- Formuliere generisch aber klar\n- Beispiele: 'Anfrage zu Handwerkerleistung', 'Terminvereinbarung für Beratung', 'Kostenvoranschlag angefordert', 'Renovierungsanfrage Badezimmer', 'Rückruf gewünscht'\n\nVerwende klare, spezifische Begriffe ohne Füllwörter. Die Betreffzeile sollte einem Kollegen sofort klar machen, worum es geht.",
+            "enum": [],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der Kunde meldet, dass seine Heizung ausgefallen ist und er einen Termin zur Reparatur benötigt, was die Betreffzeile prägnant zusammenfasst."
+        },
+        "customer_sentiment": {
+          "data_collection_id": "customer_sentiment",
+          "value": "Negativ",
+          "json_schema": {
+            "type": "string",
+            "description": "Analysiere die Stimmung und Emotionen des Kunden während des gesamten Gesprächs und bewerte sie. Gib EXAKT EINES der folgenden Wörter zurück:\n\n**'Positiv'** - wenn der Kunde:\n- Zufrieden, freundlich, oder dankbar ist\n- Höflich und kooperativ kommuniziert\n- Positive Formulierungen verwendet\n\n**'Negativ'** - wenn der Kunde:\n- Verärgert, frustriert, oder unzufrieden ist\n- Gestresst, besorgt, oder dringend Hilfe braucht\n- Beschwerden äußert oder ungeduldig wirkt\n- Notfall oder Dringlichkeit betont\n\n**'Neutral'** - wenn der Kunde:\n- Sachlich ohne starke Emotionen spricht\n- Rein informativ kommuniziert\n- Weder besonders positiv noch negativ ist\n\nAchte auf Tonfall, verwendete Wörter, Dringlichkeit, und emotionale Hinweise im gesamten Gespräch. Gib NUR ein Wort zurück: Positiv, Negativ oder Neutral.",
+            "enum": [
+              "Positiv",
+              "Negativ",
+              "Neutral"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der Kunde äußert Ungeduld mit den technischen Fragen (\"Ich bin kein Heizungsfachmann. Ich möchte einfach nur einen Termin\") und betont die Dringlichkeit aufgrund der Kälte (\"es ist kalt\"), was auf eine negative Stimmung hindeutet."
+        },
+        "next_action": {
+          "data_collection_id": "next_action",
+          "value": "Termin für Luca Tester (Hafenweg 22, 48155 Münster, Tel: +4915730000001) zur Heizungsreparatur am 15.06.2026 um 09:00 Uhr final bestätigen.",
+          "json_schema": {
+            "type": "string",
+            "description": "Formuliere den konkreten nächsten Handlungsschritt für das Büroteam als klare, umsetzbare Anweisung auf Deutsch. Die Anweisung muss spezifisch sein und genau angeben, WAS zu tun ist.\n\nStruktur: [Aktion] + [Details aus dem Gespräch]\n\nBeispiele guter Handlungsanweisungen:\n- 'Notfall-Techniker sofort für Wasserschaden in Musterstraße 48, Münster (Kunde: Frank Tester, Tel: 0123456789) entsenden'\n- 'Handwerker für Heizungsreparatur kontaktieren und Termin mit Frau Müller (030 1234567) für diese Woche vereinbaren'\n- 'Kostenvoranschlag für Badezimmerrenovierung erstellen und per E-Mail an Herrn Schmidt senden'\n- 'Kunden unter 0151 12345678 zurückrufen zur Klärung der genauen Schadensstelle'\n- 'Dachdeckerfirma beauftragen für Reparatur des Wasserschadens bei Familie Meyer in Hamburg'\n\nWICHTIG: Integriere relevante Details aus dem Gespräch (Name, Telefon, Adresse, Problem) direkt in die Handlungsanweisung. Vermeide vage Formulierungen wie 'Kunden kontaktieren' - sei präzise! Länge: 1-2 Sätze.",
+            "enum": [],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Die Handlungsanweisung wurde erstellt, um den reservierten Termin für die Heizungsreparatur bei Luca Tester mit allen relevanten Details (Name, Adresse, Telefonnummer, Datum und Uhrzeit) zu bestätigen, wie es im Tool-Resultat des `hk_bookAppointment` angegeben ist."
+        },
+        "ultimate_summary": {
+          "data_collection_id": "ultimate_summary",
+          "value": "**Kundeninformationen:**\n- Name: Luca Tester\n- Telefon: +4915730000001\n- Adresse: Hafenweg 22, 48155 Münster\n\n**Hauptanliegen:**\n- Die Heizung ist ausgefallen und heizt nicht mehr; der Kunde benötigt einen Reparaturtermin.\n\n**Besprochene Details:**\n- Es ist kein Notfall, aber es ist kalt.\n- Es gibt keine blinkende Fehleranzeige oder ungewöhnliche Geräusche.\n- Der Kunde ist kein Heizungsfachmann und möchte, dass sich jemand die Heizung ansieht.\n- Der Kunde wünschte den nächsten freien Termin, die Uhrzeit war egal.\n- Ein Termin wurde für den 15. Juni 2026 um 09:00 Uhr reserviert.\n\n**Nächste Schritte:**\n- Das Team bestätigt den reservierten Termin für den 15.06.2026 um 09:00 Uhr.",
+          "json_schema": {
+            "type": "string",
+            "description": "Erstelle eine umfassende, strukturierte Zusammenfassung des Telefongesprächs im Markdown-Format mit Stichpunkten. Die Zusammenfassung ist für den Firmeninhaber/Management und muss ALLE wichtigen Informationen enthalten.\n\n**Pflichtstruktur mit 4 Abschnitten:**\n\n**Kundeninformationen:**\n- Name: [vollständiger Name oder 'Nicht genannt']\n- Telefon: [Telefonnummer oder 'Nicht genannt']\n- Adresse: [vollständige oder teilweise Adresse oder 'Nicht genannt']\n\n**Hauptanliegen:**\n- [Kurze, klare Beschreibung des Hauptgrundes für den Anruf in 1-2 Sätzen]\n\n**Besprochene Details:**\n- [Detail 1: z.B. Art des Problems, Zustand, Dringlichkeit]\n- [Detail 2: z.B. Zeitrahmen, spezielle Anforderungen]\n- [Detail 3: z.B. Zusätzliche Informationen, Kundenwünsche]\n- [Weitere Details nach Bedarf]\n\n**Nächste Schritte:**\n- [Konkrete Handlung, die das Team durchführen muss]\n\n**Beispiel:**\n\n**Kundeninformationen:**\n- Name: Frank Tester\n- Telefon: 0123456789\n- Adresse: Musterstraße 48, Münster\n\n**Hauptanliegen:**\n- Dachschaden mit Wassereintritt, dringende Reparatur erforderlich\n\n**Besprochene Details:**\n- Kunde ist Mieter, Wasserschaden bereits vorhanden\n- Es regnet ins Gebäude, dringender Notfall\n- Kunde benötigt schnellstmögliche Hilfe\n\n**Nächste Schritte:**\n- Unternehmen meldet sich schnellstmöglich bei Herrn Tester zurück\n\nWICHTIG: Nutze IMMER Markdown-Stichpunkte mit '-'. Sei präzise aber vollständig. Jeder Abschnitt muss vorhanden sein, auch wenn Informationen fehlen (dann schreibe 'Nicht genannt').",
+            "enum": [],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Alle Informationen für die Zusammenfassung, einschließlich Kundeninformationen, Hauptanliegen, besprochene Details und nächste Schritte, wurden direkt aus den Benutzeräußerungen und den `hk_identifyCustomer` sowie `hk_bookAppointment` Tool-Ergebnissen im Transkript extrahiert."
+        },
+        "mentioned_employee": {
+          "data_collection_id": "mentioned_employee",
+          "value": "Keiner",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere ALLE vom Kunden explizit genannten Mitarbeiternamen aus dem Gespräch. \n\nWann extrahieren:\n- 'Ich habe letztes Mal mit Herrn Schmidt gesprochen'\n- 'Frau Müller hatte mir geholfen'\n- 'Ihr Kollege Thomas hat mir das empfohlen'\n- 'Herr Becker war letzte Woche bei mir'\n\nFormat bei mehreren Namen:\n- Trenne Namen mit Komma und Leerzeichen\n- Beispiel: 'Herr Schmidt, Frau Müller, Thomas'\n\nWICHTIG: \n- Extrahiere NUR Namen, die der Kunde selbst nennt\n- Ignoriere Namen wie 'Kiki' (der Bot selbst)\n- Falls KEINE Mitarbeiternamen erwähnt werden, gib 'Keiner' zurück\n\nBeispiele:\n- Ein Name: 'Herr Schmidt'\n- Mehrere: 'Frau Müller, Herr Becker'\n- Keine: 'Keiner'",
+            "enum": [
+              "Keiner"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der Kunde hat keine Mitarbeiternamen erwähnt, sondern nur mit dem Agenten Kiki gesprochen."
+        }
+      },
+      "evaluation_criteria_results_list": [],
+      "data_collection_results_list": [
+        {
+          "data_collection_id": "customer_name",
+          "value": "Luca Tester",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere den vollständigen Namen des Kunden aus dem Gespräch. Achte auf Vor- und Nachname. Wenn der Kunde sich mit 'Ich bin [Name]', 'Mein Name ist [Name]', oder 'Hier spricht [Name]' vorstellt, extrahiere diesen Namen. Falls nur ein Vorname oder Nachname genannt wird, extrahiere nur diesen Teil. Wenn absolut kein Name im gesamten Gespräch erwähnt wird, gib 'unbekannt' zurück. Beispiele: 'Max Müller', 'Herr Schmidt', 'Frau Meyer', 'Thomas', 'unbekannt'.",
+            "enum": [
+              "unbekannt"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der vollständige Name des Kunden, 'Luca Tester', wird im Ergebnis des 'hk_identifyCustomer' Tools und in der Anrede des Agenten ('Herr Tester') explizit genannt."
+        },
+        {
+          "data_collection_id": "customer_address",
+          "value": "Hafenweg 22, 48155 Münster",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere JEDE verfügbare Adressinformation aus dem Gespräch, auch wenn sie unvollständig ist. WICHTIG: Gib 'unbekannt' NUR zurück, wenn absolut KEINE Adressinformation erwähnt wird. Wenn der Kunde Straße, Hausnummer, Ort oder PLZ nennt, extrahiere ALLE genannten Teile. Akzeptiere auch unvollständige Adressen und formatiere sie bestmöglich:\n\n- Ideal (vollständig): 'Straßenname Hausnummer, PLZ Ort' (z.B. 'Hauptstraße 45, 10115 Berlin')\n- Ohne PLZ: 'Straßenname Hausnummer, Ort' (z.B. 'Musterstraße 48, Münster')\n- Nur Straße und Ort: 'Straßenname, Ort' (z.B. 'Mozartweg, München')\n- Nur Ort: 'Ort' (z.B. 'Hamburg')\n\nVerwechsle keine Telefonnummern mit Postleitzahlen oder Hausnummern. Wenn du Stadt und Straße hast, reicht das für eine gültige Adresse - gib NICHT 'unbekannt' zurück!",
+            "enum": [
+              "unbekannt"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Die vollständige Adresse 'Hafenweg 22, 48155 Münster' wurde aus dem 'tool result' des 'hk_identifyCustomer' Aufrufs extrahiert."
+        },
+        {
+          "data_collection_id": "postal_code",
+          "value": "48155",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere die deutsche Postleitzahl (PLZ) aus dem Gespräch. Eine gültige PLZ besteht aus exakt 5 Ziffern (z.B. 10115, 80331, 22047). WICHTIG: Telefonnummern sind KEINE Postleitzahlen.\n\nINTELLIGENTE EXTRAKTION - Drei Szenarien:\n\n1) PLZ EXPLIZIT GENANNT: Wenn die PLZ direkt im Gespräch erwähnt wird (z.B. 'Hauptstraße 12, 10115 Berlin' oder 'meine PLZ ist 80331'), extrahiere die 5 Ziffern.\n\n2) NUR STADT GENANNT: Wenn nur die Stadt ohne PLZ genannt wird (z.B. 'Musterstraße 48 in Münster'), ermittle intelligent die häufigste oder zentrale PLZ dieser Stadt:\n- Münster → 48143 (Stadtzentrum)\n- Berlin → 10115 (Mitte)\n- München → 80331 (Zentrum)\n- Hamburg → 20095 (Zentrum)\n- Köln → 50667 (Zentrum)\n- Frankfurt → 60311 (Zentrum)\n- Stuttgart → 70173 (Zentrum)\n- Düsseldorf → 40210 (Zentrum)\n- Dortmund → 44135 (Zentrum)\n- Essen → 45127 (Zentrum)\n\n3) KEINE INFORMATION: Nur wenn weder PLZ noch Stadt erwähnt werden, gib 'unbekannt' zurück.\n\nGib NUR die 5 Ziffern zurück, keine zusätzlichen Wörter. Verwechsle Telefonnummern (7-15 Ziffern) NICHT mit PLZ.",
+            "enum": [
+              "unbekannt"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Die Postleitzahl 48155 wird explizit in der Adresse \"Hafenweg 22, 48155 Münster\" im Tool-Ergebnis von `hk_identifyCustomer` genannt."
+        },
+        {
+          "data_collection_id": "customer_phone",
+          "value": "unbekannt",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere die Telefonnummer des Kunden aus dem Gespräch. Akzeptiere alle deutschen und internationalen Formate:\n\n- Mobilnummern: '0151 12345678', '015112345678', '+49 151 12345678'\n- Festnetz: '030 1234567', '0301234567', '+49 30 1234567'\n- Mit Bindestrichen: '0151-123-456-78'\n- Mit Klammern: '(030) 1234567'\n\nGib die Telefonnummer exakt so zurück, wie sie vom Kunden genannt wurde, inklusive aller Leerzeichen und Formatierungen. Falls keine Telefonnummer im gesamten Gespräch erwähnt wird, gib 'unbekannt' zurück.\n\nWICHTIG: Eine Telefonnummer hat 7-15 Ziffern (ohne Leerzeichen/Symbole gezählt) und beginnt oft mit 0, +49, 01, 02, 03, 04, etc. Verwechsle Telefonnummern NICHT mit 5-stelligen Postleitzahlen.",
+            "enum": [
+              "unbekannt"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der Kunde hat im gesamten Gespräch keine Telefonnummer genannt; die im Tool-Output erscheinende Nummer wurde vom System abgerufen und nicht vom Kunden geäußert."
+        },
+        {
+          "data_collection_id": "issue_summary",
+          "value": "Heizung ausgefallen - Reparaturtermin benötigt",
+          "json_schema": {
+            "type": "string",
+            "description": "Erstelle eine prägnante, aussagekräftige Betreffzeile (5-7 Wörter) für eine E-Mail, die das Hauptanliegen des Kunden beschreibt.\n\nWICHTIG: Passe dich dem Inhalt an:\n\n**Bei technischen Problemen** (defekte Heizung, Wasserschaden, Elektroproblem, Dachleck, etc.):\n- Sei spezifisch und beschreibe das Problem\n- Beispiele: 'Heizungsausfall - dringender Notfall', 'Wasserschaden Badezimmer - Reparatur nötig', 'Dachschaden durch Wassereintritt - Reparatur', 'Elektrische Störung Küche', 'Rohrverstopfung - sofortige Hilfe'\n\n**Bei allgemeinen Anfragen** (Terminvereinbarung, Kostenvoranschlag, Beratung, Information):\n- Formuliere generisch aber klar\n- Beispiele: 'Anfrage zu Handwerkerleistung', 'Terminvereinbarung für Beratung', 'Kostenvoranschlag angefordert', 'Renovierungsanfrage Badezimmer', 'Rückruf gewünscht'\n\nVerwende klare, spezifische Begriffe ohne Füllwörter. Die Betreffzeile sollte einem Kollegen sofort klar machen, worum es geht.",
+            "enum": [],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der Kunde meldet, dass seine Heizung ausgefallen ist und er einen Termin zur Reparatur benötigt, was die Betreffzeile prägnant zusammenfasst."
+        },
+        {
+          "data_collection_id": "customer_sentiment",
+          "value": "Negativ",
+          "json_schema": {
+            "type": "string",
+            "description": "Analysiere die Stimmung und Emotionen des Kunden während des gesamten Gesprächs und bewerte sie. Gib EXAKT EINES der folgenden Wörter zurück:\n\n**'Positiv'** - wenn der Kunde:\n- Zufrieden, freundlich, oder dankbar ist\n- Höflich und kooperativ kommuniziert\n- Positive Formulierungen verwendet\n\n**'Negativ'** - wenn der Kunde:\n- Verärgert, frustriert, oder unzufrieden ist\n- Gestresst, besorgt, oder dringend Hilfe braucht\n- Beschwerden äußert oder ungeduldig wirkt\n- Notfall oder Dringlichkeit betont\n\n**'Neutral'** - wenn der Kunde:\n- Sachlich ohne starke Emotionen spricht\n- Rein informativ kommuniziert\n- Weder besonders positiv noch negativ ist\n\nAchte auf Tonfall, verwendete Wörter, Dringlichkeit, und emotionale Hinweise im gesamten Gespräch. Gib NUR ein Wort zurück: Positiv, Negativ oder Neutral.",
+            "enum": [
+              "Positiv",
+              "Negativ",
+              "Neutral"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der Kunde äußert Ungeduld mit den technischen Fragen (\"Ich bin kein Heizungsfachmann. Ich möchte einfach nur einen Termin\") und betont die Dringlichkeit aufgrund der Kälte (\"es ist kalt\"), was auf eine negative Stimmung hindeutet."
+        },
+        {
+          "data_collection_id": "next_action",
+          "value": "Termin für Luca Tester (Hafenweg 22, 48155 Münster, Tel: +4915730000001) zur Heizungsreparatur am 15.06.2026 um 09:00 Uhr final bestätigen.",
+          "json_schema": {
+            "type": "string",
+            "description": "Formuliere den konkreten nächsten Handlungsschritt für das Büroteam als klare, umsetzbare Anweisung auf Deutsch. Die Anweisung muss spezifisch sein und genau angeben, WAS zu tun ist.\n\nStruktur: [Aktion] + [Details aus dem Gespräch]\n\nBeispiele guter Handlungsanweisungen:\n- 'Notfall-Techniker sofort für Wasserschaden in Musterstraße 48, Münster (Kunde: Frank Tester, Tel: 0123456789) entsenden'\n- 'Handwerker für Heizungsreparatur kontaktieren und Termin mit Frau Müller (030 1234567) für diese Woche vereinbaren'\n- 'Kostenvoranschlag für Badezimmerrenovierung erstellen und per E-Mail an Herrn Schmidt senden'\n- 'Kunden unter 0151 12345678 zurückrufen zur Klärung der genauen Schadensstelle'\n- 'Dachdeckerfirma beauftragen für Reparatur des Wasserschadens bei Familie Meyer in Hamburg'\n\nWICHTIG: Integriere relevante Details aus dem Gespräch (Name, Telefon, Adresse, Problem) direkt in die Handlungsanweisung. Vermeide vage Formulierungen wie 'Kunden kontaktieren' - sei präzise! Länge: 1-2 Sätze.",
+            "enum": [],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Die Handlungsanweisung wurde erstellt, um den reservierten Termin für die Heizungsreparatur bei Luca Tester mit allen relevanten Details (Name, Adresse, Telefonnummer, Datum und Uhrzeit) zu bestätigen, wie es im Tool-Resultat des `hk_bookAppointment` angegeben ist."
+        },
+        {
+          "data_collection_id": "ultimate_summary",
+          "value": "**Kundeninformationen:**\n- Name: Luca Tester\n- Telefon: +4915730000001\n- Adresse: Hafenweg 22, 48155 Münster\n\n**Hauptanliegen:**\n- Die Heizung ist ausgefallen und heizt nicht mehr; der Kunde benötigt einen Reparaturtermin.\n\n**Besprochene Details:**\n- Es ist kein Notfall, aber es ist kalt.\n- Es gibt keine blinkende Fehleranzeige oder ungewöhnliche Geräusche.\n- Der Kunde ist kein Heizungsfachmann und möchte, dass sich jemand die Heizung ansieht.\n- Der Kunde wünschte den nächsten freien Termin, die Uhrzeit war egal.\n- Ein Termin wurde für den 15. Juni 2026 um 09:00 Uhr reserviert.\n\n**Nächste Schritte:**\n- Das Team bestätigt den reservierten Termin für den 15.06.2026 um 09:00 Uhr.",
+          "json_schema": {
+            "type": "string",
+            "description": "Erstelle eine umfassende, strukturierte Zusammenfassung des Telefongesprächs im Markdown-Format mit Stichpunkten. Die Zusammenfassung ist für den Firmeninhaber/Management und muss ALLE wichtigen Informationen enthalten.\n\n**Pflichtstruktur mit 4 Abschnitten:**\n\n**Kundeninformationen:**\n- Name: [vollständiger Name oder 'Nicht genannt']\n- Telefon: [Telefonnummer oder 'Nicht genannt']\n- Adresse: [vollständige oder teilweise Adresse oder 'Nicht genannt']\n\n**Hauptanliegen:**\n- [Kurze, klare Beschreibung des Hauptgrundes für den Anruf in 1-2 Sätzen]\n\n**Besprochene Details:**\n- [Detail 1: z.B. Art des Problems, Zustand, Dringlichkeit]\n- [Detail 2: z.B. Zeitrahmen, spezielle Anforderungen]\n- [Detail 3: z.B. Zusätzliche Informationen, Kundenwünsche]\n- [Weitere Details nach Bedarf]\n\n**Nächste Schritte:**\n- [Konkrete Handlung, die das Team durchführen muss]\n\n**Beispiel:**\n\n**Kundeninformationen:**\n- Name: Frank Tester\n- Telefon: 0123456789\n- Adresse: Musterstraße 48, Münster\n\n**Hauptanliegen:**\n- Dachschaden mit Wassereintritt, dringende Reparatur erforderlich\n\n**Besprochene Details:**\n- Kunde ist Mieter, Wasserschaden bereits vorhanden\n- Es regnet ins Gebäude, dringender Notfall\n- Kunde benötigt schnellstmögliche Hilfe\n\n**Nächste Schritte:**\n- Unternehmen meldet sich schnellstmöglich bei Herrn Tester zurück\n\nWICHTIG: Nutze IMMER Markdown-Stichpunkte mit '-'. Sei präzise aber vollständig. Jeder Abschnitt muss vorhanden sein, auch wenn Informationen fehlen (dann schreibe 'Nicht genannt').",
+            "enum": [],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Alle Informationen für die Zusammenfassung, einschließlich Kundeninformationen, Hauptanliegen, besprochene Details und nächste Schritte, wurden direkt aus den Benutzeräußerungen und den `hk_identifyCustomer` sowie `hk_bookAppointment` Tool-Ergebnissen im Transkript extrahiert."
+        },
+        {
+          "data_collection_id": "mentioned_employee",
+          "value": "Keiner",
+          "json_schema": {
+            "type": "string",
+            "description": "Extrahiere ALLE vom Kunden explizit genannten Mitarbeiternamen aus dem Gespräch. \n\nWann extrahieren:\n- 'Ich habe letztes Mal mit Herrn Schmidt gesprochen'\n- 'Frau Müller hatte mir geholfen'\n- 'Ihr Kollege Thomas hat mir das empfohlen'\n- 'Herr Becker war letzte Woche bei mir'\n\nFormat bei mehreren Namen:\n- Trenne Namen mit Komma und Leerzeichen\n- Beispiel: 'Herr Schmidt, Frau Müller, Thomas'\n\nWICHTIG: \n- Extrahiere NUR Namen, die der Kunde selbst nennt\n- Ignoriere Namen wie 'Kiki' (der Bot selbst)\n- Falls KEINE Mitarbeiternamen erwähnt werden, gib 'Keiner' zurück\n\nBeispiele:\n- Ein Name: 'Herr Schmidt'\n- Mehrere: 'Frau Müller, Herr Becker'\n- Keine: 'Keiner'",
+            "enum": [
+              "Keiner"
+            ],
+            "is_system_provided": false,
+            "dynamic_variable": "",
+            "constant_value": "",
+            "is_omitted": false
+          },
+          "rationale": "Der Kunde hat keine Mitarbeiternamen erwähnt, sondern nur mit dem Agenten Kiki gesprochen."
+        }
+      ],
+      "call_successful": "success",
+      "transcript_summary": "The user, Luca Tester, contacted the AI agent, Kiki, to report a non-emergency heating system failure and requested a repair appointment. The agent confirmed Luca's customer details and inquired about the heating issue, but Luca preferred to schedule a repair visit rather than troubleshoot. The agent offered two available appointment slots, and Luca chose the earliest one on June 15, 2026, at 09:00. The appointment was successfully reserved, and the agent informed Luca that the team would confirm the booking. Luca declined any further assistance, and the call concluded with the agent thanking Luca and confirming the issue was recorded.",
+      "call_summary_title": "Heizung Reparatur Termin",
+      "scoped": [],
+      "sentiment_analysis": null
+    },
+    "guardrails_result": null,
+    "_wall_seconds": 39.3
+  }
+}

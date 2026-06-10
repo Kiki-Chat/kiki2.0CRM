@@ -1,0 +1,22 @@
+{
+  "stamp": "20260610T184139Z",
+  "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+  "pass_rate": "1/1",
+  "results": [
+    {
+      "id": "ident_unknown_caller",
+      "bucket": "identification",
+      "passed": true,
+      "failures": [],
+      "warnings": [],
+      "tools_called": [
+        "hk_identifyCustomer",
+        "hk_createInquiry",
+        "end_call"
+      ],
+      "agent_turns": 13,
+      "wall_seconds": 43.1,
+      "judge_notes": "Unknown caller: agent must collect required fields (name, address, phone, problem) BEFORE hk_createInquiry, ask one question at a time, not invent data."
+    }
+  ]
+}
