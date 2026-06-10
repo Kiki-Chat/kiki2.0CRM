@@ -1,17 +1,18 @@
 <!doctype html>
 <!--
-  lang="de" + translate="no": the app is German-only. Chrome / Google Translate
-  auto-translation rewrites text nodes out from under React, which then crashes
-  reconciliation with `NotFoundError: Failed to execute 'insertBefore' on 'Node'`
-  (the "Diese Seite konnte nicht geladen werden" page break). Declaring the
-  language correctly and opting out of translation keeps the DOM stable.
+  lang="de" is correct (the app is German), so the browser detects the source
+  language and offers an ACCURATE translation. Browser auto-translation is left
+  ENABLED at the owner's request. ⚠️ Trade-off (accepted): translating the live
+  page can still crash React reconciliation ("NotFoundError: insertBefore" / the
+  "Diese Seite konnte nicht geladen werden" break), because Google Translate
+  rewrites text nodes out from under React. Re-add translate="no" + the notranslate
+  meta to make the app stable again.
 -->
-<html lang="de" translate="no">
+<html lang="de">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="google" content="notranslate" />
     <title>HeyKiki Portal</title>
   </head>
   <body>
