@@ -213,7 +213,7 @@ def propose_cases_for_customer(client, org_id: str, customer_id: str, customer_n
         f"Kunde: {customer_name or customer_id}\n\nANFRAGEN:\n"
         + "\n".join(s["signal"] for s in sigs)
         + f"\n\nÄhnliche Paare (Hinweis — nur bei GLEICHEM Anliegen zusammenführen):\n{cand_txt}\n\n"
-        'JSON: {"cases":[{"label":"konkretes Thema","members":["ANF-..."],"confidence":0.0-1.0,"reason":"<=12 Wörter"}]}'
+        'JSON: {"cases":[{"label":"konkretes Thema","members":["<Anfragenummer>"],"confidence":0.0-1.0,"reason":"<=12 Wörter"}]}'
     )
     try:
         resp = ai_client.chat(
