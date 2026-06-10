@@ -805,6 +805,15 @@ def build_case_thread(org_id: str, inquiry_id: str) -> dict | None:
     for k in kva_rows:
         events.extend(_kva_events(k))
 
+    # Technician job links (dispatched / started / report submitted) — the
+    # no-login form's results thread into the same case timeline.
+    from app.services.technician_jobs import job_events_for_inquiry
+
+    try:
+        events.extend(job_events_for_inquiry(org_id, inquiry_id))
+    except Exception:  # noqa: BLE001 — never break the thread view on job rows
+        pass
+
     events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)
 
     # "Offene Punkte" = pending appointments + KVAs awaiting send/answer.

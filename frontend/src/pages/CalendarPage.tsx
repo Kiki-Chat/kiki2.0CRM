@@ -514,6 +514,7 @@ export function CalendarPage() {
           appt={detail}
           color={colorFor(detail.assigned_employee_id)}
           calendarProvider={calendarProvider}
+          employees={employees}
           onClose={() => setDetail(null)}
           onReschedule={() => { setEditAppt(detail); setDetail(null) }}
         />
@@ -616,12 +617,14 @@ function AppointmentDetailModal({
   appt,
   color,
   calendarProvider,
+  employees,
   onClose,
   onReschedule,
 }: {
   appt: Appointment
   color: string
   calendarProvider: string | null
+  employees: Employee[]
   onClose: () => void
   onReschedule: () => void
 }) {
@@ -672,6 +675,27 @@ function AppointmentDetailModal({
     mutationFn: () => apiFetch(`/api/appointments/${appt.id}`, { method: 'DELETE' }),
     onSuccess: afterMutate,
     onError: (e: unknown) => setPushMsg(e instanceof Error ? e.message : 'Löschen fehlgeschlagen.'),
+  })
+  // Techniker-Einsatz: nach der Terminbestätigung wird der Techniker hier
+  // eingesetzt — er bekommt den Auftrags-Link (Einsatzbericht, Fotos) per E-Mail.
+  const [dispatchEmp, setDispatchEmp] = useState(appt.assigned_employee_id ?? '')
+  const [dispatchMsg, setDispatchMsg] = useState<string | null>(null)
+  const dispatch = useMutation({
+    mutationFn: () =>
+      apiFetch<{ success: boolean; email_status: string }>(
+        `/api/appointments/${appt.id}/dispatch-technician`,
+        { method: 'POST', body: JSON.stringify({ employee_id: dispatchEmp }) },
+      ),
+    onSuccess: (r) => {
+      setDispatchMsg(
+        r.email_status === 'sent'
+          ? '✓ Auftrags-Link per E-Mail an den Techniker gesendet.'
+          : 'Techniker zugewiesen — E-Mail konnte nicht gesendet werden (bitte erneut versuchen).',
+      )
+      qc.invalidateQueries({ queryKey: ['appointments'] })
+    },
+    onError: (e: unknown) =>
+      setDispatchMsg(e instanceof Error ? e.message : 'Einsatz konnte nicht gesendet werden.'),
   })
   return (
     <Modal open onOpenChange={(o) => !o && onClose()} title={appt.title ?? 'Termin'}>
@@ -725,6 +749,37 @@ function AppointmentDetailModal({
         </div>
         {pushable && !canPush && !alreadyPushed && <p className="text-xs text-muted">{pushDisabledReason}</p>}
         {pushMsg && <p className="text-xs text-muted">{pushMsg}</p>}
+        {appt.source !== 'google_import' && appt.status === 'confirmed' && (
+          <div className="border-t border-border pt-3">
+            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
+              Techniker einsetzen
+            </div>
+            <div className="flex gap-2">
+              <select
+                value={dispatchEmp}
+                onChange={(e) => setDispatchEmp(e.target.value)}
+                className="min-w-0 flex-1 rounded-md border border-border bg-alt px-3 py-2 text-sm text-text outline-none focus:border-green-primary"
+              >
+                <option value="">Mitarbeiter wählen…</option>
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>{e.display_name}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => dispatch.mutate()}
+                disabled={!dispatchEmp || dispatch.isPending}
+                className="shrink-0 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+              >
+                {dispatch.isPending ? 'Sendet…' : 'Auftrag senden'}
+              </button>
+            </div>
+            <p className="mt-1.5 text-xs text-muted">
+              Der Techniker erhält per E-Mail einen Link mit allen Einsatzdaten und füllt dort den
+              Einsatzbericht aus (Start/Ende, Fragen, Fotos) — ohne Login. Der Bericht erscheint im Vorgang.
+            </p>
+            {dispatchMsg && <p className="mt-1 text-xs font-medium text-green-deep">{dispatchMsg}</p>}
+          </div>
+        )}
         <div className="flex items-center justify-between border-t border-border pt-3">
           <button
             onClick={() => cancel.mutate()}

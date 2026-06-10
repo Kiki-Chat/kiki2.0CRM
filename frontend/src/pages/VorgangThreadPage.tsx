@@ -13,6 +13,7 @@ import {
   PhoneIncoming,
   PhoneOutgoing,
   User,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -96,6 +97,37 @@ const TL: Record<string, { Icon: LucideIcon; cls: string }> = {
   kva_sent: { Icon: Euro, cls: 'bg-ai-bg text-ai' },
   kva_accepted: { Icon: Euro, cls: 'bg-ai-bg text-ai' },
   kva_rejected: { Icon: Euro, cls: 'bg-ai-bg text-ai' },
+  technician_dispatched: { Icon: Wrench, cls: 'bg-info-bg text-info' },
+  technician_job_started: { Icon: Wrench, cls: 'bg-warning-bg text-warning' },
+  technician_report_submitted: { Icon: Wrench, cls: 'bg-success-bg text-success' },
+}
+
+// Inline detail block for a submitted Einsatzbericht (extras.report).
+function TechReport({ extras }: { extras: Record<string, unknown> }) {
+  const rep = (extras?.report ?? {}) as Record<string, unknown>
+  const photoCount = Number(extras?.photo_count ?? 0)
+  const needs = Array.isArray(rep.needs) ? (rep.needs as string[]) : []
+  return (
+    <div className="mt-2 space-y-1 rounded-lg border border-border bg-alt/60 p-3 text-xs text-body">
+      {typeof rep.description === 'string' && rep.description !== '' && (
+        <div><span className="font-semibold">Durchgeführt:</span> {rep.description}</div>
+      )}
+      {typeof rep.extra_demands === 'string' && rep.extra_demands !== '' && (
+        <div><span className="font-semibold">Zusätzliche Wünsche:</span> {rep.extra_demands}</div>
+      )}
+      {typeof rep.site_visit_notes === 'string' && rep.site_visit_notes !== '' && (
+        <div><span className="font-semibold">Vor-Ort:</span> {rep.site_visit_notes}</div>
+      )}
+      {rep.experience_good != null && (
+        <div><span className="font-semibold">Erfahrung gut:</span> {rep.experience_good ? 'Ja' : 'Nein'}</div>
+      )}
+      {needs.length > 0 && <div><span className="font-semibold">Benötigt:</span> {needs.join(', ')}</div>}
+      <div>
+        <span className="font-semibold">Status:</span> {rep.job_finished ? 'Auftrag abgeschlossen' : 'Auftrag noch offen'}
+        {photoCount > 0 && ` · ${photoCount} Foto${photoCount === 1 ? '' : 's'} (siehe Kunden-Dokumente)`}
+      </div>
+    </div>
+  )
 }
 
 const fmtDur = (s: number | null) =>
@@ -260,6 +292,7 @@ export function VorgangThreadPage() {
                     <div className="mt-0.5 text-xs text-muted">
                       {fmtDateTime(ev.timestamp)} · {ev.actor_name}
                     </div>
+                    {ev.kind === 'technician_report_submitted' && <TechReport extras={ev.extras} />}
                   </div>
                 </div>
               )

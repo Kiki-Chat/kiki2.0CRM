@@ -207,14 +207,12 @@ function ActionsTab({
   status,
   busy,
   appointmentSlot,
-  hasAppointment,
   onStatus,
   onDelete,
   onAssign,
   onEdit,
   onAppointment,
   onKva,
-  onAssignTechnician,
 }: {
   call: CallDetailData
   inquiry: Inquiry | undefined
@@ -222,20 +220,13 @@ function ActionsTab({
   status: string
   busy: boolean
   appointmentSlot?: ReactNode
-  hasAppointment?: boolean
   onStatus: (s: string) => void
   onDelete: () => void
   onAssign: (id: string | null) => void
   onEdit: () => void
   onAppointment: () => void
   onKva?: () => void
-  onAssignTechnician?: (employeeId: string) => void
 }) {
-  const [techPickerOpen, setTechPickerOpen] = useState(false)
-  // Technicians first — they do the ground work; office staff stay selectable.
-  const techSorted = [...employees].sort(
-    (a, b) => Number(b.is_technician ?? false) - Number(a.is_technician ?? false),
-  )
   const isOutbound = call.direction === 'outbound'
   return (
     <div className="flex flex-col gap-5">
@@ -262,38 +253,9 @@ function ActionsTab({
             <div className="flex gap-2.5">
               <PrimaryAction icon={CalendarPlus} label="Termin erstellen" tone="green" onClick={onAppointment} />
               <PrimaryAction icon={Receipt} label="Kostenvoranschlag" tone="money" onClick={onKva} disabled={!onKva} />
-              <PrimaryAction
-                icon={UserPlus}
-                label="Zuweisung ergänzen"
-                tone="steel"
-                onClick={() => setTechPickerOpen((o) => !o)}
-                disabled={!onAssignTechnician || (!inquiry && !hasAppointment)}
-              />
             </div>
-            {techPickerOpen && onAssignTechnician && (
-              <div className="mt-2.5 rounded-xl border border-info/30 bg-info-bg/40 p-3">
-                <div className="mb-2 text-xs font-semibold text-body">
-                  Techniker/Monteur zuweisen — {hasAppointment ? 'wird dem Termin dieses Anrufs zugewiesen' : 'wird der Anfrage zugewiesen'} (sichtbar in Kalender &amp; Plantafel)
-                </div>
-                <div className="flex flex-col gap-1">
-                  {techSorted.length === 0 && <span className="text-sm text-faint">Keine Mitarbeiter vorhanden.</span>}
-                  {techSorted.map((e) => (
-                    <button
-                      key={e.id}
-                      onClick={() => {
-                        onAssignTechnician(e.id)
-                        setTechPickerOpen(false)
-                      }}
-                      disabled={busy}
-                      className="flex items-center justify-between rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm text-text hover:bg-alt disabled:opacity-50"
-                    >
-                      <span>{e.display_name ?? '(ohne Name)'}</span>
-                      {e.is_technician && <Tag variant="info">Techniker</Tag>}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Techniker-Einsatz: lebt am bestätigten Termin (Kalender →
+                Termin-Details → „Techniker einsetzen“), nicht am Anrufprotokoll. */}
           </div>
         </>
       )}
@@ -521,14 +483,12 @@ export function Workspace({
   timeline,
   timelineLoading,
   appointmentSlot,
-  hasAppointment,
   onStatus,
   onDelete,
   onAssign,
   onEdit,
   onAppointment,
   onKva,
-  onAssignTechnician,
   onOpenCustomer,
 }: {
   call: CallDetailData
@@ -541,14 +501,12 @@ export function Workspace({
   timeline: TimelineEvent[]
   timelineLoading: boolean
   appointmentSlot?: ReactNode
-  hasAppointment?: boolean
   onStatus: (s: string) => void
   onDelete: () => void
   onAssign: (id: string | null) => void
   onEdit: () => void
   onAppointment: () => void
   onKva?: () => void
-  onAssignTechnician?: (employeeId: string) => void
   onOpenCustomer: () => void
 }) {
   const status = inquiry?.status ?? 'open'
@@ -628,14 +586,12 @@ export function Workspace({
             status={status}
             busy={busy}
             appointmentSlot={appointmentSlot}
-            hasAppointment={hasAppointment}
             onStatus={onStatus}
             onDelete={onDelete}
             onAssign={onAssign}
             onEdit={onEdit}
             onAppointment={onAppointment}
             onKva={onKva}
-            onAssignTechnician={onAssignTechnician}
           />
         )}
         {tab === 'details' && <DetailsTab call={call} onOpenCustomer={onOpenCustomer} />}

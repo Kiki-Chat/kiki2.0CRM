@@ -41,6 +41,7 @@ const RufumleitungGuidePage = lazy(() =>
   import('./pages/RufumleitungGuidePage').then((m) => ({ default: m.RufumleitungGuidePage })),
 )
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const JobLinkPage = lazy(() => import('./pages/JobLinkPage').then((m) => ({ default: m.JobLinkPage })))
 
 export default function App() {
   return (
@@ -55,6 +56,9 @@ export default function App() {
           {/* Employee invite / password-recovery landing (Wave 2) — public: the
               recovery token in the URL establishes the session for setting a pw. */}
           <Route path="/set-password" element={<SetPasswordPage />} />
+          {/* Techniker-Einsatzlink — public: the unguessable token in the URL is
+              the credential; the technician has no portal login. */}
+          <Route path="/job/:token" element={<JobLinkPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<DashboardPage />} />
