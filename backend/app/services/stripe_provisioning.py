@@ -130,7 +130,12 @@ def create_checkout_session(
             cancel_url=cancel_url,
             automatic_tax={"enabled": True},
             customer_update={"address": "auto", "name": "auto"},
-            billing_address_collection="auto",
+            # REQUIRED (not auto): German invoicing needs the full billing
+            # address on file — Stripe must collect line1/PLZ/city, not just
+            # infer the country for VAT. Stored on the customer → appears on
+            # every invoice and drives the exact-rate tax calculation.
+            billing_address_collection="required",
+            tax_id_collection={"enabled": True},
             allow_promotion_codes=True,
         ),
     )

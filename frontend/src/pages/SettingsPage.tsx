@@ -707,6 +707,9 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                   {inv.hosted_invoice_url && (
                     <a href={inv.hosted_invoice_url} target="_blank" rel="noreferrer" className="font-medium text-green-deep hover:underline">Ansehen</a>
                   )}
+                  {inv.invoice_pdf && (
+                    <a href={inv.invoice_pdf} target="_blank" rel="noreferrer" className="font-medium text-green-deep hover:underline">PDF</a>
+                  )}
                 </div>
               </div>
             ))}

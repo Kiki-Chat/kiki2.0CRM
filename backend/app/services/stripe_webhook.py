@@ -150,16 +150,32 @@ def _derive_plan(sub: dict) -> tuple[str | None, int | None]:
     return None, None
 
 
+def _sub_period(sub: dict) -> tuple[int | None, int | None]:
+    """Current period (start, end) as unix ts. The 2025-03-31.basil API moved
+    current_period_* OFF the subscription object ONTO its items — webhook
+    payloads now only carry them on items.data[0]. Read top-level first (older
+    versions / SDK back-fill), fall back to the first item."""
+    start = sub.get("current_period_start")
+    end = sub.get("current_period_end")
+    if start is None or end is None:
+        items = (sub.get("items") or {}).get("data") or []
+        if items:
+            start = start if start is not None else items[0].get("current_period_start")
+            end = end if end is not None else items[0].get("current_period_end")
+    return start, end
+
+
 def _handle_subscription(db, sub: dict) -> str:
     org = _org_by_customer(db, sub.get("customer"))
     if not org:
         return f"no linked org for customer {sub.get('customer')}"
+    p_start, p_end = _sub_period(sub)
     update = {
         "billing_subscription_id": sub.get("id"),
         "billing_status": sub.get("status"),
         "billing_subscription_application": sub.get("application"),
-        "billing_period_start": _ts(sub.get("current_period_start")),
-        "billing_period_end": _ts(sub.get("current_period_end")),
+        "billing_period_start": _ts(p_start),
+        "billing_period_end": _ts(p_end),
         "billing_last_sync_at": _now(),
     }
     title, minutes = _derive_plan(sub)
