@@ -106,12 +106,25 @@ def test_validate_date_params_rejects_malformed():
 
 
 # ─── prod config fail-fast ───────────────────────────────────────────────────
+# A real Settings always carries the stripe_* fields the go-live guards read
+# (added in 653d9fc). These minimal fixtures must mirror that or the guards
+# AttributeError before the assertion runs. _STRIPE_OFF = billing fully off, so
+# it isolates the auth/DB guards under test without tripping the stripe guards.
+_STRIPE_OFF = {
+    "stripe_secret_key": "sk_test_x",
+    "stripe_webhook_secret": "",
+    "stripe_billing_enabled": False,
+    "stripe_usage_reporting_enabled": False,
+}
+
+
 def test_validate_runtime_config_flags_missing_secret_in_production():
     cfg = SimpleNamespace(
         is_production=True,
         master_webhook_secret="",
         supabase_url="https://x.supabase.co",
         supabase_service_role_key="svc",
+        **_STRIPE_OFF,
     )
     problems = validate_runtime_config(cfg)
     assert any("MASTER_WEBHOOK_SECRET" in p for p in problems)
@@ -123,6 +136,7 @@ def test_validate_runtime_config_flags_missing_db_in_production():
         master_webhook_secret="strong-secret",
         supabase_url="",
         supabase_service_role_key="",
+        **_STRIPE_OFF,
     )
     problems = validate_runtime_config(cfg)
     assert any("SUPABASE" in p for p in problems)
@@ -134,8 +148,41 @@ def test_validate_runtime_config_silent_in_dev():
         master_webhook_secret="",
         supabase_url="",
         supabase_service_role_key="",
+        **_STRIPE_OFF,
     )
     assert validate_runtime_config(cfg) == []  # dev only warns, never blocks
+
+
+def test_validate_runtime_config_flags_live_key_without_webhook_secret():
+    # LIVE Stripe key but no webhook secret → fatal (subscription sync unverifiable).
+    cfg = SimpleNamespace(
+        is_production=False,
+        master_webhook_secret="x",
+        supabase_url="https://x.supabase.co",
+        supabase_service_role_key="svc",
+        stripe_secret_key="sk_live_abc",
+        stripe_webhook_secret="",
+        stripe_billing_enabled=True,
+        stripe_usage_reporting_enabled=False,
+    )
+    problems = validate_runtime_config(cfg)
+    assert any("STRIPE_WEBHOOK_SECRET" in p for p in problems)
+
+
+def test_validate_runtime_config_flags_usage_reporting_without_billing():
+    # Usage reporting on while billing off → fatal misconfiguration.
+    cfg = SimpleNamespace(
+        is_production=False,
+        master_webhook_secret="x",
+        supabase_url="https://x.supabase.co",
+        supabase_service_role_key="svc",
+        stripe_secret_key="sk_test_x",
+        stripe_webhook_secret="",
+        stripe_billing_enabled=False,
+        stripe_usage_reporting_enabled=True,
+    )
+    problems = validate_runtime_config(cfg)
+    assert any("STRIPE_USAGE_REPORTING_ENABLED" in p for p in problems)
 
 
 # ─── book_appointment atomicity (orphan-inquiry rollback) ────────────────────
