@@ -10,6 +10,7 @@ email never blocks the in-app notification; the row's status records the outcome
 
 from __future__ import annotations
 
+import html as _html
 import logging
 from datetime import datetime, timezone
 
@@ -17,6 +18,11 @@ from app.db.supabase_client import get_service_client
 from app.services.common import now_berlin
 
 log = logging.getLogger(__name__)
+
+# HeyKiki support address — the biller's contact on billing emails (these are
+# HeyKiki→customer, unlike white-labeled org→customer invoice/KVA mails).
+BILLING_FROM_NAME = "HeyKiki"
+BILLING_CONTACT = "info.kikichat@gmail.com"
 
 
 def _now() -> str:
@@ -76,11 +82,24 @@ def _maybe_dispatch_email(nid, org_id, ntype, title, body) -> None:
             status = "recorded"  # no org contact address → in-app only
             return
         from app.services.email_send import send_email
+        from app.services.email_templates import message_to_html, render_email
 
+        # Same branded shell as the Invoice/KVA emails (green-gradient header +
+        # footer), with a title heading then the message body. Branded HeyKiki —
+        # these are HeyKiki billing the customer, not the org's own customer mail.
+        heading = (
+            f'<h2 style="margin:0 0 14px 0;color:#03423A;font-size:18px;font-weight:600;'
+            f"font-family:'Segoe UI',Tahoma,Geneva,Verdana,Arial,sans-serif;\">{_html.escape(title)}</h2>"
+        )
+        body_html = render_email(
+            company_name=BILLING_FROM_NAME,
+            body_html=heading + message_to_html(body or title),
+            contact_email=BILLING_CONTACT,
+        )
         send_email(
             org_id=org_id, to_email=to,
             subject=f"HeyKiki: {title}",
-            body_html=f"<p>{body or title}</p>",
+            body_html=body_html,
             body_text=body or title,
         )
         status = "sent"
