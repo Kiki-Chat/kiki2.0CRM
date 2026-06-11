@@ -111,14 +111,19 @@ def _sub(status="trialing", customer="cus_1"):
 
 
 def test_checkout_completed_links_subscription(monkeypatch):
-    db = FakeDB(canned={"organizations": [{"id": "o1", "stripe_customer_id": "cus_1"}]})
+    db = FakeDB(canned={"organizations": [{"id": "o1", "stripe_customer_id": "cus_1"}]},
+                unique={"billing_notifications": "dedup_key"})
     monkeypatch.setattr(sw, "get_service_client", lambda: db)
+    monkeypatch.setattr(bn, "get_service_client", lambda: db)
     monkeypatch.setattr(sw.stripe.Subscription, "retrieve", lambda sid, **k: _sub())
     sw._handle_checkout_completed(db, {"id": "cs_1", "subscription": "sub_1", "customer": "cus_1"})
     upd = db.updates_to("organizations")
     assert upd and upd[-1]["billing_status"] == "trialing"
     assert upd[-1]["billing_plan_title"] == "Kiki Solo"
     assert upd[-1]["billing_quota_minutes"] == 99
+    # Our welcome email fires once on checkout (Stripe owns receipt/invoice).
+    acts = [i for i in db.inserts_to("billing_notifications") if i["type"] == "subscription_activated"]
+    assert len(acts) == 1 and acts[0]["dedup_key"] == "subscription_activated:sub_1"
 
 
 def test_trial_will_end_syncs_and_notifies(monkeypatch):

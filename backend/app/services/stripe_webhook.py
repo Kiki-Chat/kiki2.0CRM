@@ -243,6 +243,17 @@ def _handle_checkout_completed(db, session: dict) -> str:
         try:
             sub = stripe.Subscription.retrieve(sub_id, expand=["items.data.price"])
             note = _handle_subscription(db, sub)
+            # OUR welcome email (Brevo) — Stripe owns the receipt + invoice email.
+            # Best-effort + deduped per subscription, so it never blocks linking.
+            try:
+                from app.services.billing_notifications import notify_subscription_activated
+
+                org = _org_by_customer(db, sub.get("customer"))
+                title, _ = _derive_plan(sub)
+                if org:
+                    notify_subscription_activated(org["id"], title, sub_id)
+            except Exception:  # noqa: BLE001
+                pass
         except Exception as exc:  # noqa: BLE001
             note = f"sub sync failed: {exc}"
     try:

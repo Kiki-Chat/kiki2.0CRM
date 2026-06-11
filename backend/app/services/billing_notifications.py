@@ -105,6 +105,22 @@ def notify_trial_will_end(org_id: str) -> None:
     )
 
 
+def notify_subscription_activated(org_id: str, plan_title: str | None, subscription_id: str | None) -> None:
+    """Welcome / subscription-confirmation — OUR email (Brevo), distinct from
+    Stripe's payment receipt + invoice. Deduped per subscription so a re-delivered
+    checkout webhook can't double-send."""
+    plan = plan_title or "Ihr Tarif"
+    record_notification(
+        org_id, "subscription_activated",
+        title="Abonnement aktiviert",
+        body=f"Ihr Abonnement „{plan}“ ist aktiv. Vielen Dank! Ihre KI-Sekretärin läuft "
+        "ohne Unterbrechung weiter. Rechnungen und Zahlungsbeleg finden Sie in Ihrem "
+        "Konto unter Einstellungen → Abrechnung. Eine Kündigung ist nur per E-Mail an "
+        "info.kikichat@gmail.com oder telefonisch möglich.",
+        dedup_key=f"subscription_activated:{subscription_id or org_id}",
+    )
+
+
 def notify_payment_failed(org_id: str) -> None:
     record_notification(
         org_id, "payment_failed",
