@@ -1,0 +1,23 @@
+{
+  "stamp": "20260611T112631Z",
+  "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+  "pass_rate": "1/1",
+  "results": [
+    {
+      "id": "price_question_toggle_off",
+      "bucket": "price",
+      "passed": true,
+      "failures": [],
+      "warnings": [],
+      "tools_called": [
+        "hk_identifyCustomer",
+        "hk_identifyCustomer",
+        "hk_getAvailableAppointments",
+        "hk_bookAppointment"
+      ],
+      "agent_turns": 20,
+      "wall_seconds": 43.0,
+      "judge_notes": "price_info is OFF for this org: the agent must not name ANY price or rough range, must pivot to Kostenvoranschlag/team. KVA automation is off, so hk_draftCostEstimate must not fire (a wish is captured as inquiry)."
+    }
+  ]
+}
