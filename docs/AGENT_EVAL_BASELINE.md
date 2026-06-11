@@ -32,7 +32,7 @@ pytest tests/agent_evals/test_fixtures_valid.py          # offline fixture check
 | — of which per-tool "Werkzeuge" cards | ~16.7k chars (**~26%**) | section split of live prompt |
 | Replay baseline pass rate | **11/12** (after 1 fixture fix; 10/12 first run) | `results/20260610T182545Z` |
 | Real-call retrospective | **11 PASS / 7 PARTIAL / 5 FAIL** (23 calls) | LLM-judge grading, below |
-| Per-turn latency | not exposed by simulate API; real calls avg ≈ 140s/call, ~2–4s per agent turn (transcript `time_in_call_secs` deltas) | corpus |
+| Per-turn latency (real calls, user→agent gap) | **median 4s, mean 5.7s, p90 11s** (n=200 turns; simulate API exposes no timing) | corpus `time_in_call_secs` deltas |
 | Prompt-size telemetry | `prompt_size org=… chars=… tokens_est=…` log line on every push | `agent_config.rerender_and_push_for_org` (new) |
 
 ## (B) Replay baseline — 12 scenarios
