@@ -935,6 +935,9 @@ async def generate_conversation_logic(
     saved — the UI shows the generated rules in the editor and the user saves
     via the normal PATCH (same review/confirm path as manual edits)."""
     _require_admin(user)
+    # LLM-spend endpoint — bound per org (audit 2026-06-11).
+    from app.services.ratelimit import enforce_rate_limit
+    enforce_rate_limit("rule_generate", user.org_id, max_calls=6, per_seconds=60)
     description = (payload.description or "").strip()
     if len(description) < 10:
         raise HTTPException(status_code=422, detail="Bitte beschreiben Sie Ihre Regeln etwas ausführlicher.")

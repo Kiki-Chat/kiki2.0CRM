@@ -98,6 +98,21 @@ export function NotdienstBadge({ small = false }: { small?: boolean }) {
   )
 }
 
+// ─── Phantom-capture badge — agent claimed "aufgenommen" but no tool ran ────
+export function PhantomCaptureBadge({ small = false }: { small?: boolean }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex flex-shrink-0 items-center gap-1 rounded-md bg-orange-100 font-bold text-orange-700',
+        small ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10.5px]',
+      )}
+      title="Die KI hat dem Anrufer zugesagt, das Anliegen aufzunehmen — es wurde aber kein Eintrag erstellt. Bitte Transkript prüfen und ggf. manuell anlegen."
+    >
+      <AlertTriangle size={small ? 10 : 11} /> Anliegen prüfen
+    </span>
+  )
+}
+
 export function MoodPill({ mood }: { mood: string }) {
   const m =
     /positiv/i.test(mood)

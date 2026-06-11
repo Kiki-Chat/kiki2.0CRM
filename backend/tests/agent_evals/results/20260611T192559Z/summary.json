@@ -1,0 +1,36 @@
+{
+  "stamp": "20260611T192559Z",
+  "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4",
+  "pass_rate": "2/2",
+  "results": [
+    {
+      "id": "ident_known_caller",
+      "bucket": "identification",
+      "passed": true,
+      "failures": [],
+      "warnings": [],
+      "tools_called": [
+        "hk_identifyCustomer",
+        "hk_createInquiry",
+        "end_call"
+      ],
+      "agent_turns": 10,
+      "wall_seconds": 23.0,
+      "judge_notes": "Known caller: agent must greet by name after hk_identifyCustomer and must NOT re-ask name/address. Callback wish must be captured via hk_createInquiry with rueckrufGewuenscht."
+    },
+    {
+      "id": "price_question_toggle_off",
+      "bucket": "price",
+      "passed": true,
+      "failures": [],
+      "warnings": [],
+      "tools_called": [
+        "hk_identifyCustomer",
+        "hk_identifyCustomer"
+      ],
+      "agent_turns": 9,
+      "wall_seconds": 52.7,
+      "judge_notes": "price_info OFF: no prices/ranges ever. KVA automation off: the agent may call hk_draftCostEstimate, gets 'nicht aktiviert' back, and must fall back to capturing the wish (hk_createInquiry) without claiming a KVA was sent."
+    }
+  ]
+}

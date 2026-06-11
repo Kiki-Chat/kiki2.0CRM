@@ -19,7 +19,7 @@ import {
 import { cn } from '../../lib/utils'
 import { useMe } from '../../lib/useMe'
 import { Tag } from '../../components/ui/Tag'
-import { Avatar, AssignDropdown, DirBadge, NotdienstBadge, StatusPill } from './atoms'
+import { Avatar, AssignDropdown, DirBadge, NotdienstBadge, PhantomCaptureBadge, StatusPill } from './atoms'
 import {
   ACTION_KIND_LABEL,
   type ActionItem,
@@ -123,6 +123,7 @@ export function CallRow({
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <StatusPill status={call.inquiry_status} dot />
           {call.emergency_flag && <NotdienstBadge small />}
+          {call.data_collection?.phantom_capture && <PhantomCaptureBadge small />}
         </div>
         <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-faint">
           <span>{fmtTime(call.started_at)}</span>

@@ -7,6 +7,7 @@ Returns a debug-friendly result envelope per conversation (always a list).
 """
 
 import logging
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -169,6 +170,38 @@ def _trim_transcript(transcript) -> list[dict]:
 def _data_collection_values(analysis: dict) -> dict:
     results = (analysis or {}).get("data_collection_results") or {}
     return {k: v.get("value") for k, v in results.items() if isinstance(v, dict)}
+
+
+# ─── phantom-capture detector (eval 2026-06-11: 3/23 real calls promised
+# "Anliegen aufgenommen" with NO write-tool call — the request silently
+# evaporated). Conservative claim patterns on purpose: generic reassurances
+# ("wir melden uns") are excluded, only explicit capture/forward claims count.
+_CAPTURE_CLAIM_RE = re.compile(
+    r"anliegen aufgenommen|habe alles aufgenommen|nehme ihr anliegen"
+    r"|ich notiere|notiert\b|geben? (wir |das |es )+(so )?weiter"
+    r"|leite .{0,30}weiter|weitergeleitet",
+    re.IGNORECASE,
+)
+_WRITE_TOOLS = {
+    "hk_createInquiry", "hk_bookAppointment", "hk_changeAppointment",
+    "hk_cancelAppointment", "hk_updateCustomerData", "hk_draftCostEstimate",
+    "hk_transferCall", "transfer_to_number",
+}
+
+
+def _phantom_capture(trimmed: list[dict]) -> bool:
+    """True when the agent CLAIMED the caller's concern was captured/forwarded
+    but no write tool was even attempted in the call. Stored as
+    data_collection.phantom_capture (no schema change) and surfaced as a badge
+    in the call log so staff re-check the call instead of trusting the claim."""
+    claimed = wrote = False
+    for t in trimmed:
+        if t.get("role") == "agent" and _CAPTURE_CLAIM_RE.search(t.get("message") or ""):
+            claimed = True
+        for name in t.get("tool_calls") or []:
+            if name in _WRITE_TOOLS:
+                wrote = True
+    return claimed and not wrote
 
 
 def _result(
@@ -337,6 +370,17 @@ def _process_one(data: dict | None, fmt: str) -> dict:
         )
         anfrage_matched = bool(inq)
 
+    trimmed = _trim_transcript(transcript)
+    dc = _data_collection_values(analysis)
+    if _phantom_capture(trimmed):
+        # Stored inside the existing jsonb (no DDL) — the call-log badge and any
+        # later analytics read it from here.
+        dc["phantom_capture"] = True
+        logger.warning(
+            "phantom capture detected (org %s, conv %s): agent claimed the "
+            "concern was recorded but no write tool was called",
+            org_id, conversation_id,
+        )
     row = {
         "org_id": org_id,
         "elevenlabs_conversation_id": conversation_id,
@@ -347,10 +391,10 @@ def _process_one(data: dict | None, fmt: str) -> dict:
         "started_at": started_at,
         "duration_seconds": metadata.get("call_duration_secs"),
         "status": "completed",
-        "transcript": _trim_transcript(transcript),
+        "transcript": trimmed,
         "summary": analysis.get("transcript_summary"),
         "summary_title": analysis.get("call_summary_title"),
-        "data_collection": _data_collection_values(analysis),
+        "data_collection": dc,
     }
     # Idempotent on conversation_id (unique). Update on conflict, no duplicates.
     upserted = (

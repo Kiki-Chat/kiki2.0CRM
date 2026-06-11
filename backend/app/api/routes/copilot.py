@@ -20,6 +20,7 @@ from app.db.supabase_client import get_service_client
 from app.services.ai import client as ai_client
 from app.services.copilot.orchestrator import run_turn
 from app.services.copilot.tools import get_tool
+from app.services.ratelimit import enforce_rate_limit
 
 router = APIRouter(prefix="/api/copilot", tags=["copilot"])
 
@@ -108,6 +109,9 @@ def _persist_turn(user: CurrentUser, conversation_id: str | None, message: str, 
 @router.post("/chat")
 async def chat(payload: ChatRequest, user: CurrentUser = Depends(require_org)) -> dict:
     _require_ai()
+    # Every turn is OpenAI spend — bound it per org (audit 2026-06-11: no rate
+    # limiting anywhere). 20 turns/min is far above real chat usage.
+    enforce_rate_limit("copilot_chat", user.org_id, max_calls=20, per_seconds=60)
     if not (payload.message or "").strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nachricht ist leer.")
     result = await run_in_threadpool(run_turn, user, payload.message, history=payload.history)

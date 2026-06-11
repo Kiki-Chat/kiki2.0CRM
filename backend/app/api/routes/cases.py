@@ -35,7 +35,22 @@ def _customer_name(client, org_id: str, customer_id: str) -> str | None:
 async def propose_cases(customer_id: str, user: CurrentUser = Depends(require_org)) -> dict:
     """Run the LLM matchmaker for one customer and return the proposed grouping
     (cases + confidence + reason). Writes nothing."""
+    # LLM-spend endpoint — bound per org in addition to the monthly cap below.
+    from app.services.ratelimit import enforce_rate_limit
+    enforce_rate_limit("cases_propose", user.org_id, max_calls=6, per_seconds=60)
+
     def _run():
+        # Monthly AI cost cap — the offline runners (apply_run/dryrun) enforce it,
+        # but this live endpoint skipped it (audit 2026-06-11): any org user could
+        # loop the route into unmetered gpt-4o spend. Same ledger, same cap.
+        from app.services.ai import usage as ai_usage
+
+        if not ai_usage.within_cap(user.org_id):
+            raise HTTPException(
+                status_code=429,
+                detail="Das monatliche KI-Budget Ihrer Organisation ist erreicht — "
+                "die automatische Vorgangs-Gruppierung ist bis zum Monatswechsel pausiert.",
+            )
         client = get_service_client()
         validate_fk_in_org(client, table="customers", fk_id=customer_id, org_id=user.org_id, label="Kunde")
         name = _customer_name(client, user.org_id, customer_id)

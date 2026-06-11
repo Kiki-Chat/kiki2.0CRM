@@ -18,7 +18,9 @@ export interface CallListItem {
   direction: string | null
   duration_seconds: number | null
   started_at: string | null
-  data_collection: Record<string, string> | null
+  // phantom_capture: backend post-call detector — the agent claimed the concern
+  // was recorded but no write tool ran; the badge tells staff to re-check.
+  data_collection: (Record<string, string> & { phantom_capture?: boolean }) | null
   customer_id: string | null
   read_at: string | null
   created_at: string | null

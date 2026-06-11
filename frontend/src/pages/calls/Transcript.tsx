@@ -19,7 +19,7 @@ import kikiAvatar from '../../assets/kiki-avatar.png'
 import { apiBlobUrl } from '../../lib/api'
 import { cn, initials } from '../../lib/utils'
 import { GhostBtn } from './ui'
-import { DirBadge, NotdienstBadge } from './atoms'
+import { DirBadge, NotdienstBadge, PhantomCaptureBadge } from './atoms'
 import { type CallDetailData, displayName, fmtDuration, fmtTime } from './shared'
 
 const clock = (s: number) =>
@@ -133,6 +133,7 @@ export function Transcript({
           <div className="flex items-center gap-2">
             <span className="truncate text-base font-extrabold text-text">{displayName(call)}</span>
             {call.emergency_flag && <NotdienstBadge small />}
+            {call.data_collection?.phantom_capture && <PhantomCaptureBadge small />}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
             <span className="font-semibold">Anruf-Transkript</span>
