@@ -703,15 +703,28 @@ def run_due_reschedule_expiry(
       • L3 (auto-confirm) → automatic: drop the stale proposal, and if the customer
         had abandoned the old slot (replace_intent) cancel it (reversible) + notify.
     Driven by the same external sweep as run_due_outbound; idempotent (clears the
-    deadline so a second tick is a no-op)."""
+    deadline so a second tick is a no-op).
+
+    Hardening (bug-#3 follow-ups):
+      • The cleanup UPDATE is CONDITIONAL on the proposal still being pending, so
+        if an admin approved/declined in the gap between this sweep's SELECT and
+        its UPDATE, the UPDATE matches 0 rows and we neither cancel nor notify —
+        no more racing a human decision into a wrong-state customer call.
+      • L3 auto-resolve only fires inside the org's outbound time window/weekdays,
+        so the cancellation call never goes out at night (rows outside the window
+        stay pending and resolve on the next in-window tick).
+      • A replace-cancel deletes the pushed Google event too, like /cancel."""
     from app.services.appointments import _get_kiki_level
     from app.services.appointment_notify import notify_appointment_outcome
+    from app.services import calendar_sync
 
     now = now or datetime.now(timezone.utc)
+    now_local = now.astimezone(_BERLIN)
+    weekday_key = _WEEKDAY_KEYS[now_local.weekday()]
     db = get_service_client()
     q = (
         db.table("appointments")
-        .select("id, org_id, reschedule_replace_intent")
+        .select("id, org_id, reschedule_replace_intent, google_event_id")
         .not_.is_("customer_proposed_at", "null")
         .not_.is_("reschedule_expires_at", "null")
         .lt("reschedule_expires_at", now.astimezone(timezone.utc).isoformat())
@@ -722,7 +735,28 @@ def run_due_reschedule_expiry(
         q = q.eq("org_id", only_org_id)
     rows = q.execute().data or []
 
-    out: dict = {"due": len(rows), "flagged": 0, "expired": 0, "cancelled": 0, "errors": []}
+    out: dict = {"due": len(rows), "flagged": 0, "expired": 0, "cancelled": 0,
+                 "deferred": 0, "raced": 0, "errors": []}
+    window_cache: dict = {}
+
+    def _in_outbound_window(oid: str) -> bool:
+        if oid not in window_cache:
+            cfg = (
+                db.table("agent_configs")
+                .select("outbound_time_from, outbound_time_to, outbound_weekdays")
+                .eq("org_id", oid).limit(1).execute().data or [{}]
+            )[0]
+            window_cache[oid] = cfg
+        cfg = window_cache[oid]
+        wkdays = cfg.get("outbound_weekdays") or []
+        if wkdays and weekday_key not in wkdays:
+            return False
+        return _within_window(
+            now_local.time(),
+            _parse_clock(cfg.get("outbound_time_from")),
+            _parse_clock(cfg.get("outbound_time_to")),
+        )
+
     for r in rows:
         org_id, appt_id = r.get("org_id"), r.get("id")
         if not (org_id and appt_id):
@@ -737,6 +771,11 @@ def run_due_reschedule_expiry(
             if replace:
                 out["cancelled"] += 1
             continue
+        # B5: an L3 auto-cancel places a real call — only inside the outbound
+        # window. Outside it, leave the row pending for the next in-window tick.
+        if replace and not _in_outbound_window(org_id):
+            out["deferred"] += 1
+            continue
         payload: dict = {
             "customer_proposed_start_time": None,
             "customer_proposed_end_time": None,
@@ -748,11 +787,33 @@ def run_due_reschedule_expiry(
         if replace:
             payload["status"] = "cancelled"
             payload["cancelled_at"] = now.astimezone(timezone.utc).isoformat()
+            payload["google_event_id"] = None
         try:
-            db.table("appointments").update(payload).eq("org_id", org_id).eq("id", appt_id).execute()
+            # B1: conditional UPDATE — only act while the proposal is STILL pending.
+            # If a human resolved it after our SELECT, these filters match 0 rows.
+            updated = (
+                db.table("appointments")
+                .update(payload)
+                .eq("org_id", org_id)
+                .eq("id", appt_id)
+                .not_.is_("customer_proposed_at", "null")
+                .not_.is_("reschedule_expires_at", "null")
+                .neq("status", "cancelled")
+                .execute()
+                .data
+            )
+            if not updated:
+                out["raced"] += 1  # resolved by a human in the gap — skip silently
+                continue
             out["expired"] += 1
             if replace:
                 out["cancelled"] += 1
+                # B4: free the slot on Google too (best-effort).
+                if r.get("google_event_id"):
+                    try:
+                        calendar_sync.delete_google_event(org_id, r["google_event_id"])
+                    except Exception:  # pragma: no cover — never blocks cleanup
+                        pass
                 try:
                     notify_appointment_outcome(org_id, appt_id, "cancel")
                 except Exception:  # pragma: no cover — notify must not block cleanup

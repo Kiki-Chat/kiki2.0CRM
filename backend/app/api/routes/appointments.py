@@ -20,6 +20,20 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_past(iso_ts: str | None) -> bool:
+    """True if the ISO timestamp parses to a moment already elapsed. Unparseable
+    or empty → False (don't block on a value we can't read)."""
+    if not iso_ts:
+        return False
+    try:
+        dt = datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt <= datetime.now(timezone.utc)
+    except (ValueError, TypeError):
+        return False
+
+
 def _get_appointment(org_id: str, appointment_id: str) -> dict | None:
     """Tenant-scoped fetch — every action route uses this before mutating so
     cross-org IDs return 404 instead of silently no-op'ing."""
@@ -483,7 +497,8 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
             "cancelled_at, rescheduled_at, "
             "alternative_start_time, alternative_end_time, alternative_note, "
             "alternative_proposed_at, customer_proposed_start_time, "
-            "customer_proposed_end_time, customer_proposed_at, customer_proposal_source"
+            "customer_proposed_end_time, customer_proposed_at, customer_proposal_source, "
+            "reschedule_replace_intent"
         )
         .eq("org_id", org_id)
         .eq("status", "pending")
@@ -511,7 +526,8 @@ def _pending_for_call(org_id: str, call_id: str) -> dict | None:
                 "assigned_employee_id, confirmed_at, rejected_at, rejection_reason, "
                 "alternative_start_time, alternative_end_time, alternative_note, "
                 "alternative_proposed_at, customer_proposed_start_time, "
-                "customer_proposed_end_time, customer_proposed_at, customer_proposal_source"
+                "customer_proposed_end_time, customer_proposed_at, customer_proposal_source, "
+                "reschedule_replace_intent"
             )
             .eq("org_id", org_id)
             .in_("status", ["confirmed", "cancelled"])
@@ -592,11 +608,29 @@ def _approve_proposal(org_id: str, appointment_id: str) -> dict | None:
     appt = _get_appointment(org_id, appointment_id)
     if not appt:
         return None
+    # Status gate (bug #3): never resurrect a closed appointment. A cancelled/
+    # rejected row can still carry a stale customer_proposed_* (e.g. cancelled
+    # while a proposal was pending); approving it would flip it back to
+    # 'confirmed' AND fire a confirmation call for an appointment the business
+    # already killed. The UI also hides the button on done rows — this is the
+    # server-side backstop.
+    if (appt.get("status") or "") in ("cancelled", "rejected"):
+        raise HTTPException(
+            status_code=409,
+            detail="Dieser Termin ist bereits abgeschlossen und kann nicht mehr genehmigt werden.",
+        )
     new_start = appt.get("customer_proposed_start_time")
     if not new_start:
         raise HTTPException(
             status_code=409,
             detail="Kein Kundenvorschlag vorhanden, der genehmigt werden könnte.",
+        )
+    # Don't confirm (and call the customer about) a slot that is already in the
+    # past — a stale proposal sitting unactioned past its time.
+    if _is_past(new_start):
+        raise HTTPException(
+            status_code=409,
+            detail="Der vorgeschlagene Termin liegt in der Vergangenheit und kann nicht mehr bestätigt werden.",
         )
     updated = (
         get_service_client()
@@ -622,7 +656,21 @@ def _approve_proposal(org_id: str, appointment_id: str) -> dict | None:
         .execute()
         .data
     )
-    return updated[0] if updated else None
+    row = updated[0] if updated else None
+    # Keep Google in sync (bug #4): the slot moved, so the pushed event must move
+    # too — otherwise field staff working off Google show up at the OLD time.
+    # delete_google_event has no events.update primitive (push is insert-only),
+    # so move = delete the old event + re-insert at the new time. Best-effort.
+    if row and appt.get("google_event_id"):
+        try:
+            calendar_sync.delete_google_event(org_id, appt["google_event_id"])
+            get_service_client().table("appointments").update(
+                {"google_event_id": None}
+            ).eq("org_id", org_id).eq("id", appointment_id).execute()
+            calendar_sync.push_crm_event_to_google(org_id, appointment_id)
+        except Exception:  # noqa: BLE001 — Google sync must not block the approval
+            pass
+    return row
 
 
 def _decline_proposal(org_id: str, appointment_id: str) -> dict | None:
@@ -645,6 +693,14 @@ def _decline_proposal(org_id: str, appointment_id: str) -> dict | None:
     if replace_intent:
         payload["status"] = "cancelled"
         payload["cancelled_at"] = _now_iso()
+        # Free the slot on Google too (bug #4) — same contract as _cancel: the
+        # CRM cancel proceeds regardless of the Google result.
+        if appt.get("google_event_id"):
+            try:
+                calendar_sync.delete_google_event(org_id, appt["google_event_id"])
+            except Exception:  # noqa: BLE001 — best-effort, never blocks the cancel
+                pass
+            payload["google_event_id"] = None
     updated = (
         get_service_client()
         .table("appointments")
@@ -791,7 +847,20 @@ def _cancel(org_id: str, appointment_id: str) -> dict | None:
     updated = (
         get_service_client()
         .table("appointments")
-        .update({"status": "cancelled", "google_event_id": None, "cancelled_at": _now_iso()})
+        .update({
+            "status": "cancelled",
+            "google_event_id": None,
+            "cancelled_at": _now_iso(),
+            # Clear any pending reschedule proposal (bug #3): a cancelled row must
+            # NOT keep customer_proposed_* / the safety timer, or the approve
+            # button could reappear and resurrect it.
+            "customer_proposed_start_time": None,
+            "customer_proposed_end_time": None,
+            "customer_proposed_at": None,
+            "customer_proposal_source": None,
+            "reschedule_expires_at": None,
+            "reschedule_replace_intent": None,
+        })
         .eq("org_id", org_id)
         .eq("id", appointment_id)
         .execute()

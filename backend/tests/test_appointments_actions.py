@@ -425,3 +425,64 @@ def test_decline_proposal_replace_intent_cancels_original(monkeypatch):
     assert client._last_update_payload["customer_proposed_at"] is None
     # the route uses this flag to fire the cancellation notification
     assert result.get("_replace_cancelled") is True
+
+
+# ─── bug-#3 hardening: approve status gate + future-slot guard + cancel cleanup ─
+def _future_iso(hours: int = 48) -> str:
+    return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+
+
+def test_approve_proposal_409_when_appointment_cancelled(monkeypatch):
+    """A cancelled appointment carrying a stale proposal must NOT be approvable —
+    approving would resurrect it to 'confirmed' and call the customer about an
+    appointment the business already cancelled (bug #3)."""
+    cancelled_with_stale_prop = {
+        "id": "a", "org_id": "org-1", "status": "cancelled",
+        "customer_proposed_start_time": _future_iso(),
+    }
+    monkeypatch.setattr(
+        appt_routes, "get_service_client",
+        lambda: _FakeClient([[cancelled_with_stale_prop]]),
+    )
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(appt_routes.approve_customer_proposal("a", user=_org_admin_user("org-1")))
+    assert exc.value.status_code == 409
+    assert "abgeschlossen" in exc.value.detail
+
+
+def test_approve_proposal_409_when_proposed_slot_in_past(monkeypatch):
+    """A proposal whose slot has already elapsed cannot be confirmed — otherwise
+    the customer gets a confirmation call for a past appointment (bug #3)."""
+    past = {
+        "id": "a", "org_id": "org-1", "status": "pending",
+        "customer_proposed_start_time": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+    }
+    monkeypatch.setattr(appt_routes, "get_service_client", lambda: _FakeClient([[past]]))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(appt_routes.approve_customer_proposal("a", user=_org_admin_user("org-1")))
+    assert exc.value.status_code == 409
+    assert "Vergangenheit" in exc.value.detail
+
+
+def test_cancel_clears_pending_proposal_fields(monkeypatch):
+    """Cancelling an appointment that still carries a customer proposal must wipe
+    customer_proposed_* and the safety timer, so the approve button can never
+    reappear on a cancelled row (bug #3 defense-in-depth)."""
+    appt = {
+        "id": "a", "org_id": "org-1", "status": "pending", "google_event_id": None,
+        "customer_proposed_start_time": _future_iso(),
+        "customer_proposed_at": "2026-06-11T08:00:00+00:00",
+        "reschedule_expires_at": "2026-06-12T08:00:00+00:00",
+        "reschedule_replace_intent": True,
+    }
+    cancelled = {**appt, "status": "cancelled"}
+    client = _FakeClient([[appt], [cancelled]])
+    monkeypatch.setattr(appt_routes, "get_service_client", lambda: client)
+
+    asyncio.run(appt_routes.cancel_appointment_route("a", user=_org_admin_user("org-1")))
+    upd = client._last_update_payload
+    assert upd["status"] == "cancelled"
+    assert upd["customer_proposed_start_time"] is None
+    assert upd["customer_proposed_at"] is None
+    assert upd["reschedule_expires_at"] is None
+    assert upd["reschedule_replace_intent"] is None

@@ -63,6 +63,9 @@ export interface PendingAppointment {
   customer_proposed_end_time: string | null
   customer_proposed_at: string | null
   customer_proposal_source: string | null
+  // True when the customer abandoned the OLD slot — so declining the proposal
+  // CANCELS the appointment and calls/emails the customer (not a silent discard).
+  reschedule_replace_intent: boolean | null
   // 2-line issue summary from the call (calls.summary) — shown under the date.
   issue_summary: string | null
 }
@@ -615,7 +618,7 @@ export function AppointmentCard({
         {/* Customer counter-proposal (reschedule loop): recorded by the agent on
             the call. Approving applies the slot + fires the confirmation call+email;
             Ablehnen clears it. Takes priority over the "Alternative gesendet" state. */}
-        {customerProposed && (
+        {customerProposed && !isDone && (
           <div className="mt-3 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3">
             <div className="text-xs font-semibold text-amber-700">
               Kunde schlägt einen neuen Termin vor
@@ -625,8 +628,10 @@ export function AppointmentCard({
             </div>
             <p className="text-[11px] text-muted">
               Im Anruf vom Kunden vorgeschlagen. „Genehmigen" verschiebt den Termin
-              und bestätigt ihn dem Kunden (Anruf + E-Mail); „Ablehnen" verwirft den
-              Vorschlag.
+              und bestätigt ihn dem Kunden (Anruf + E-Mail);{' '}
+              {appointment.reschedule_replace_intent
+                ? '„Ablehnen" storniert den Termin und informiert den Kunden (Anruf + E-Mail) — der Kunde wollte den ursprünglichen Termin nicht behalten.'
+                : '„Ablehnen" verwirft nur den Vorschlag; der ursprüngliche Termin bleibt bestehen.'}
             </p>
             <div className="flex flex-wrap gap-1.5 pt-1">
               <button
