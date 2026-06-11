@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity, BadgeEuro, BookOpen, Bot, CalendarClock, Clock, GitBranch,
-  History, ListChecks, Lock, Phone, PhoneOutgoing, RotateCcw, Siren, SlidersHorizontal, Sparkles, Tags, Wrench,
+  History, Lock, Phone, PhoneOutgoing, RotateCcw, Siren, SlidersHorizontal, Sparkles, Tags, Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -27,8 +27,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: 'Konfiguration', items: [
     { slug: 'verhalten', label: 'Verhalten', icon: Sparkles },
     { slug: 'autonomie', label: 'Autonomie', icon: SlidersHorizontal },
-    { slug: 'leitfaden', label: 'Leitfaden', icon: ListChecks },
-    { slug: 'gespraechslogik', label: 'Gesprächslogik', icon: GitBranch },
+    { slug: 'gespraechsablauf', label: 'Gesprächsablauf', icon: GitBranch },
     { slug: 'branche-kontext', label: 'Branche & Kontext', icon: BookOpen },
   ] },
   { label: 'Terminplanung', items: [
@@ -70,8 +69,10 @@ export function KikiZentralePage() {
     onError: (e: Error) => { setRollbackSnap(null); flash(e.message || 'Wiederherstellen fehlgeschlagen.') },
   })
 
-  // Old bookmark/link compatibility: Pflichtfelder became Leitfaden.
-  if (section === 'pflichtfelder') return <Navigate to="/kiki-zentrale/leitfaden" replace />
+  // Old bookmark/link compatibility: Pflichtfelder → Leitfaden → and now both
+  // Leitfaden + Gesprächslogik live on the combined Gesprächsablauf page.
+  if (section === 'pflichtfelder' || section === 'leitfaden' || section === 'gespraechslogik')
+    return <Navigate to="/kiki-zentrale/gespraechsablauf" replace />
   if (!ALL_SLUGS.has(section)) return <Navigate to="/kiki-zentrale/verhalten" replace />
 
   // Kiki-Zentrale is the AI control surface — every mutation is admin-only on the
@@ -192,8 +193,29 @@ function SectionContent({ section, data, flash }: { section: string; data: KzOve
   switch (section) {
     case 'verhalten': return <VerhaltenSection data={data} flash={flash} />
     case 'autonomie': return <AutonomieSection data={data} flash={flash} />
-    case 'leitfaden': return <PflichtfelderSection data={data} flash={flash} />
-    case 'gespraechslogik': return <GespraechslogikSection flash={flash} />
+    case 'gespraechsablauf': return (
+      // ONE page for the whole call flow: the Leitfaden is the DEFAULT path
+      // (ordered fields, the 80% case), the Wenn/Dann rules are the EXCEPTIONS
+      // layered on top (the 20% case) — the combined preview at the bottom
+      // shows exactly how both mesh in the agent prompt.
+      <div className="space-y-8">
+        <div>
+          <h2 className="mb-1 text-lg font-bold text-text">Standard-Ablauf</h2>
+          <p className="mb-3 text-sm text-muted">
+            Diese Punkte fragt Kiki in jedem normalen Gespräch der Reihe nach ab.
+          </p>
+          <PflichtfelderSection data={data} flash={flash} />
+        </div>
+        <div>
+          <h2 className="mb-1 text-lg font-bold text-text">Ausnahmen &amp; Sonderfälle</h2>
+          <p className="mb-3 text-sm text-muted">
+            Wenn/Dann-Regeln, die VOR dem Standard-Ablauf gelten — einfach unten beschreiben,
+            die KI baut die Regeln. Felder aus dem Standard-Ablauf können direkt verwendet werden.
+          </p>
+          <GespraechslogikSection flash={flash} />
+        </div>
+      </div>
+    )
     case 'branche-kontext': return <BrancheKontextSection data={data} flash={flash} />
     case 'geschaeftszeiten': return <GeschaeftszeitenSection />
     case 'terminregeln': return <TerminregelnSection data={data} flash={flash} />

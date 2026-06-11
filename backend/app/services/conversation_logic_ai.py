@@ -47,7 +47,7 @@ Antworte AUSSCHLIESSLICH mit einem JSON-Objekt dieser Form (keine Erklärungen):
 ]}}
 
 Regeln:
-- Aktions-Typen: "ask" (Frage stellen, text nötig), "say" (Hinweis sagen, text nötig), "goto" (target: "schritt_2" = Daten aufnehmen, "schritt_3" = Termin, "abschluss" = Gespräch beenden).
+- Aktions-Typen: "ask" (freie Frage, text nötig), "ask_field" (ein Leitfaden-Feld abfragen: field_key + text=Feldname — IMMER bevorzugen, wenn die gewünschte Frage einem verfügbaren Leitfaden-Feld entspricht, z. B. Name/Telefon/Kundennummer), "say" (Hinweis sagen, text nötig), "goto" (target: "schritt_2" = Daten aufnehmen, "schritt_3" = Termin, "abschluss" = Gespräch beenden).
 - Eine Regel = ein Block mit Wenn/Sonst-wenn/Sonst-Zweigen. Erster Zweig immer "wenn"; "sonst" hat KEINE conditions.
 - Bedingungen sind kurze deutsche Aussagen über den Anrufer/das Gespräch. Sie werden wörtlich hinter "Wenn" eingesetzt — formuliere sie also mit Verb am Ende, z. B. "der Anrufer ein Lieferant ist" (NICHT "der Anrufer ist ein Lieferant").
 - Mehrere Bedingungen in einem Zweig: condition_op "und" oder "oder".
@@ -97,13 +97,26 @@ def _call_model(messages: list[dict]) -> tuple[dict, object]:
 
 
 def generate_logic_from_text(
-    *, org_id: str, user_id: str | None, description: str, existing: dict | None = None
+    *,
+    org_id: str,
+    user_id: str | None,
+    description: str,
+    existing: dict | None = None,
+    fields: list[dict] | None = None,
 ) -> dict:
     """Returns {"logic": <validated tree>, "text": <compiled German preview>}.
 
+    ``fields`` = the org's Leitfaden fields ([{field_key, label}]) so the model
+    can emit ask_field references (shared vocabulary with the guide) instead of
+    re-inventing free-text questions for Name/Telefon/Kundennummer & Co.
     Raises GenerationFailed / AIServiceDisabled with user-facing messages.
     """
     user_msg = f"Beschreibung des Betriebs:\n{description.strip()}"
+    if fields:
+        listing = "\n".join(f'- field_key "{f["field_key"]}": {f["label"]}' for f in fields if f.get("field_key"))
+        user_msg += (
+            "\n\nVerfügbare Leitfaden-Felder (für ask_field; text = Feldname):\n" + listing
+        )
     if existing and (existing.get("blocks") or []):
         user_msg += "\n\nBestehende Regeln (ergänzen/anpassen):\n" + json.dumps(
             existing, ensure_ascii=False

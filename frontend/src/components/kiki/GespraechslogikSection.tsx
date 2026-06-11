@@ -12,13 +12,20 @@ import { cn } from '../../lib/utils'
 import { Card, Field, GroupLabel, inputCls, SaveBar, Toggle, useKikiConfirm } from './shared'
 
 // ─── Tree types (mirror backend/app/schemas/conversation_logic.py) ───────────
-type ActionType = 'ask' | 'say' | 'goto' | 'subrule'
+type ActionType = 'ask' | 'ask_field' | 'say' | 'goto' | 'subrule'
 interface LogicAction {
   id: string
   type: ActionType
   text?: string
+  /** ask_field: reference to a Leitfaden field; text carries the label snapshot. */
+  field_key?: string
   target?: 'schritt_2' | 'schritt_3' | 'abschluss'
   rule?: LogicRule
+}
+/** Leitfaden fields offered in ask_field selects — shared vocabulary with the guide. */
+export interface GuideFieldOption {
+  field_key: string
+  label: string
 }
 interface LogicBranch {
   id: string
@@ -43,11 +50,33 @@ const GOTO_OPTIONS: [string, string][] = [
   ['abschluss', 'Abschluss (Verabschiedung)'],
 ]
 const ACTION_LABEL: Record<ActionType, string> = {
-  ask: 'Frage stellen',
+  ask: 'Freie Frage',
+  ask_field: 'Feld aus Leitfaden',
   say: 'Hinweis / Ansage',
   goto: 'Weiter zu …',
   subrule: 'Unterregel (Wenn/Sonst)',
 }
+
+// Template chips: each prefills the NL textarea with a ready description the
+// user tweaks + generates — the manager's "templates", via the NL pipeline.
+const NL_TEMPLATES: { label: string; text: string }[] = [
+  {
+    label: 'Lieferanten-Weiche',
+    text: 'Wenn ein Lieferant anruft, frag nach der Lieferantennummer und notiere das Anliegen, danach direkt zum Abschluss. Wenn ein Kunde anruft, frag nach der Kundennummer und fahre normal fort.',
+  },
+  {
+    label: 'Notfall-Weiche',
+    text: 'Wenn der Anrufer einen Notfall meldet (z. B. Wasserschaden, Heizungsausfall im Winter), sag, dass wir uns sofort kümmern, und gehe direkt zur Terminvergabe.',
+  },
+  {
+    label: 'Privat / Firma',
+    text: 'Wenn ein Firmenkunde anruft, frag nach dem Firmennamen und der Kundennummer. Wenn ein Privatkunde anruft, frag nach dem Namen und der Adresse.',
+  },
+  {
+    label: 'Bestandskunde zuerst',
+    text: 'Frag als erstes, ob der Anrufer schon Kunde bei uns ist. Wenn ja, frag nach der Kundennummer. Wenn nein, frag nach Name, Adresse und Telefonnummer.',
+  },
+]
 
 const newBranch = (kind: LogicBranch['kind']): LogicBranch => ({
   id: uid(), kind, conditions: kind === 'sonst' ? [] : [''], condition_op: 'und', actions: [],
@@ -67,6 +96,7 @@ function withIds(doc: LogicDoc): LogicDoc {
         id: a.id || uid(),
         type: a.type,
         text: a.text,
+        field_key: a.field_key,
         target: a.target,
         rule: a.rule ? fixRule(a.rule) : undefined,
       })),
@@ -89,6 +119,16 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
   const [previewError, setPreviewError] = useState<string | null>(null)
   const dragIdx = useRef<number | null>(null)
 
+  // Shared vocabulary with the Leitfaden: rules can ask guide fields directly
+  // (ask_field), so both surfaces work on the same data points.
+  const { data: fieldsData } = useQuery({
+    queryKey: ['kiki-zentrale', 'required-fields'],
+    queryFn: () => apiFetch<{ fields: (GuideFieldOption & { is_active: boolean; linked_setting: string | null })[] }>(`${KZ}/required-fields`),
+  })
+  const guideFields: GuideFieldOption[] = (fieldsData?.fields ?? [])
+    .filter((f) => f.is_active && !f.linked_setting)
+    .map((f) => ({ field_key: f.field_key, label: f.label }))
+
   useEffect(() => {
     if (!dirty && data) {
       setEnabled(data.enabled)
@@ -102,16 +142,14 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
     setDirty(true)
   }
 
-  // Debounced server-side compile for the live preview.
+  // Debounced server-side compile for the live preview — COMBINED view: the
+  // saved Leitfaden (default path) + these rules (exceptions), exactly the two
+  // blocks the agent prompt receives. Runs even with zero rules so guide-only
+  // users see their default flow here too.
   useEffect(() => {
-    if (!blocks.length) {
-      setPreview('')
-      setPreviewError(null)
-      return
-    }
     const t = setTimeout(async () => {
       try {
-        const res = await apiFetch<{ text: string }>(`${KZ}/conversation-logic/preview`, {
+        const res = await apiFetch<{ text: string }>(`${KZ}/gespraechsablauf/preview`, {
           method: 'POST',
           body: JSON.stringify({ logic: { version: 1, blocks } }),
         })
@@ -195,6 +233,18 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
           Beschreiben Sie einfach, wie Kiki sich verhalten soll — die KI baut daraus die
           Wenn/Dann-Regeln. Sie können das Ergebnis unten noch anpassen, bevor Sie speichern.
         </p>
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {NL_TEMPLATES.map((t) => (
+            <button
+              key={t.label}
+              onClick={() => setNlText(t.text)}
+              disabled={generate.isPending}
+              className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-body transition hover:border-green-primary hover:text-green-deep disabled:opacity-50"
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
         <textarea
           value={nlText}
           onChange={(e) => setNlText(e.target.value)}
@@ -222,7 +272,7 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
 
       <Card>
         <div className="mb-1 flex items-center justify-between">
-          <GroupLabel>Regeln</GroupLabel>
+          <GroupLabel>Wenn/Dann-Regeln</GroupLabel>
           <span className="text-xs text-muted">Ziehen zum Sortieren</span>
         </div>
         <div className="space-y-3">
@@ -254,6 +304,7 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
               <RuleEditor
                 rule={rule}
                 depth={0}
+                guideFields={guideFields}
                 onChange={(next) => touch((p) => p.map((r) => (r.id === rule.id ? next : r)))}
               />
             </div>
@@ -274,13 +325,17 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
       </Card>
 
       <Card>
-        <GroupLabel>So liest Kiki diese Regeln</GroupLabel>
+        <GroupLabel>So liest Kiki das Gespräch (Sonderfälle + Standard-Ablauf)</GroupLabel>
+        <p className="mb-2 text-xs text-muted">
+          Beide Teile zusammen: Ihre Wenn/Dann-Regeln gelten zuerst, danach arbeitet Kiki den
+          Standard-Ablauf aus dem Leitfaden oben ab.
+        </p>
         {previewError ? (
           <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{previewError}</div>
         ) : preview ? (
           <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border bg-alt p-3 font-mono text-xs leading-relaxed text-body">{preview}</pre>
         ) : (
-          <p className="text-sm text-faint">Die Vorschau erscheint, sobald Regeln angelegt sind.</p>
+          <p className="text-sm text-faint">Die Vorschau lädt…</p>
         )}
       </Card>
       {kc.element}
@@ -289,7 +344,7 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
 }
 
 // ─── Rule / branch / action editors ─────────────────────────────────────────
-function RuleEditor({ rule, depth, onChange }: { rule: LogicRule; depth: number; onChange: (r: LogicRule) => void }) {
+function RuleEditor({ rule, depth, guideFields, onChange }: { rule: LogicRule; depth: number; guideFields: GuideFieldOption[]; onChange: (r: LogicRule) => void }) {
   const setBranch = (id: string, next: LogicBranch) =>
     onChange({ ...rule, branches: rule.branches.map((b) => (b.id === id ? next : b)) })
   const hasSonst = rule.branches.some((b) => b.kind === 'sonst')
@@ -300,6 +355,7 @@ function RuleEditor({ rule, depth, onChange }: { rule: LogicRule; depth: number;
           key={br.id}
           branch={br}
           depth={depth}
+          guideFields={guideFields}
           onChange={(next) => setBranch(br.id, next)}
           onRemove={
             rule.branches.length > 1
@@ -336,9 +392,10 @@ function RuleEditor({ rule, depth, onChange }: { rule: LogicRule; depth: number;
   )
 }
 
-function BranchEditor({ branch, depth, onChange, onRemove }: {
+function BranchEditor({ branch, depth, guideFields, onChange, onRemove }: {
   branch: LogicBranch
   depth: number
+  guideFields: GuideFieldOption[]
   onChange: (b: LogicBranch) => void
   onRemove?: () => void
 }) {
@@ -387,15 +444,20 @@ function BranchEditor({ branch, depth, onChange, onRemove }: {
             key={a.id}
             action={a}
             depth={depth}
+            guideFields={guideFields}
             onChange={(next) => onChange({ ...branch, actions: branch.actions.map((x) => (x.id === a.id ? next : x)) })}
             onRemove={() => onChange({ ...branch, actions: branch.actions.filter((x) => x.id !== a.id) })}
           />
         ))}
         {branch.actions.length < 8 && (
-          <AddActionButton depth={depth} onAdd={(type) => {
+          <AddActionButton depth={depth} hasFields={guideFields.length > 0} onAdd={(type) => {
             const a: LogicAction = { id: uid(), type }
             if (type === 'goto') a.target = 'schritt_2'
             if (type === 'subrule') a.rule = newRule()
+            if (type === 'ask_field' && guideFields[0]) {
+              a.field_key = guideFields[0].field_key
+              a.text = guideFields[0].label
+            }
             onChange({ ...branch, actions: [...branch.actions, a] })
           }} />
         )}
@@ -404,8 +466,9 @@ function BranchEditor({ branch, depth, onChange, onRemove }: {
   )
 }
 
-function AddActionButton({ depth, onAdd }: { depth: number; onAdd: (t: ActionType) => void }) {
-  const types: ActionType[] = depth === 0 ? ['ask', 'say', 'goto', 'subrule'] : ['ask', 'say', 'goto']
+function AddActionButton({ depth, hasFields, onAdd }: { depth: number; hasFields: boolean; onAdd: (t: ActionType) => void }) {
+  const base: ActionType[] = depth === 0 ? ['ask', 'say', 'goto', 'subrule'] : ['ask', 'say', 'goto']
+  const types: ActionType[] = hasFields ? ['ask_field', ...base] : base
   return (
     <div className="flex flex-wrap gap-1.5 pt-1">
       {types.map((t) => (
@@ -417,9 +480,10 @@ function AddActionButton({ depth, onAdd }: { depth: number; onAdd: (t: ActionTyp
   )
 }
 
-function ActionEditor({ action, depth, onChange, onRemove }: {
+function ActionEditor({ action, depth, guideFields, onChange, onRemove }: {
   action: LogicAction
   depth: number
+  guideFields: GuideFieldOption[]
   onChange: (a: LogicAction) => void
   onRemove: () => void
 }) {
@@ -438,6 +502,25 @@ function ActionEditor({ action, depth, onChange, onRemove }: {
           className={cn(inputCls, 'text-xs')}
         />
       )}
+      {action.type === 'ask_field' && (
+        <select
+          value={action.field_key ?? ''}
+          onChange={(e) => {
+            const f = guideFields.find((x) => x.field_key === e.target.value)
+            onChange({ ...action, field_key: f?.field_key, text: f?.label })
+          }}
+          className={cn(inputCls, 'text-xs')}
+        >
+          {!action.field_key && <option value="">Feld wählen…</option>}
+          {guideFields.map((f) => (
+            <option key={f.field_key} value={f.field_key}>{f.label}</option>
+          ))}
+          {/* Saved tree may reference a field that was since deleted/deactivated. */}
+          {action.field_key && !guideFields.some((f) => f.field_key === action.field_key) && (
+            <option value={action.field_key}>{action.text ?? action.field_key} (nicht mehr im Leitfaden)</option>
+          )}
+        </select>
+      )}
       {action.type === 'goto' && (
         <select
           value={action.target ?? 'schritt_2'}
@@ -449,7 +532,7 @@ function ActionEditor({ action, depth, onChange, onRemove }: {
       )}
       {action.type === 'subrule' && action.rule && depth === 0 && (
         <Field label="">
-          <RuleEditor rule={action.rule} depth={1} onChange={(r) => onChange({ ...action, rule: r })} />
+          <RuleEditor rule={action.rule} depth={1} guideFields={guideFields} onChange={(r) => onChange({ ...action, rule: r })} />
         </Field>
       )}
     </div>

@@ -124,6 +124,48 @@ def test_code_fenced_json_is_tolerated():
     assert out["logic"]["blocks"]
 
 
+def test_ask_field_tree_compiles_with_field_reference():
+    tree = {
+        "version": 1,
+        "blocks": [{
+            "branches": [{
+                "kind": "wenn", "conditions": ["der Anrufer ein Kunde ist"], "condition_op": "und",
+                "actions": [{"type": "ask_field", "field_key": "customer_number", "text": "Kundennummer"}],
+            }],
+        }],
+    }
+    ai_client.set_test_client(_ScriptedClient([_Resp(json.dumps(tree))]))
+    out = _generate()
+    assert "Leitfaden-Feld **Kundennummer**" in out["text"]
+    assert out["logic"]["blocks"][0]["branches"][0]["actions"][0]["field_key"] == "customer_number"
+
+
+def test_guide_fields_are_offered_to_the_model():
+    scripted = _ScriptedClient([_Resp(json.dumps(VALID_TREE))])
+    ai_client.set_test_client(scripted)
+    gen.generate_logic_from_text(
+        org_id="org1", user_id="u1", description="Kunden nach der Kundennummer fragen.",
+        fields=[{"field_key": "name", "label": "Name"}, {"field_key": "customer_number", "label": "Kundennummer"}],
+    )
+    user_msg = scripted.calls[0]["messages"][1]["content"]
+    assert 'field_key "customer_number": Kundennummer' in user_msg
+
+
+def test_ask_field_without_field_key_is_invalid():
+    broken = {
+        "version": 1,
+        "blocks": [{
+            "branches": [{
+                "kind": "wenn", "conditions": ["x"], "condition_op": "und",
+                "actions": [{"type": "ask_field", "text": "Kundennummer"}],
+            }],
+        }],
+    }
+    ai_client.set_test_client(_ScriptedClient([_Resp(json.dumps(broken)), _Resp(json.dumps(VALID_TREE))]))
+    out = _generate()  # repair round-trip fixes it
+    assert "Lieferantennummer" in out["text"]
+
+
 def test_existing_rules_are_passed_to_the_model():
     scripted = _ScriptedClient([_Resp(json.dumps(VALID_TREE))])
     ai_client.set_test_client(scripted)
