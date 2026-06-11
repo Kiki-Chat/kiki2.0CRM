@@ -264,6 +264,50 @@ def _create_appointment(user: CurrentUser, args: dict) -> dict:
         return {"error": f"Termin nicht angelegt: {getattr(exc, 'detail', str(exc))}"}
 
 
+def _list_appointments(user: CurrentUser, args: dict) -> dict:
+    from app.api.routes import appointments as appt_routes
+
+    rows = appt_routes._list(user.org_id, args.get("from") or None, args.get("to") or None)
+    keep = (
+        "id", "title", "scheduled_at", "duration_minutes", "status", "customer_id",
+        "customer_name", "assigned_employee_id", "employee_name", "location", "notes",
+    )
+    return {"appointments": [{k: a.get(k) for k in keep} for a in rows[:50]], "count": len(rows)}
+
+
+def _update_appointment(user: CurrentUser, args: dict) -> dict:
+    from app.api.routes import appointments as appt_routes
+    from app.schemas.admin import AppointmentPatch
+    from app.services.appointment_notify import notify_appointment_outcome
+
+    appointment_id = (args.get("appointment_id") or "").strip()
+    if not _UUID_RE.match(appointment_id):
+        return {"error": "appointment_id (UUID) ist erforderlich — finde den Termin zuerst mit list_appointments."}
+    fields = {
+        k: args[k]
+        for k in ("title", "scheduled_at", "duration_minutes", "location", "assigned_employee_id", "notes")
+        if args.get(k) is not None
+    }
+    if not fields:
+        return {"error": "Keine Änderungen angegeben."}
+    if args.get("customer_id") or args.get("customer"):
+        resolved = _resolve_customer(user.org_id, str(args.get("customer_id") or args.get("customer")))
+        if "id" not in resolved:
+            return resolved
+        fields["customer_id"] = resolved["id"]
+    try:
+        appt = appt_routes._patch(user, appointment_id, AppointmentPatch(**fields))
+    except Exception as exc:  # noqa: BLE001 — FK/role validation raises; surface a clean message
+        return {"error": f"Termin nicht geändert: {getattr(exc, 'detail', str(exc))}"}
+    if not appt:
+        return {"error": "Termin nicht gefunden."}
+    # Mirror the calendar route: moving a CONFIRMED appointment informs the
+    # customer (call/email per Kiki-Zentrale settings) — same contract as the UI.
+    if "scheduled_at" in fields and appt.get("status") == "confirmed":
+        appt["_outbound"] = notify_appointment_outcome(user.org_id, appointment_id, "reschedule")
+    return {"appointment": appt}
+
+
 def _report_problem(user: CurrentUser, args: dict) -> dict:
     summary = (args.get("summary") or "").strip()
     details = (args.get("details") or "").strip()
@@ -579,6 +623,41 @@ REGISTRY: list[Tool] = [
             "required": ["inquiry_id", "status"],
         },
         run=_set_inquiry_status,
+        kind="write",
+    ),
+    Tool(
+        name="list_appointments",
+        description="Liste Termine des Betriebs (optional nach Zeitraum). Nutze dies, um einen Termin zu finden, bevor du ihn änderst.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "from": {"type": "string", "description": "ISO-Startdatum (inkl.), z. B. 2026-06-10"},
+                "to": {"type": "string", "description": "ISO-Enddatum (exkl.)"},
+            },
+        },
+        run=_list_appointments,
+    ),
+    Tool(
+        name="update_appointment",
+        description=(
+            "Ändere einen bestehenden Termin (nach Bestätigung): Zeit, Dauer, Titel, Ort, Kunde, Mitarbeiter, Notizen. "
+            "Eine Zeitänderung an einem bestätigten Termin informiert den Kunden automatisch (Anruf/E-Mail je nach Einstellung)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "appointment_id": {"type": "string", "description": "Termin-UUID (über list_appointments finden)"},
+                "scheduled_at": {"type": "string", "description": "Neue ISO-Datum/Uhrzeit"},
+                "duration_minutes": {"type": "integer"},
+                "title": {"type": "string"},
+                "location": {"type": "string"},
+                "customer_id": {"type": "string", "description": "Kunden-UUID"},
+                "assigned_employee_id": {"type": "string"},
+                "notes": {"type": "string"},
+            },
+            "required": ["appointment_id"],
+        },
+        run=_update_appointment,
         kind="write",
     ),
     Tool(

@@ -694,6 +694,89 @@ async def decline_customer_proposal(
     return appt
 
 
+# ─── Technician dispatch (tokenized job link) ────────────────────────────────
+class DispatchTechnicianPayload(BaseModel):
+    employee_id: str
+
+
+def _dispatch_technician(user: CurrentUser, appointment_id: str, employee_id: str) -> dict:
+    from app.services import technician_jobs
+    from app.services.email_send import send_email
+
+    client = get_service_client()
+    # Assign via the normal patch path: FK hardening + self-assignment rules.
+    appt = _patch(user, appointment_id, AppointmentPatch(assigned_employee_id=employee_id))
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    emp_rows = (
+        client.table("employees").select("id, display_name, email")
+        .eq("org_id", user.org_id).eq("id", employee_id).limit(1).execute().data
+    )
+    emp = emp_rows[0] if emp_rows else None
+    if not emp or not (emp.get("email") or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Dieser Mitarbeiter hat keine E-Mail-Adresse hinterlegt — bitte zuerst unter Mitarbeiter ergänzen.",
+        )
+    try:
+        link = technician_jobs.create_job_link(
+            org_id=user.org_id, appointment_id=appointment_id, employee_id=employee_id
+        )
+    except technician_jobs.JobLinkError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    url = technician_jobs.job_link_url(link["token"])
+    job = technician_jobs.get_job_for_token(link["token"])
+    a, c = job["appointment"], job["customer"]
+    when = (a.get("scheduled_at") or "").replace("T", " ")[:16]
+    lines = [
+        f"Hallo {emp.get('display_name') or ''},".strip(),
+        "",
+        f"für Sie wurde ein Einsatz geplant{' bei ' + c['name'] if c.get('name') else ''}:",
+        f"• Termin: {a.get('title') or 'Termin'} — {when} ({a.get('duration_minutes') or 60} Min)",
+    ]
+    if c.get("address"):
+        lines.append(f"• Adresse: {c['address']}")
+    if c.get("phone"):
+        lines.append(f"• Telefon: {c['phone']}")
+    if a.get("notes"):
+        lines.append(f"• Hinweise: {a['notes']}")
+    lines += [
+        "",
+        "Über diesen Link starten Sie den Einsatz und füllen danach den kurzen Einsatzbericht aus (inkl. Fotos):",
+        url,
+        "",
+        "Der Link gilt nur für diesen Einsatz.",
+    ]
+    body_text = "\n".join(lines)
+    body_html = "<p>" + "<br>".join(
+        line.replace(url, f'<a href="{url}">{url}</a>') for line in lines
+    ) + "</p>"
+    email_status = "sent"
+    try:
+        send_email(
+            org_id=user.org_id, to_email=emp["email"].strip(),
+            subject=f"Neuer Einsatz: {a.get('title') or 'Termin'} — {when}",
+            body_html=body_html, body_text=body_text,
+        )
+    except Exception:  # noqa: BLE001 — link still works; surface the failure
+        email_status = "failed"
+    client.table("technician_job_links").update({"email_status": email_status}).eq(
+        "id", link["id"]
+    ).execute()
+    return {"success": True, "link_url": url, "email_status": email_status, "appointment": appt}
+
+
+@router.post("/{appointment_id}/dispatch-technician")
+async def dispatch_technician(
+    appointment_id: str,
+    payload: DispatchTechnicianPayload,
+    user: CurrentUser = Depends(require_org),
+) -> dict:
+    """Assign a technician AND send them the tokenized job link by email.
+    Lives on the appointment (confirmation step) — NOT on the call log."""
+    return await run_in_threadpool(_dispatch_technician, user, appointment_id, payload.employee_id)
+
+
 # ─── CRM cancel / delete (propagate to Google) ───────────────────────────────
 # CRM is authoritative for this direction: attempt the Google events.delete
 # (best-effort) ONLY when the appointment was pushed (google_event_id set), then

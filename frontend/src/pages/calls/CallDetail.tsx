@@ -90,29 +90,8 @@ export function CallDetail({
 
   const pendingAppt = usePendingAppointment(callId)
 
-  // "Zuweisung ergänzen": put a technician (or any employee) on this call's
-  // work — the appointment when one exists, the inquiry otherwise. Shows up in
-  // calendar + Plantafel via the regular assigned_employee_id.
-  const assignTechnician = useMutation({
-    mutationFn: (employeeId: string) => {
-      const appt = pendingAppt.data?.appointment
-      return appt
-        ? apiFetch(`/api/appointments/${appt.id}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ assigned_employee_id: employeeId }),
-          })
-        : apiFetch<Inquiry>(`/api/inquiries/${inquiry!.id}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ assigned_employee_id: employeeId }),
-          })
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pendingAppointment', callId] })
-      qc.invalidateQueries({ queryKey: ['callInquiry', callId] })
-      qc.invalidateQueries({ queryKey: ['appointments'] })
-      qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
-    },
-  })
+  // Techniker-Einsatz lebt am bestätigten Termin (Kalender → Termin-Details →
+  // „Techniker einsetzen“) — bewusst NICHT mehr am Anrufprotokoll.
   const [dismissedApptIds, setDismissedApptIds] = useState<Set<string>>(new Set())
   // After Bestätigen/Ablehnen the appointment leaves the "pending" set and the
   // server stops returning it — but we keep the card on screen (as a reminder /
@@ -161,7 +140,6 @@ export function CallDetail({
       timeline={timeline.data ?? []}
       timelineLoading={timeline.isLoading}
       appointmentSlot={appointmentSlot}
-      hasAppointment={!!pendingAppt.data?.appointment}
       onStatus={(s) => patchInquiry.mutate({ status: s })}
       onDelete={() => {
         if (
@@ -172,11 +150,6 @@ export function CallDetail({
           deleteCall.mutate()
       }}
       onAssign={(id) => patchInquiry.mutate({ assigned_employee_id: id })}
-      onAssignTechnician={
-        pendingAppt.data?.appointment || inquiry
-          ? (id) => assignTechnician.mutate(id)
-          : undefined
-      }
       onEdit={() => setModal('process')}
       onAppointment={() => setModal('appointment')}
       onKva={

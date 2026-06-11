@@ -865,6 +865,86 @@ async def preview_conversation_logic(
     return {"text": _validate_logic_or_422(payload.logic)}
 
 
+@router.post("/gespraechsablauf/preview")
+async def preview_gespraechsablauf(
+    payload: ConversationLogicPreview, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Combined preview for the merged Gesprächsablauf page: the SAVED Leitfaden
+    block (default path) + the posted rules compiled — exactly the two blocks the
+    agent prompt receives, so the user sees how guide and rules mesh."""
+    logic_text = _validate_logic_or_422(payload.logic)
+
+    def _fields_block() -> str:
+        from app.services.agent_config import render_required_fields_block
+
+        client = get_service_client()
+        rows = (
+            client.table("agent_required_fields").select("*")
+            .eq("org_id", user.org_id).order("sort_order").execute().data or []
+        )
+        cfg = (
+            client.table("agent_configs").select("*")
+            .eq("org_id", user.org_id).limit(1).execute().data or [{}]
+        )[0]
+        return render_required_fields_block(rows, cfg)
+
+    fields_text = await run_in_threadpool(_fields_block)
+    parts = []
+    if logic_text:
+        parts.append("## Sonderfälle (gelten zuerst)\n" + logic_text)
+    parts.append("## Standard-Ablauf (Leitfaden)\n" + fields_text)
+    return {"text": "\n\n".join(parts), "logic_text": logic_text, "fields_text": fields_text}
+
+
+class ConversationLogicGenerate(BaseModel):
+    description: str
+    # When set, the model extends/adjusts the current rules instead of replacing.
+    existing: dict | None = None
+
+
+@router.post("/conversation-logic/generate")
+async def generate_conversation_logic(
+    payload: ConversationLogicGenerate, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Natural language → validated rule tree + compiled preview. NOTHING is
+    saved — the UI shows the generated rules in the editor and the user saves
+    via the normal PATCH (same review/confirm path as manual edits)."""
+    _require_admin(user)
+    description = (payload.description or "").strip()
+    if len(description) < 10:
+        raise HTTPException(status_code=422, detail="Bitte beschreiben Sie Ihre Regeln etwas ausführlicher.")
+    if len(description) > 4000:
+        raise HTTPException(status_code=422, detail="Die Beschreibung ist zu lang (max. 4000 Zeichen).")
+
+    from app.services.ai.client import AIServiceDisabled
+    from app.services.conversation_logic_ai import GenerationFailed, generate_logic_from_text
+
+    def _do() -> dict:
+        # Shared vocabulary with the Leitfaden: give the model the org's active
+        # fields so matching asks become ask_field references, not free text.
+        rows = (
+            get_service_client().table("agent_required_fields")
+            .select("field_key, label, is_active, linked_setting")
+            .eq("org_id", user.org_id).order("sort_order").execute().data or []
+        )
+        fields = [
+            {"field_key": r["field_key"], "label": r.get("label") or r["field_key"]}
+            for r in rows
+            if r.get("field_key") and r.get("is_active") and not r.get("linked_setting")
+        ]
+        return generate_logic_from_text(
+            org_id=user.org_id, user_id=user.id,
+            description=description, existing=payload.existing, fields=fields,
+        )
+
+    try:
+        return await run_in_threadpool(_do)
+    except AIServiceDisabled:
+        raise HTTPException(status_code=503, detail="KI-Unterstützung ist derzeit nicht verfügbar.")
+    except GenerationFailed as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 # ─── Branche & Kontext ───────────────────────────────────────────────────────
 @router.patch("/context")
 async def update_context(

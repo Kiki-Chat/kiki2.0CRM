@@ -99,3 +99,15 @@ def test_unknown_event_type_ignored(monkeypatch):
     assert db.updates_to("organizations") == []
     wh = db.updates_to("billing_webhook_events")
     assert wh and wh[-1]["processing_status"] == "ignored"
+
+
+def test_sub_period_reads_from_items_when_top_level_absent():
+    # 2025-03-31.basil webhook payloads drop current_period_* from the sub
+    # object and carry them only on items.data[0].
+    sub = {"id": "sub_1", "items": {"data": [{"current_period_start": 111, "current_period_end": 222}]}}
+    assert sw._sub_period(sub) == (111, 222)
+
+
+def test_sub_period_prefers_top_level_when_present():
+    sub = {"current_period_start": 5, "current_period_end": 9, "items": {"data": [{"current_period_start": 111}]}}
+    assert sw._sub_period(sub) == (5, 9)

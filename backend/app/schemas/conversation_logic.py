@@ -40,8 +40,11 @@ class LogicError(ValueError):
 
 class LogicAction(BaseModel):
     id: str | None = None
-    type: str  # ask | say | goto | subrule
+    type: str  # ask | ask_field | say | goto | subrule
     text: str | None = None
+    # ask_field: reference to a Leitfaden field (agent_required_fields.field_key).
+    # `text` carries the field's label snapshot so the pure compiler needs no DB.
+    field_key: str | None = None
     target: str | None = None
     rule: "LogicRule | None" = None
     model_config = {"extra": "ignore"}
@@ -49,7 +52,7 @@ class LogicAction(BaseModel):
     @field_validator("type")
     @classmethod
     def _type_ok(cls, v: str) -> str:
-        if v not in ("ask", "say", "goto", "subrule"):
+        if v not in ("ask", "ask_field", "say", "goto", "subrule"):
             raise ValueError(f"Unbekannter Aktions-Typ: {v}")
         return v
 
@@ -130,6 +133,11 @@ def _validate_rule(rule: LogicRule, *, depth: int) -> None:
                     raise LogicError("Frage-/Hinweis-Aktionen brauchen einen Text.")
                 if len(a.text or "") > MAX_TEXT:
                     raise LogicError(f"Aktions-Texte dürfen höchstens {MAX_TEXT} Zeichen haben.")
+            elif a.type == "ask_field":
+                if not (a.field_key or "").strip() or not (a.text or "").strip():
+                    raise LogicError("Feld-Aktionen brauchen ein Leitfaden-Feld.")
+                if len(a.text or "") > MAX_TEXT:
+                    raise LogicError(f"Aktions-Texte dürfen höchstens {MAX_TEXT} Zeichen haben.")
             elif a.type == "goto":
                 if a.target not in GOTO_TARGETS:
                     raise LogicError("„Weiter zu“ muss Schritt 2, Schritt 3 oder Abschluss sein.")
@@ -181,6 +189,13 @@ def _branch_header(br: LogicBranch) -> str:
 def _action_line(a: LogicAction) -> str | None:
     if a.type == "ask":
         return f"Frage: „{_clean(a.text)}“"
+    if a.type == "ask_field":
+        # References a Leitfaden field — the answer lands in the same structured
+        # data point as in the normal guide flow (don't re-ask it later).
+        return (
+            f"Erfasse jetzt das Leitfaden-Feld **{_clean(a.text)}** "
+            "(danach im normalen Ablauf nicht erneut fragen)."
+        )
     if a.type == "say":
         return f"Sage/Hinweis: {_clean(a.text)}"
     if a.type == "goto":

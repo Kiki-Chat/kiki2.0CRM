@@ -15,7 +15,7 @@ export interface LiveFillPosition {
 }
 
 export interface LiveFillPayload {
-  tool: 'create_invoice' | 'create_cost_estimate'
+  tool: 'create_invoice' | 'create_cost_estimate' | 'create_appointment'
   args: {
     customer?: string
     customer_id?: string
@@ -23,11 +23,21 @@ export interface LiveFillPayload {
     positions?: LiveFillPosition[]
     intro_text?: string
     closing_text?: string
+    // create_appointment
+    title?: string
+    scheduled_at?: string
+    duration_minutes?: number
+    location?: string
+    assigned_employee_id?: string
+    notes?: string
   }
 }
 
 const KEY = 'kiki-live-fill'
 export const LIVE_FILL_EVENT = 'kiki-live-fill-status'
+// Fired when a request is stored, so a target page that is ALREADY mounted
+// (navigate() to the same route does not remount) can pick it up too.
+export const LIVE_FILL_REQUEST_EVENT = 'kiki-live-fill-request'
 
 export interface LiveFillStatus {
   tool: LiveFillPayload['tool']
@@ -38,6 +48,9 @@ export interface LiveFillStatus {
 
 export function requestLiveFill(payload: LiveFillPayload): void {
   sessionStorage.setItem(KEY, JSON.stringify(payload))
+  window.dispatchEvent(
+    new CustomEvent(LIVE_FILL_REQUEST_EVENT, { detail: { tool: payload.tool } }),
+  )
 }
 
 /** One-shot read for the target form page; clears the request so a reload of

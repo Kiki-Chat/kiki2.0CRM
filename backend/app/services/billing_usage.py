@@ -51,9 +51,9 @@ def select_billable(results: list[dict]) -> list[tuple[str, str]]:
 def minutes_from_seconds(seconds: int | float | None) -> int:
     """Convert call seconds → billable minutes.
 
-    Phase 1 uses round() to match the existing 'minutes used' display
-    (settings._usage / KI-Nutzung). CEIL-vs-ROUND is an explicit go-live decision
-    (see the Phase-1 plan assumptions) — change here only, in one place."""
+    GO-LIVE DECISION (Amber, 2026-06-10): round() stays — the bill equals the
+    displayed usage (settings._usage / KI-Nutzung). Do not switch to ceil()
+    without also changing the display, or invoice and UI drift apart."""
     return round((seconds or 0) / 60)
 
 
