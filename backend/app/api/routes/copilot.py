@@ -45,8 +45,25 @@ def _require_ai() -> None:
         )
 
 
-def _audit(user: CurrentUser, tool_name: str, args: dict, result: Any) -> None:
-    """Best-effort write audit. Fail-open (table may not exist yet in Phase 0)."""
+def _valid_uuid(value: str | None) -> bool:
+    """PostgREST rejects non-UUID values against uuid columns with a 500-causing
+    APIError — validate up front so junk ids get a clean 404 instead."""
+    import uuid as _uuid
+
+    try:
+        _uuid.UUID(str(value))
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _audit(
+    user: CurrentUser, tool_name: str, args: dict, result: Any,
+    conversation_id: str | None = None,
+) -> None:
+    """Best-effort write audit. Fail-open (table may not exist yet in Phase 0).
+    conversation_id links the executed write back to the chat that produced it
+    (the 0042 column existed but was never populated — audit 2026-06-11)."""
     try:
         status_str = "error" if isinstance(result, dict) and result.get("error") else "ok"
         get_service_client().table("copilot_action_audit").insert(
@@ -57,6 +74,7 @@ def _audit(user: CurrentUser, tool_name: str, args: dict, result: Any) -> None:
                 "args": args,
                 "result_status": status_str,
                 "confirmed": True,
+                "conversation_id": conversation_id if _valid_uuid(conversation_id) else None,
             }
         ).execute()
     except Exception:  # noqa: BLE001 — audit never breaks the action
@@ -66,10 +84,25 @@ def _audit(user: CurrentUser, tool_name: str, args: dict, result: Any) -> None:
 # ─── Conversation persistence (Hey-Kiki chat history) ───────────────────────
 def _persist_turn(user: CurrentUser, conversation_id: str | None, message: str, result: dict) -> str | None:
     """Store the user+assistant turn; returns the conversation id. Best-effort —
-    a persistence failure must never break the chat response."""
+    a persistence failure must never break the chat response.
+
+    Hardening (audit 2026-06-11):
+    - Explicit timestamps (assistant = user + 1ms): the old single-batch insert
+      gave both rows an identical created_at, so reload order within a turn was
+      nondeterministic (Postgres sort isn't stable) and could flip Q/A.
+    - Compensation: if the messages insert fails right after a NEW conversation
+      row was created, delete that empty row — it would otherwise sit in the
+      history forever as an unopenable blank thread — and return the ORIGINAL
+      conversation_id so the client doesn't fragment onto a dead id."""
+    from datetime import datetime, timedelta, timezone
+
+    created_new = False
+    cid = None
     try:
         client = get_service_client()
         cid = (conversation_id or "").strip() or None
+        if cid and not _valid_uuid(cid):
+            cid = None
         if cid:
             owned = (
                 client.table("copilot_conversations").select("id")
@@ -85,11 +118,17 @@ def _persist_turn(user: CurrentUser, conversation_id: str | None, message: str, 
                 .execute().data
             )
             cid = row[0]["id"]
+            created_new = True
+        t0 = datetime.now(timezone.utc)
         client.table("copilot_messages").insert([
-            {"conversation_id": cid, "org_id": user.org_id, "role": "user", "content": message},
+            {
+                "conversation_id": cid, "org_id": user.org_id, "role": "user",
+                "content": message, "created_at": t0.isoformat(),
+            },
             {
                 "conversation_id": cid, "org_id": user.org_id, "role": "assistant",
                 "content": result.get("content") or "",
+                "created_at": (t0 + timedelta(milliseconds=1)).isoformat(),
                 # Stored in the pre-existing tool_calls jsonb (0042 schema) —
                 # holds the turn's action cards for display-only reload.
                 "tool_calls": {
@@ -103,6 +142,13 @@ def _persist_turn(user: CurrentUser, conversation_id: str | None, message: str, 
         ).eq("id", cid).execute()
         return cid
     except Exception:  # noqa: BLE001 — history is a convenience, never a blocker
+        if created_new and cid:
+            try:  # compensate: don't leave an empty orphan thread behind
+                get_service_client().table("copilot_conversations").delete().eq(
+                    "id", cid
+                ).eq("org_id", user.org_id).execute()
+            except Exception:  # noqa: BLE001
+                pass
         return conversation_id
 
 
@@ -120,21 +166,36 @@ async def chat(payload: ChatRequest, user: CurrentUser = Depends(require_org)) -
 
 
 @router.get("/conversations")
-async def list_conversations(user: CurrentUser = Depends(require_org)) -> dict:
+async def list_conversations(
+    limit: int = 30, offset: int = 0, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """History list, newest first. Paginated (audit 2026-06-11: the hard 30-row
+    cap made older chats invisible AND undeletable — the trash button only
+    exists on visible rows)."""
+    limit = max(1, min(int(limit), 100))
+    offset = max(0, int(offset))
+
     def _do() -> dict:
         rows = (
             get_service_client().table("copilot_conversations")
             .select("id, title, created_at, updated_at")
             .eq("org_id", user.org_id).eq("user_id", user.id)
-            .order("updated_at", desc=True).limit(30).execute().data or []
+            .order("updated_at", desc=True)
+            .range(offset, offset + limit)  # one extra row → has_more signal
+            .execute().data or []
         )
-        return {"conversations": rows}
+        has_more = len(rows) > limit
+        return {"conversations": rows[:limit], "has_more": has_more, "offset": offset}
 
     return await run_in_threadpool(_do)
 
 
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(conversation_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+    # Non-UUID ids made PostgREST raise → 500; a junk id is just "not found".
+    if not _valid_uuid(conversation_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat nicht gefunden.")
+
     def _do() -> dict | None:
         client = get_service_client()
         convo = (
@@ -144,16 +205,23 @@ async def get_conversation(conversation_id: str, user: CurrentUser = Depends(req
         )
         if not convo:
             return None
+        # Keep the NEWEST 200 (audit 2026-06-11: ascending+limit kept the OLDEST
+        # 200 and silently dropped the recent exchange — and the model history
+        # was rebuilt from that, so the AI lost the newest context too). Fetch
+        # newest-first, then restore chronological order for display. `id` is
+        # the tiebreaker for legacy same-timestamp turn pairs.
         messages = (
             client.table("copilot_messages")
             .select("id, role, content, tool_calls, created_at")
             .eq("conversation_id", conversation_id)
-            .order("created_at").limit(200).execute().data or []
+            .order("created_at", desc=True).order("id", desc=True)
+            .limit(200).execute().data or []
         )
+        messages.reverse()
         # Frontend contract: the action payload is exposed as `actions`.
         for m in messages:
             m["actions"] = m.pop("tool_calls", None)
-        return {"conversation": convo[0], "messages": messages}
+        return {"conversation": convo[0], "messages": messages, "truncated": len(messages) >= 200}
 
     result = await run_in_threadpool(_do)
     if result is None:
@@ -163,6 +231,9 @@ async def get_conversation(conversation_id: str, user: CurrentUser = Depends(req
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+    if not _valid_uuid(conversation_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat nicht gefunden.")
+
     def _do() -> bool:
         res = (
             get_service_client().table("copilot_conversations").delete()
@@ -188,5 +259,5 @@ async def confirm(payload: ConfirmRequest, user: CurrentUser = Depends(require_o
             detail="Diese Aktion erfordert keine Bestätigung.",
         )
     result = await run_in_threadpool(tool.run, user, payload.args or {})
-    _audit(user, tool.name, payload.args or {}, result)
+    _audit(user, tool.name, payload.args or {}, result, conversation_id=payload.conversation_id)
     return {"ok": True, "result": result}

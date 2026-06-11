@@ -127,7 +127,10 @@ def test_patch_phone_writes_existing_business_number_to_organizations(monkeypatc
 
     payload = kz.PhoneUpdate(existing_business_number="+4925112345678")
     # The repush/sync pipeline is exercised elsewhere — keep this test offline.
-    monkeypatch.setattr(kz, "_schedule_repush", lambda *a, **k: None)
+    async def _noop_repush(*a, **k):
+        return None
+
+    monkeypatch.setattr(kz, "_schedule_repush", _noop_repush)
     result = asyncio.run(kz.update_phone(payload, MagicMock(), user=_org_admin()))
 
     # The new field was written to `organizations`.
@@ -178,7 +181,10 @@ def test_patch_phone_writes_forwarding_pair_to_agent_configs(monkeypatch):
         forwarding_number="+49 151 1111111",
         incoming_forwarding_number="+49 152 2222222",
     )
-    monkeypatch.setattr(kz, "_schedule_repush", lambda *a, **k: None)
+    async def _noop_repush(*a, **k):
+        return None
+
+    monkeypatch.setattr(kz, "_schedule_repush", _noop_repush)
     asyncio.run(kz.update_phone(payload, MagicMock(), user=_org_admin()))
 
     cfg_writes = [w for w in writes if w[0] == "agent_configs"]

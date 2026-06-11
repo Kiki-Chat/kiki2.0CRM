@@ -873,21 +873,32 @@ function CreateAppointmentModal({
     liveFillStarted.current = true
     const run = async () => {
       setKikiFilling(true)
+      // Tell the panel the takeover is live — it cancels its 60s fallback so
+      // the write can never execute twice (panel + script).
+      emitLiveFillStatus({ tool: 'create_appointment', status: 'started' })
       try {
         const args = liveFill.args || {}
         await sleep(700)
 
-        // 1) Customer: UUID directly, otherwise match loaded options by name.
+        // 1) Customer: UUID directly, otherwise EXACT unique name match —
+        // ambiguous/no match fails over to the API path (server-side resolve).
         const ref = String(args.customer_id || args.customer || '').trim()
         let cid = ''
         if (/^[0-9a-f-]{36}$/i.test(ref)) {
           cid = ref
         } else if (ref) {
           const needle = ref.toLowerCase()
-          const hit = (customerData.customers ?? []).find((c) =>
-            (c.full_name || '').toLowerCase().includes(needle),
+          const hits = (customerData.customers ?? []).filter(
+            (c) => (c.full_name || '').trim().toLowerCase() === needle,
           )
-          cid = hit?.id ?? ''
+          if (hits.length !== 1) {
+            throw new Error(
+              hits.length === 0
+                ? `Kunde „${ref}“ nicht eindeutig gefunden`
+                : `Mehrere Kunden namens „${ref}“ — bitte eindeutig wählen`,
+            )
+          }
+          cid = hits[0].id
         }
         if (cid) {
           setCustomerId(cid)

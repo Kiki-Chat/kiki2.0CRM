@@ -161,6 +161,11 @@ export function CostEstimateFormPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inquiryId, inquiries, isEdit])
 
+  // Kept current every render so the async live-fill script reads the LATEST
+  // defaults at save time (its closure would otherwise see the first render's).
+  const textDefaultsRef = useRef(textDefaults)
+  textDefaultsRef.current = textDefaults
+
   // Pre-fill default text modules (Einleitung/Schluss/Zahlungsbedingungen) for new docs.
   const textDefaultsApplied = useRef(false)
   useEffect(() => {
@@ -189,6 +194,9 @@ export function CostEstimateFormPage() {
 
     const run = async () => {
       setKikiFilling(true)
+      // Tell the panel the takeover is live — it cancels its 60s fallback so
+      // the write can never execute twice (panel + script).
+      emitLiveFillStatus({ tool: 'create_cost_estimate', status: 'started' })
       try {
         const args = lf.args || {}
         await sleep(700)
@@ -198,11 +206,22 @@ export function CostEstimateFormPage() {
         if (/^[0-9a-f-]{36}$/i.test(ref)) {
           cid = ref
         } else if (ref) {
+          // EXACT name match, and it must be unique — a first-substring hit
+          // could attach the document to the wrong customer (several "Müller"s).
+          // Ambiguous/no match → fail the live fill; the panel's API path
+          // resolves server-side and refuses ambiguity properly.
           const needle = ref.toLowerCase()
-          const hit = (customerData.customers ?? []).find((c) =>
-            (c.full_name || '').toLowerCase().includes(needle),
+          const hits = (customerData.customers ?? []).filter(
+            (c) => (c.full_name || '').trim().toLowerCase() === needle,
           )
-          cid = hit?.id ?? ''
+          if (hits.length !== 1) {
+            throw new Error(
+              hits.length === 0
+                ? `Kunde „${ref}“ nicht eindeutig gefunden`
+                : `Mehrere Kunden namens „${ref}“ — bitte eindeutig wählen`,
+            )
+          }
+          cid = hits[0].id
         }
         if (cid) {
           setCustomerId(cid)
@@ -255,9 +274,17 @@ export function CostEstimateFormPage() {
             tolerance_pct: 20,
             validity_days: 30,
             positions: rows.map(({ _id, ...p }, r) => ({ ...p, description: String(wanted[r].description || '') })),
-            intro_text: args.intro_text ? String(args.intro_text) : '',
-            closing_text: args.closing_text ? String(args.closing_text) : '',
-            payment_terms: '',
+            // Persist what the user WATCHED being filled: the org's default text
+            // modules are visible in the form (text-defaults effect) and in the
+            // live PDF preview — saving '' here silently shipped a KVA missing
+            // its intro/closing/payment texts (audit 2026-06-11).
+            intro_text: args.intro_text
+              ? String(args.intro_text)
+              : (textDefaultsRef.current?.einleitung || ''),
+            closing_text: args.closing_text
+              ? String(args.closing_text)
+              : (textDefaultsRef.current?.schlusstext || ''),
+            payment_terms: textDefaultsRef.current?.zahlungsbedingungen || '',
             surcharge: 0,
             surcharge_description: '',
             total_discount_pct: 0,

@@ -105,12 +105,15 @@ def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str, seq: int =
         ac.finish_sync(org_id, seq, ok=False, reason=str(exc)[:300])
 
 
-def _schedule_repush(
+async def _schedule_repush(
     background: BackgroundTasks, user: CurrentUser, endpoint_label: str
 ) -> None:
-    """begin_sync (synchronous, so the first poll already sees 'pending') +
-    deferred re-push. The single entry point for ALL config-mutating handlers."""
-    seq = ac.begin_sync(user.org_id, endpoint_label)
+    """begin_sync (awaited before the response, so the first poll already sees
+    'pending') + deferred re-push. The single entry point for ALL config-mutating
+    handlers. begin_sync runs in the threadpool — it makes up to three blocking
+    Supabase round-trips, which used to run directly on the event loop and stall
+    every in-flight request (audit 2026-06-11)."""
+    seq = await run_in_threadpool(ac.begin_sync, user.org_id, endpoint_label)
     background.add_task(_repush_bg, user.org_id, user.id, endpoint_label, seq)
 
 
@@ -443,7 +446,7 @@ async def get_sync_status(user: CurrentUser = Depends(require_org)) -> dict:
 @router.post("/sync-status/retry")
 async def retry_sync(background: BackgroundTasks, user: CurrentUser = Depends(require_org)) -> dict:
     _require_admin(user)
-    _schedule_repush(background, user, "kz_retry")
+    await _schedule_repush(background, user, "kz_retry")
     return {"success": True}
 
 
@@ -509,7 +512,14 @@ async def update_verhalten(
     )
 
     def _do() -> dict:
-        cfg = _upsert_config(user.org_id, supa) if supa else None
+        # Order matters (audit 2026-06-11): the EL patch runs FIRST. The old
+        # order committed the DB write, then a failing EL call aborted the
+        # handler BEFORE _schedule_repush — prompt-feeding fields changed in the
+        # DB while the agent never re-rendered AND no sync state was set (the
+        # banner stayed idle). EL-first means: EL failure → 500 with NOTHING
+        # committed (clean retry); a DB failure after EL success only leaves
+        # EL-only fields (persona/voice) applied, which have no DB twin to
+        # diverge from.
         agent_state = None
         if el_patch:
             agent_id = ea.get_org_agent_id(user.org_id)
@@ -522,6 +532,7 @@ async def update_verhalten(
                 endpoint_label="verhalten",
             )
             agent_state = _el_read_state(agent_id)
+        cfg = _upsert_config(user.org_id, supa) if supa else None
         if cfg is None:
             cfg = (
                 get_service_client().table("agent_configs").select(_CONFIG_COLS)
@@ -533,7 +544,7 @@ async def update_verhalten(
     # The per-capability autonomy (and welcome) feed the agent prompt → re-render
     # and push to ElevenLabs in the background, like the other config sections.
     if supa:
-        _schedule_repush(background, user, "kz_verhalten")
+        await _schedule_repush(background, user, "kz_verhalten")
     return result
 
 
@@ -673,6 +684,7 @@ async def save_leitfaden(
             return "stale"
         linked_by_id = {r["id"]: r.get("linked_setting") for r in rows}
         cfg_updates: dict = {}
+        row_updates: list[tuple[str, dict]] = []
         for idx, item in enumerate(payload.items):
             linked = linked_by_id.get(item.id)
             update: dict = {"sort_order": idx}
@@ -682,9 +694,10 @@ async def save_leitfaden(
                     cfg_updates[linked] = item.is_active
             else:
                 update["is_active"] = item.is_active
-            client.table("agent_required_fields").update(update).eq(
-                "id", item.id
-            ).eq("org_id", user.org_id).execute()
+            row_updates.append((item.id, update))
+        # Guard BEFORE any write (audit 2026-06-11): the old order committed the
+        # per-row updates first, then bailed with 422 — a half-applied save the
+        # user was told had failed, with the repush skipped (DB↔agent divergence).
         if cfg_updates.get("price_info_enabled"):
             # Same guard as PATCH /price-info: no priced Artikel → no price talk.
             priced = (
@@ -694,6 +707,10 @@ async def save_leitfaden(
             )
             if not priced:
                 return "no_prices"
+        for item_id, update in row_updates:
+            client.table("agent_required_fields").update(update).eq(
+                "id", item_id
+            ).eq("org_id", user.org_id).execute()
         if cfg_updates:
             _upsert_config(user.org_id, cfg_updates)
         return "ok"
@@ -710,7 +727,7 @@ async def save_leitfaden(
             detail="Preisauskunft kann nicht aktiviert werden: Es sind keine Artikel "
             "mit Preisen hinterlegt. Bitte pflegen Sie zuerst Preise im Menü „Artikel“.",
         )
-    _schedule_repush(background, user, "kz_leitfaden")
+    await _schedule_repush(background, user, "kz_leitfaden")
     return {"success": True}
 
 
@@ -731,7 +748,7 @@ async def create_required_field(
         return client.table("agent_required_fields").insert(row).execute().data[0]
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_required_fields")
+    await _schedule_repush(background, user, "kz_required_fields")
     return result
 
 
@@ -754,7 +771,7 @@ async def update_required_field(
         )[0]
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_required_fields")
+    await _schedule_repush(background, user, "kz_required_fields")
     return result
 
 
@@ -785,7 +802,7 @@ async def delete_required_field(
     if res == "locked":
         raise HTTPException(status_code=400, detail="Pflichtfeld ist gesperrt und kann nicht gelöscht werden.")
     # Only re-push after a real delete (not on missing/locked no-ops).
-    _schedule_repush(background, user, "kz_required_fields")
+    await _schedule_repush(background, user, "kz_required_fields")
     return {"success": True}
 
 
@@ -804,7 +821,7 @@ async def reorder_required_fields(
         return {"success": True}
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_required_fields")
+    await _schedule_repush(background, user, "kz_required_fields")
     return result
 
 
@@ -873,7 +890,7 @@ async def update_conversation_logic(
     if not fields:
         return {"success": True}
     await run_in_threadpool(_upsert_config, user.org_id, fields)
-    _schedule_repush(background, user, "kz_conversation_logic")
+    await _schedule_repush(background, user, "kz_conversation_logic")
     return {"success": True}
 
 
@@ -985,7 +1002,7 @@ async def update_context(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_identity")
+    await _schedule_repush(background, user, "kz_identity")
     return result
 
 
@@ -1004,7 +1021,7 @@ async def update_problem_description(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_problem_description")
+    await _schedule_repush(background, user, "kz_problem_description")
     return result
 
 
@@ -1145,7 +1162,7 @@ async def update_scheduling_rules(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_scheduling")
+    await _schedule_repush(background, user, "kz_scheduling")
     return result
 
 
@@ -1179,7 +1196,7 @@ async def create_category(
         return client.table("appointment_categories").insert(row).execute().data[0]
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_categories")
+    await _schedule_repush(background, user, "kz_categories")
     return result
 
 
@@ -1202,7 +1219,7 @@ async def update_category(
         )[0]
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_categories")
+    await _schedule_repush(background, user, "kz_categories")
     return result
 
 
@@ -1219,7 +1236,7 @@ async def delete_category(
         return {"success": True}
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_categories")
+    await _schedule_repush(background, user, "kz_categories")
     return result
 
 
@@ -1262,7 +1279,7 @@ async def update_price_info(
     )
     # This PATCH previously never re-pushed the prompt — the toggle changed the
     # DB but the live agent kept its old price behaviour. Repush is the fix.
-    _schedule_repush(background, user, "kz_price_info")
+    await _schedule_repush(background, user, "kz_price_info")
     # Keep the Preisliste KB document in step with the toggle (create/remove).
     from app.services.price_knowledge import sync_price_list_kb
 
@@ -1338,7 +1355,7 @@ async def update_emergency(
         return _upsert_config(user.org_id, fields)
 
     result = await run_in_threadpool(_do)
-    _schedule_repush(background, user, "kz_emergency")
+    await _schedule_repush(background, user, "kz_emergency")
     return result
 
 
@@ -1395,7 +1412,7 @@ async def update_phone(
     result = await run_in_threadpool(_do)
     # incoming_forwarding_number feeds the KZ_STAFF_TRANSFER prompt block — the
     # agent must learn about a changed/removed staff-transfer number immediately.
-    _schedule_repush(background, user, "kz_phone")
+    await _schedule_repush(background, user, "kz_phone")
     return result
 
 

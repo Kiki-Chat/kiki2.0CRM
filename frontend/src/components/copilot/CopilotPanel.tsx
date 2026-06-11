@@ -7,6 +7,7 @@ import kikiAvatar from '../../assets/kiki-avatar.png'
 import { apiFetch } from '../../lib/api'
 import {
   LIVE_FILL_EVENT,
+  clearLiveFill,
   requestLiveFill,
   type LiveFillPayload,
   type LiveFillStatus,
@@ -329,6 +330,13 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
     const onStatus = (e: Event) => {
       const detail = (e as CustomEvent<LiveFillStatus>).detail
       if (!detail || detail.tool !== action.tool || settled) return
+      if (detail.status === 'started') {
+        // The form took over — cancel the fallback so the write can never run
+        // TWICE (script still animating past 60s used to double-execute it).
+        // The script always settles with done/failed from here on.
+        clearTimeout(timeout)
+        return
+      }
       settled = true
       window.removeEventListener(LIVE_FILL_EVENT, onStatus)
       clearTimeout(timeout)
@@ -346,6 +354,10 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
       if (settled) return
       settled = true
       window.removeEventListener(LIVE_FILL_EVENT, onStatus)
+      // The form never picked the request up — withdraw it BEFORE the direct
+      // write, or a later-mounting form would consume the stale payload and
+      // create the document a second time.
+      clearLiveFill()
       void confirmViaApi(msgId, idx, action)
     }, 60_000)
     window.addEventListener(LIVE_FILL_EVENT, onStatus)
@@ -371,7 +383,16 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
     try {
       const res = await apiFetch<{ ok: boolean; result: Record<string, unknown> }>(
         '/api/copilot/confirm',
-        { method: 'POST', body: JSON.stringify({ tool: action.tool, args: action.args }) },
+        {
+          method: 'POST',
+          // conversation_id links the executed write to this chat in the audit
+          // trail (the 0042 column was never populated — audit 2026-06-11).
+          body: JSON.stringify({
+            tool: action.tool,
+            args: action.args,
+            conversation_id: conversationId,
+          }),
+        },
       )
       const errMsg = res.result && typeof res.result.error === 'string' ? res.result.error : null
       const ok = res.ok && !errMsg

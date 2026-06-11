@@ -60,6 +60,25 @@ if _config_problems:
         raise RuntimeError(_msg)
     _logging.getLogger(__name__).warning("%s\n(non-fatal in non-production)", _msg)
 
+# Error tracking (eval 2026-06-11: a dozen swallowed-exception paths surface
+# only as logger.warning lines nobody reads — e.g. the price-KB divergence).
+# Dormant until SENTRY_DSN is set; zero behavior change without it.
+import os as _os
+
+_sentry_dsn = (_os.environ.get("SENTRY_DSN") or "").strip()
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            environment="production" if settings.is_production else "development",
+            traces_sample_rate=0.0,  # errors only — no perf-tracing spend
+        )
+        _logging.getLogger(__name__).info("Sentry error tracking enabled")
+    except Exception as _exc:  # noqa: BLE001 — observability must never block boot
+        _logging.getLogger(__name__).warning("Sentry init failed: %s", _exc)
+
 app = FastAPI(title="HeyKiki Portal API", version="0.1.0")
 
 # Observability (Item 4) — dormant unless OBSERVABILITY_ENABLED=1. Structured

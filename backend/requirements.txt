@@ -24,3 +24,6 @@ redis==5.2.1
 # + Invoice.upcoming — both REMOVED in stripe-python v12+ (Meters API migration).
 # Do NOT bump to >=12 without porting usage reporting to the Meters API first.
 stripe==11.6.0
+
+# Error tracking — dormant unless SENTRY_DSN is set (see app/main.py).
+sentry-sdk>=2.0

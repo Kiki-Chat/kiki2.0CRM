@@ -156,21 +156,34 @@ export function InvoiceFormPage() {
 
     const run = async () => {
       setKikiFilling(true)
+      // Tell the panel the takeover is live — it cancels its 60s fallback so
+      // the write can never execute twice (panel + script).
+      emitLiveFillStatus({ tool: 'create_invoice', status: 'started' })
       try {
         const args = lf.args || {}
         await sleep(700)
 
-        // 1) Customer: UUID directly, otherwise match the loaded options by name.
+        // 1) Customer: UUID directly, otherwise EXACT unique name match — a
+        // first-substring hit could attach the invoice to the wrong customer;
+        // ambiguous/no match fails over to the API path, which resolves
+        // server-side and refuses ambiguity properly.
         const ref = String(args.customer_id || args.customer || '').trim()
         let cid = ''
         if (/^[0-9a-f-]{36}$/i.test(ref)) {
           cid = ref
         } else if (ref) {
           const needle = ref.toLowerCase()
-          const hit = (customerData.customers ?? []).find((c) =>
-            (c.full_name || '').toLowerCase().includes(needle),
+          const hits = (customerData.customers ?? []).filter(
+            (c) => (c.full_name || '').trim().toLowerCase() === needle,
           )
-          cid = hit?.id ?? ''
+          if (hits.length !== 1) {
+            throw new Error(
+              hits.length === 0
+                ? `Kunde „${ref}“ nicht eindeutig gefunden`
+                : `Mehrere Kunden namens „${ref}“ — bitte eindeutig wählen`,
+            )
+          }
+          cid = hits[0].id
         }
         if (cid) {
           setCustomerId(cid)

@@ -42,8 +42,17 @@ export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthConte
       setSession(data.session)
       setLoading(false)
     })
-    const { data: sub } = client.auth.onAuthStateChange((_event, s) => {
+    const { data: sub } = client.auth.onAuthStateChange((event, s) => {
       setSession(s)
+      // Recovery links now land on the BARE origin (the allowlist entry that
+      // already exists for the magic link) instead of /set-password — a path
+      // that wasn't allowlisted made Supabase silently fall back to its Site
+      // URL (localhost), which is exactly the "reset link goes to localhost"
+      // bug testers hit. Supabase fires PASSWORD_RECOVERY once the hash token
+      // is consumed; route to the set-password screen from here.
+      if (event === 'PASSWORD_RECOVERY' && window.location.pathname !== '/set-password') {
+        window.location.assign('/set-password')
+      }
     })
     return () => sub.subscription.unsubscribe()
   }, [client])
@@ -73,12 +82,16 @@ export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthConte
       },
       async resetPassword(email) {
         if (!client) throw new Error('Supabase not configured')
-        // Forgot-password: send a RECOVERY link to /set-password, where the user
-        // sets a NEW password via updateUser() — no old password required (the
-        // recovery session authorises it). redirectTo must be on Supabase Auth's
-        // allowlist (same as the magic-link redirect).
+        // Forgot-password: send a RECOVERY link. redirectTo is the BARE origin —
+        // the SAME allowlist entry the magic link uses — because Supabase's
+        // allowlist matches exact URLs: `${origin}/set-password` was NOT listed,
+        // so Supabase silently fell back to its Site URL (localhost) — the
+        // tester-reported "reset link goes to localhost" bug. The
+        // PASSWORD_RECOVERY handler in useSupabaseAuthBinding then routes the
+        // recovery session to /set-password, where updateUser() sets the new
+        // password (no old password required).
         const { error } = await client.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/set-password`,
+          redirectTo: window.location.origin,
         })
         if (error) throw error
       },
