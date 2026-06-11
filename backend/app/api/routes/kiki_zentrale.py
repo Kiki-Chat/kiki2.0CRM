@@ -8,6 +8,7 @@ PATCH here.
 
 import difflib
 import logging
+import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -219,6 +220,30 @@ class SchedulingRulesUpdate(BaseModel):
     lead_time_only_weekdays: bool | None = None
     lead_time_earliest_clock: str | None = None
     model_config = {"extra": "ignore"}
+
+
+def _validate_dialable(value: str | None, label: str) -> None:
+    """Transfer destinations end up in the EL transfer_to_number tool — Twilio
+    rejects a non-E.164 target as an AUDIBLE error mid-call (audit 2026-06-11:
+    these numbers were persisted with zero validation; _dial_clean normalizes
+    but cannot reject). Accept +E.164 or a 0-prefixed German local number
+    (_dial_clean turns it into +49…); anything else is a 422 at save time.
+    None/blank = clearing the field, always allowed."""
+    if value is None or not value.strip():
+        return
+    stripped = re.sub(r"[\s\-/().]", "", value.strip())
+    if stripped.startswith("+"):
+        rest = stripped[1:]
+        ok = rest.isdigit() and 8 <= len(rest) <= 15
+    elif stripped.startswith("0"):
+        ok = stripped.isdigit() and 8 <= len(stripped) <= 15
+    else:
+        ok = False
+    if not ok:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label}: Bitte eine gültige Telefonnummer im Format +49… (oder 0…) angeben.",
+        )
 
 
 class EmergencyUpdate(BaseModel):
@@ -1303,6 +1328,7 @@ async def update_emergency(
     payload: EmergencyUpdate, background: BackgroundTasks, user: CurrentUser = Depends(require_org)
 ) -> dict:
     _require_admin(user)
+    _validate_dialable(payload.emergency_number, "Notdienst-Nummer")
     fields = payload.model_dump(exclude_unset=True)
 
     def _do() -> dict:
@@ -1327,7 +1353,10 @@ async def update_phone(
       forwarding from this number to their HeyKiki number).
     """
     _require_admin(user)
-    # Validate + normalise the new business-number field BEFORE any write.
+    # Validate + normalise BEFORE any write — the forwarding pair feeds the live
+    # transfer tool, so garbage here surfaces as an audible mid-call error.
+    _validate_dialable(payload.forwarding_number, "Weiterleitungs-Nummer")
+    _validate_dialable(payload.incoming_forwarding_number, "Mitarbeiter-Nummer")
     cleaned_existing = payload.cleaned_existing_business_number()
     set_existing = "existing_business_number" in payload.model_fields_set
 

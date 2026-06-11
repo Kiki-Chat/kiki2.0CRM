@@ -359,46 +359,75 @@ def get_org_code(client, org_id: str) -> str:
     code = rows[0].get("code") if rows else None
     if code:
         return code
-    # Next free sequence = count of orgs that already hold a code, +1.
-    res = (
-        client.table("organizations")
-        .select("id", count="exact").not_.is_("code", "null").execute()
+    # Next free sequence = count of orgs that already hold a code, +1. A racing
+    # sibling can derive the same code; the unique index rejects the losing
+    # UPDATE — in that case RE-DERIVE instead of returning the colliding code
+    # (audit 2026-06-11: the old bare except swallowed the rejection and minted
+    # another org's K-prefix onto this org's record numbers).
+    for _ in range(3):
+        res = (
+            client.table("organizations")
+            .select("id", count="exact").not_.is_("code", "null").execute()
+        )
+        code = f"K{(res.count or 0) + 1:02d}"
+        try:
+            client.table("organizations").update({"code": code}).eq("id", org_id).execute()
+            return code
+        except Exception:  # noqa: BLE001 — unique violation: a sibling took it
+            continue
+    # Still colliding after retries — return whatever a sibling writer may have
+    # persisted for us meanwhile, else the neutral never-assigned placeholder.
+    rows = (
+        client.table("organizations").select("code")
+        .eq("id", org_id).limit(1).execute().data or []
     )
-    code = f"K{(res.count or 0) + 1:02d}"
-    try:  # freeze it; the unique index rejects a racing duplicate harmlessly
-        client.table("organizations").update({"code": code}).eq("id", org_id).execute()
-    except Exception:  # noqa: BLE001
-        pass
-    return code
+    return (rows[0].get("code") if rows else None) or "K00"
+
+
+def _max_number_seq(client, table: str, org_id: str, year: int) -> int:
+    """Highest numeric suffix among this org's ``…-{year}-…NNNN`` record numbers.
+
+    MAX+1 instead of COUNT+1 (audit 2026-06-11): COUNT+1 re-issues numbers after
+    a delete (4 remaining rows → next '0005' collides with a surviving '0005').
+    The org code is constant per org and the suffix zero-padded, so lexical
+    DESC order equals numeric order; parse the tail defensively anyway."""
+    rows = (
+        client.table(table)
+        .select("number")
+        .eq("org_id", org_id)
+        .like("number", f"%-{year}-%")
+        .order("number", desc=True)
+        .limit(5)
+        .execute()
+        .data
+        or []
+    )
+    best = 0
+    for r in rows:
+        tail = str(r.get("number") or "").rsplit("-", 1)[-1].lstrip("A")
+        if tail.isdigit():
+            best = max(best, int(tail))
+    return best
 
 
 def gen_inquiry_number(client, org_id: str) -> str:
     """Next Anfrage number, org-bound: ``{ORGCODE}-{YYYY}-A{NNNN}`` (e.g.
     TD04-2026-A0007). The org code makes numbers unique ACROSS orgs; the ``A``
-    keeps Anfrage numbers visually distinct from case numbers."""
+    keeps Anfrage numbers visually distinct from case numbers. MAX+1 over the
+    existing numbers (backed by the partial unique index from migration 0065 —
+    a racing twin insert now fails loudly instead of corrupting numbering)."""
     year = now_berlin().year
-    res = (
-        client.table("inquiries")
-        .select("id", count="exact")
-        .eq("org_id", org_id)
-        .gte("created_at", f"{year}-01-01")
-        .execute()
-    )
-    return f"{get_org_code(client, org_id)}-{year}-A{(res.count or 0) + 1:04d}"
+    seq = _max_number_seq(client, "inquiries", org_id, year) + 1
+    return f"{get_org_code(client, org_id)}-{year}-A{seq:04d}"
 
 
 def gen_case_number(client, org_id: str) -> str:
     """Next staff-facing case (Fall) number, org-bound: ``{ORGCODE}-{YYYY}-{NNNN}``
-    (e.g. TD04-2026-0001). No 'FALL' prefix — the UI already labels it Fall."""
+    (e.g. TD04-2026-0001). No 'FALL' prefix — the UI already labels it Fall.
+    MAX+1 + unique index, same contract as gen_inquiry_number."""
     year = now_berlin().year
-    res = (
-        client.table("cases")
-        .select("id", count="exact")
-        .eq("org_id", org_id)
-        .gte("created_at", f"{year}-01-01")
-        .execute()
-    )
-    return f"{get_org_code(client, org_id)}-{year}-{(res.count or 0) + 1:04d}"
+    seq = _max_number_seq(client, "cases", org_id, year) + 1
+    return f"{get_org_code(client, org_id)}-{year}-{seq:04d}"
 
 
 CUSTOMER_NUMBER_PREFIX = "KI-"

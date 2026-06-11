@@ -49,6 +49,7 @@ class _Q:
 
     # filters we don't model still need to chain
     def neq(self, *a, **k): return self
+    def like(self, *a, **k): return self
     def in_(self, *a, **k): return self
     def select(self, *a, **k): return self
     def order(self, *a, **k): return self

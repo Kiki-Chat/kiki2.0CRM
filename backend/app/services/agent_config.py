@@ -382,8 +382,13 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
             "lead_time_earliest_clock, emergency_enabled, emergency_number, "
             "emergency_only_outside_business_hours, emergency_keywords, "
             "emergency_extra_windows, emergency_surcharge_notice_enabled, "
-            "emergency_surcharge_text, incoming_forwarding_number, price_info_enabled, "
-            "conversation_logic, conversation_logic_enabled"
+            # forwarding_number is the LEGACY emergency fallback — build_transfer_tool
+            # and render_emergency_block fall back to it when emergency_number is
+            # unset; omitting it here made that fallback dead code (audit 2026-06-11:
+            # affected orgs silently got NO transfer tool + a "leite NICHT weiter"
+            # prompt on real emergencies).
+            "emergency_surcharge_text, forwarding_number, incoming_forwarding_number, "
+            "price_info_enabled, conversation_logic, conversation_logic_enabled"
         )
         .eq("org_id", str(org_id))
         .limit(1)
@@ -1320,6 +1325,7 @@ def build_transfer_tool(cfg: dict) -> dict | None:
     transfers: list[dict] = []
     emergency = _dial_clean(cfg.get("emergency_number") or cfg.get("forwarding_number"))
     staff = _dial_clean(cfg.get("incoming_forwarding_number"))
+    emergency_added = False
     if emergency and cfg.get("emergency_enabled"):
         transfers.append(
             {
@@ -1332,7 +1338,12 @@ def build_transfer_tool(cfg: dict) -> dict | None:
                 "transfer_type": "conference",
             }
         )
-    if staff and staff != emergency:
+        emergency_added = True
+    # Dedupe ONLY against an emergency entry that was actually added: when the
+    # Notdienst is disabled but staff == emergency number, the old `staff !=
+    # emergency` check dropped the staff entry too → the tool vanished entirely
+    # while the prompt still offered Mitarbeiter-transfers (audit 2026-06-11).
+    if staff and (not emergency_added or staff != emergency):
         transfers.append(
             {
                 "transfer_destination": {"type": "phone", "phone_number": staff},

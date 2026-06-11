@@ -167,7 +167,7 @@ def test_patch_phone_writes_forwarding_pair_to_agent_configs(monkeypatch):
         chain.eq.return_value = chain
         chain.limit.return_value = chain
         chain.execute.return_value = MagicMock(
-            data=[{"forwarding_number": "+49 111", "incoming_forwarding_number": "+49 222"}]
+            data=[{"forwarding_number": "+49 151 1111111", "incoming_forwarding_number": "+49 152 2222222"}]
         )
         return chain
 
@@ -175,16 +175,16 @@ def test_patch_phone_writes_forwarding_pair_to_agent_configs(monkeypatch):
     monkeypatch.setattr(kz, "get_service_client", lambda: client)
 
     payload = kz.PhoneUpdate(
-        forwarding_number="+49 111",
-        incoming_forwarding_number="+49 222",
+        forwarding_number="+49 151 1111111",
+        incoming_forwarding_number="+49 152 2222222",
     )
     monkeypatch.setattr(kz, "_schedule_repush", lambda *a, **k: None)
     asyncio.run(kz.update_phone(payload, MagicMock(), user=_org_admin()))
 
     cfg_writes = [w for w in writes if w[0] == "agent_configs"]
     assert len(cfg_writes) == 1
-    assert cfg_writes[0][1].get("forwarding_number") == "+49 111"
-    assert cfg_writes[0][1].get("incoming_forwarding_number") == "+49 222"
+    assert cfg_writes[0][1].get("forwarding_number") == "+49 151 1111111"
+    assert cfg_writes[0][1].get("incoming_forwarding_number") == "+49 152 2222222"
     # No organizations write — existing_business_number wasn't in the payload.
     assert all(w[0] != "organizations" for w in writes)
 
