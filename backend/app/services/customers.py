@@ -108,6 +108,34 @@ def get_or_create_customer(
         return existing
 
     phone_norm = _to_e164(phone)
+
+    # Tester 2026-06-11: a KNOWN customer giving a DIFFERENT number on a call
+    # (new SIM, work phone, calling for themselves from elsewhere) must not become
+    # a duplicate row with the same name. If exactly ONE same-name customer exists
+    # in the org, attach the new number as the SECONDARY mobile (phone2 — simply
+    # overwritten when they give yet another) and reuse that row. Ambiguous names
+    # (0 or 2+ matches) fall through to create, as before — we never guess-merge.
+    if phone_norm and name and name.strip():
+        same_name = (
+            client.table("customers")
+            .select("id, full_name, phone, phone2, email, customer_number")
+            .eq("org_id", org_id)
+            .neq("status", "deleted")
+            .ilike("full_name", name.strip())  # no wildcards → exact, case-insensitive
+            .limit(2)
+            .execute()
+            .data
+            or []
+        )
+        if len(same_name) == 1:
+            cust = same_name[0]
+            if phone_norm not in (cust.get("phone"), cust.get("phone2")):
+                client.table("customers").update(
+                    {"phone2": phone_norm, "updated_at": "now()"}
+                ).eq("org_id", org_id).eq("id", cust["id"]).execute()
+                cust["phone2"] = phone_norm
+            return cust
+
     payload = {
         "org_id": org_id,
         "full_name": name,

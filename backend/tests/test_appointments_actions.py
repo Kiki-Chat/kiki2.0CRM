@@ -122,8 +122,9 @@ def test_confirm_happy_path_sets_confirmed_at_and_status(monkeypatch):
         "id": appt_id,
         "org_id": org_id,
         "status": "pending",
-        # A confirmable appointment must carry a responsible employee.
+        # A confirmable appointment must carry a responsible employee AND a time.
         "assigned_employee_id": "emp-1",
+        "scheduled_at": "2026-06-20T10:00:00+00:00",
     }
     confirmed = {**pending, "status": "confirmed", "confirmed_at": "2026-05-28T10:00:00+00:00"}
     client = _FakeClient([[pending], [confirmed]])

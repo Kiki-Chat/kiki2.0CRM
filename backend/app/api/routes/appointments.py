@@ -283,6 +283,17 @@ def _confirm(org_id: str, appointment_id: str) -> dict | None:
                 "zugewiesen. Bitte zuerst einen Mitarbeiter zuweisen."
             ),
         )
+    # …and a concrete time (tester 2026-06-11): a slot captured on a call without
+    # a parseable datetime must not be confirmable — confirming fires the customer
+    # call/email, which would announce an appointment with no time.
+    if not appt.get("scheduled_at"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Termin kann nicht bestätigt werden — es ist kein Zeitpunkt "
+                "festgelegt. Bitte zuerst Datum und Uhrzeit setzen."
+            ),
+        )
     now = _now_iso()
     updated = (
         get_service_client()

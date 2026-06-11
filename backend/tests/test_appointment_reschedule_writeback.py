@@ -86,3 +86,87 @@ def test_change_appointment_stamps_customer_proposal_additively(monkeypatch):
     assert stamp["customer_proposed_start_time"]
     assert stamp["customer_proposed_at"]
     assert stamp["customer_proposal_source"] == "agent_call"
+
+
+# ─── conv_7401ktv… post-mortem fixes (2026-06-11) ─────────────────────────────
+def test_change_targets_exact_appointment_via_conversation_ledger(monkeypatch):
+    """Part 1: on an outbound appointment call the outbound_calls ledger names the
+    exact appointment — a hallucinated phoneNumber must be irrelevant."""
+    db = _DB(
+        {
+            # ledger row for this conversation → referenz Termin appt-42
+            "outbound_calls": [[{"referenz_typ": "Termin", "referenz_id": "appt-42"}]],
+            # the targeted appointment (active), then NO further appointment select
+            "appointments": [[{"id": "appt-42", "scheduled_at": "2026-06-15T07:00:00+00:00",
+                               "customer_id": "cust-7", "status": "confirmed"}]],
+            # customer fetched BY ID from the appointment (not by the junk phone)
+            "customers": [[{"id": "cust-7", "full_name": "Govind Yadav"}]],
+            "inquiries": [[], [{"id": "inq-2"}]],
+            "organizations": [[{"id": "org-1", "code": "K01"}]],
+        },
+        counts={"inquiries": 0},
+    )
+    monkeypatch.setattr(appt_service, "get_service_client", lambda: db)
+
+    payload = ChangeAppointmentRequest(
+        phoneNumber="+49 123 4567890",  # the hallucinated placeholder from the real call
+        newDate="15.06.2026", newTime="13:00",
+        _conversationId="conv_7401ktv7t944e5a8h5eh9t4wq0w3",
+    )
+    out = appt_service.change_appointment("org-1", payload)
+    assert out["success"] is True and out["status"] == "PENDING_CONFIRMATION"
+    assert out["originalDatetime"] == "2026-06-15T07:00:00+00:00"
+    # proposal stamped on exactly the ledger-named appointment
+    assert [p for (t, p) in db.updates if t == "appointments"]
+
+
+def test_change_falls_back_to_recorded_inquiry_when_nothing_matches(monkeypatch):
+    """Part 3: no ledger row, junk phone, unknown caller → the request must NOT be
+    lost. A 'Terminänderung (manuell zuordnen)' inquiry is recorded and the agent
+    gets a truthful forwarded-to-team message."""
+    db = _DB(
+        {
+            "outbound_calls": [[]],          # no ledger row (e.g. UAT test call)
+            "customers": [[], []],           # caller-ID lookup, then junk-phone lookup
+            "inquiries": [[], [{"id": "inq-lost"}]],
+            "organizations": [[{"id": "org-1", "code": "K01"}]],
+        },
+        counts={"inquiries": 0},
+    )
+    monkeypatch.setattr(appt_service, "get_service_client", lambda: db)
+
+    payload = ChangeAppointmentRequest(
+        phoneNumber="+49 123 4567890", newDate="15.06.2026", newTime="13:00",
+        _conversationId="conv_unknown", _callerNumber="+4925197593618",
+    )
+    out = appt_service.change_appointment("org-1", payload)
+    assert out["success"] is True
+    assert out["status"] == "FORWARDED_TO_TEAM"
+    assert out["changeRequestId"] == "inq-lost"
+    ins = [p for (t, p) in db.inserts if t == "inquiries"]
+    assert ins and ins[0]["title"] == "Terminänderung (manuell zuordnen)"
+    assert "+4925197593618" in ins[0]["notes"]          # caller context preserved
+    assert "13:00" in ins[0]["notes"] or "2026-06-15" in ins[0]["notes"]
+
+
+def test_change_known_customer_without_upcoming_appt_records_inquiry(monkeypatch):
+    """Part 3b: customer resolved but no upcoming appointment row → capture the
+    wish as an inquiry linked to that customer instead of returning a dead error."""
+    db = _DB(
+        {
+            "customers": [[{"id": "cust-1", "full_name": "Max", "phone": "+49170"}]],
+            "appointments": [[]],            # no upcoming rows
+            "inquiries": [[], [{"id": "inq-3"}]],
+            "organizations": [[{"id": "org-1", "code": "K01"}]],
+        },
+        counts={"inquiries": 0},
+    )
+    monkeypatch.setattr(appt_service, "get_service_client", lambda: db)
+
+    payload = ChangeAppointmentRequest(
+        _callerNumber="+49170", newDate="2026-06-20", newTime="10:00",
+    )
+    out = appt_service.change_appointment("org-1", payload)
+    assert out["success"] is True and out["status"] == "FORWARDED_TO_TEAM"
+    ins = [p for (t, p) in db.inserts if t == "inquiries"]
+    assert ins[0]["customer_id"] == "cust-1"

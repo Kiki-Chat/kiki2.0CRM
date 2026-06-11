@@ -334,7 +334,7 @@ def test_run_due_outbound_appointment_dispatch_and_ledger(monkeypatch):
     db = _FakeDB({
         "agent_configs": [[_cfg_row(now)]],
         "organizations": [[_ORG_ROW]],
-        "appointments": [[_APPT]],
+        "appointments": [[_APPT], [_APPT]],  # selector/fetch + pre-dial liveness re-check
         "outbound_calls": [[]],   # dedup pre-check: none dispatched yet
         "customers": [[_CUST]],
     })
@@ -423,7 +423,7 @@ def test_run_due_outbound_dedup_excludes_already_dispatched(monkeypatch):
     db = _FakeDB({
         "agent_configs": [[_cfg_row(now)]],
         "organizations": [[_ORG_ROW]],
-        "appointments": [[_APPT]],
+        "appointments": [[_APPT], [_APPT]],  # selector/fetch + pre-dial liveness re-check
         "outbound_calls": [[{"referenz_id": "appt-1"}]],  # already has a non-failed call
     })
     monkeypatch.setattr(outbound_dispatch, "get_service_client", lambda: db)
@@ -441,7 +441,7 @@ def test_run_due_outbound_dry_run_no_call_no_claim(monkeypatch):
     db = _FakeDB({
         "agent_configs": [[_cfg_row(now)]],
         "organizations": [[_ORG_ROW]],
-        "appointments": [[_APPT]],
+        "appointments": [[_APPT], [_APPT]],  # selector/fetch + pre-dial liveness re-check
         "customers": [[_CUST]],
     })
     monkeypatch.setattr(outbound_dispatch, "get_service_client", lambda: db)
@@ -497,7 +497,7 @@ def test_run_due_outbound_no_phone_skipped(monkeypatch):
     db = _FakeDB({
         "agent_configs": [[_cfg_row(now)]],
         "organizations": [[_ORG_ROW]],
-        "appointments": [[_APPT]],
+        "appointments": [[_APPT], [_APPT]],  # selector/fetch + pre-dial liveness re-check
         "outbound_calls": [[]],
         "customers": [[{"id": "cust-1", "full_name": "No Phone", "phone": None}]],
     })
@@ -515,7 +515,7 @@ def test_run_due_outbound_no_phone_skipped(monkeypatch):
 def test_send_single_override_dials_test_number_and_skips_ledger(monkeypatch):
     db = _FakeDB({
         "organizations": [[_ORG_ROW]],
-        "appointments": [[_APPT]],
+        "appointments": [[_APPT], [_APPT]],  # selector/fetch + pre-dial liveness re-check
         "customers": [[{**_CUST, "phone": "+49REALCUSTOMER"}]],
     })
     monkeypatch.setattr(outbound_dispatch, "get_service_client", lambda: db)
@@ -552,7 +552,7 @@ def test_send_single_not_found_raises_lookuperror(monkeypatch):
 def test_send_single_no_phone_no_override_raises(monkeypatch):
     db = _FakeDB({
         "organizations": [[_ORG_ROW]],
-        "appointments": [[_APPT]],
+        "appointments": [[_APPT], [_APPT]],  # selector/fetch + pre-dial liveness re-check
         "customers": [[{"id": "cust-1", "full_name": "X", "phone": None}]],
     })
     monkeypatch.setattr(outbound_dispatch, "get_service_client", lambda: db)
@@ -667,7 +667,7 @@ def test_open_case_with_inquiry_records_inquiry_id_in_claim(monkeypatch):
     db = _FakeDB({
         "agent_configs": [[_cfg_row(now)]],
         "organizations": [[_ORG_ROW]],
-        "appointments": [[appt]],
+        "appointments": [[appt], [appt]],  # selector + pre-dial liveness re-check
         "inquiries": [[{"id": "inq-open", "status": "open"}]],
         "outbound_calls": [[]],
         "customers": [[_CUST]],

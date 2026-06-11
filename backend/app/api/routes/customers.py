@@ -467,6 +467,42 @@ async def import_customers_preview(
 
 def _update(org_id: str, customer_id: str, payload: CustomerUpsert) -> dict | None:
     client = get_service_client()
+
+    # Dedup guard on EDIT too (tester 2026-06-11): create blocked duplicates, but
+    # changing an existing customer's phone/phone2/email to another customer's
+    # number slipped through. Same shared rule, same 409 — a hit on the row being
+    # edited itself is of course fine.
+    if payload.phone or payload.phone2 or payload.email:
+        cur_rows = (
+            client.table("customers")
+            .select("id, full_name")
+            .eq("org_id", org_id)
+            .eq("id", customer_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        cur_name = (cur_rows[0].get("full_name") if cur_rows else None)
+        dup = find_existing_customer(
+            client, org_id,
+            phone=payload.phone,
+            name=payload.full_name or cur_name,
+            email=payload.email,
+        )
+        if (dup is None or dup.get("id") == customer_id) and payload.phone2:
+            d2 = find_existing_customer(
+                client, org_id, phone=payload.phone2, name=payload.full_name or cur_name
+            )
+            if d2 and d2.get("id") != customer_id:
+                dup = d2
+        if dup and dup.get("id") != customer_id:
+            num = dup.get("customer_number") or dup.get("full_name") or "vorhanden"
+            raise HTTPException(
+                status_code=409,
+                detail=f"Es existiert bereits ein Kunde mit dieser Telefonnummer oder E-Mail (Kundennr. {num}).",
+            )
+
     fields: dict = {}
     if payload.full_name is not None:
         fields["full_name"] = payload.full_name

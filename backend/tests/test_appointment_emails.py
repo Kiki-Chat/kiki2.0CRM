@@ -152,7 +152,7 @@ class _DB:
 def test_send_single_appointment_places_call_and_emails(monkeypatch, scope_on):
     db = _DB({
         "organizations": [[_ORG]],
-        "appointments": [[_APPT]],
+        "appointments": [[_APPT], [_APPT]],  # selector/fetch + pre-dial liveness re-check
         "customers": [[_CUST]],
     })
     monkeypatch.setattr(outbound_dispatch, "get_service_client", lambda: db)

@@ -276,6 +276,21 @@ def _claim(db, claim: dict) -> bool:
 def _dispatch_one(
     db, *, org, org_id, spec, record, customer, inquiry_id, cycle_no, to_number_override, dry_run, now
 ):
+    # Pre-dial liveness re-check (tester 2026-06-11): an appointment cancelled
+    # AFTER this call was selected / claimed / scheduled for retry must not be
+    # dialed — the record snapshot can be stale by the time we actually dial.
+    # Occasion-aware: a cancellation call legitimately concerns a cancelled
+    # appointment; every other Termin occasion requires a live one.
+    if spec.referenz_typ == "Termin" and not dry_run:
+        cur = (
+            db.table("appointments").select("status")
+            .eq("org_id", org_id).eq("id", record["id"]).limit(1).execute().data or []
+        )
+        status = (cur[0] if cur else {}).get("status")
+        allowed = ("cancelled",) if spec.key == "appointment_cancellation" else ("pending", "confirmed")
+        if status not in allowed:
+            return {"skipped": "record_inactive", "referenz_id": record["id"], "status": status}
+
     to_number = to_number_override or (
         spec.to_number_of(record, customer) if spec.to_number_of else (customer or {}).get("phone")
     )

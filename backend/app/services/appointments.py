@@ -700,83 +700,182 @@ def cancel_appointment(org_id: str, payload: CancelAppointmentRequest) -> dict:
 
 
 # ─── changeAppointment ───────────────────────────────────────────────────────
-def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
-    client = get_service_client()
-    customer = _find_customer_by_phone(
-        client, org_id, payload.phone_number or payload.caller_number
-    )
-    if not customer and payload.name:
-        rows = (
-            client.table("customers")
-            .select("id, full_name")
-            .eq("org_id", org_id)
-            .ilike("full_name", f"%{payload.name}%")
-            .limit(1)
-            .execute()
-            .data
-        )
-        customer = rows[0] if rows else None
-    if not customer:
-        return {
-            "success": False,
-            "error": "NO_APPOINTMENT_FOUND",
-            "message": "Zu Ihren Angaben wurde kein Termin gefunden.",
-        }
-
-    now = now_berlin()
+def _appointment_from_conversation(client, org_id: str, conversation_id: str | None) -> dict | None:
+    """Deterministic reschedule targeting on OUTBOUND calls: the outbound_calls
+    ledger row stamped with this conversation_id says exactly which appointment
+    this call is about (referenz_typ='Termin' + referenz_id) — no phone/name/date
+    guessing needed. Post-mortem conv_7401ktv…: the LLM passed a hallucinated
+    phoneNumber, the lookup failed, and the reschedule request was silently lost
+    although the call KNEW the appointment id the whole time."""
+    if not conversation_id:
+        return None
     rows = (
-        client.table("appointments")
-        .select("id, scheduled_at")
+        client.table("outbound_calls")
+        .select("referenz_typ, referenz_id")
         .eq("org_id", org_id)
-        .eq("customer_id", customer["id"])
-        .in_("status", ["pending", "confirmed"])
-        .gte("scheduled_at", now.isoformat())
-        .order("scheduled_at")
+        .eq("conversation_id", conversation_id)
+        .limit(1)
         .execute()
         .data
         or []
     )
-    if not rows:
-        return {
-            "success": False,
-            "error": "NO_APPOINTMENT_FOUND",
-            "message": "Es wurde kein bevorstehender Termin gefunden.",
-        }
-    # Pick the RIGHT appointment to move. With one upcoming appointment we take it.
-    # With several we never guess: the agent must supply the date of the one the
-    # customer means (mirrors the cancel flow) so we link the proposal to the exact
-    # appointment — this is what keeps a reschedule from drifting onto the wrong row.
-    if len(rows) == 1:
-        appt = rows[0]
-    else:
-        want = _parse_iso_date(payload.appointment_date)
-        if want is None:
-            return {
-                "success": False,
-                "error": "DATE_CONFIRMATION_REQUIRED",
-                "message": "Sie haben mehrere bevorstehende Termine. Welchen möchten "
-                "Sie verschieben? Bitte nennen Sie mir das Datum des Termins.",
+    led = rows[0] if rows else None
+    if not led or led.get("referenz_typ") != "Termin" or not led.get("referenz_id"):
+        return None
+    appt = (
+        client.table("appointments")
+        .select("id, scheduled_at, customer_id, status")
+        .eq("org_id", org_id)
+        .eq("id", led["referenz_id"])
+        .in_("status", ["pending", "confirmed"])
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return appt[0] if appt else None
+
+
+def _record_unmatched_change_request(
+    client, org_id: str, payload: ChangeAppointmentRequest, customer: dict | None = None
+) -> dict:
+    """Terminal fallback: the reschedule could not be linked to an appointment —
+    NEVER drop it (the agent already promised the caller it would be passed on).
+    Record a concrete appointment_change inquiry carrying every bit of caller
+    context we have, so a human can match it; the agent's message stays truthful."""
+    new_dt = parse_when(payload.new_date, payload.new_time)
+    wunsch = (
+        new_dt.isoformat()
+        if new_dt
+        else f"{payload.new_date or '?'} {payload.new_time or ''}".strip()
+    )
+    number = gen_inquiry_number(client, org_id)
+    notes = (
+        "NICHT ZUGEORDNET — Termin konnte nicht automatisch gefunden werden, "
+        "bitte manuell zuordnen.\n"
+        f"Wunschtermin neu: {wunsch}\n"
+        f"Caller-ID: {payload.caller_number or '-'} | vom Agenten übermittelte Nummer: "
+        f"{payload.phone_number or '-'} | Name: {payload.name or '-'}\n"
+        f"Grund: {payload.reason or '-'} | Conversation: {payload.conversation_id or '-'}"
+    )
+    change = (
+        client.table("inquiries")
+        .insert(
+            {
+                "org_id": org_id,
+                "customer_id": (customer or {}).get("id"),
+                "title": "Terminänderung (manuell zuordnen)",
+                "type": "appointment_change",
+                "status": "open",
+                "number": number,
+                "notes": notes,
             }
-        matching = [
-            a for a in rows
-            if (_parse_iso(a["scheduled_at"])
-                and _parse_iso(a["scheduled_at"]).astimezone(BERLIN).date() == want)
-        ]
-        if len(matching) == 0:
-            return {
-                "success": False,
-                "error": "NO_APPOINTMENT_FOUND",
-                "message": "An diesem Datum wurde kein Termin gefunden. Bitte prüfen "
-                "Sie das Datum.",
-            }
-        if len(matching) > 1:
-            return {
-                "success": False,
-                "error": "MULTIPLE_MATCHES",
-                "message": "Es gibt mehrere Termine an diesem Datum. Bitte nennen Sie "
-                "zusätzlich die Uhrzeit zur eindeutigen Zuordnung.",
-            }
-        appt = matching[0]
+        )
+        .execute()
+        .data[0]
+    )
+    return {
+        "success": True,
+        "changeRequestId": change["id"],
+        "status": "FORWARDED_TO_TEAM",
+        "message": "Ich habe Ihren Terminänderungswunsch an das Team weitergegeben — "
+        "es prüft den Termin und meldet sich zur Bestätigung bei Ihnen.",
+    }
+
+
+def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
+    client = get_service_client()
+
+    # 1) Deterministic: on an outbound appointment call the ledger names the
+    #    exact appointment — use it and skip the phone/name derivation entirely.
+    appt = _appointment_from_conversation(client, org_id, payload.conversation_id)
+    customer: dict | None = None
+    if appt is not None and appt.get("customer_id"):
+        cust_rows = (
+            client.table("customers")
+            .select("id, full_name")
+            .eq("org_id", org_id)
+            .eq("id", appt["customer_id"])
+            .limit(1)
+            .execute()
+            .data
+        )
+        customer = cust_rows[0] if cust_rows else None
+
+    if appt is None:
+        # 2) Derivation path (inbound / no ledger): the VERIFIED Caller-ID wins
+        #    over the LLM-supplied phoneNumber — a hallucinated/placeholder number
+        #    must never shadow the real caller. Name is the last resort.
+        customer = _find_customer_by_phone(client, org_id, payload.caller_number)
+        if not customer:
+            customer = _find_customer_by_phone(client, org_id, payload.phone_number)
+        if not customer and payload.name:
+            rows = (
+                client.table("customers")
+                .select("id, full_name")
+                .eq("org_id", org_id)
+                .ilike("full_name", f"%{payload.name}%")
+                .limit(1)
+                .execute()
+                .data
+            )
+            customer = rows[0] if rows else None
+        if not customer:
+            # 3) Never lose the request: record it for manual matching.
+            return _record_unmatched_change_request(client, org_id, payload)
+
+        now = now_berlin()
+        rows = (
+            client.table("appointments")
+            .select("id, scheduled_at")
+            .eq("org_id", org_id)
+            .eq("customer_id", customer["id"])
+            .in_("status", ["pending", "confirmed"])
+            .gte("scheduled_at", now.isoformat())
+            .order("scheduled_at")
+            .execute()
+            .data
+            or []
+        )
+        if not rows:
+            # Known customer but no upcoming appointment row → still capture it.
+            return _record_unmatched_change_request(client, org_id, payload, customer)
+        # Pick the RIGHT appointment to move. With one upcoming appointment we
+        # take it. With several we never guess: the agent must supply the date of
+        # the one the customer means (mirrors the cancel flow) so we link the
+        # proposal to the exact appointment — this is what keeps a reschedule
+        # from drifting onto the wrong row.
+        if len(rows) == 1:
+            appt = rows[0]
+        else:
+            want = _parse_iso_date(payload.appointment_date)
+            if want is None:
+                return {
+                    "success": False,
+                    "error": "DATE_CONFIRMATION_REQUIRED",
+                    "message": "Sie haben mehrere bevorstehende Termine. Welchen möchten "
+                    "Sie verschieben? Bitte nennen Sie mir das Datum des Termins.",
+                }
+            matching = [
+                a for a in rows
+                if (_parse_iso(a["scheduled_at"])
+                    and _parse_iso(a["scheduled_at"]).astimezone(BERLIN).date() == want)
+            ]
+            if len(matching) == 0:
+                return {
+                    "success": False,
+                    "error": "NO_APPOINTMENT_FOUND",
+                    "message": "An diesem Datum wurde kein Termin gefunden. Bitte prüfen "
+                    "Sie das Datum.",
+                }
+            if len(matching) > 1:
+                return {
+                    "success": False,
+                    "error": "MULTIPLE_MATCHES",
+                    "message": "Es gibt mehrere Termine an diesem Datum. Bitte nennen Sie "
+                    "zusätzlich die Uhrzeit zur eindeutigen Zuordnung.",
+                }
+            appt = matching[0]
 
     new_dt = parse_when(payload.new_date, payload.new_time)
     if new_dt is None:
@@ -793,7 +892,9 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
         .insert(
             {
                 "org_id": org_id,
-                "customer_id": customer["id"],
+                # Part-1 path resolves the customer from the appointment row; fall
+                # back to that id if the customer fetch came up empty.
+                "customer_id": (customer or {}).get("id") or appt.get("customer_id"),
                 "title": "Terminänderung",
                 "type": "appointment_change",
                 "status": "open",
