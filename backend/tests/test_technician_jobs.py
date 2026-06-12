@@ -2,8 +2,8 @@
 
 DB is a MagicMock routed per table; what we assert is the BEHAVIOUR contract:
 revoked/closed-case links die with German messages, submit enforces the
-mandatory description + photo-when-finished rules, and a re-dispatch revokes
-the prior live link.
+mandatory description + at-least-one-photo (on every submit) rules, and a
+re-dispatch revokes the prior live link.
 """
 from __future__ import annotations
 
@@ -100,6 +100,13 @@ def test_submit_finished_requires_photo(monkeypatch):
     _patch_client(monkeypatch, _ctx_tables(_link_row(photo_paths=[])))
     with pytest.raises(tj.JobLinkError, match="Foto"):
         tj.submit_job("tok", {"description": "Alles erledigt", "job_finished": True})
+
+
+def test_submit_unfinished_also_requires_photo(monkeypatch):
+    # Photo is mandatory on EVERY submit now, not only when the job is finished.
+    _patch_client(monkeypatch, _ctx_tables(_link_row(photo_paths=[])))
+    with pytest.raises(tj.JobLinkError, match="Foto"):
+        tj.submit_job("tok", {"description": "Zwischenstand dokumentiert", "job_finished": False})
 
 
 def test_submit_ok_stamps_timestamps(monkeypatch):

@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 PHOTO_BUCKET = "customer-files"
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
-MAX_PHOTOS = 12
+MAX_PHOTOS = 30
 
 
 class JobLinkError(ValueError):
@@ -211,8 +211,8 @@ def add_photo(token: str, *, filename: str, content: bytes, mime_type: str) -> d
 
 
 def submit_job(token: str, report: dict) -> dict:
-    """Final submit — requires an end-of-job description and ≥1 photo when the
-    job was finished. The report threads into the Vorgang timeline via
+    """Final submit — requires an end-of-job description and ≥1 photo (always,
+    not only when finished). The report threads into the Vorgang timeline via
     build_case_thread (read side), nothing else to write."""
     link = _load_link(token)
     _load_context(link)
@@ -222,8 +222,8 @@ def submit_job(token: str, report: dict) -> dict:
     description = (report.get("description") or "").strip()
     if not description:
         raise JobLinkError("Bitte beschreiben Sie kurz, was vor Ort gemacht wurde.")
-    if finished and not (link.get("photo_paths") or []):
-        raise JobLinkError("Bitte laden Sie mindestens ein Foto der fertigen Arbeit hoch.")
+    if not (link.get("photo_paths") or []):
+        raise JobLinkError("Bitte laden Sie mindestens ein Foto hoch.")
     clean = {
         "experience_good": report.get("experience_good"),
         "extra_demands": (report.get("extra_demands") or "").strip() or None,

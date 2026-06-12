@@ -248,12 +248,15 @@ export function JobLinkPage() {
             />
           </FieldBlock>
 
-          <FieldBlock label={`Fotos${finished ? ' (mind. 1 bei Abschluss) *' : ''}`}>
+          <FieldBlock label="Fotos (mind. 1, mehrere möglich) *">
+            {/* No `capture` attribute on purpose: with it, mobile jumps straight
+                to the camera and blocks the gallery + multi-select. Without it the
+                OS shows the chooser (Kamera / Galerie / Dateien) and `multiple`
+                works — i.e. take a photo now OR pick existing ones, several at a time. */}
             <input
               ref={fileRef}
               type="file"
               accept="image/*"
-              capture="environment"
               multiple
               className="hidden"
               onChange={(e) => void uploadPhotos(e.target.files)}
@@ -266,6 +269,7 @@ export function JobLinkPage() {
               {uploading ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
               {uploading ? 'Lädt hoch…' : 'Foto aufnehmen / hochladen'}
             </button>
+            <p className="mt-1 text-xs text-muted">Auf dem Handy: Kamera oder Galerie. Mehrere Fotos möglich.</p>
             {photos > 0 && (
               <p className="mt-1 text-xs font-medium text-green-deep">✓ {photos} Foto{photos === 1 ? '' : 's'} hochgeladen</p>
             )}
@@ -275,7 +279,7 @@ export function JobLinkPage() {
 
           <button
             onClick={() => { setFormError(null); submit.mutate() }}
-            disabled={submit.isPending || !description.trim() || (finished && photos === 0)}
+            disabled={submit.isPending || !description.trim() || photos === 0}
             className="w-full rounded-xl bg-green-primary py-3.5 text-base font-bold text-white hover:brightness-110 disabled:opacity-50"
           >
             {submit.isPending ? 'Wird übermittelt…' : 'Bericht absenden'}
