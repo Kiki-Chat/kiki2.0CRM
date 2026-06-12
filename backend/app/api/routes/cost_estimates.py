@@ -148,6 +148,15 @@ def _create(org_id: str, user_id: str | None, payload: CostEstimateUpsert) -> di
     client = get_service_client()
     _validate_fks(client, org_id, payload)
     row = _build_row(org_id, payload, user_id)
+    # Projects merge (item 6): a KVA for an inquiry belongs to that inquiry's
+    # Projekt — inherit it when the form didn't set one explicitly.
+    if row.get("inquiry_id") and not row.get("project_id"):
+        inq = (
+            client.table("inquiries").select("project_id")
+            .eq("org_id", org_id).eq("id", row["inquiry_id"]).limit(1).execute().data
+        )
+        if inq and inq[0].get("project_id"):
+            row["project_id"] = inq[0]["project_id"]
     row["number"] = gen_number(client, org_id, payload.type)
     row["status"] = "draft"
     return client.table("cost_estimates").insert(row).execute().data[0]

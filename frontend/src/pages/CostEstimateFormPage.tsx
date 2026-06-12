@@ -40,7 +40,7 @@ interface Position {
   is_labor: boolean
 }
 interface CustomerOption { id: string; full_name: string | null }
-interface Inquiry { id: string; title: string | null; status: string }
+interface Inquiry { id: string; number: string | null; subject: string | null; title: string | null; status: string }
 interface CatalogItem { id: string; name: string; description: string | null; unit_price: number; unit: string | null }
 
 const UNITS = ['Stk', 'm', 'm²', 'h', 'Std', 'pauschal', 'kg', 'l', 'Tag']
@@ -416,11 +416,20 @@ export function CostEstimateFormPage() {
               </select>
             </div>
             {!!customerId && (
-              <div className="mt-3"><div className={labelCls}>Anfrage (optional)</div>
-                <select value={inquiryId} onChange={(e) => { setInquiryId(e.target.value); const inq = inquiries.find((i) => i.id === e.target.value); if (inq?.title) setSubject(inq.title) }} className={inputCls}>
+              <div className="mt-3"><div className={labelCls}>Anfrage zuordnen (optional)</div>
+                <select value={inquiryId} onChange={(e) => { setInquiryId(e.target.value); const inq = inquiries.find((i) => i.id === e.target.value); const t = inq?.subject || inq?.title; if (t) setSubject(t) }} className={inputCls}>
                   <option value="">Keine Anfrage</option>
-                  {inquiries.map((i) => <option key={i.id} value={i.id}>{i.title ?? 'Anfrage'}</option>)}
+                  {/* Number first (the "header"), then topic — one KVA per inquiry;
+                      the KVA inherits the inquiry's PROJEKT automatically. */}
+                  {inquiries.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.number ? `${i.number} — ` : ''}{i.subject ?? i.title ?? 'Anfrage'}
+                    </option>
+                  ))}
                 </select>
+                {inquiryId && (
+                  <p className="mt-1 text-xs text-muted">Der KVA wird automatisch dem Projekt dieser Anfrage zugeordnet.</p>
+                )}
               </div>
             )}
           </Card>

@@ -26,6 +26,24 @@ def _today() -> str:
     return now_berlin().date().isoformat()
 
 
+def _member_inquiry_ids(client, org_id: str, project_id: str) -> list[str]:
+    """The project's member inquiries — the LINK CHAIN of the projects merge.
+    Appointments/KVAs created from calls only carry inquiry_id, so every project
+    relation resolves as: direct project_id OR inquiry_id ∈ members."""
+    rows = (
+        client.table("inquiries").select("id")
+        .eq("org_id", org_id).eq("project_id", project_id)
+        .neq("status", "deleted").execute().data or []
+    )
+    return [r["id"] for r in rows]
+
+
+def _merged(direct: list[dict], via_chain: list[dict]) -> list[dict]:
+    """Union two row lists by id (direct project_id hits win)."""
+    seen = {r["id"] for r in direct}
+    return direct + [r for r in via_chain if r["id"] not in seen]
+
+
 def _fetch(client, org_id: str, project_id: str) -> dict | None:
     rows = (
         client.table("projects").select("*").eq("org_id", org_id)
@@ -227,27 +245,37 @@ def _detail(org_id: str, project_id: str) -> dict | None:
         p["customer_name"] = cust.get("full_name")
         p["customer"] = cust
 
-    # Six independent reads (all scoped to this project / its customer) — run them
-    # concurrently, and PAGE the row-returning ones so a project with >1000 related
-    # rows can't silently truncate its stats.
-    def _inq():
-        return fetch_all_rows(
-            lambda: client.table("inquiries").select("status").eq("org_id", org_id).eq("project_id", project_id)
-        )
+    # Relation reads resolve via the LINK CHAIN (direct project_id OR inquiry_id
+    # ∈ member inquiries) — call-driven appointments/KVAs only carry inquiry_id,
+    # so project_id-only filters left the workspace half-empty (Amber 2026-06-12).
+    # Member ids first, then the dependent reads run concurrently + paged.
+    member_rows = fetch_all_rows(
+        lambda: client.table("inquiries").select("id, status").eq("org_id", org_id)
+        .eq("project_id", project_id).neq("status", "deleted")
+    )
+    member_ids = [r["id"] for r in member_rows]
 
     def _appts():
-        return fetch_all_rows(
-            lambda: client.table("appointments").select("status, scheduled_at").eq("org_id", org_id).eq("project_id", project_id)
+        direct = fetch_all_rows(
+            lambda: client.table("appointments").select("id, status, scheduled_at").eq("org_id", org_id).eq("project_id", project_id)
         )
+        chained = fetch_all_rows(
+            lambda: client.table("appointments").select("id, status, scheduled_at").eq("org_id", org_id).in_("inquiry_id", member_ids)
+        ) if member_ids else []
+        return _merged(direct, chained)
 
     def _kvas():
-        return fetch_all_rows(
+        direct = fetch_all_rows(
             lambda: client.table("cost_estimates").select("id").eq("org_id", org_id).eq("project_id", project_id)
         )
+        chained = fetch_all_rows(
+            lambda: client.table("cost_estimates").select("id").eq("org_id", org_id).in_("inquiry_id", member_ids)
+        ) if member_ids else []
+        return _merged(direct, chained)
 
     def _invs():
         return fetch_all_rows(
-            lambda: client.table("invoices").select("total, status").eq("org_id", org_id).eq("project_id", project_id)
+            lambda: client.table("invoices").select("id, total, status").eq("org_id", org_id).eq("project_id", project_id)
         )
 
     def _docs():
@@ -256,14 +284,26 @@ def _detail(org_id: str, project_id: str) -> dict | None:
         )
 
     def _calls_count():
-        if not cid:
+        # Calls belong to the project via its member inquiries — NOT all customer
+        # calls (a customer can have several projects).
+        if not member_ids:
             return 0
         return (
             client.table("calls").select("id", count="exact")
-            .eq("org_id", org_id).eq("customer_id", cid).execute().count or 0
+            .eq("org_id", org_id).in_("inquiry_id", member_ids)
+            .is_("deleted_at", "null").execute().count or 0
         )
 
-    inquiries, appts, kvas, invs, docs, calls = run_parallel(_inq, _appts, _kvas, _invs, _docs, _calls_count)
+    appts, kvas, invs, docs, calls = run_parallel(_appts, _kvas, _invs, _docs, _calls_count)
+    inquiries = member_rows
+
+    # Invoices linked via their KVA (created from a call's KVA, no project set).
+    kva_ids = [k["id"] for k in kvas]
+    if kva_ids:
+        inv_chained = fetch_all_rows(
+            lambda: client.table("invoices").select("id, total, status").eq("org_id", org_id).in_("cost_estimate_id", kva_ids)
+        )
+        invs = _merged(invs, inv_chained)
 
     pe = fetch_all_rows(
         lambda: client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id)
@@ -385,22 +425,39 @@ def _activity(org_id: str, project_id: str, limit: int) -> list[dict] | None:
     p = _fetch(client, org_id, project_id)
     if not p:
         return None
-    cid = p.get("customer_id")
     items: list[dict] = []
+    # LINK CHAIN (projects merge): each relation = direct project_id OR via the
+    # project's member inquiries — mirrors the workspace tab endpoints.
+    member_ids = _member_inquiry_ids(client, org_id, project_id)
+
+    def _two(table: str, sel: str) -> list[dict]:
+        direct = client.table(table).select("id, " + sel).eq("org_id", org_id).eq("project_id", project_id).execute().data or []
+        chained = (
+            client.table(table).select("id, " + sel).eq("org_id", org_id).in_("inquiry_id", member_ids).execute().data or []
+        ) if member_ids else []
+        return _merged(direct, chained)
+
     for i in client.table("inquiries").select("title, created_at, number").eq("org_id", org_id).eq("project_id", project_id).execute().data or []:
         items.append({"type": "inquiry", "date": i.get("created_at"), "label": f"Neue Anfrage: {i.get('title') or ''}".strip()})
-    for a in client.table("appointments").select("title, scheduled_at, status").eq("org_id", org_id).eq("project_id", project_id).execute().data or []:
+    for a in _two("appointments", "title, scheduled_at, status"):
         done = a.get("status") == "completed"
         verb = "abgeschlossen" if done else "geplant"
         items.append({"type": "appointment_done" if done else "appointment", "date": a.get("scheduled_at"), "label": f"Termin {verb}: {a.get('title') or ''}".strip()})
-    for k in client.table("cost_estimates").select("number, created_at, total").eq("org_id", org_id).eq("project_id", project_id).execute().data or []:
+    kvas = _two("cost_estimates", "number, created_at, total")
+    for k in kvas:
         items.append({"type": "cost_estimate", "date": k.get("created_at"), "amount": k.get("total"), "label": f"{k.get('number') or 'KVA'} erstellt"})
-    for v in client.table("invoices").select("number, created_at, total, status, sent_at, paid_at").eq("org_id", org_id).eq("project_id", project_id).execute().data or []:
+    inv_direct = client.table("invoices").select("id, number, created_at, total, status, sent_at, paid_at").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
+    kva_ids = [k["id"] for k in kvas]
+    inv_chained = (
+        client.table("invoices").select("id, number, created_at, total, status, sent_at, paid_at")
+        .eq("org_id", org_id).in_("cost_estimate_id", kva_ids).execute().data or []
+    ) if kva_ids else []
+    for v in _merged(inv_direct, inv_chained):
         items.append({"type": "invoice", "date": v.get("sent_at") or v.get("created_at"), "amount": v.get("total"), "label": f"{v.get('number') or 'RE'} {'bezahlt' if v.get('status') == 'paid' else 'erstellt'}"})
         if v.get("paid_at"):
             items.append({"type": "payment", "date": v.get("paid_at"), "amount": v.get("total"), "label": f"Zahlung eingegangen · {v.get('number') or ''}".strip()})
-    if cid:
-        for c in client.table("calls").select("started_at, created_at, duration_seconds, summary_title").eq("org_id", org_id).eq("customer_id", cid).order("created_at", desc=True).limit(10).execute().data or []:
+    if member_ids:
+        for c in client.table("calls").select("started_at, created_at, duration_seconds, summary_title").eq("org_id", org_id).in_("inquiry_id", member_ids).is_("deleted_at", "null").order("created_at", desc=True).limit(10).execute().data or []:
             mins = round((c.get("duration_seconds") or 0) / 60)
             items.append({"type": "call", "date": c.get("started_at") or c.get("created_at"), "label": f"Anruf · {mins} min" + (f" · {c.get('summary_title')}" if c.get("summary_title") else "")})
     items = [it for it in items if it.get("date")]
@@ -424,12 +481,16 @@ async def project_calls(project_id: str, user: CurrentUser = Depends(require_org
         p = _fetch(client, user.org_id, project_id)
         if not p:
             return None
-        if not p.get("customer_id"):
+        # THIS project's calls = calls of its member inquiries (a customer can
+        # have several projects — all-customer-calls was wrong).
+        member_ids = _member_inquiry_ids(client, user.org_id, project_id)
+        if not member_ids:
             return []
         return (
             client.table("calls")
             .select("id, started_at, duration_seconds, direction, status, summary, summary_title")
-            .eq("org_id", user.org_id).eq("customer_id", p["customer_id"])
+            .eq("org_id", user.org_id).in_("inquiry_id", member_ids)
+            .is_("deleted_at", "null")
             .order("started_at", desc=True).execute().data or []
         )
     rows = await run_in_threadpool(_q)
@@ -455,11 +516,17 @@ async def project_inquiries(project_id: str, user: CurrentUser = Depends(require
 async def project_appointments(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
     def _q():
         client = get_service_client()
-        rows = (
-            client.table("appointments")
-            .select("id, title, scheduled_at, duration_minutes, status, color, customer_id, assigned_employee_id, location, notes")
-            .eq("org_id", user.org_id).eq("project_id", project_id).order("scheduled_at").execute().data or []
+        member_ids = _member_inquiry_ids(client, user.org_id, project_id)
+        _APPT_COLS = "id, title, scheduled_at, duration_minutes, status, color, customer_id, assigned_employee_id, location, notes"
+        direct = (
+            client.table("appointments").select(_APPT_COLS)
+            .eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []
         )
+        chained = (
+            client.table("appointments").select(_APPT_COLS)
+            .eq("org_id", user.org_id).in_("inquiry_id", member_ids).execute().data or []
+        ) if member_ids else []
+        rows = sorted(_merged(direct, chained), key=lambda r: r.get("scheduled_at") or "")
         _attach_employee_names(client, user.org_id, rows)
         cids = {r.get("customer_id") for r in rows if r.get("customer_id")}
         if cids:
@@ -474,11 +541,17 @@ async def project_appointments(project_id: str, user: CurrentUser = Depends(requ
 async def project_cost_estimates(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
     def _q():
         client = get_service_client()
-        return (
-            client.table("cost_estimates")
-            .select("id, number, status, subject, total, created_at, valid_until, type")
-            .eq("org_id", user.org_id).eq("project_id", project_id).order("created_at", desc=True).execute().data or []
+        member_ids = _member_inquiry_ids(client, user.org_id, project_id)
+        _KVA_COLS = "id, number, status, subject, total, created_at, valid_until, type"
+        direct = (
+            client.table("cost_estimates").select(_KVA_COLS)
+            .eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []
         )
+        chained = (
+            client.table("cost_estimates").select(_KVA_COLS)
+            .eq("org_id", user.org_id).in_("inquiry_id", member_ids).execute().data or []
+        ) if member_ids else []
+        return sorted(_merged(direct, chained), key=lambda r: r.get("created_at") or "", reverse=True)
     return await run_in_threadpool(_q)
 
 
@@ -486,11 +559,27 @@ async def project_cost_estimates(project_id: str, user: CurrentUser = Depends(re
 async def project_invoices(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
     def _q():
         client = get_service_client()
-        rows = (
-            client.table("invoices")
-            .select("id, number, status, invoice_date, due_date, total, sent_at, paid_at, created_at")
-            .eq("org_id", user.org_id).eq("project_id", project_id).order("created_at", desc=True).execute().data or []
+        _INV_COLS = "id, number, status, invoice_date, due_date, total, sent_at, paid_at, created_at"
+        direct = (
+            client.table("invoices").select(_INV_COLS)
+            .eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []
         )
+        # Also via the KVA chain: invoice → cost_estimate → (project_id OR member inquiry).
+        member_ids = _member_inquiry_ids(client, user.org_id, project_id)
+        kva_direct = (
+            client.table("cost_estimates").select("id")
+            .eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []
+        )
+        kva_chained = (
+            client.table("cost_estimates").select("id")
+            .eq("org_id", user.org_id).in_("inquiry_id", member_ids).execute().data or []
+        ) if member_ids else []
+        kva_ids = list({k["id"] for k in kva_direct + kva_chained})
+        chained = (
+            client.table("invoices").select(_INV_COLS)
+            .eq("org_id", user.org_id).in_("cost_estimate_id", kva_ids).execute().data or []
+        ) if kva_ids else []
+        rows = sorted(_merged(direct, chained), key=lambda r: r.get("created_at") or "", reverse=True)
         today = _today()
         for r in rows:
             if r.get("status") == "sent" and r.get("due_date") and str(r["due_date"]) < today:

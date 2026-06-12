@@ -538,7 +538,7 @@ function AddEmployeeModal({ project, existing, onClose, onSaved }: { project: Pr
 }
 
 // ─── DOKUMENTE ────────────────────────────────────────────────────────────────
-interface Doc { id: string; name: string | null; category: string | null; is_image: boolean; uploaded_at: string; size_bytes: number | null; url: string | null }
+interface Doc { id: string; name: string | null; category: string | null; is_image: boolean; uploaded_at: string; size_bytes: number | null; url: string | null; uploaded_by_name?: string | null }
 const fmtSize = (b: number | null) => (b == null ? '' : b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`)
 export function DocumentsTab({ project }: { project: ProjectLite }) {
   const qc = useQueryClient()
@@ -587,7 +587,7 @@ export function DocumentsTab({ project }: { project: ProjectLite }) {
             {list.map((d) => (
               <div key={d.id} className="flex items-center gap-3 px-4 py-3">
                 <FileText size={16} className="text-warning" />
-                <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-text">{d.name}</div><div className="text-xs text-muted">{fmtSize(d.size_bytes)} · {fmtDate(d.uploaded_at)}</div></div>
+                <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium text-text">{d.name}</div><div className="text-xs text-muted">{fmtSize(d.size_bytes)} · {fmtDate(d.uploaded_at)}{d.uploaded_by_name ? ` · ${d.uploaded_by_name}` : ''}</div></div>
                 {d.url && <a href={d.url} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-muted hover:bg-alt"><Download size={15} /></a>}
               </div>
             ))}
@@ -600,7 +600,13 @@ export function DocumentsTab({ project }: { project: ProjectLite }) {
           <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Fotos</div>
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
             {photos.map((p) => (
-              <a key={p.id} href={p.url ?? '#'} target="_blank" rel="noreferrer"><img src={p.url ?? ''} alt={p.name ?? ''} className="aspect-square w-full rounded-lg border border-border object-cover" /></a>
+              <a key={p.id} href={p.url ?? '#'} target="_blank" rel="noreferrer" title={p.uploaded_by_name ?? p.name ?? ''}>
+                <img src={p.url ?? ''} alt={p.name ?? ''} className="aspect-square w-full rounded-lg border border-border object-cover" />
+                {/* Who fed this photo in (e.g. "Techniker: Tobi") — item 6 polish. */}
+                {p.uploaded_by_name && (
+                  <div className="mt-0.5 truncate text-[10px] font-medium text-muted">{p.uploaded_by_name}</div>
+                )}
+              </a>
             ))}
           </div>
         </div>

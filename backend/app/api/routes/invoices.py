@@ -127,6 +127,23 @@ def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
     validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
 
     row = _build_row(org_id, payload, user_id)
+    # Projects merge (item 6): an invoice built from a KVA belongs to that KVA's
+    # Projekt (directly, or via the KVA's inquiry) — inherit when not set.
+    if row.get("cost_estimate_id") and not row.get("project_id"):
+        kva = (
+            client.table("cost_estimates").select("project_id, inquiry_id")
+            .eq("org_id", org_id).eq("id", row["cost_estimate_id"]).limit(1).execute().data
+        )
+        if kva:
+            pid = kva[0].get("project_id")
+            if not pid and kva[0].get("inquiry_id"):
+                inq = (
+                    client.table("inquiries").select("project_id")
+                    .eq("org_id", org_id).eq("id", kva[0]["inquiry_id"]).limit(1).execute().data
+                )
+                pid = inq[0].get("project_id") if inq else None
+            if pid:
+                row["project_id"] = pid
     row["number"] = gen_invoice_number(client, org_id)
     row["status"] = "draft"
     created = client.table("invoices").insert(row).execute().data[0]

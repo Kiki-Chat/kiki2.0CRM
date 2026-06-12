@@ -275,18 +275,32 @@ def add_photo(token: str, *, filename: str, content: bytes, mime_type: str) -> d
         "id", link["id"]
     ).execute()
     # Mirror into the customer's documents so the CRM shows the photos in place.
+    # Stamped with inquiry + Projekt + technician name, so the project's
+    # Dokumente tab shows WHO uploaded each Einsatzbericht photo (item 6).
     customer = ctx.get("customer")
     if customer:
         try:
+            project_id = None
+            if link.get("inquiry_id"):
+                inq = (
+                    client.table("inquiries").select("project_id")
+                    .eq("org_id", link["org_id"]).eq("id", link["inquiry_id"])
+                    .limit(1).execute().data
+                )
+                project_id = inq[0].get("project_id") if inq else None
+            technician = (ctx.get("employee") or {}).get("display_name")
             client.table("documents").insert({
                 "org_id": link["org_id"],
                 "customer_id": customer["id"],
+                "inquiry_id": link.get("inquiry_id"),
+                "project_id": project_id,
                 "name": safe_name,
                 "path": path,
                 "category": "Einsatzbericht",
                 "mime_type": mime_type or "image/jpeg",
                 "is_image": True,
                 "size_bytes": len(content),
+                "uploaded_by_name": f"Techniker: {technician}" if technician else None,
             }).execute()
         except Exception as exc:  # noqa: BLE001 — photo stays in the report either way
             log.warning("technician_jobs: documents mirror failed: %s", exc)
