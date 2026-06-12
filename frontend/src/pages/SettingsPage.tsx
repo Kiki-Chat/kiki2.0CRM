@@ -1265,8 +1265,19 @@ function PdsSection({ config, flash }: { config: PdsConfig | null; flash: (m: st
     mutationFn: () => apiFetch('/api/settings/pds-config', { method: 'PATCH', body: JSON.stringify({ api_url: apiUrl, api_user: apiUser, auto_sync_enabled: autoSync, sync_interval: syncInterval, sync_entities: entities, ...(apiKey ? { api_key: apiKey } : {}) }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setApiKey(''); flash('Gespeichert.') },
   })
-  const testConn = useMutation({ mutationFn: () => apiFetch<{ message?: string }>('/api/settings/pds-test', { method: 'POST' }), onSuccess: (r) => flash(r?.message || 'Test') })
-  const syncNow = useMutation({ mutationFn: () => apiFetch<{ message?: string }>('/api/settings/pds-sync', { method: 'POST' }), onSuccess: (r) => flash(r?.message || 'Sync') })
+  // Persistent inline test result (not just a transient toast) — the demo shows
+  // the live PDS answer (reachability + Personen count) right under the button.
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const testConn = useMutation({
+    mutationFn: () => apiFetch<{ success: boolean; message: string }>('/api/settings/pds-test', { method: 'POST' }),
+    onSuccess: (r) => setTestResult(r),
+    onError: (e: Error) => setTestResult({ success: false, message: e.message || 'Test fehlgeschlagen.' }),
+  })
+  const syncNow = useMutation({
+    mutationFn: () => apiFetch<{ message?: string }>('/api/settings/pds-sync', { method: 'POST' }),
+    onSuccess: (r) => flash(r?.message || 'Synchronisiert.'),
+    onError: (e: Error) => flash(e.message || 'Synchronisierung fehlgeschlagen.'),
+  })
   return (
     <Card>
       <GroupLabel>API-Konfiguration</GroupLabel>
@@ -1280,11 +1291,25 @@ function PdsSection({ config, flash }: { config: PdsConfig | null; flash: (m: st
           <button onClick={() => setShowKey((s) => !s)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted">{showKey ? <EyeOff size={15} /> : <Eye size={15} />}</button>
         </div>
       </Field></div>
-      <button onClick={() => testConn.mutate()} className="mt-3 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt">Verbindung testen</button>
+      <button onClick={() => { setTestResult(null); testConn.mutate() }} disabled={testConn.isPending} className="mt-3 rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">
+        {testConn.isPending ? 'Teste Verbindung…' : 'Verbindung testen'}
+      </button>
+      {testResult && (
+        <div className={cn(
+          'mt-2 rounded-md px-3 py-2 text-sm font-medium',
+          testResult.success ? 'bg-green-tint-50 text-green-deep' : 'bg-error-bg text-error',
+        )}>
+          {testResult.success ? '✓ ' : '✗ '}{testResult.message}
+        </div>
+      )}
 
       <div className="my-6 border-t border-border" />
       <GroupLabel>Synchronisierung</GroupLabel>
       <label className="flex items-center gap-2 text-sm text-text"><Toggle on={autoSync} onChange={setAutoSync} /> Automatische Synchronisierung aktivieren</label>
+      <p className="mt-1 text-xs text-muted">
+        Ist die Synchronisierung aktiv, wird jeder eingehende KI-Anruf direkt nach Gesprächsende
+        automatisch als Aufgabe in PDS protokolliert (Anrufer-Zuordnung per Telefonnummer).
+      </p>
       <div className="mt-3"><Field label="Sync-Intervall"><select value={syncInterval} disabled={!autoSync} onChange={(e) => setSyncInterval(e.target.value)} className={cn(inputCls, 'max-w-xs', !autoSync && 'opacity-50')}>{SYNC_INTERVALS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field></div>
 
       <div className="my-6 border-t border-border" />
@@ -1299,7 +1324,9 @@ function PdsSection({ config, flash }: { config: PdsConfig | null; flash: (m: st
       </div>
 
       <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
-        <button onClick={() => syncNow.mutate()} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt">Jetzt synchronisieren</button>
+        <button onClick={() => syncNow.mutate()} disabled={syncNow.isPending} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">
+          {syncNow.isPending ? 'Synchronisiert…' : 'Jetzt synchronisieren'}
+        </button>
         <button onClick={() => save.mutate()} disabled={save.isPending} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{save.isPending ? 'Speichert…' : 'Speichern'}</button>
       </div>
     </Card>

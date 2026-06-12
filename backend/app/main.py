@@ -22,6 +22,7 @@ from app.api.routes import (
     me,
     oauth,
     outbound,
+    pds,
     planning_board,
     post_call,
     projects,
@@ -145,6 +146,7 @@ app.include_router(oauth.router)
 app.include_router(outbound.router)
 app.include_router(public_jobs.router)
 app.include_router(public_technician.router)
+app.include_router(pds.router)
 app.include_router(actions.router)
 
 # ElevenLabs tool webhooks — LIVE: org-scoped handlers the agent calls mid-call

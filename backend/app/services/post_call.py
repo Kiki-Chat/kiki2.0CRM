@@ -425,6 +425,14 @@ def _process_one(data: dict | None, fmt: str) -> dict:
         except Exception:  # noqa: BLE001 — never break post-call ingest
             logger.warning("outbound case-link failed (conv %s)", conversation_id)
 
+    # PDS auto-sync (n8n "Log Call" workflow, now native): when the org has the
+    # PDS integration with Automatische Synchronisation ON, every ingested call
+    # is logged into PDS as an Aufgabe. Best-effort — never breaks ingest.
+    if call_log_id:
+        from app.services.pds import safe_auto_log_call
+
+        safe_auto_log_call(client, org_id, upserted[0])
+
     # Category back-fill: when the agent booked without (or with an unknown)
     # `kategorie`, classify the call summary against the org's Terminkategorien
     # so the Offene-Aktion card arrives pre-filled. Best-effort, never breaks

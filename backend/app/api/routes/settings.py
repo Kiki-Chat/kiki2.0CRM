@@ -354,12 +354,18 @@ async def update_pds_config(payload: PdsConfigUpdate, user: CurrentUser = Depend
 
 @router.post("/pds-test")
 async def pds_test(user: CurrentUser = Depends(require_org_admin)) -> dict:
-    return {"success": False, "message": "Verbindungstest in Kürze verfügbar."}
+    """Real connection probe against the configured PDS instance (listpersonen)."""
+    from app.services import pds
+
+    return await run_in_threadpool(pds.test_connection, user.org_id)
 
 
 @router.post("/pds-sync")
 async def pds_sync(user: CurrentUser = Depends(require_org_admin)) -> dict:
-    return {"success": False, "message": "Synchronisierung in Kürze verfügbar."}
+    """Manual 'Jetzt synchronisieren': push un-synced calls as PDS Aufgaben."""
+    from app.services import pds
+
+    return await run_in_threadpool(pds.sync_recent_calls, user.org_id)
 
 
 # ─── Danger zone: delete organization ─────────────────────────────────────────
