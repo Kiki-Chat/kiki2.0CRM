@@ -31,6 +31,7 @@ class CustomerUpsert(BaseModel):
 class EmployeeCreate(BaseModel):
     display_name: str
     email: str | None = None
+    phone: str | None = None  # technician contact (future WhatsApp dispatch)
     login_access: bool = True
     access_role: str = "employee"  # admin | employee
     is_active: bool = True
@@ -43,6 +44,7 @@ class EmployeeCreate(BaseModel):
 class EmployeeUpdate(BaseModel):
     display_name: str | None = None
     email: str | None = None
+    phone: str | None = None
     access_role: str | None = None
     is_active: bool | None = None
     calendar_color: str | None = None

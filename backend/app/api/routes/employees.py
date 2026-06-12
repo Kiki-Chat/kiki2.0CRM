@@ -15,7 +15,7 @@ from app.schemas.admin import (
     EmployeeCreate,
     EmployeeUpdate,
 )
-from app.services import csv_import, employee_invite
+from app.services import csv_import, employee_invite, technician_jobs
 from app.services.common import run_parallel, validate_fk_in_org
 
 log = logging.getLogger(__name__)
@@ -26,6 +26,38 @@ def _org_name(client, org_id: str) -> str | None:
         client.table("organizations").select("name").eq("id", org_id).limit(1).execute().data
     )
     return rows[0].get("name") if rows else None
+
+
+def _send_technician_welcome(org_id, company, name, to_email, portal_url) -> None:
+    """Best-effort: email a freshly-created technician their STANDING portal link
+    (informal 'du' — a worker, not a business customer). Triggers the existing
+    send_email() chain (Amber's infra); never blocks employee creation."""
+    import html as _html
+
+    try:
+        from app.services.email_send import send_email
+
+        company = company or "HeyKiki"
+        greeting = f"Hallo {name}," if name else "Hallo,"
+        c_esc, g_esc, url_esc = _html.escape(company), _html.escape(greeting), _html.escape(portal_url)
+        body_text = (
+            f"{greeting}\n\nDu wurdest als Techniker bei {company} hinzugefügt. Über deinen "
+            f"persönlichen Link siehst du alle deine Einsätze (aktuelle und vergangene) — ganz "
+            f"ohne Login:\n\n{portal_url}\n\nTipp: Speichere den Link als Lesezeichen auf deinem Handy."
+        )
+        body_html = (
+            f"<p>{g_esc}</p><p>Du wurdest als Techniker bei <strong>{c_esc}</strong> hinzugefügt. "
+            f"Über deinen persönlichen Link siehst du alle deine Einsätze (aktuelle und vergangene) "
+            f'— ganz ohne Login:</p><p><a href="{url_esc}">{url_esc}</a></p>'
+            f"<p>Tipp: Speichere den Link als Lesezeichen auf deinem Handy.</p>"
+        )
+        send_email(
+            org_id=org_id, to_email=to_email,
+            subject=f"Dein Techniker-Zugang bei {company}",
+            body_html=body_html, body_text=body_text,
+        )
+    except Exception as exc:  # noqa: BLE001 — email must never block creation
+        log.warning("technician welcome email failed (org=%s): %s", org_id, exc)
 
 
 class SetPasswordRequest(BaseModel):
@@ -45,9 +77,9 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
     employees = (
         client.table("employees")
         .select(
-            "id, user_id, display_name, email, access_role, is_active, calendar_color, "
+            "id, user_id, display_name, email, phone, access_role, is_active, calendar_color, "
             "role_in_company, vacation_days_per_year, remaining_vacation_days, "
-            "hourly_rate, activity_area, auto_assign, is_technician"
+            "hourly_rate, activity_area, auto_assign, is_technician, technician_portal_token"
         )
         .eq("org_id", org_id)
         .eq("deleted", False)
@@ -104,6 +136,11 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
                 "id": e["id"],
                 "display_name": e.get("display_name"),
                 "email": e.get("email") or (user.get("email") if user else None),
+                "phone": e.get("phone"),
+                "technician_portal_url": (
+                    technician_jobs.technician_portal_url(e["technician_portal_token"])
+                    if e.get("technician_portal_token") else None
+                ),
                 "has_login": bool(e.get("user_id")),
                 "access_role": access_role,
                 "is_active": e.get("is_active", True),
@@ -125,8 +162,8 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
     # for employees; admins get the full record.
     if role not in _OWNER_ROLES:
         sensitive = (
-            "email", "has_login", "access_role", "is_org_owner",
-            "vacation_days_per_year", "remaining_vacation_days", "hourly_rate",
+            "email", "phone", "technician_portal_url", "has_login", "access_role",
+            "is_org_owner", "vacation_days_per_year", "remaining_vacation_days", "hourly_rate",
         )
         out = [{k: v for k, v in e.items() if k not in sensitive} for e in out]
     return out
@@ -259,19 +296,36 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                         "oder ein Passwort manuell setzen."
                     )
 
+    # Lightweight technician (no CRM login) gets a STANDING portal token so they
+    # can see all their jobs at /techniker/<token> (item 17). Minted here (only for
+    # the no-login technician case) so the unique index can't race a later update.
+    import secrets as _secrets
+
+    portal_token = (
+        _secrets.token_urlsafe(32) if (payload.is_technician and not payload.login_access) else None
+    )
     row = {
         "org_id": org_id,
         "user_id": user_id,
         "display_name": payload.display_name,
         "email": payload.email,
+        "phone": payload.phone,
         "access_role": payload.access_role,
         "is_active": payload.is_active,
         "calendar_color": payload.calendar_color,
         "activity_area": payload.activity_area,
         "auto_assign": payload.auto_assign,
         "is_technician": payload.is_technician,
+        "technician_portal_token": portal_token,
     }
     created = client.table("employees").insert(row).execute().data[0]
+    if portal_token:
+        portal_url = technician_jobs.technician_portal_url(portal_token)
+        created["technician_portal_url"] = portal_url
+        if payload.email:
+            _send_technician_welcome(
+                org_id, _org_name(client, org_id), payload.display_name, payload.email, portal_url
+            )
     if warning:
         created["warning"] = warning
     return created

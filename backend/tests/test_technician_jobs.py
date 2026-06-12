@@ -161,3 +161,47 @@ def test_job_events_shapes(monkeypatch):
     submitted = events[-1]
     assert "Tobi" in submitted["description"]
     assert submitted["extras"]["photo_count"] == 2
+
+
+# ─── Technician portal (item 17) ─────────────────────────────────────────────
+def _portal_tables(links, *, deleted=False):
+    return {
+        "employees": _chain([{"id": "e1", "org_id": "org1", "display_name": "Tobi", "deleted": deleted}]),
+        "organizations": _chain([{"id": "org1", "name": "Betrieb"}]),
+        "technician_job_links": _chain(links),
+        "appointments": _chain([
+            {"id": "a1", "title": "Heizung", "scheduled_at": "2026-06-11T08:00:00+00:00",
+             "status": "confirmed", "customer_id": "c1", "location": None}
+        ]),
+        "customers": _chain([{"id": "c1", "full_name": "Max", "address": None}]),
+    }
+
+
+def test_portal_invalid_token_rejected(monkeypatch):
+    _patch_client(monkeypatch, {"employees": _chain([])})
+    with pytest.raises(tj.JobLinkError, match="ungültig"):
+        tj.get_technician_portal("nope")
+
+
+def test_portal_deleted_technician_rejected(monkeypatch):
+    _patch_client(monkeypatch, _portal_tables([], deleted=True))
+    with pytest.raises(tj.JobLinkError, match="ungültig"):
+        tj.get_technician_portal("tok")
+
+
+def test_portal_lists_jobs_with_status(monkeypatch):
+    # submitted → abgeschlossen, started → läuft, fresh → offen; a revoked link
+    # with no report is hidden (superseded), submitted ones stay forever.
+    links = [
+        _link_row(token="t_done", submitted_at="2026-06-10T10:00:00+00:00", photo_paths=["p"]),
+        _link_row(token="t_run", started_at="2026-06-10T09:00:00+00:00"),
+        _link_row(token="t_open"),
+        _link_row(token="t_revoked", revoked_at="2026-06-10T07:00:00+00:00"),
+    ]
+    _patch_client(monkeypatch, _portal_tables(links))
+    out = tj.get_technician_portal("tok")
+    assert out["technician_name"] == "Tobi"
+    assert out["org_name"] == "Betrieb"
+    statuses = {j["job_token"]: j["status"] for j in out["jobs"]}
+    assert statuses == {"t_done": "abgeschlossen", "t_run": "läuft", "t_open": "offen"}
+    assert out["jobs"][0]["customer_name"] == "Max"

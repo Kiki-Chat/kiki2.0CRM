@@ -22,6 +22,7 @@ import {
   Trash2,
   Upload,
   Users,
+  Wrench,
   X,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
@@ -49,6 +50,8 @@ interface Employee {
   activity_area: string | null
   auto_assign: boolean
   is_technician?: boolean
+  phone?: string | null
+  technician_portal_url?: string | null
   present: boolean
   absence_type: string | null
 }
@@ -109,6 +112,7 @@ export function EmployeesPage() {
   const { isAdmin, isLoading: meLoading } = useMe()
   const [tab, setTab] = useState<Tab>('employees')
   const [newOpen, setNewOpen] = useState(false)
+  const [techOpen, setTechOpen] = useState(false)
   const [csvOpen, setCsvOpen] = useState(false)
   const [newAbsenceOpen, setNewAbsenceOpen] = useState(false)
   const { toast, flash } = useToast(6000)
@@ -186,6 +190,12 @@ export function EmployeesPage() {
                 <Upload size={15} /> CSV Import
               </button>
               <button
+                onClick={() => setTechOpen(true)}
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"
+              >
+                <Wrench size={15} /> Techniker anlegen
+              </button>
+              <button
                 onClick={() => setNewOpen(true)}
                 className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
               >
@@ -230,6 +240,7 @@ export function EmployeesPage() {
       {tab === 'applications' && <AntraegeTab />}
 
       {newOpen && <NewEmployeeModal flash={flash} onClose={() => setNewOpen(false)} />}
+      {techOpen && <NewTechnicianModal flash={flash} onClose={() => setTechOpen(false)} />}
       {csvOpen && (
         <CsvImportModal
           entity="employees"
@@ -380,6 +391,17 @@ function EmployeesTab({ flash }: { flash: (m: string) => void }) {
                     <IconBtn title="Bearbeiten" onClick={() => setEditing(e)}>
                       <Pencil size={16} />
                     </IconBtn>
+                    {e.is_technician && e.technician_portal_url && (
+                      <IconBtn
+                        title="Techniker-Portal-Link kopieren"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(e.technician_portal_url!)
+                          flash('Portal-Link kopiert.')
+                        }}
+                      >
+                        <Link2 size={16} />
+                      </IconBtn>
+                    )}
                     {e.has_login && (
                       <IconBtn title="Passwort zurücksetzen" onClick={() => setPasswordFor(e)}>
                         <KeyRound size={16} />
@@ -643,6 +665,123 @@ function Check({
 }
 
 // ─── New employee modal ──────────────────────────────────────────────────────
+// Lightweight technician: NO login, NO CRM fields — just name + email + phone.
+// On create we get back a standing portal link (also emailed); show it so the
+// admin can copy / WhatsApp it. Distinct from NewEmployeeModal on purpose (item 17).
+function NewTechnicianModal({ flash, onClose }: { flash: (m: string) => void; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [portalUrl, setPortalUrl] = useState<string | null>(null)
+
+  const create = useMutation({
+    mutationFn: () =>
+      apiFetch('/api/employees', {
+        method: 'POST',
+        body: JSON.stringify({
+          display_name: name,
+          email: email || null,
+          phone: phone || null,
+          login_access: false,
+          is_technician: true,
+          auto_assign: false,
+        }),
+      }) as Promise<{ technician_portal_url?: string }>,
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['employees-full'] })
+      qc.invalidateQueries({ queryKey: ['employees'] })
+      setPortalUrl(data?.technician_portal_url ?? null)
+      flash(`${name} wurde als Techniker angelegt.`)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const valid = name.trim() && email.trim()
+
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title="Techniker anlegen"
+      widthClass="max-w-lg"
+      footer={
+        portalUrl ? (
+          <button onClick={onClose} className="w-full rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110">
+            Fertig
+          </button>
+        ) : (
+          <div className="flex gap-3">
+            <button onClick={onClose} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body">
+              Abbrechen
+            </button>
+            <button
+              disabled={!valid || create.isPending}
+              onClick={() => create.mutate()}
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+            >
+              <Wrench size={15} /> {create.isPending ? 'Legt an…' : 'Techniker anlegen'}
+            </button>
+          </div>
+        )
+      }
+    >
+      {portalUrl ? (
+        <div className="space-y-4">
+          <div className="flex gap-2 rounded-md border border-success/30 bg-green-tint-50 px-3 py-2.5 text-sm text-green-deep">
+            <CircleCheck size={16} className="mt-0.5 shrink-0" />
+            <div>
+              <span className="font-semibold">{name} angelegt.</span>{' '}
+              {email ? `Der Portal-Link wurde an ${email} gesendet.` : ''}
+            </div>
+          </div>
+          <div>
+            <div className={labelCls}>Techniker-Portal-Link</div>
+            <div className="flex gap-2">
+              <input readOnly value={portalUrl} onFocus={(e) => e.target.select()} className={inputCls} />
+              <button
+                onClick={() => { navigator.clipboard?.writeText(portalUrl); flash('Link kopiert.') }}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-alt px-3 text-sm font-medium text-body hover:bg-border/30"
+              >
+                <Link2 size={15} /> Kopieren
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted">
+              Über diesen Link sieht der Techniker alle seine Einsätze — ganz ohne Login. Du kannst ihn auch per WhatsApp teilen.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
+          <div className="flex gap-2 rounded-md border border-info/30 bg-info-bg px-3 py-2.5 text-sm text-info">
+            <Wrench size={16} className="mt-0.5 shrink-0" />
+            <div>
+              Ein Techniker arbeitet vor Ort und braucht <span className="font-medium">keinen Login</span>. Er bekommt
+              einen persönlichen Link zu seinen Einsätzen — wir brauchen nur Name, E-Mail und Telefon.
+            </div>
+          </div>
+          <div>
+            <div className={labelCls}>Name *</div>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Vor- und Nachname" className={inputCls} />
+          </div>
+          <div>
+            <div className={labelCls}>E-Mail *</div>
+            <input type="email" name="tech_email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.de" className={inputCls} />
+            <p className="mt-1 text-xs text-muted">Für den Portal-Link und die Auftrags-E-Mails.</p>
+          </div>
+          <div>
+            <div className={labelCls}>Telefon</div>
+            <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+49 …" className={inputCls} />
+            <p className="mt-1 text-xs text-muted">Für künftige WhatsApp-Benachrichtigungen.</p>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onClose: () => void }) {
   const qc = useQueryClient()
   const [loginAccess, setLoginAccess] = useState(true)

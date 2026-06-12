@@ -66,6 +66,89 @@ def job_link_url(token: str) -> str:
     return f"{base}/job/{token}"
 
 
+def technician_portal_url(token: str) -> str:
+    base = (settings.frontend_public_url or "").rstrip("/") or "http://localhost:5173"
+    return f"{base}/techniker/{token}"
+
+
+def get_technician_portal(token: str) -> dict:
+    """Public, no-login: a technician's own jobs (past + current) for their
+    standing portal token. Pinned to the technician's org (the token IS the
+    credential — same model as the per-job link). Newest first; each job carries
+    its per-job form token so the technician can open / continue the report."""
+    client = get_service_client()
+    emp_rows = (
+        client.table("employees")
+        .select("id, org_id, display_name, deleted")
+        .eq("technician_portal_token", token).limit(1).execute().data
+    )
+    if not emp_rows or emp_rows[0].get("deleted"):
+        raise JobLinkError("Dieser Techniker-Link ist ungültig.")
+    emp = emp_rows[0]
+    org_id = emp["org_id"]
+    org = client.table("organizations").select("name").eq("id", org_id).limit(1).execute().data
+    links = (
+        client.table("technician_job_links")
+        .select("token, appointment_id, started_at, finished_at, submitted_at, revoked_at, photo_paths, created_at")
+        .eq("org_id", org_id).eq("employee_id", emp["id"])
+        .order("created_at", desc=True).limit(100).execute().data
+        or []
+    )
+    appt_ids = [l["appointment_id"] for l in links if l.get("appointment_id")]
+    appts: dict[str, dict] = {}
+    if appt_ids:
+        for a in (
+            client.table("appointments")
+            .select("id, title, scheduled_at, status, customer_id, location")
+            .eq("org_id", org_id).in_("id", appt_ids).execute().data or []
+        ):
+            appts[a["id"]] = a
+    cust_ids = list({a.get("customer_id") for a in appts.values() if a.get("customer_id")})
+    custs: dict[str, dict] = {}
+    if cust_ids:
+        for c in (
+            client.table("customers").select("id, full_name, address")
+            .eq("org_id", org_id).in_("id", cust_ids).execute().data or []
+        ):
+            custs[c["id"]] = c
+
+    jobs: list[dict] = []
+    for l in links:
+        # Hide superseded/cancelled links that never produced a report; keep every
+        # SUBMITTED one forever — that's the technician's track record.
+        if l.get("revoked_at") and not l.get("submitted_at"):
+            continue
+        a = appts.get(l.get("appointment_id")) or {}
+        if a.get("status") == "cancelled" and not l.get("submitted_at"):
+            continue
+        cust = custs.get(a.get("customer_id")) or {}
+        loc = a.get("location")
+        addr = (
+            format_address(cust.get("address")) if cust.get("address")
+            else (loc.get("raw") if isinstance(loc, dict) else loc)
+        )
+        status = (
+            "abgeschlossen" if l.get("submitted_at")
+            else "läuft" if l.get("started_at")
+            else "offen"
+        )
+        jobs.append({
+            "job_token": l["token"],
+            "title": a.get("title") or "Termin",
+            "scheduled_at": a.get("scheduled_at"),
+            "customer_name": cust.get("full_name"),
+            "customer_address": addr,
+            "status": status,
+            "submitted_at": l.get("submitted_at"),
+            "photo_count": len(l.get("photo_paths") or []),
+        })
+    return {
+        "technician_name": emp.get("display_name"),
+        "org_name": (org[0]["name"] if org else None),
+        "jobs": jobs,
+    }
+
+
 def _load_link(token: str) -> dict:
     client = get_service_client()
     rows = (

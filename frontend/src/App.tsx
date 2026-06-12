@@ -42,6 +42,9 @@ const RufumleitungGuidePage = lazy(() =>
 )
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const JobLinkPage = lazy(() => import('./pages/JobLinkPage').then((m) => ({ default: m.JobLinkPage })))
+const TechnicianPortalPage = lazy(() =>
+  import('./pages/TechnicianPortalPage').then((m) => ({ default: m.TechnicianPortalPage })),
+)
 
 export default function App() {
   return (
@@ -59,6 +62,9 @@ export default function App() {
           {/* Techniker-Einsatzlink — public: the unguessable token in the URL is
               the credential; the technician has no portal login. */}
           <Route path="/job/:token" element={<JobLinkPage />} />
+          {/* Techniker-Portal — public standing link: lists the technician's own
+              jobs (past + current); no login (the token is the credential). */}
+          <Route path="/techniker/:token" element={<TechnicianPortalPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<DashboardPage />} />
