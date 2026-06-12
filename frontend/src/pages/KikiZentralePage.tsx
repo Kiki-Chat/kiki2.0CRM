@@ -44,7 +44,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { slug: 'telefon', label: 'Telefon-Einstellungen', icon: Phone },
     { slug: 'ausgehende-anrufe', label: 'Ausgehende Anrufe', icon: PhoneOutgoing },
   ] },
-  { label: 'Wartung', items: [{ slug: 'verlauf', label: 'Verlauf & Rückgängig', icon: History }] },
+  { label: 'Umbenennen', items: [{ slug: 'verlauf', label: 'Verlauf & Rückgängig', icon: History }] },
 ]
 const ALL_SLUGS = new Set(NAV_GROUPS.flatMap((g) => g.items.map((i) => i.slug)))
 
