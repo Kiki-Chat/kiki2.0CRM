@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase'
 import { cn } from '../lib/utils'
 import { useMediaQuery } from '../lib/useMediaQuery'
 import { useMe } from '../lib/useMe'
+import { useToast } from '../lib/useToast'
 import { FilterPopover, PagerNumbered, Segmented } from './calls/atoms'
 import { CallDetail } from './calls/CallDetail'
 import { ActionRow, CallRow, EmptyAktionen } from './calls/Inbox'
@@ -114,10 +115,36 @@ export function CallLogsPage() {
   })
 
   // Aktionen to-do controls: Übernehmen / Erledigt / Löschen / reopen.
+  // OPTIMISTIC: update the cache instantly so the click feels immediate. The
+  // /api/actions/pending refetch is a 6-table aggregate (~slow) — previously the
+  // row sat unchanged until that refetch landed, so the buttons felt dead/late.
+  // Now the refetch only reconciles on settle; errors roll back + flash a message.
+  const { toast: actionToast, flash: flashAction } = useToast()
   const setActionState = useMutation({
     mutationFn: ({ action_key, status }: { action_key: string; status: 'open' | 'claimed' | 'done' | 'dismissed' }) =>
       apiFetch('/api/actions/state', { method: 'POST', body: JSON.stringify({ action_key, status }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['actions', 'pending'] }),
+    onMutate: async ({ action_key, status }) => {
+      await qc.cancelQueries({ queryKey: ['actions', 'pending'] })
+      const prev = qc.getQueryData<ActionItem[]>(['actions', 'pending'])
+      qc.setQueryData<ActionItem[]>(['actions', 'pending'], (old) =>
+        !old
+          ? old
+          : status === 'dismissed'
+            ? old.filter((a) => a.action_key !== action_key)
+            : old.map((a) => {
+                if (a.action_key !== action_key) return a
+                if (status === 'claimed') return { ...a, state: 'claimed' as const }
+                if (status === 'done') return { ...a, state: 'done' as const, done_at_task: new Date().toISOString() }
+                return { ...a, state: 'open' as const, done_at_task: null }
+              }),
+      )
+      return { prev }
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['actions', 'pending'], ctx.prev)
+      flashAction('Aktion konnte nicht gespeichert werden.')
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['actions', 'pending'] }),
   })
   useEffect(() => {
     if (!selectedId) return
@@ -170,6 +197,11 @@ export function CallLogsPage() {
 
   return (
     <div className="flex h-full min-h-0 font-poster">
+      {actionToast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-md bg-error-bg px-4 py-2 text-sm font-medium text-error shadow-e2">
+          {actionToast}
+        </div>
+      )}
       <aside
         style={isWide ? { width: listResize.width } : undefined}
         className={cn(

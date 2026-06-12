@@ -132,9 +132,11 @@ export function KikiZentralePage() {
 
       {toast && <div className="mb-4 rounded-md bg-green-tint-50 px-3 py-2 text-sm font-medium text-green-deep">{toast}</div>}
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        {/* Sub-nav */}
-        <aside className="w-full shrink-0 lg:w-60">
+      <div className="flex flex-col gap-6 md:flex-row">
+        {/* Sub-nav — side-by-side from md (768px), so narrowing the window/sidebar
+            lets the content CONTRACT next to the menu instead of dropping below it
+            (it only stacks on true mobile, where the app nav is a drawer anyway). */}
+        <aside className="w-full shrink-0 md:w-52 lg:w-60">
           <nav className="space-y-4">
             {NAV_GROUPS.map((group) => (
               <div key={group.label}>

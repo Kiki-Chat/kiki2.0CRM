@@ -3,9 +3,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
 
 import { customerSupabase } from '../lib/supabase'
@@ -32,6 +34,9 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthContextValue {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  // Last signed-in user id we observed; `undefined` = none seen yet (first load).
+  const lastUserId = useRef<string | null | undefined>(undefined)
 
   useEffect(() => {
     if (!client) {
@@ -44,6 +49,17 @@ export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthConte
     })
     const { data: sub } = client.auth.onAuthStateChange((event, s) => {
       setSession(s)
+      // Drop ALL cached server data when the signed-in identity CHANGES (logout
+      // or switching accounts). Without this, React Query keeps serving the
+      // previous user's ['me'] / calls / stats until a manual reload recreates the
+      // client — the "still shows the old account after re-login" glitch. Skip the
+      // first observed value so a normal login doesn't wipe a freshly primed
+      // cache; same-user TOKEN_REFRESHED / USER_UPDATED events are ignored.
+      const uid = s?.user?.id ?? null
+      if (lastUserId.current !== undefined && lastUserId.current !== uid) {
+        queryClient.clear()
+      }
+      lastUserId.current = uid
       // Recovery links now land on the BARE origin (the allowlist entry that
       // already exists for the magic link) instead of /set-password — a path
       // that wasn't allowlisted made Supabase silently fall back to its Site

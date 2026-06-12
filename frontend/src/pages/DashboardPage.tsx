@@ -15,12 +15,13 @@ import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
 
 // The overview tab now leads with call performance (Gesamtanrufe / Beantwortet /
-// Durchschnittsdauer + graphs, via <AnrufeTab/>). The hero bubble still needs the
-// two "heute" counts, so this is all we read from /api/dashboard/overview.
+// Durchschnittsdauer + graphs, via <AnrufeTab/>). The hero bubble reads the two
+// OPEN-total counts (open requests + pending actions), so this is all we read
+// from /api/dashboard/overview.
 interface OverviewData {
   kpis: {
-    calls_today: number
-    inquiries_today: number
+    open_inquiries: number
+    pending_actions: number
   }
 }
 
@@ -110,10 +111,10 @@ export function DashboardPage() {
 
 function OverviewTab({ company }: { company: string }) {
   const navigate = useNavigate()
-  // The hero bubble shows today's tallies; the stats + graphs below come from
-  // <AnrufeTab/> (its own period-filtered query). We only read the two "heute"
-  // counts here, so a slow/failed overview fetch just leaves the bubble at 0 —
-  // it never blocks the call-stats block from rendering.
+  // The hero bubble shows the OPEN totals (open requests + pending actions) — not
+  // a per-day slice; the stats + graphs below come from <AnrufeTab/> (its own
+  // period-filtered query). A slow/failed overview fetch just leaves the bubble at
+  // 0 — it never blocks the call-stats block from rendering.
   const { data } = useQuery<OverviewData>({
     queryKey: ['dashboard-overview'],
     queryFn: () => apiFetch<OverviewData>('/api/dashboard/overview'),
@@ -129,8 +130,8 @@ function OverviewTab({ company }: { company: string }) {
   }
 
   const kpis = data?.kpis
-  const callsToday = kpis?.calls_today ?? 0
-  const actionsToday = kpis?.inquiries_today ?? 0
+  const openCalls = kpis?.open_inquiries ?? 0
+  const openActions = kpis?.pending_actions ?? 0
 
   return (
     <div className="space-y-5">
@@ -153,30 +154,30 @@ function OverviewTab({ company }: { company: string }) {
 
           <div className="speech-bubble relative mt-5 max-w-[480px] rounded-2xl rounded-bl-md border border-border bg-surface p-4 shadow-e1">
             <p className="text-[15px] leading-relaxed text-body">
-              Hey <strong className="font-bold text-text">{company}</strong>, ich habe heute{' '}
+              Hey <strong className="font-bold text-text">{company}</strong>, aktuell sind{' '}
               <span className="font-extrabold text-info">
-                {callsToday} {callsToday === 1 ? 'Anruf' : 'Anrufe'}
+                {openCalls} {openCalls === 1 ? 'Anfrage' : 'Anfragen'}
               </span>{' '}
               und{' '}
               <span className="font-extrabold text-green-primary">
-                {actionsToday} {actionsToday === 1 ? 'Aktion' : 'Aktionen'}
+                {openActions} {openActions === 1 ? 'Aktion' : 'Aktionen'}
               </span>{' '}
-              empfangen. Wie soll ich fortfahren?
+              offen. Wie soll ich fortfahren?
             </p>
           </div>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <button
-              onClick={() => navigate('/calls?direction=inbound&status=open&tab=anfragen')}
+              onClick={() => navigate('/calls?status=open&tab=anfragen')}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-alt px-4 py-2.5 text-sm font-bold text-text transition hover:border-green-tint-200 hover:bg-green-tint-50"
             >
-              <Phone size={15} /> {callsToday} {callsToday === 1 ? 'Anruf' : 'Anrufe'} ansehen
+              <Phone size={15} /> {openCalls} {openCalls === 1 ? 'Anfrage' : 'Anfragen'} ansehen
             </button>
             <button
               onClick={() => navigate('/calls?status=open&tab=aktionen')}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-alt px-4 py-2.5 text-sm font-bold text-text transition hover:border-green-tint-200 hover:bg-green-tint-50"
             >
-              <Sparkles size={15} /> {actionsToday} {actionsToday === 1 ? 'Aktion' : 'Aktionen'} ansehen
+              <Sparkles size={15} /> {openActions} {openActions === 1 ? 'Aktion' : 'Aktionen'} ansehen
             </button>
           </div>
         </div>

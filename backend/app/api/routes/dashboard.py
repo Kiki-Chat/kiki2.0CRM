@@ -180,6 +180,14 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
             .order("created_at", desc=True).limit(5).execute().data or []
         )
 
+    def _q_pending_actions():
+        # The SAME aggregate the call-log "Aktionen" tab shows — the hero count must
+        # match that list: TOTAL open actions, not a per-day slice. Lazy import to
+        # avoid a route↔route import cycle at module load.
+        from app.api.routes.actions import _aggregate
+
+        return len(_aggregate(org_id))
+
     (
         open_inquiries,
         total_customers,
@@ -189,6 +197,7 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
         kva_pending,
         upcoming,
         open_tasks,
+        pending_actions,
     ) = await asyncio.gather(
         run_in_threadpool(_q_open_inquiries),
         run_in_threadpool(_q_total_customers),
@@ -198,6 +207,7 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
         run_in_threadpool(_q_kva_pending),
         run_in_threadpool(_q_upcoming),
         run_in_threadpool(_q_open_tasks),
+        run_in_threadpool(_q_pending_actions),
     )
 
     return {
@@ -209,6 +219,8 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
             "calls_today": calls_today,
             "inquiries_today": inquiries_today,
             "kva_pending": kva_pending,
+            # Total OPEN items for the dashboard hero (not "today").
+            "pending_actions": pending_actions,
         },
         "open_tasks": open_tasks,
         "upcoming_appointments": upcoming,
