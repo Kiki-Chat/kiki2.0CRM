@@ -63,13 +63,15 @@ def _is_action(text: str) -> bool:
 
 
 def _gather_signals(client, org_id: str, customer_id: str) -> list[dict]:
-    # Only UNGROUPED inquiries — the matchmaker proposes NEW cases for what isn't
-    # filed yet; it never re-proposes (and duplicates) cases that already exist.
+    # Only UNGROUPED inquiries — the matchmaker proposes NEW groupings for what
+    # isn't filed yet; it never re-proposes (and duplicates) existing groups.
+    # Projects merge (item 6): "ungrouped" = project_id IS NULL — the grouper's
+    # output materialises as Projekte now, not cases.
     inqs = (
         client.table("inquiries")
         .select("id, number, subject, title, type, status, created_at")
         .eq("org_id", org_id).eq("customer_id", customer_id)
-        .neq("status", "deleted").is_("case_id", "null").order("created_at").execute().data or []
+        .neq("status", "deleted").is_("project_id", "null").order("created_at").execute().data or []
     )
     if not inqs:
         return []

@@ -32,6 +32,10 @@ export interface CallListItem {
   case_id: string | null
   case_number: string | null
   case_label: string | null
+  // Projects merge (item 6): the chip links to the inquiry's Projekt.
+  project_id: string | null
+  project_number: string | null
+  project_title: string | null
   emergency_flag: boolean
   assigned_employee_id: string | null
   assigned_employee_initials: string | null

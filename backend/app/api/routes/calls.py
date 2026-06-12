@@ -54,7 +54,7 @@ def _enrich_calls_with_inquiries(client, org_id: str, calls: list[dict]) -> list
 
     _INQ_COLS = (
         "id, call_id, status, type, emergency_flag, assigned_employee_id, "
-        "number, subject, title, created_at, case_id"
+        "number, subject, title, created_at, case_id, project_id"
     )
 
     # Primary: resolve by the case id already stamped on the call.
@@ -110,6 +110,17 @@ def _enrich_calls_with_inquiries(client, org_id: str, calls: list[dict]) -> list
         ):
             cases_by_id[cs["id"]] = cs
 
+    # Projects merge (item 6): the chip points at the inquiry's PROJEKT now.
+    # case_* fields stay for back-compat; project_* is what the UI links to.
+    project_ids = {i["project_id"] for i in chosen if i.get("project_id")}
+    projects_by_id: dict[str, dict] = {}
+    if project_ids:
+        for p in (
+            client.table("projects").select("id, number, title")
+            .eq("org_id", org_id).in_("id", list(project_ids)).execute().data or []
+        ):
+            projects_by_id[p["id"]] = p
+
     for c in calls:
         inq = inquiry_by_id.get(c.get("inquiry_id")) or inquiry_by_call.get(c.get("id"))
         if inq is None:
@@ -120,6 +131,9 @@ def _enrich_calls_with_inquiries(client, org_id: str, calls: list[dict]) -> list
             c["case_id"] = None
             c["case_number"] = None
             c["case_label"] = None
+            c["project_id"] = None
+            c["project_number"] = None
+            c["project_title"] = None
             c["emergency_flag"] = False
             c["assigned_employee_id"] = None
             c["assigned_employee_initials"] = None
@@ -133,6 +147,10 @@ def _enrich_calls_with_inquiries(client, org_id: str, calls: list[dict]) -> list
         c["case_id"] = inq.get("case_id")
         c["case_number"] = cs.get("number") if cs else None
         c["case_label"] = cs.get("label") if cs else None
+        pr = projects_by_id.get(inq.get("project_id"))
+        c["project_id"] = inq.get("project_id")
+        c["project_number"] = pr.get("number") if pr else None
+        c["project_title"] = pr.get("title") if pr else None
         # Flag-driven, OR category-driven for legacy/AI-classified rows.
         type_lower = (inq.get("type") or "").lower()
         c["emergency_flag"] = bool(inq.get("emergency_flag")) or (
@@ -841,9 +859,8 @@ def build_case_thread(org_id: str, inquiry_id: str) -> dict | None:
 
 
 def build_case_umbrella(org_id: str, case_id: str) -> dict | None:
-    """One CASE (Fall) = one umbrella over MANY inquiries. Returns the case header, its
-    member inquiries, and ONE chronological timeline across every call (in/out),
-    appointment, KVA and status change of ALL those inquiries. None if not in org."""
+    """One CASE (Fall) = one umbrella over MANY inquiries (legacy reads — kept so
+    old /fall links keep working after the projects merge)."""
     client = get_service_client()
     rows = (
         client.table("cases").select("id, number, label, status, customer_id, created_at")
@@ -858,6 +875,39 @@ def build_case_umbrella(org_id: str, case_id: str) -> dict | None:
         .eq("org_id", org_id).eq("case_id", case_id).neq("status", "deleted")
         .order("created_at").execute().data or []
     )
+    return _umbrella_bundle(client, org_id, case, inquiries)
+
+
+def build_project_umbrella(org_id: str, project_id: str) -> dict | None:
+    """One PROJEKT = one umbrella over MANY inquiries (the merged case layer,
+    item 6). Same bundle shape as the case umbrella — the header carries the
+    project's number/title so the existing umbrella UI renders unchanged."""
+    client = get_service_client()
+    rows = (
+        client.table("projects").select("id, number, title, status, customer_id, created_at")
+        .eq("org_id", org_id).eq("id", project_id).limit(1).execute().data
+    )
+    if not rows:
+        return None
+    p = rows[0]
+    header = {
+        "id": p["id"], "number": p.get("number"), "label": p.get("title"),
+        "status": p.get("status"), "customer_id": p.get("customer_id"),
+        "created_at": p.get("created_at"),
+    }
+    inquiries = (
+        client.table("inquiries")
+        .select("id, number, subject, title, type, status, created_at, updated_at, case_confidence, case_reason")
+        .eq("org_id", org_id).eq("project_id", project_id).neq("status", "deleted")
+        .order("created_at").execute().data or []
+    )
+    return _umbrella_bundle(client, org_id, header, inquiries)
+
+
+def _umbrella_bundle(client, org_id: str, case: dict, inquiries: list[dict]) -> dict:
+    """Shared umbrella body: customer + cross-inquiry timeline + related rows.
+    `case` is the header dict (id/number/label/status/customer_id/created_at) —
+    for projects, `label` carries the project title."""
     inq_ids = [i["id"] for i in inquiries]
 
     customer = None

@@ -258,10 +258,22 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
         inq["open_count"] = open_count.get(iid, 0)
         inq["last_activity_at"] = last_act.get(iid) or inq.get("updated_at") or inq.get("created_at")
 
-    customer["cases"] = (
-        client.table("cases").select("id, number, label, status, created_at")
-        .eq("org_id", org_id).eq("customer_id", customer_id).execute().data or []
+    # Projects merge (item 6): the umbrella layer IS projects now. Serve them in
+    # the historical `cases` shape (id/number/label/status) and alias each
+    # inquiry's case_id to its project_id — the detail page's grouping UI, move
+    # menu and /fall/:id links (→ project umbrella) all keep working unchanged.
+    projects = (
+        client.table("projects").select("id, number, title, status, created_at")
+        .eq("org_id", org_id).eq("customer_id", customer_id)
+        .neq("status", "archived").execute().data or []
     )
+    customer["cases"] = [
+        {"id": p["id"], "number": p.get("number"), "label": p.get("title"),
+         "status": p.get("status"), "created_at": p.get("created_at")}
+        for p in projects
+    ]
+    for inq in customer["inquiries"]:
+        inq["case_id"] = inq.get("project_id")
     return customer
 
 

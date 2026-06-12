@@ -513,6 +513,9 @@ export function Workspace({
   const navigate = useNavigate()
   const vgNumber = inquiry?.number ?? call.inquiry_number ?? null
   const vgSubject = inquiry?.subject ?? call.inquiry_subject ?? null
+  // Projects merge (item 6): prefer the Projekt chip; old calls without a
+  // project keep their Fall link until the backfill migrates them.
+  const projectId = call.project_id
   const caseId = call.case_id
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface">
@@ -527,7 +530,20 @@ export function Workspace({
           <StatusPill status={status} />
           {inquiry?.type && <Tag variant="green">{inquiry.type}</Tag>}
         </div>
-        {caseId ? (
+        {projectId ? (
+          <button
+            onClick={() => navigate(`/projects/${projectId}`)}
+            title="Zum Projekt (alle Anfragen, KVAs, Techniker)"
+            className="mb-3.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-ai-bg bg-ai-bg px-2.5 py-1.5 text-xs font-bold text-ai transition hover:brightness-95"
+          >
+            <Layers size={13} className="flex-shrink-0" />
+            <span className="truncate">
+              Projekt {call.project_number ?? ''}
+              {call.project_title ? ` · ${call.project_title}` : ''}
+            </span>
+            <ChevronRight size={13} className="flex-shrink-0" />
+          </button>
+        ) : caseId ? (
           <button
             onClick={() => navigate(`/fall/${caseId}`)}
             title="Zum Fall (alle Anfragen)"

@@ -150,6 +150,11 @@ def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
     }
     inquiry = client.table("inquiries").insert(row).execute().data[0]
     _set_call_inquiry_id(client, org_id, call["id"], inquiry["id"])
+    # Projects merge (item 6): every new inquiry is auto-filed into a Projekt —
+    # attach to a matching open one, else create its own. Best-effort by design.
+    from app.services.projects_auto import safe_auto_assign
+
+    safe_auto_assign(client, org_id, inquiry)
     return inquiry
 
 
@@ -246,6 +251,11 @@ def create_inquiry(org_id: str, payload: CreateInquiryRequest) -> dict:
         .execute()
         .data[0]
     )
+
+    # Projects merge (item 6): agent-captured inquiries are auto-filed too.
+    from app.services.projects_auto import safe_auto_assign
+
+    safe_auto_assign(client, org_id, inquiry)
 
     return {
         "success": True,

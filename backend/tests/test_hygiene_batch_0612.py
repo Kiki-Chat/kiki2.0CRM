@@ -126,15 +126,16 @@ def test_conversation_init_sets_voicemail_default(monkeypatch):
 
 
 # ─── 5. move_inquiry_case same-customer guard ─────────────────────────────────
+# Projects merge (item 6): the move targets PROJECTS now — same guard semantics.
 def test_move_inquiry_case_rejects_other_customers_case(monkeypatch):
     db = _DB({
         "inquiries": [[{"id": "inq-1", "customer_id": "cust-A"}]],
-        "cases": [[{"id": "case-B", "customer_id": "cust-B"}]],  # belongs to another customer
+        "projects": [[{"id": "proj-B", "customer_id": "cust-B"}]],  # another customer's
     })
     monkeypatch.setattr(cases_routes, "get_service_client", lambda: db)
     monkeypatch.setattr(cases_routes, "validate_fk_in_org", lambda *a, **k: None)
 
-    payload = cases_routes.MoveIn(case_id="case-B")
+    payload = cases_routes.MoveIn(case_id="proj-B")
     with pytest.raises(HTTPException) as exc:
         asyncio.run(cases_routes.move_inquiry_case("inq-1", payload, user=_user()))
     assert exc.value.status_code == 422
@@ -144,11 +145,11 @@ def test_move_inquiry_case_rejects_other_customers_case(monkeypatch):
 def test_move_inquiry_case_allows_same_customer(monkeypatch):
     db = _DB({
         "inquiries": [[{"id": "inq-1", "customer_id": "cust-A"}]],
-        "cases": [[{"id": "case-A", "customer_id": "cust-A"}]],
+        "projects": [[{"id": "proj-A", "customer_id": "cust-A"}]],
     })
     monkeypatch.setattr(cases_routes, "get_service_client", lambda: db)
     monkeypatch.setattr(cases_routes, "validate_fk_in_org", lambda *a, **k: None)
 
-    payload = cases_routes.MoveIn(case_id="case-A")
+    payload = cases_routes.MoveIn(case_id="proj-A")
     out = asyncio.run(cases_routes.move_inquiry_case("inq-1", payload, user=_user()))
-    assert out["success"] is True and out["case_id"] == "case-A"
+    assert out["success"] is True and out["case_id"] == "proj-A"

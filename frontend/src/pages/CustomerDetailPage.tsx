@@ -334,18 +334,18 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
             onClick={() => propose.mutate()}
             disabled={propose.isPending || inquiries.length < 2}
             className="flex items-center gap-1.5 rounded-md border border-ai-bg px-3 py-1.5 text-xs font-semibold text-ai hover:bg-ai-bg disabled:opacity-50"
-            title="Ähnliche Vorgänge per KI zu Fällen bündeln"
+            title="Ähnliche Vorgänge per KI zu Projekten bündeln"
           >
             <Sparkles size={14} /> {propose.isPending ? 'Analysiere…' : 'KI-Gruppierung'}
           </button>
           <button
             onClick={() => {
-              const l = window.prompt('Neuer Fall — Thema:')
+              const l = window.prompt('Neues Projekt — Thema:')
               if (l) createCase.mutate(l)
             }}
             className="flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110"
           >
-            <Plus size={14} /> Neuer Fall
+            <Plus size={14} /> Neues Projekt
           </button>
         </div>
       }
@@ -354,7 +354,7 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Tag variant="info">{open} offen</Tag>
           <Tag variant="success">{done} erledigt</Tag>
-          {cases.length > 0 && <Tag variant="ai">{cases.length} Fälle</Tag>}
+          {cases.length > 0 && <Tag variant="ai">{cases.length} Projekte</Tag>}
         </div>
         <div className="relative mb-3">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
@@ -374,12 +374,12 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
             return (
               <div key={cid} className="rounded-xl border border-ai-bg bg-ai-bg/40 p-2">
                 <button
-                  onClick={() => navigate(`/fall/${cid}`)}
+                  onClick={() => navigate(`/projects/${cid}`)}
                   className="mb-1.5 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition hover:bg-ai-bg"
-                  title="Fall öffnen (alle Anfragen)"
+                  title="Projekt öffnen (alle Anfragen)"
                 >
                   <Layers size={14} className="flex-shrink-0 text-ai" />
-                  <span className="truncate text-sm font-bold text-text">{c.label || 'Fall'}</span>
+                  <span className="truncate text-sm font-bold text-text">{c.label || 'Projekt'}</span>
                   {c.number && <span className="font-mono text-[11px] text-ai">{c.number}</span>}
                   <span className="flex-1" />
                   <span className="text-xs text-muted">{items.length} Anfragen</span>
@@ -420,7 +420,7 @@ function InquiryRow({ i, cases, caseId, onChanged }: { i: Inquiry; cases: CaseRo
   const topic = i.subject || i.title || 'Vorgang'
   return (
     <div className="group relative rounded-lg border border-border bg-surface p-3 transition hover:border-green-primary hover:bg-alt">
-      <div onClick={() => navigate(caseId ? `/fall/${caseId}` : `/vorgang/${i.id}`)} className="cursor-pointer">
+      <div onClick={() => navigate(caseId ? `/projects/${caseId}` : `/vorgang/${i.id}`)} className="cursor-pointer">
         <div className="flex items-center gap-2 pr-7">
           <Tag variant={st.variant}>{st.label}</Tag>
           <span className="flex-1 truncate text-sm font-semibold text-text">{topic}</span>
@@ -468,7 +468,7 @@ function MoveMenu({ inquiry, cases, onMoved }: { inquiry: Inquiry; cases: CaseRo
           setOpen((o) => !o)
         }}
         className="rounded p-1 text-faint hover:bg-border"
-        title="In anderen Fall verschieben"
+        title="In anderes Projekt verschieben"
       >
         <MoreVertical size={15} />
       </button>
@@ -478,23 +478,23 @@ function MoveMenu({ inquiry, cases, onMoved }: { inquiry: Inquiry; cases: CaseRo
           <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-border bg-surface p-1 shadow-e3">
             {inquiry.case_id && (
               <button onClick={() => move.mutate({ case_id: null })} className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
-                Aus Fall lösen
+                Aus Projekt lösen
               </button>
             )}
-            {others.length > 0 && <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Fall verschieben</div>}
+            {others.length > 0 && <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Projekt verschieben</div>}
             {others.map((c) => (
               <button key={c.id} onClick={() => move.mutate({ case_id: c.id })} className="block w-full truncate rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
-                → {c.label || 'Fall'}
+                → {c.label || 'Projekt'}
               </button>
             ))}
             <button
               onClick={() => {
-                const l = window.prompt('Neuer Fall — Thema:')
+                const l = window.prompt('Neues Projekt — Thema:')
                 if (l) move.mutate({ new_case_label: l })
               }}
               className="block w-full rounded px-2.5 py-1.5 text-left text-sm font-medium text-green-deep hover:bg-alt"
             >
-              ＋ Neuer Fall…
+              ＋ Neues Projekt…
             </button>
           </div>
         </>
@@ -539,7 +539,7 @@ function GroupingReviewModal({
     <Modal
       open
       onOpenChange={(o) => !o && onClose()}
-      title="KI-Vorschlag: Vorgänge zu Fällen bündeln"
+      title="KI-Vorschlag: Vorgänge zu Projekten bündeln"
       widthClass="max-w-2xl"
       footer={
         <button
@@ -547,13 +547,13 @@ function GroupingReviewModal({
           disabled={apply.isPending || picked.size === 0}
           className="w-full rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
         >
-          {picked.size} Fälle übernehmen
+          {picked.size} Projekte übernehmen
         </button>
       }
     >
       <div className="space-y-2">
         <p className="text-xs text-muted">
-          {proposal.n_inquiries} Vorgänge analysiert ({proposal.model}). Haken = als ein Fall bündeln; einzelne Vorgänge
+          {proposal.n_inquiries} Vorgänge analysiert ({proposal.model}). Haken = als ein Projekt bündeln; einzelne Vorgänge
           kannst du danach jederzeit verschieben.
         </p>
         {merges.length === 0 && <p className="py-6 text-center text-sm text-muted">Kein Bündelungsvorschlag — alle Vorgänge wirken eigenständig.</p>}
