@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowUpDown, Clock, FileText, Globe, Info, Loader2, Lock, Phone, Plus, RefreshCw,
+  Clock, FileText, GitBranch, Globe, Info, Loader2, Lock, Phone, Plus, RefreshCw,
   Siren, Trash2, X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -14,6 +14,7 @@ import { cn } from '../../lib/utils'
 import { Modal } from '../ui/Modal'
 import { Tag } from '../ui/Tag'
 import { Card, ConfirmDialog, Field, GroupLabel, inputCls, labelCls, SaveBar, StatusBadge, Toggle, useKikiConfirm } from './shared'
+import { DragHandle, SortableList, SortableRow } from './SortableList'
 
 type Props = { data: KzOverview; flash: (m: string) => void }
 
@@ -135,7 +136,12 @@ const LINKED_TARGET_LABEL: Record<string, string> = {
   price_info_enabled: 'Preisauskunft',
 }
 
-export function LeitfadenSection({ flash }: Props) {
+export function LeitfadenSection({ flash, specialCaseFieldKeys }: Props & {
+  /** Field keys the Sonderfall rules currently use (Gesprächsablauf page). Those
+   * rows are forced OFF + locked here — a field lives EITHER in a Sonderfall
+   * OR im Standard-Ablauf, never in both (Luca-meeting item 7). */
+  specialCaseFieldKeys?: string[]
+}) {
   const qc = useQueryClient()
   const { data, dataUpdatedAt } = useQuery({ queryKey: ['kiki-zentrale', 'required-fields'], queryFn: () => apiFetch<{ fields: KzRequiredField[] }>(`${KZ}/required-fields`) })
   const serverFields = useMemo(() => data?.fields ?? [], [data])
@@ -144,7 +150,6 @@ export function LeitfadenSection({ flash }: Props) {
   const [newKey, setNewKey] = useState('')
   const [newLabel, setNewLabel] = useState('')
   const [newDesc, setNewDesc] = useState('')
-  const dragIdx = useRef<number | null>(null)
   // Linked-row toggle confirmation: which row + target value is pending.
   const [linkedConfirm, setLinkedConfirm] = useState<{ id: string; label: string; target: string; value: boolean } | null>(null)
 
@@ -152,6 +157,19 @@ export function LeitfadenSection({ flash }: Props) {
   useEffect(() => {
     if (!dirty) setItems(serverFields)
   }, [serverFields, dataUpdatedAt, dirty])
+
+  // Either/or with the Sonderfälle: any field a rule erfasst is auto-toggled OFF
+  // here (and locked in the row UI below). Marks the list dirty so the next
+  // „Speichern" persists the switch-off.
+  const usedSet = useMemo(() => new Set(specialCaseFieldKeys ?? []), [specialCaseFieldKeys])
+  useEffect(() => {
+    if (!usedSet.size) return
+    setItems((p) => {
+      if (!p.some((f) => usedSet.has(f.field_key) && f.is_active)) return p
+      setTimeout(() => setDirty(true), 0)
+      return p.map((f) => (usedSet.has(f.field_key) && f.is_active ? { ...f, is_active: false } : f))
+    })
+  }, [usedSet])
 
   const setActive = (id: string, value: boolean) => {
     setItems((p) => p.map((f) => (f.id === id ? { ...f, is_active: value } : f)))
@@ -190,10 +208,7 @@ export function LeitfadenSection({ flash }: Props) {
   })
 
   // Drag reorder — LOCAL ONLY; persisted with Speichern.
-  const onDrop = (to: number) => {
-    const from = dragIdx.current
-    dragIdx.current = null
-    if (from === null || from === to) return
+  const moveItem = (from: number, to: number) => {
     setItems((p) => {
       const next = [...p]
       const [m] = next.splice(from, 1)
@@ -228,53 +243,73 @@ export function LeitfadenSection({ flash }: Props) {
           legt fest, ob ein Punkt überhaupt vorkommt. Erst „Speichern“ überträgt die Änderungen an Kiki.
         </p>
         <div className="space-y-2">
-          {items.map((f, i) => (
-            <div
-              key={f.id}
-              draggable
-              onDragStart={() => (dragIdx.current = i)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => onDrop(i)}
-              className={cn('flex items-start gap-3 rounded-lg border border-border px-3 py-2', f.is_active ? 'bg-alt' : 'bg-alt/40 opacity-70')}
-            >
-              <ArrowUpDown size={15} className="mt-2 cursor-grab text-faint" />
-              <div className="flex-1">
-                <div className="flex items-center gap-2 text-sm font-medium text-text">
-                  {f.label}
-                  {f.is_locked && !f.linked_setting && <Lock size={12} className="text-faint" />}
-                  {f.is_duty && <Tag variant="green">Pflicht</Tag>}
-                  {f.linked_setting && (
-                    <Tag variant="info">Verknüpft · {LINKED_TARGET_LABEL[f.linked_setting]}</Tag>
+          <SortableList ids={items.map((f) => f.id)} onMove={moveItem}>
+            {items.map((f) => {
+              const inSpecialCase = usedSet.has(f.field_key)
+              return (
+                <SortableRow
+                  key={f.id}
+                  id={f.id}
+                  className={cn(
+                    'mb-2 flex items-start gap-3 rounded-lg border border-border px-3 py-2',
+                    inSpecialCase ? 'border-dashed bg-alt/30 opacity-80' : f.is_active ? 'bg-alt' : 'bg-alt/40 opacity-70',
                   )}
-                </div>
-                {f.linked_setting ? (
-                  <p className="mt-1 text-xs text-muted">{f.description}</p>
-                ) : (
-                  <FieldDescriptionInput field={f} onSave={(description) => patchDesc.mutate({ id: f.id, description })} />
-                )}
-              </div>
-              <div className="mt-1.5 flex items-center gap-2">
-                <Toggle
-                  on={f.is_active}
-                  onChange={(v) => {
-                    if (f.linked_setting) {
-                      setLinkedConfirm({ id: f.id, label: f.label, target: LINKED_TARGET_LABEL[f.linked_setting], value: v })
-                    } else {
-                      setActive(f.id, v)
-                    }
-                  }}
-                />
-                <button
-                  disabled={f.is_locked || del.isPending}
-                  onClick={() => { if (window.confirm(`„${f.label}“ wirklich entfernen?`)) del.mutate(f.id) }}
-                  title={f.is_locked ? 'Gesperrter Punkt' : 'Entfernen'}
-                  className="text-muted hover:text-error disabled:opacity-30"
                 >
-                  {del.isPending && del.variables === f.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-                </button>
-              </div>
-            </div>
-          ))}
+                  {(handleProps) => (
+                    <>
+                      <DragHandle {...handleProps} className="mt-2" />
+                      <div className="flex-1">
+                        <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-text">
+                          {f.label}
+                          {f.is_locked && !f.linked_setting && <Lock size={12} className="text-faint" />}
+                          {f.is_duty && !inSpecialCase && <Tag variant="green">Pflicht</Tag>}
+                          {f.linked_setting && (
+                            <Tag variant="info">Verknüpft · {LINKED_TARGET_LABEL[f.linked_setting]}</Tag>
+                          )}
+                          {inSpecialCase && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-warning-bg px-2 py-0.5 text-[10px] font-semibold text-warning">
+                              <GitBranch size={10} /> Im Sonderfall erfasst
+                            </span>
+                          )}
+                        </div>
+                        {inSpecialCase ? (
+                          <p className="mt-1 text-xs text-muted">
+                            Dieses Feld fragt ein Sonderfall oben ab — im Standard-Ablauf deshalb abgeschaltet (entweder/oder).
+                          </p>
+                        ) : f.linked_setting ? (
+                          <p className="mt-1 text-xs text-muted">{f.description}</p>
+                        ) : (
+                          <FieldDescriptionInput field={f} onSave={(description) => patchDesc.mutate({ id: f.id, description })} />
+                        )}
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <Toggle
+                          on={f.is_active}
+                          disabled={inSpecialCase}
+                          onChange={(v) => {
+                            if (inSpecialCase) return
+                            if (f.linked_setting) {
+                              setLinkedConfirm({ id: f.id, label: f.label, target: LINKED_TARGET_LABEL[f.linked_setting], value: v })
+                            } else {
+                              setActive(f.id, v)
+                            }
+                          }}
+                        />
+                        <button
+                          disabled={f.is_locked || del.isPending}
+                          onClick={() => { if (window.confirm(`„${f.label}“ wirklich entfernen?`)) del.mutate(f.id) }}
+                          title={f.is_locked ? 'Gesperrter Punkt' : 'Entfernen'}
+                          className="text-muted hover:text-error disabled:opacity-30"
+                        >
+                          {del.isPending && del.variables === f.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </SortableRow>
+              )
+            })}
+          </SortableList>
         </div>
         <SaveBar
           onReset={() => { setItems(serverFields); setDirty(false) }}

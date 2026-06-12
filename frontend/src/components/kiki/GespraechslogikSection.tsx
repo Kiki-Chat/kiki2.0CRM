@@ -3,13 +3,14 @@
 // The compiled German preview comes from the backend (single compiler, no TS
 // port): POST /conversation-logic/preview, debounced.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpDown, GitBranch, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { CornerDownRight, GitBranch, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 import { apiFetch } from '../../lib/api'
 import { KZ } from '../../lib/kikiApi'
 import { cn } from '../../lib/utils'
 import { Card, Field, GroupLabel, inputCls, SaveBar, Toggle, useKikiConfirm } from './shared'
+import { DragHandle, SortableList, SortableRow } from './SortableList'
 
 // ─── Tree types (mirror backend/app/schemas/conversation_logic.py) ───────────
 type ActionType = 'ask' | 'ask_field' | 'say' | 'goto' | 'subrule'
@@ -51,10 +52,53 @@ const GOTO_OPTIONS: [string, string][] = [
 ]
 const ACTION_LABEL: Record<ActionType, string> = {
   ask: 'Freie Frage',
-  ask_field: 'Feld aus Leitfaden',
+  ask_field: 'Feld aus Standard-Ablauf',
   say: 'Hinweis / Ansage',
   goto: 'Weiter zu …',
-  subrule: 'Unterregel (Wenn/Sonst)',
+  subrule: 'Verschachtelter Fall (Wenn/Sonst)',
+}
+
+// Visual identity per branch kind — the if / else-if / else MUST look different
+// at a glance (color + plain-German label), so a non-coder reads the structure
+// without knowing what "if/else" means (Luca-meeting item 8).
+const KIND_META: Record<LogicBranch['kind'], { label: string; badge: string; border: string; help: string }> = {
+  wenn: {
+    label: 'WENN',
+    badge: 'bg-info-bg text-info',
+    border: 'border-l-[3px] border-l-info',
+    help: 'Der Fall, den Kiki zuerst prüft.',
+  },
+  sonst_wenn: {
+    label: 'ANDERNFALLS, WENN',
+    badge: 'bg-warning-bg text-warning',
+    border: 'border-l-[3px] border-l-warning',
+    help: 'Wird nur geprüft, wenn der Fall darüber NICHT zutrifft.',
+  },
+  sonst: {
+    label: 'IN ALLEN ANDEREN FÄLLEN',
+    badge: 'bg-alt text-muted',
+    border: 'border-l-[3px] border-l-border',
+    help: 'Greift, wenn keiner der Fälle darüber zutrifft.',
+  },
+}
+
+// Offer-point rows (Termin/KVA/Preisauskunft) ARE selectable in rules — they
+// were filtered out before, which is why "Termine" and "KVA" were missing from
+// the dropdown (item 7). Invoices intentionally have no row here at all.
+const RULE_LINKED_OK = new Set(['appointments_enabled', 'kva_enabled', 'price_info_enabled'])
+
+/** Every Leitfaden field referenced by an ask_field action (incl. nested rules). */
+function collectUsedFieldKeys(blocks: LogicRule[]): string[] {
+  const keys = new Set<string>()
+  const walkRule = (r: LogicRule) =>
+    r.branches.forEach((b) =>
+      b.actions.forEach((a) => {
+        if (a.type === 'ask_field' && a.field_key) keys.add(a.field_key)
+        if (a.rule) walkRule(a.rule)
+      }),
+    )
+  blocks.forEach(walkRule)
+  return [...keys].sort()
 }
 
 // Template chips: each prefills the NL textarea with a ready description the
@@ -105,7 +149,16 @@ function withIds(doc: LogicDoc): LogicDoc {
   return { version: doc.version ?? 1, blocks: (doc.blocks ?? []).map(fixRule) }
 }
 
-export function GespraechslogikSection({ flash }: { flash: (m: string) => void }) {
+export function GespraechslogikSection({
+  flash,
+  onUsedFieldsChange,
+}: {
+  flash: (m: string) => void
+  /** Reports which Leitfaden fields the rules currently use (ask_field) — the
+   * Gesprächsablauf page feeds this into the Standard-Ablauf so a field lives
+   * EITHER in a Sonderfall OR im Standard, never in both (item 7). */
+  onUsedFieldsChange?: (keys: string[]) => void
+}) {
   const qc = useQueryClient()
   const kc = useKikiConfirm()
   const { data, dataUpdatedAt } = useQuery({
@@ -117,17 +170,25 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
   const [dirty, setDirty] = useState(false)
   const [preview, setPreview] = useState('')
   const [previewError, setPreviewError] = useState<string | null>(null)
-  const dragIdx = useRef<number | null>(null)
 
   // Shared vocabulary with the Leitfaden: rules can ask guide fields directly
-  // (ask_field), so both surfaces work on the same data points.
+  // (ask_field), so both surfaces work on the same data points. Includes the
+  // offer points (Termine/KVA/Preisauskunft) and also INACTIVE fields — a field
+  // used here is deliberately off in the Standard-Ablauf (either/or).
   const { data: fieldsData } = useQuery({
     queryKey: ['kiki-zentrale', 'required-fields'],
     queryFn: () => apiFetch<{ fields: (GuideFieldOption & { is_active: boolean; linked_setting: string | null })[] }>(`${KZ}/required-fields`),
   })
   const guideFields: GuideFieldOption[] = (fieldsData?.fields ?? [])
-    .filter((f) => f.is_active && !f.linked_setting)
+    .filter((f) => !f.linked_setting || RULE_LINKED_OK.has(f.linked_setting))
     .map((f) => ({ field_key: f.field_key, label: f.label }))
+
+  // Tell the page which fields the Sonderfälle now own (either/or with Standard).
+  const usedKeys = collectUsedFieldKeys(blocks).join(',')
+  useEffect(() => {
+    onUsedFieldsChange?.(usedKeys ? usedKeys.split(',') : [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usedKeys])
 
   useEffect(() => {
     if (!dirty && data) {
@@ -200,17 +261,13 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
     onError: (e: Error) => flash(e.message || 'Speichern fehlgeschlagen.'),
   })
 
-  const onDrop = (to: number) => {
-    const from = dragIdx.current
-    dragIdx.current = null
-    if (from === null || from === to) return
+  const moveRule = (from: number, to: number) =>
     touch((p) => {
       const next = [...p]
       const [m] = next.splice(from, 1)
       next.splice(to, 0, m)
       return next
     })
-  }
 
   return (
     <div className="space-y-4">
@@ -281,34 +338,33 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
               Noch keine Regeln. Beispiel: „Wenn ein Lieferant anruft → Anliegen erfragen → weiter zum Abschluss.“
             </p>
           )}
-          {blocks.map((rule, i) => (
-            <div
-              key={rule.id}
-              draggable
-              onDragStart={() => (dragIdx.current = i)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => onDrop(i)}
-              className="rounded-xl border border-border bg-alt/50 p-3"
-            >
-              <div className="mb-2 flex items-center gap-2">
-                <ArrowUpDown size={14} className="cursor-grab text-faint" />
-                <span className="text-xs font-bold uppercase tracking-wide text-muted">Regel {i + 1}</span>
-                <button
-                  onClick={() => touch((p) => p.filter((r) => r.id !== rule.id))}
-                  title="Regel löschen"
-                  className="ml-auto text-muted hover:text-error"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              <RuleEditor
-                rule={rule}
-                depth={0}
-                guideFields={guideFields}
-                onChange={(next) => touch((p) => p.map((r) => (r.id === rule.id ? next : r)))}
-              />
-            </div>
-          ))}
+          <SortableList ids={blocks.map((r) => r.id)} onMove={moveRule}>
+            {blocks.map((rule, i) => (
+              <SortableRow key={rule.id} id={rule.id} className="mb-3 rounded-xl border border-border bg-alt/50 p-3">
+                {(handleProps) => (
+                  <>
+                    <div className="mb-2 flex items-center gap-2">
+                      <DragHandle {...handleProps} />
+                      <span className="text-xs font-bold uppercase tracking-wide text-muted">Regel {i + 1}</span>
+                      <button
+                        onClick={() => touch((p) => p.filter((r) => r.id !== rule.id))}
+                        title="Regel löschen"
+                        className="ml-auto text-muted hover:text-error"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <RuleEditor
+                      rule={rule}
+                      depth={0}
+                      guideFields={guideFields}
+                      onChange={(next) => touch((p) => p.map((r) => (r.id === rule.id ? next : r)))}
+                    />
+                  </>
+                )}
+              </SortableRow>
+            ))}
+          </SortableList>
         </div>
         <button
           onClick={() => touch((p) => [...p, newRule()])}
@@ -364,10 +420,10 @@ function RuleEditor({ rule, depth, guideFields, onChange }: { rule: LogicRule; d
           }
         />
       ))}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => {
-            // Sonst stays last.
+            // The catch-all stays last.
             const sonstIdx = rule.branches.findIndex((b) => b.kind === 'sonst')
             const next = [...rule.branches]
             const nb = newBranch('sonst_wenn')
@@ -375,16 +431,16 @@ function RuleEditor({ rule, depth, guideFields, onChange }: { rule: LogicRule; d
             else next.splice(sonstIdx, 0, nb)
             onChange({ ...rule, branches: next })
           }}
-          className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-body hover:bg-alt"
+          className="rounded-md border border-warning/40 bg-warning-bg/40 px-2.5 py-1.5 text-xs font-semibold text-warning hover:bg-warning-bg"
         >
-          + Sonst-wenn
+          + Weiterer Fall (andernfalls, wenn …)
         </button>
         {!hasSonst && (
           <button
             onClick={() => onChange({ ...rule, branches: [...rule.branches, newBranch('sonst')] })}
-            className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-body hover:bg-alt"
+            className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-alt"
           >
-            + Sonst
+            + Auffang-Fall (alle anderen)
           </button>
         )}
       </div>
@@ -399,13 +455,14 @@ function BranchEditor({ branch, depth, guideFields, onChange, onRemove }: {
   onChange: (b: LogicBranch) => void
   onRemove?: () => void
 }) {
-  const kindLabel = branch.kind === 'wenn' ? 'Wenn' : branch.kind === 'sonst_wenn' ? 'Sonst, wenn' : 'Sonst'
+  const meta = KIND_META[branch.kind]
   return (
-    <div className="rounded-lg border border-border bg-surface p-2.5">
+    <div className={cn('rounded-lg border border-border bg-surface p-2.5', meta.border)}>
       <div className="mb-1.5 flex items-center gap-2">
-        <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-bold', branch.kind === 'sonst' ? 'bg-alt text-muted' : 'bg-green-tint-100 text-green-deep')}>{kindLabel}</span>
+        <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-bold tracking-wide', meta.badge)}>{meta.label}</span>
+        <span className="hidden text-[11px] text-faint sm:inline">{meta.help}</span>
         {onRemove && (
-          <button onClick={onRemove} title="Zweig löschen" className="ml-auto text-muted hover:text-error"><Trash2 size={13} /></button>
+          <button onClick={onRemove} title="Fall löschen" className="ml-auto text-muted hover:text-error"><Trash2 size={13} /></button>
         )}
       </div>
       {branch.kind !== 'sonst' && (
@@ -424,7 +481,7 @@ function BranchEditor({ branch, depth, guideFields, onChange, onRemove }: {
               <input
                 value={c}
                 onChange={(e) => onChange({ ...branch, conditions: branch.conditions.map((x, j) => (j === i ? e.target.value : x)) })}
-                placeholder="Bedingung, z. B. „der Anrufer ist ein Lieferant (kein Kunde)“"
+                placeholder="Was muss zutreffen? z. B. „Der Anrufer ist ein Lieferant“"
                 maxLength={200}
                 className={cn(inputCls, 'text-xs')}
               />
@@ -438,7 +495,10 @@ function BranchEditor({ branch, depth, guideFields, onChange, onRemove }: {
           )}
         </div>
       )}
-      <div className="space-y-1.5">
+      <div className="mb-1 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-green-deep">
+        <CornerDownRight size={12} /> Dann macht Kiki:
+      </div>
+      <div className="space-y-1.5 pl-4">
         {branch.actions.map((a) => (
           <ActionEditor
             key={a.id}

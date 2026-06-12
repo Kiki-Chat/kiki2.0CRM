@@ -191,33 +191,39 @@ export function KikiZentralePage() {
   )
 }
 
+// ONE page for the whole call flow. Sonderfälle come FIRST (Luca-meeting item 7:
+// they are the reason users open this page, and they run first in the call too);
+// the Standard-Ablauf below is the default path. The two are EITHER/OR per field:
+// the rules editor reports which Leitfaden fields its Sonderfälle use, and the
+// Standard-Ablauf locks those rows off, so a field is never asked in both.
+function GespraechsablaufSection({ data, flash }: { data: KzOverview; flash: (m: string) => void }) {
+  const [usedFieldKeys, setUsedFieldKeys] = useState<string[]>([])
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="mb-1 text-lg font-bold text-text">Ausnahmen &amp; Sonderfälle</h2>
+        <p className="mb-3 text-sm text-muted">
+          Diese Fälle prüft Kiki ZUERST — einfach unten beschreiben, die KI baut die Regeln.
+          Felder, die ein Sonderfall erfasst, werden im Standard-Ablauf automatisch abgeschaltet.
+        </p>
+        <GespraechslogikSection flash={flash} onUsedFieldsChange={setUsedFieldKeys} />
+      </div>
+      <div>
+        <h2 className="mb-1 text-lg font-bold text-text">Standard-Ablauf</h2>
+        <p className="mb-3 text-sm text-muted">
+          Trifft kein Sonderfall zu, fragt Kiki diese Punkte der Reihe nach ab.
+        </p>
+        <PflichtfelderSection data={data} flash={flash} specialCaseFieldKeys={usedFieldKeys} />
+      </div>
+    </div>
+  )
+}
+
 function SectionContent({ section, data, flash }: { section: string; data: KzOverview; flash: (m: string) => void }) {
   switch (section) {
     case 'verhalten': return <VerhaltenSection data={data} flash={flash} />
     case 'autonomie': return <AutonomieSection data={data} flash={flash} />
-    case 'gespraechsablauf': return (
-      // ONE page for the whole call flow: the Leitfaden is the DEFAULT path
-      // (ordered fields, the 80% case), the Wenn/Dann rules are the EXCEPTIONS
-      // layered on top (the 20% case) — the combined preview at the bottom
-      // shows exactly how both mesh in the agent prompt.
-      <div className="space-y-8">
-        <div>
-          <h2 className="mb-1 text-lg font-bold text-text">Standard-Ablauf</h2>
-          <p className="mb-3 text-sm text-muted">
-            Diese Punkte fragt Kiki in jedem normalen Gespräch der Reihe nach ab.
-          </p>
-          <PflichtfelderSection data={data} flash={flash} />
-        </div>
-        <div>
-          <h2 className="mb-1 text-lg font-bold text-text">Ausnahmen &amp; Sonderfälle</h2>
-          <p className="mb-3 text-sm text-muted">
-            Wenn/Dann-Regeln, die VOR dem Standard-Ablauf gelten — einfach unten beschreiben,
-            die KI baut die Regeln. Felder aus dem Standard-Ablauf können direkt verwendet werden.
-          </p>
-          <GespraechslogikSection flash={flash} />
-        </div>
-      </div>
-    )
+    case 'gespraechsablauf': return <GespraechsablaufSection data={data} flash={flash} />
     case 'branche-kontext': return <BrancheKontextSection data={data} flash={flash} />
     case 'geschaeftszeiten': return <GeschaeftszeitenSection />
     case 'terminregeln': return <TerminregelnSection data={data} flash={flash} />
