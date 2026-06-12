@@ -136,7 +136,7 @@ def _create_customer(user: CurrentUser, args: dict) -> dict:
 
 
 # ─── Phase 2/3/4 tools (writes, settings, escalation) ────────────────────────
-ESCALATION_EMAIL = "info.kikichat@gmail.com"
+ESCALATION_EMAIL = "info@kikichat.de"
 _INQUIRY_STATUS = ("open", "in_progress", "completed")
 _ORG_PROFILE_FIELDS = ("name", "trade", "phone_number", "fax", "email", "website", "chamber_of_crafts")
 

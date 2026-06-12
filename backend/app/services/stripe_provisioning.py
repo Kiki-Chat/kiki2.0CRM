@@ -3,12 +3,18 @@
 ensure_stripe_customer: idempotent (org.stripe_customer_id short-circuit + a stable
 idempotency key). create_checkout_session: a hosted Stripe Checkout (mode=subscription)
 pre-filled from the org's customer, with the base + metered line items, optional trial,
-and automatic_tax (Kleinunternehmer → 0% VAT). All writes go through stripe_call_safely.
+and automatic_tax (19% German VAT added ON TOP of the NET price; EU B2B reverse-charge
+applies when a valid VAT-ID is collected). All writes go through stripe_call_safely.
+ensure_portal_configuration: the account's billing-portal config with self-service
+cancellation DISABLED (also removes the 'default configuration not created' 502).
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
+
+import stripe
 
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
@@ -18,6 +24,8 @@ from app.services.stripe_billing import (
     stripe_call_safely,
 )
 from app.services.stripe_catalog import find_plan_prices
+
+log = logging.getLogger(__name__)
 
 DEFAULT_TRIAL_DAYS = 14  # ⚠️ confirm with Amber before go-live
 
@@ -154,3 +162,61 @@ def create_checkout_session(
     except Exception:  # noqa: BLE001 — table may predate 0049; the session is still valid
         pass
     return {"url": session.get("url"), "session_id": session["id"]}
+
+
+# ─── Billing-portal configuration ─────────────────────────────────────────────
+# Bump when the portal feature set changes (forces a fresh Configuration to be made).
+_PORTAL_CONFIG_MARKER = "v1"
+_portal_config_cache: dict[str, str] = {}
+
+
+def ensure_portal_configuration() -> str | None:
+    """Return the id of HeyKiki's billing-portal Configuration, creating it once.
+
+    Two problems, one fix:
+      • Policy (Amber): self-service cancellation is DISABLED — customers cancel only
+        via email/phone. A portal Session inherits its configuration's features, and
+        Stripe's *default* config ENABLES cancellation, so we must pass our own with
+        ``subscription_cancel`` off.
+      • The 502: ``billing_portal.Session.create`` raises *"No configuration provided
+        and your default configuration has not been created"* whenever the portal was
+        never saved in the Stripe Dashboard for the active mode. Passing an explicit
+        configuration removes that dependency entirely — the most common root cause of
+        the portal-session 502.
+
+    Idempotent: reuses our metadata-marked configuration if one exists (cached per
+    process). Returns ``None`` if creation fails, so the caller can still fall back to
+    a default-config session rather than hard-failing."""
+    cached = _portal_config_cache.get(_PORTAL_CONFIG_MARKER)
+    if cached:
+        return cached
+    s = get_stripe()
+    try:
+        for cfg in s.billing_portal.Configuration.list(limit=100).auto_paging_iter():
+            md = cfg.get("metadata") or {}
+            if md.get("heykiki_portal") == _PORTAL_CONFIG_MARKER and cfg.get("active"):
+                _portal_config_cache[_PORTAL_CONFIG_MARKER] = cfg["id"]
+                return cfg["id"]
+    except stripe.error.StripeError as exc:  # type: ignore[attr-defined]
+        log.warning("portal configuration list failed: %s", exc)
+    try:
+        cfg = s.billing_portal.Configuration.create(
+            business_profile={"headline": "HeyKiki — Abrechnung verwalten"},
+            features={
+                "invoice_history": {"enabled": True},
+                "payment_method_update": {"enabled": True},
+                "customer_update": {
+                    "enabled": True,
+                    # tax_id lets B2B customers add their VAT-ID → reverse-charge.
+                    "allowed_updates": ["address", "email", "phone", "tax_id"],
+                },
+                # Amber's policy: NO self-service cancellation in the portal.
+                "subscription_cancel": {"enabled": False},
+            },
+            metadata={"heykiki_portal": _PORTAL_CONFIG_MARKER},
+        )
+        _portal_config_cache[_PORTAL_CONFIG_MARKER] = cfg["id"]
+        return cfg["id"]
+    except stripe.error.StripeError as exc:  # type: ignore[attr-defined]
+        log.warning("portal configuration create failed: %s", exc)
+        return None

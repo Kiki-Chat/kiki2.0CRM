@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 # HeyKiki support address — the biller's contact on billing emails (these are
 # HeyKiki→customer, unlike white-labeled org→customer invoice/KVA mails).
 BILLING_FROM_NAME = "HeyKiki"
-BILLING_CONTACT = "info.kikichat@gmail.com"
+BILLING_CONTACT = "info@kikichat.de"
 
 
 def _now() -> str:
@@ -135,7 +135,7 @@ def notify_subscription_activated(org_id: str, plan_title: str | None, subscript
         body=f"Ihr Abonnement „{plan}“ ist aktiv. Vielen Dank! Ihre KI-Sekretärin läuft "
         "ohne Unterbrechung weiter. Rechnungen und Zahlungsbeleg finden Sie in Ihrem "
         "Konto unter Einstellungen → Abrechnung. Eine Kündigung ist nur per E-Mail an "
-        "info.kikichat@gmail.com oder telefonisch möglich.",
+        "info@kikichat.de oder telefonisch möglich.",
         dedup_key=f"subscription_activated:{subscription_id or org_id}",
     )
 

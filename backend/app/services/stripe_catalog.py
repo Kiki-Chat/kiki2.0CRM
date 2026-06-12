@@ -12,6 +12,15 @@ key at go-live (run ensure_catalog()). ensure_catalog() is price-drift-aware: wh
 lookup-keyed price no longer matches PLANS, a new price is created and the lookup key
 is transferred (Stripe prices are immutable), so re-running after a price change is
 safe in both TEST and LIVE.
+
+TAX: every price is NET (tax_behavior="exclusive") — 19% German VAT (MwSt) is added
+ON TOP at checkout via automatic_tax (Amber 2026-06-12: VAT must never be absorbed
+into the plan price; applies to base + overage minutes for all tiers; EU B2B
+reverse-charge still applies when a valid VAT-ID is collected). Drift detection now
+includes tax_behavior, so an inclusive→exclusive switch mints fresh prices on the
+next ensure_catalog() run and transfers the lookup key. (For the 19% to actually be
+charged, HeyKiki's Stripe Tax registration must be active — Dashboard › Tax — not
+Kleinunternehmer/exempt.)
 Metadata matches STRIPE_INTEGRATION_HANDOVER.md §4a so Phase-1 quota derivation works.
 """
 
@@ -87,15 +96,19 @@ def ensure_catalog() -> dict:
             mult = 1 if interval == "month" else ANNUAL_MONTHS
             base_price = _ensure_price(
                 s, f"{_slug(title)}_base_{interval}",
-                matches=lambda p, want=spec["monthly_cents"] * mult: p.get("unit_amount") == want,
+                matches=lambda p, want=spec["monthly_cents"] * mult: (
+                    p.get("unit_amount") == want and p.get("tax_behavior") == "exclusive"
+                ),
                 product=base["id"], currency="eur",
                 unit_amount=spec["monthly_cents"] * mult,
-                recurring={"interval": interval}, tax_behavior="inclusive",
+                recurring={"interval": interval}, tax_behavior="exclusive",
             )
 
             def _metered_matches(p, *, minutes=spec["minutes"], overage=spec["overage_cents"]):
                 tiers = p.get("tiers") or []
                 if len(tiers) != 2:
+                    return False
+                if p.get("tax_behavior") != "exclusive":
                     return False
                 return (
                     tiers[0].get("up_to") == minutes
@@ -113,7 +126,7 @@ def ensure_catalog() -> dict:
                     {"up_to": spec["minutes"], "unit_amount": 0},
                     {"up_to": "inf", "unit_amount": spec["overage_cents"]},
                 ],
-                tax_behavior="inclusive",
+                tax_behavior="exclusive",
             )
             price_ids[f"base_{interval}"] = base_price["id"]
             price_ids[f"metered_{interval}"] = metered_price["id"]

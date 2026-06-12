@@ -651,12 +651,6 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
             </div>
           </div>
           {portal.isError && <div className="mt-3 text-sm text-error">{(portal.error as Error).message}</div>}
-          {/* Kündigungs-Policy: bewusst KEIN Self-Service-Cancel im Portal/CRM. */}
-          <p className="mt-3 border-t border-border pt-3 text-xs text-muted">
-            Kündigung: Eine Kündigung ist ausschließlich per E-Mail an{' '}
-            <a href="mailto:info.kikichat@gmail.com" className="font-medium text-green-deep underline">info.kikichat@gmail.com</a>{' '}
-            oder telefonisch möglich — nicht über das Portal.
-          </p>
         </Card>
       )}
 
@@ -722,7 +716,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-sm font-bold text-text">Tarif wählen</div>
-              <div className="text-xs text-muted">Starten Sie Ihr Abonnement — inkl. Testphase.</div>
+              <div className="text-xs text-muted">Starten Sie Ihr Abonnement — inkl. Testphase. Alle Preise zzgl. 19 % MwSt.</div>
             </div>
             <div className="flex items-center gap-1 rounded-lg bg-alt p-1 text-xs font-semibold">
               <button onClick={() => setPlanInterval('month')} className={cn('rounded-md px-3 py-1', planInterval === 'month' ? 'bg-surface text-text shadow' : 'text-muted')}>Monatlich</button>

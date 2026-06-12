@@ -10,7 +10,7 @@
 > **Locked decisions (from product, 2026-06-04):**
 > 1. **Voice = text-first.** Ship the text/chat copilot first; OpenAI **Realtime** voice is **Phase 5**.
 > 2. **Escalation = register + email out.** No in-platform ticket tables; the copilot **registers a complaint
->    and emails it to `info.kikichat@gmail.com`** (via the existing Brevo `send_email` chain, trigger-only).
+>    and emails it to `info@kikichat.de`** (via the existing Brevo `send_email` chain, trigger-only).
 > 3. **v1 capability = reads + confirmed writes.** v1 answers/reads freely **and** can create/update
 >    (customer, inquiry, appointment, draft KVA/invoice) — every write behind a **mandatory UI confirm**.
 >    ⇒ the confirmation + audit layer must exist **at launch**, not later.
@@ -202,14 +202,14 @@ until the build phase:
 When the copilot **can't** help (no tool fits, a tool fails, or the user asks for a human / wants to report a
 problem), it **registers the complaint and emails it out** — no in-platform ticketing:
 
-- **Target (locked): `info.kikichat@gmail.com`.** Every escalation / complaint is sent there.
+- **Target (locked): `info@kikichat.de`.** Every escalation / complaint is sent there.
 - **Register:** the complaint is logged to `copilot_escalations` (§8) — who, which org, the conversation snippet,
   the unmet request — so nothing is lost even if mail fails, and there's a record to follow up on.
 - **Send:** the email is fired through the **existing Brevo `send_email` chain**. ⚠️ Per the standing rule the
   email-send chain is **Amber-owned** — we **only trigger** it, never modify it. The mail is a plain internal
   support notification (subject = the complaint summary; body = user / org + conversation snippet + the request).
 - **Phase-4 check:** make sure this internal mail is **not** caught by the `OUTBOUND_TEST_SCOPE_ONLY` scope guard
-  (that guard governs *customer-facing* outbound; an internal support mail to `info.kikichat@gmail.com` must send
+  (that guard governs *customer-facing* outbound; an internal support mail to `info@kikichat.de` must send
   regardless of its state).
 
 ## 10. Frontend plan — a floating chat widget (NOT the search bar)
@@ -226,7 +226,7 @@ problem), it **registers the complaint and emails it out** — no in-platform ti
 - **Action-confirm cards:** a proposed write renders inline as a card ("Kiki möchte … anlegen") showing the exact
   values + **Bestätigen / Abbrechen**; confirm → `POST /api/copilot/confirm`.
 - **Complaint / escalation:** a "Problem melden" affordance (and the model's own out-of-scope path) collect the
-  complaint and **register + email it to `info.kikichat@gmail.com`** (see §9).
+  complaint and **register + email it to `info@kikichat.de`** (see §9).
 - **Navigation:** `navigate_to` results call `useNavigate()` so Kiki can take the user to a screen.
 - **Wiring is ready:** `useMe()` (role/org) + `apiFetch()` (token-attached). No new deps for text/SSE.
 
@@ -238,7 +238,7 @@ problem), it **registers the complaint and emails it out** — no in-platform ti
 | **1 — Read & guide** | Read tools + navigation + `explain_setting`; the floating chat widget; streaming. The "ask anything / guide me" MVP. | low |
 | **2 — Confirmed writes** | The write tools from §6 behind UI confirm + audit. *(In scope for v1 per the locked decision — 1+2 ship together as the first usable release.)* | medium |
 | **3 — Settings copilot** | `apply_setting` + Kiki-Zentrale config, with guardrails, side-effect warnings, snapshot rollback. Admin-gated. | high |
-| **4 — Escalation** | Register complaints (`copilot_escalations`) + email them to `info.kikichat@gmail.com`. | low |
+| **4 — Escalation** | Register complaints (`copilot_escalations`) + email them to `info@kikichat.de`. | low |
 | **5 — Voice** | OpenAI Realtime layered over the proven text copilot (mic toggle in the same widget). | medium |
 | **Cross-cutting** | Usage caps tied to `ai_minutes_quota`/KI-Nutzung; cost ceilings; observability. | — |
 
@@ -256,7 +256,7 @@ problem), it **registers the complaint and emails it out** — no in-platform ti
 
 ## 13. Open inputs
 
-1. ~~**Escalation target**~~ — ✅ **resolved: `info.kikichat@gmail.com`** (§9).
+1. ~~**Escalation target**~~ — ✅ **resolved: `info@kikichat.de`** (§9).
 2. ~~**Model + budget**~~ — ✅ **resolved: a small / fast OpenAI model** (`4o-mini`-class, env-overridable) for
    the copilot **and** the classifiers — lower cost + latency, fine for CRM. Per-org usage cap via `ai_usage_log`.
 3. **Super-admin copilot?** — v1 assumes **org users** (owner/admin/employee). A cross-org copilot for the

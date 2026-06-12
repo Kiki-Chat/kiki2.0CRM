@@ -5,6 +5,8 @@ write-ish op is creating a billing-portal session.
 
 from __future__ import annotations
 
+import logging
+
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.concurrency import run_in_threadpool
@@ -32,6 +34,7 @@ from app.services.stripe_billing import (
 )
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
+log = logging.getLogger(__name__)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -211,18 +214,32 @@ def _portal_session(org_id: str, actor_id: str) -> PortalSessionResponse:
     return_url = settings.billing_portal_return_url or (
         settings.frontend_public_url.rstrip("/") + "/settings/abrechnung"
     )
+    # Pass our own configuration (self-service cancellation disabled) — this also
+    # removes Stripe's 'default configuration not created' error, the most common
+    # cause of the portal-session 502.
+    from app.services.stripe_provisioning import ensure_portal_configuration
+
+    config_id = ensure_portal_configuration()
+
+    def _build(idem, meta):
+        params: dict = {"customer": customer_id, "return_url": return_url}
+        if config_id:
+            params["configuration"] = config_id
+        return get_stripe().billing_portal.Session.create(**params)
+
     try:
         session = stripe_call_safely(
             op="portal_session.create",
             org_id=org_id,
             actor_id=actor_id,
             stripe_object=customer_id,
-            request_payload={"customer": customer_id, "return_url": return_url},
-            builder=lambda idem, meta: get_stripe().billing_portal.Session.create(
-                customer=customer_id, return_url=return_url
-            ),
+            request_payload={"customer": customer_id, "return_url": return_url, "configuration": config_id},
+            builder=_build,
         )
     except StripeBillingError as exc:
+        # Surface the underlying Stripe reason in the logs so a recurring 502 is
+        # diagnosable (the customer still gets a clean German message).
+        log.warning("billing portal session failed (org=%s, config=%s): %s", org_id, config_id, exc)
         raise HTTPException(status_code=502, detail="Stripe-Portal konnte nicht geöffnet werden.") from exc
     return PortalSessionResponse(url=session.get("url"))
 
