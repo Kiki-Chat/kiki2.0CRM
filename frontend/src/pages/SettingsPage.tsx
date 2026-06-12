@@ -1247,22 +1247,14 @@ function GoogleReviewsSection({ org }: { org: Org }) {
 }
 
 // ─── PDS-Software ─────────────────────────────────────────────────────────────
-const PDS_ENTITIES: [string, string][] = [['customers', 'Kontakte'], ['inquiries', 'Anfragen/Aufträge'], ['appointments', 'Termine'], ['projects', 'Projekte'], ['invoices', 'Rechnungen'], ['cost_estimates', 'KVAs'], ['time_entries', 'Zeiterfassung'], ['catalog', 'Artikel'], ['assets', 'Anlagen']]
-const SYNC_INTERVALS: [string, string][] = [['every_15_min', '15 Minuten'], ['every_30_min', '30 Minuten'], ['hourly', 'Stündlich'], ['daily', 'Täglich']]
-const DIRECTIONS: [string, string][] = [['bidirectional', 'Bidirektional'], ['import', 'Nur Import'], ['export', 'Nur Export']]
 function PdsSection({ config, flash }: { config: PdsConfig | null; flash: (m: string) => void }) {
   const qc = useQueryClient()
   const [apiUrl, setApiUrl] = useState(config?.api_url || '')
-  const [apiUser, setApiUser] = useState(config?.api_user || '')
   const [apiKey, setApiKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [autoSync, setAutoSync] = useState(config?.auto_sync_enabled ?? false)
-  const [syncInterval, setSyncInterval] = useState(config?.sync_interval || 'every_30_min')
-  const [entities, setEntities] = useState<Record<string, string>>(config?.sync_entities || {})
-  const toggleEntity = (k: string) => setEntities((e) => { const n = { ...e }; if (n[k]) delete n[k]; else n[k] = 'bidirectional'; return n })
-  const setDir = (k: string, d: string) => setEntities((e) => ({ ...e, [k]: d }))
   const save = useMutation({
-    mutationFn: () => apiFetch('/api/settings/pds-config', { method: 'PATCH', body: JSON.stringify({ api_url: apiUrl, api_user: apiUser, auto_sync_enabled: autoSync, sync_interval: syncInterval, sync_entities: entities, ...(apiKey ? { api_key: apiKey } : {}) }) }),
+    mutationFn: () => apiFetch('/api/settings/pds-config', { method: 'PATCH', body: JSON.stringify({ api_url: apiUrl, auto_sync_enabled: autoSync, ...(apiKey ? { api_key: apiKey } : {}) }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setApiKey(''); flash('Gespeichert.') },
   })
   // Persistent inline test result (not just a transient toast) — the demo shows
@@ -1281,10 +1273,7 @@ function PdsSection({ config, flash }: { config: PdsConfig | null; flash: (m: st
   return (
     <Card>
       <GroupLabel>API-Konfiguration</GroupLabel>
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="PDS API URL"><input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} className={inputCls} /></Field>
-        <Field label="API-Benutzer (optional)"><input value={apiUser} onChange={(e) => setApiUser(e.target.value)} className={inputCls} /></Field>
-      </div>
+      <Field label="PDS API URL"><input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} placeholder="https://41309.pdscloud.de" className={inputCls} /></Field>
       <div className="mt-4"><Field label="API-Key">
         <div className="relative">
           <input type={showKey ? 'text' : 'password'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={config?.has_api_key ? 'Leer = bestehenden behalten' : 'API-Key eingeben'} className={cn(inputCls, 'pr-10')} />
@@ -1310,18 +1299,6 @@ function PdsSection({ config, flash }: { config: PdsConfig | null; flash: (m: st
         Ist die Synchronisierung aktiv, wird jeder eingehende KI-Anruf direkt nach Gesprächsende
         automatisch als Aufgabe in PDS protokolliert (Anrufer-Zuordnung per Telefonnummer).
       </p>
-      <div className="mt-3"><Field label="Sync-Intervall"><select value={syncInterval} disabled={!autoSync} onChange={(e) => setSyncInterval(e.target.value)} className={cn(inputCls, 'max-w-xs', !autoSync && 'opacity-50')}>{SYNC_INTERVALS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field></div>
-
-      <div className="my-6 border-t border-border" />
-      <GroupLabel>Daten</GroupLabel>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {PDS_ENTITIES.map(([k, l]) => (
-          <div key={k} className="flex items-center gap-2 rounded-md border border-border p-2">
-            <label className="flex flex-1 items-center gap-2 text-sm text-text"><input type="checkbox" checked={!!entities[k]} onChange={() => toggleEntity(k)} className="h-4 w-4 accent-green-primary" /> {l}</label>
-            {entities[k] && <select value={entities[k]} onChange={(e) => setDir(k, e.target.value)} className="rounded-md border border-border bg-alt px-1.5 py-1 text-xs text-text outline-none">{DIRECTIONS.map(([v, dl]) => <option key={v} value={v}>{dl}</option>)}</select>}
-          </div>
-        ))}
-      </div>
 
       <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
         <button onClick={() => syncNow.mutate()} disabled={syncNow.isPending} className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-50">
