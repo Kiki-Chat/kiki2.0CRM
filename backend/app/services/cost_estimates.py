@@ -508,6 +508,16 @@ def draft_cost_estimate(org_id: str, payload) -> dict:
         kva_on = cfg_row.get("kva_automation_enabled")
     if not kva_on:
         return {"success": False, "message": "KVA-Erstellung ist nicht aktiviert."}
+    # Amber's ruling 2026-06-12 (closes audit item AUT-05): L1 = OFF for EVERY
+    # capability, server-side. Projects/invoices/appointments already hard-block
+    # at level 1 — KVA was the only one relying on the prompt alone, so a tool
+    # call at L1+enabled would still have created a draft.
+    try:
+        kva_level = int(cfg_row.get("kva_level") or cfg_row.get("kiki_level") or 2)
+    except (TypeError, ValueError):
+        kva_level = 2
+    if kva_level <= 1:
+        return {"success": False, "message": "KVA-Erstellung ist nicht aktiviert."}
 
     positions = [_normalize_position(p) for p in (payload.positions or [])]
     totals = compute_totals(positions, 0, 0)

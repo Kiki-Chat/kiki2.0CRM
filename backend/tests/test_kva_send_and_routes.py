@@ -242,6 +242,21 @@ def test_draft_cost_estimate_gated_off_no_insert(monkeypatch):
     assert client.inserts == []
 
 
+def test_draft_cost_estimate_l1_hard_blocked_server_side(monkeypatch):
+    """Amber's ruling 2026-06-12 (audit AUT-05): L1 = OFF for every capability.
+    KVA enabled but level 1 → no draft, same 'nicht aktiviert' contract — the
+    prompt is no longer the only thing preventing an L1 tool call."""
+    client = _DraftClient({"kva_enabled": True, "kva_level": 1, "kiki_level": 3})
+    monkeypatch.setattr(ce, "get_service_client", lambda: client)
+    monkeypatch.setattr(ce, "_send_draft_kva", lambda *a, **k: pytest.fail("must not send"))
+
+    res = ce.draft_cost_estimate("org-1", _draft_payload())
+
+    assert res["success"] is False
+    assert "nicht aktiviert" in res["message"]
+    assert client.inserts == []
+
+
 def test_draft_cost_estimate_l2_drafts_without_send(monkeypatch):
     """L2: enabled but autonomy level 2 → a draft is created and _send_draft_kva
     is NOT called (the team reviews before anything leaves the building)."""

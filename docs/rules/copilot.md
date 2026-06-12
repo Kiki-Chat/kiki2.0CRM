@@ -98,4 +98,4 @@ Rules governing the in-app CRM assistant ("Hey Kiki" panel): tool scoping, confi
 - **Surfaced in UI:** —
 - **Covered by test:** NONE
 - **Prompt block:** —
-- **Status:** [VERIFY WITH AMBER] — confirm that L1–L3 gating is intentionally voice-agent-only and the copilot's confirm-gate is the intended equivalent
+- **Status:** enforced (by design) — CONFIRMED by Amber 2026-06-12: the copilot intentionally overrides the L1–L3 autonomy levels because every write is human-confirmed in the panel (AI-powered, user-handled); the confirm gate IS the copilot's autonomy mechanism. L1–L3 apply to the voice agent only.

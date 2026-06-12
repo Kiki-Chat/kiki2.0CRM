@@ -142,15 +142,15 @@ Registry of all documented business rules, grouped by domain. One line per rule;
 
 ## Totals
 
-98 rules — enforced: 62 · prompt-only: 20 · partially-enforced: 14 · mixed: 1 (ND-06) · VERIFY (status): 1 (COP-14)
+98 rules — enforced: 64 · prompt-only: 19 · partially-enforced: 14 · mixed: 1 (ND-06)
 
-## VERIFY WITH AMBER
+## VERIFY WITH AMBER — resolutions (2026-06-12)
 
-Rules carrying an explicit `[VERIFY WITH AMBER]` marker in their domain file:
+Amber's standing ruling: **L1 = aus, L2 = halbautomatisch, L3 = vollautomatisch — für JEDE Autonomie-Stufe, serverseitig.**
 
-1. **AUT-05** (autonomie.md) — KVA-L1 mit enabled=true: Service-Gate prüft nur den Enabled-Flag, nicht `kva_level==1` — soll L1 auch serverseitig das Drafting hart blocken?
-2. **AUT-09** (autonomie.md) — Keine Tests für den Reschedule-Vorschlags-Flow in backend/tests gefunden — Testlage bestätigen.
-3. **OUT-07** (outbound.md) — Keine dedizierte Testabdeckung für den Short-Hangup-Retry-Pfad (`schedule_short_hangup_retry` / `run_due_retries`).
-4. **OUT-09** (outbound.md) — `enforce_call_scope` schützt nur den Klick-Pfad (appointment_notify); der Sweep (`_dispatch_one`) wählt `customer.phone` direkt — sollen Sweep-Calls auch durch den Scope-Guard? (Während LIVE moot, relevant falls Flag wieder auf 1.)
-5. **OUT-11** (outbound.md) — Keine Testabdeckung für den Reschedule-Expiry-Sweep gefunden.
-6. **COP-14** (copilot.md) — Bestätigen, dass L1–L3-Gating bewusst nur den Voice-Agenten betrifft und das Confirm-Gate des Copilots das gewollte Äquivalent ist.
+1. **AUT-05 — RESOLVED/FIXED**: `draft_cost_estimate` blockt jetzt auch bei `kva_level <= 1` serverseitig (Projekte/Rechnungen/Termine taten das bereits).
+2. **AUT-09 — RESOLVED**: Reschedule-Vorschlags-Flow seit 2026-06-11 getestet (`test_appointments_actions.py` approve/decline/Status-Gates + `test_reschedule_expiry.py`).
+3. **OUT-07 — offen (niedrig)**: Short-Hangup-Retry weiter ohne dedizierten Test; Pre-Dial-Liveness-Guard (2026-06-11) testet den gefährlichsten Teil des Re-Dials mit.
+4. **OUT-09 — offen (moot solange LIVE)**: Scope-Guard für Sweep-Calls erst relevant, falls `OUTBOUND_TEST_SCOPE_ONLY` je wieder auf 1 geht.
+5. **OUT-11 — RESOLVED**: Expiry-Sweep seit 2026-06-11 getestet (`test_reschedule_expiry.py`: Race/Window/Flag-Pfade).
+6. **COP-14 — RESOLVED (by design)**: Copilot übergeht die L1–L3-Stufen bewusst — jede Schreibaktion wird vom Menschen im Panel bestätigt; das Confirm-Gate IST der Autonomie-Mechanismus des Copilots.

@@ -31,12 +31,12 @@ Per-capability autonomy for the voice agent: each capability (Termine, KVA, Proj
 - **Status:** enforced
 
 ## AUT-05 — Ist KVA deaktiviert (oder Stufe 1), wird beim Tool-Aufruf KEIN Kostenvoranschlags-Entwurf angelegt; Kiki nimmt den Wunsch nur als Anliegen auf.
-- **Enforced by:** `backend/app/services/cost_estimates.py:draft_cost_estimate` (gate on `kva_enabled` / legacy `kva_automation_enabled`)
+- **Enforced by:** `backend/app/services/cost_estimates.py:draft_cost_estimate` (gate on `kva_enabled` / legacy `kva_automation_enabled` AND `kva_level <= 1` — L1 hard-blocks server-side)
 - **Surfaced in UI:** AutonomieSection.tsx ("Nur Anfrage aufnehmen — kein KVA")
-- **Covered by test:** `backend/tests/test_kva_send_and_routes.py::test_draft_cost_estimate_gated_off_no_insert`; `backend/tests/test_round2_features.py::test_draft_cost_estimate_noop_when_kva_disabled`
+- **Covered by test:** `backend/tests/test_kva_send_and_routes.py::test_draft_cost_estimate_gated_off_no_insert`, `::test_draft_cost_estimate_l1_hard_blocked_server_side`; `backend/tests/test_round2_features.py::test_draft_cost_estimate_noop_when_kva_disabled`
 - **Prompt block:** `## Autonomie-Hinweis` (KVA L1 line)
 - **Status:** enforced
-- **Note:** the prompt-side gate covers level 1; the service-side gate only checks the enabled flag, not `kva_level==1` — at L1-with-enabled-true a tool call would still draft. [VERIFY WITH AMBER] whether L1+enabled should also hard-block drafting server-side.
+- **Note:** RESOLVED 2026-06-12 — Amber's ruling: **L1 = OFF for every capability, server-side**. `draft_cost_estimate` now also blocks at `kva_level <= 1` (legacy `kiki_level` fallback), matching projects/invoices/appointments.
 
 ## AUT-06 — Bei KVA-Stufe 2 erstellt Kiki nur einen ENTWURF (status='draft'); das TEAM prüft und versendet ihn — Kiki behauptet nie, der KVA sei schon verschickt.
 - **Enforced by:** `backend/app/services/cost_estimates.py:draft_cost_estimate` (level != 3 ⇒ draft stays draft, no send)
