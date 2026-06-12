@@ -88,7 +88,7 @@ export function AutonomieSection({ data, flash }: { data: KzOverview; flash: (m:
           </button>
         </div>
         <p className="mb-3 text-xs text-muted">
-          Schalten Sie jeden Bereich einzeln ein und wählen Sie, wie selbstständig Kiki arbeitet. Ist der
+          Schalte jeden Bereich einzeln ein und wähle, wie selbstständig Kiki arbeitet. Ist der
           Schalter aus, nimmt Kiki die Anfrage nur auf. Termine &amp; KVA wirken im Telefongespräch; Projekte
           &amp; Rechnungen laufen im Hintergrund.
         </p>
@@ -133,7 +133,7 @@ export function AutonomieSection({ data, flash }: { data: KzOverview; flash: (m:
                           <span className="min-w-0">
                             <span className="block text-xs font-semibold text-text">Umbuchungs-Timer</span>
                             <span className="block text-xs text-muted">
-                              Stunden, die eine offene Umbuchung auf Ihre Entscheidung wartet.
+                              Stunden, die eine offene Umbuchung auf deine Entscheidung wartet.
                               {lvl >= 3
                                 ? ' Danach wird sie automatisch aufgelöst.'
                                 : ' Danach wird sie als überfällig markiert (keine automatische Stornierung).'}
@@ -172,8 +172,8 @@ export function AutonomieSection({ data, flash }: { data: KzOverview; flash: (m:
 
       <Modal open={hintOpen} onOpenChange={setHintOpen} title="So funktioniert die Autonomie">
         <p className="mb-4 text-sm text-body">
-          Pro Bereich legen Sie fest, wie selbstständig Kiki arbeitet. Der Schalter steuert „aus“ (Stufe&nbsp;1);
-          ist er an, wählen Sie zwischen halb- und vollautomatisch (Stufe&nbsp;2 oder&nbsp;3).
+          Pro Bereich legst du fest, wie selbstständig Kiki arbeitet. Der Schalter steuert „aus“ (Stufe&nbsp;1);
+          ist er an, wählst du zwischen halb- und vollautomatisch (Stufe&nbsp;2 oder&nbsp;3).
         </p>
         <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full text-left text-sm">

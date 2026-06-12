@@ -40,8 +40,8 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { slug: 'leistungsangebot', label: 'Leistungsangebot', icon: Wrench },
   ] },
   { label: 'Notdienst', items: [{ slug: 'notdienst', label: 'Notdienst', icon: Siren }] },
-  { label: 'Telefonie', items: [
-    { slug: 'telefon', label: 'Telefon', icon: Phone },
+  { label: 'Telefon & Anrufe', items: [
+    { slug: 'telefon', label: 'Telefon-Einstellungen', icon: Phone },
     { slug: 'ausgehende-anrufe', label: 'Ausgehende Anrufe', icon: PhoneOutgoing },
   ] },
   { label: 'Wartung', items: [{ slug: 'verlauf', label: 'Verlauf & Rückgängig', icon: History }] },

@@ -230,8 +230,8 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
           <GroupLabel>In eigenen Worten beschreiben</GroupLabel>
         </div>
         <p className="mb-2 text-xs text-muted">
-          Beschreiben Sie einfach, wie Kiki sich verhalten soll — die KI baut daraus die
-          Wenn/Dann-Regeln. Sie können das Ergebnis unten noch anpassen, bevor Sie speichern.
+          Beschreibe einfach, wie Kiki sich verhalten soll — die KI baut daraus die
+          Wenn/Dann-Regeln. Du kannst das Ergebnis unten noch anpassen, bevor du speicherst.
         </p>
         <div className="mb-2 flex flex-wrap gap-1.5">
           {NL_TEMPLATES.map((t) => (
@@ -327,7 +327,7 @@ export function GespraechslogikSection({ flash }: { flash: (m: string) => void }
       <Card>
         <GroupLabel>So liest Kiki das Gespräch (Sonderfälle + Standard-Ablauf)</GroupLabel>
         <p className="mb-2 text-xs text-muted">
-          Beide Teile zusammen: Ihre Wenn/Dann-Regeln gelten zuerst, danach arbeitet Kiki den
+          Beide Teile zusammen: Deine Wenn/Dann-Regeln gelten zuerst, danach arbeitet Kiki den
           Standard-Ablauf aus dem Leitfaden oben ab.
         </p>
         {previewError ? (

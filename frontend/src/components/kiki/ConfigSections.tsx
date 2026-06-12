@@ -449,7 +449,7 @@ export function TerminregelnSection({ data, flash }: Props) {
     <div className="space-y-4">
       <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
         <Info size={16} className="mt-0.5 shrink-0 text-info" />
-        <span>Ob Kiki überhaupt Termine vergibt, steuern Sie im Bereich <a href="/kiki-zentrale/autonomie" className="font-medium text-green-deep hover:underline">Autonomie</a> (Bereich „Termine“). Hier legen Sie die Regeln fest, nach denen freie Termine angeboten werden.</span>
+        <span>Ob Kiki überhaupt Termine vergibt, steuerst du im Bereich <a href="/kiki-zentrale/autonomie" className="font-medium text-green-deep hover:underline">Autonomie</a> (Bereich „Termine“). Hier legst du die Regeln fest, nach denen freie Termine angeboten werden.</span>
       </div>
       <Card>
         <GroupLabel>Kapazität & Pufferzeiten</GroupLabel>
@@ -513,7 +513,7 @@ export function TerminkategorienSection({ flash }: Props) {
       {cats.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-8 text-center">
           <Clock size={22} className="mx-auto text-faint" />
-          <p className="mt-2 text-sm text-muted">Noch keine Kategorien. Legen Sie Termintypen wie „Beratung" oder „Wartung" an.</p>
+          <p className="mt-2 text-sm text-muted">Noch keine Kategorien. Lege Termintypen wie „Beratung" oder „Wartung" an.</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -583,7 +583,7 @@ export function PreisauskunftSection({ data, flash }: Props) {
     <div className="space-y-4">
       <Card>
         <div className="flex items-center justify-between">
-          <div><div className="text-sm font-bold text-text">Preisauskunft am Telefon</div><div className="text-xs text-muted">Kiki nennt Richtpreise aus Ihren Artikeln. Standardmäßig deaktiviert.</div></div>
+          <div><div className="text-sm font-bold text-text">Preisauskunft am Telefon</div><div className="text-xs text-muted">Kiki nennt Richtpreise aus deinen Artikeln. Standardmäßig deaktiviert.</div></div>
           <div className="flex items-center gap-2">
             {toggle.isPending && <Loader2 size={16} className="animate-spin text-muted" />}
             <Toggle on={on} disabled={toggle.isPending || blockEnable} onChange={(v) => kc.confirm(() => { setOn(v); toggle.mutate(v) })} />
@@ -595,7 +595,7 @@ export function PreisauskunftSection({ data, flash }: Props) {
           <Info size={16} className="mt-0.5 shrink-0 text-error" />
           <span>
             Preisauskunft kann nicht aktiviert werden: Es sind keine Artikel mit Preisen hinterlegt.
-            Bitte pflegen Sie zuerst Preise im Menü <a href="/catalog" className="font-medium text-green-deep hover:underline">Artikel</a>.
+            Bitte pflege zuerst Preise im Menü <a href="/catalog" className="font-medium text-green-deep hover:underline">Artikel</a>.
           </span>
         </div>
       )}
@@ -603,7 +603,7 @@ export function PreisauskunftSection({ data, flash }: Props) {
         <Info size={16} className={cn('mt-0.5 shrink-0', on ? 'text-warning' : 'text-faint')} />
         <span>
           {on
-            ? `Kiki gibt telefonisch Richtpreise heraus — Quelle ist die automatisch erzeugte Preisliste aus Ihren Artikeln (${pricedCount} Position${pricedCount === 1 ? '' : 'en'} mit Preis). Preise, die dort nicht stehen, nennt Kiki nicht.`
+            ? `Kiki gibt telefonisch Richtpreise heraus — Quelle ist die automatisch erzeugte Preisliste aus deinen Artikeln (${pricedCount} Position${pricedCount === 1 ? '' : 'en'} mit Preis). Preise, die dort nicht stehen, nennt Kiki nicht.`
             : 'Kiki gibt keine Preise heraus und verweist auf einen Kostenvoranschlag.'}
         </span>
       </div>
@@ -648,7 +648,7 @@ export function LeistungsangebotSection({ flash }: Props) {
   return (
     <Card>
       <GroupLabel>Leistungsangebot</GroupLabel>
-      <p className="mb-4 text-sm text-muted">Klicken Sie einen bestehenden Eintrag an, um ihn zwischen angeboten und nicht angeboten zu verschieben. Mit den Buttons unten neue Einträge in die jeweilige Liste aufnehmen.</p>
+      <p className="mb-4 text-sm text-muted">Klicke einen bestehenden Eintrag an, um ihn zwischen angeboten und nicht angeboten zu verschieben. Mit den Buttons unten neue Einträge in die jeweilige Liste aufnehmen.</p>
       <div className="flex flex-col gap-6 sm:flex-row">
         <Col title="Angebotene Leistungen" items={offered} green />
         <Col title="Nicht angebotene Leistungen" items={notOffered} />
@@ -812,16 +812,16 @@ export function TelefonSection({ data, flash }: Props) {
   const [biz, setBiz] = useState(data.existing_business_number ?? '')
   return (
     <Card>
-      <GroupLabel>Telefonie</GroupLabel>
+      <GroupLabel>Telefonnummer & Weiterleitung</GroupLabel>
       <Field label="HeyKiki-Telefonnummer">
         <div className="flex items-center gap-2 rounded-md border border-border bg-alt px-3 py-2 text-sm text-muted" title="Diese Nummer wird von HeyKiki bereitgestellt und kann nicht geändert werden.">
           <Lock size={14} className="text-faint" /><Phone size={14} className="text-faint" />
           <span className="text-text">{data.phone_number || 'Nicht zugewiesen'}</span>
         </div>
       </Field>
-      <p className="mt-1 text-xs text-muted">Diese Nummer wird von HeyKiki bereitgestellt und kann nicht geändert werden. Für eine andere Rufnummer wenden Sie sich an support@heykiki.de.</p>
+      <p className="mt-1 text-xs text-muted">Diese Nummer wird von HeyKiki bereitgestellt und kann nicht geändert werden. Für eine andere Rufnummer wende dich an support@heykiki.de.</p>
       <div className="mt-4">
-        <Field label="Ihre bestehende Geschäftsnummer">
+        <Field label="Deine bestehende Geschäftsnummer">
           <input
             type="tel"
             value={biz}
@@ -831,7 +831,7 @@ export function TelefonSection({ data, flash }: Props) {
           />
         </Field>
         <p className="mt-1 text-xs text-muted">
-          Stellen Sie die Rufweiterleitung Ihres Telefonanbieters auf Ihre HeyKiki-Nummer ein, um Kiki Ihre Anrufe entgegennehmen zu lassen.{' '}
+          Stelle die Rufweiterleitung deines Telefonanbieters auf deine HeyKiki-Nummer ein, um Kiki deine Anrufe entgegennehmen zu lassen.{' '}
           <Link
             to="/docs/rufumleitung"
             target="_blank"
