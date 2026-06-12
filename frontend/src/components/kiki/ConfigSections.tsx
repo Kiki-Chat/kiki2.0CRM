@@ -137,9 +137,10 @@ const LINKED_TARGET_LABEL: Record<string, string> = {
 }
 
 export function LeitfadenSection({ flash, specialCaseFieldKeys }: Props & {
-  /** Field keys the Sonderfall rules currently use (Gesprächsablauf page). Those
-   * rows are forced OFF + locked here — a field lives EITHER in a Sonderfall
-   * OR im Standard-Ablauf, never in both (Luca-meeting item 7). */
+  /** Field keys the Sonderfall rules currently use (Gesprächsablauf page).
+   * Either/or contract (Amber 2026-06-12): a field is ON here OR used in a
+   * Sonderfall, never both — NOT auto-toggled; we WARN and block turning the
+   * toggle ON while the field lives in a Sonderfall. */
   specialCaseFieldKeys?: string[]
 }) {
   const qc = useQueryClient()
@@ -158,18 +159,10 @@ export function LeitfadenSection({ flash, specialCaseFieldKeys }: Props & {
     if (!dirty) setItems(serverFields)
   }, [serverFields, dataUpdatedAt, dirty])
 
-  // Either/or with the Sonderfälle: any field a rule erfasst is auto-toggled OFF
-  // here (and locked in the row UI below). Marks the list dirty so the next
-  // „Speichern" persists the switch-off.
+  // Either/or with the Sonderfällen: fields a rule uses are flagged here. We do
+  // NOT silently flip anything — a CONFLICT (active here AND used there) shows a
+  // loud warning on the row, and turning the toggle ON is blocked with a hint.
   const usedSet = useMemo(() => new Set(specialCaseFieldKeys ?? []), [specialCaseFieldKeys])
-  useEffect(() => {
-    if (!usedSet.size) return
-    setItems((p) => {
-      if (!p.some((f) => usedSet.has(f.field_key) && f.is_active)) return p
-      setTimeout(() => setDirty(true), 0)
-      return p.map((f) => (usedSet.has(f.field_key) && f.is_active ? { ...f, is_active: false } : f))
-    })
-  }, [usedSet])
 
   const setActive = (id: string, value: boolean) => {
     setItems((p) => p.map((f) => (f.id === id ? { ...f, is_active: value } : f)))
@@ -246,13 +239,15 @@ export function LeitfadenSection({ flash, specialCaseFieldKeys }: Props & {
           <SortableList ids={items.map((f) => f.id)} onMove={moveItem}>
             {items.map((f) => {
               const inSpecialCase = usedSet.has(f.field_key)
+              const conflict = inSpecialCase && f.is_active // asked TWICE — must resolve
               return (
                 <SortableRow
                   key={f.id}
                   id={f.id}
                   className={cn(
-                    'mb-2 flex items-start gap-3 rounded-lg border border-border px-3 py-2',
-                    inSpecialCase ? 'border-dashed bg-alt/30 opacity-80' : f.is_active ? 'bg-alt' : 'bg-alt/40 opacity-70',
+                    'mb-2 flex items-start gap-3 rounded-lg border px-3 py-2',
+                    conflict ? 'border-error/50 bg-error-bg/30' : 'border-border',
+                    !conflict && (f.is_active ? 'bg-alt' : 'bg-alt/40 opacity-70'),
                   )}
                 >
                   {(handleProps) => (
@@ -272,9 +267,14 @@ export function LeitfadenSection({ flash, specialCaseFieldKeys }: Props & {
                             </span>
                           )}
                         </div>
-                        {inSpecialCase ? (
+                        {conflict ? (
+                          <p className="mt-1 text-xs font-semibold text-error">
+                            ⚠ Wird doppelt abgefragt: Dieses Feld ist hier aktiv UND in einem Sonderfall.
+                            Bitte hier ausschalten — oder das Feld aus dem Sonderfall entfernen.
+                          </p>
+                        ) : inSpecialCase ? (
                           <p className="mt-1 text-xs text-muted">
-                            Dieses Feld fragt ein Sonderfall oben ab — im Standard-Ablauf deshalb abgeschaltet (entweder/oder).
+                            Ein Sonderfall fragt dieses Feld ab — hier ausgeschaltet lassen (entweder/oder).
                           </p>
                         ) : f.linked_setting ? (
                           <p className="mt-1 text-xs text-muted">{f.description}</p>
@@ -285,9 +285,13 @@ export function LeitfadenSection({ flash, specialCaseFieldKeys }: Props & {
                       <div className="mt-1.5 flex items-center gap-2">
                         <Toggle
                           on={f.is_active}
-                          disabled={inSpecialCase}
                           onChange={(v) => {
-                            if (inSpecialCase) return
+                            // Either/or guard: turning ON while a Sonderfall uses the
+                            // field would make Kiki ask twice → warn, don't flip.
+                            if (v && inSpecialCase) {
+                              flash(`„${f.label}“ wird bereits in einem Sonderfall erfragt — bitte zuerst dort entfernen.`)
+                              return
+                            }
                             if (f.linked_setting) {
                               setLinkedConfirm({ id: f.id, label: f.label, target: LINKED_TARGET_LABEL[f.linked_setting], value: v })
                             } else {

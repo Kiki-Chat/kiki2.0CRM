@@ -191,29 +191,29 @@ export function KikiZentralePage() {
   )
 }
 
-// ONE page for the whole call flow. Sonderfälle come FIRST (Luca-meeting item 7:
-// they are the reason users open this page, and they run first in the call too);
-// the Standard-Ablauf below is the default path. The two are EITHER/OR per field:
-// the rules editor reports which Leitfaden fields its Sonderfälle use, and the
-// Standard-Ablauf locks those rows off, so a field is never asked in both.
+// ONE page for the whole call flow: the Standard-Ablauf first (the default path),
+// the Sonderfälle (decision trees) below — Amber 2026-06-12. The two are
+// EITHER/OR per field: a field may be ON in the Standard OR used in a
+// Sonderfall, never both (Kiki would ask twice). Not auto-toggled — each side
+// WARNS and tells the user to switch it off on the other side.
 function GespraechsablaufSection({ data, flash }: { data: KzOverview; flash: (m: string) => void }) {
   const [usedFieldKeys, setUsedFieldKeys] = useState<string[]>([])
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="mb-1 text-lg font-bold text-text">Ausnahmen &amp; Sonderfälle</h2>
-        <p className="mb-3 text-sm text-muted">
-          Diese Fälle prüft Kiki ZUERST — einfach unten beschreiben, die KI baut die Regeln.
-          Felder, die ein Sonderfall erfasst, werden im Standard-Ablauf automatisch abgeschaltet.
-        </p>
-        <GespraechslogikSection flash={flash} onUsedFieldsChange={setUsedFieldKeys} />
-      </div>
-      <div>
         <h2 className="mb-1 text-lg font-bold text-text">Standard-Ablauf</h2>
         <p className="mb-3 text-sm text-muted">
-          Trifft kein Sonderfall zu, fragt Kiki diese Punkte der Reihe nach ab.
+          Diese Punkte fragt Kiki in jedem normalen Gespräch der Reihe nach ab.
         </p>
         <PflichtfelderSection data={data} flash={flash} specialCaseFieldKeys={usedFieldKeys} />
+      </div>
+      <div>
+        <h2 className="mb-1 text-lg font-bold text-text">Ausnahmen &amp; Sonderfälle</h2>
+        <p className="mb-3 text-sm text-muted">
+          Wenn/Dann-Regeln, die VOR dem Standard-Ablauf greifen. Ein Feld gehört entweder hierher
+          oder in den Standard-Ablauf — nie in beide (sonst fragt Kiki doppelt).
+        </p>
+        <GespraechslogikSection flash={flash} onUsedFieldsChange={setUsedFieldKeys} />
       </div>
     </div>
   )

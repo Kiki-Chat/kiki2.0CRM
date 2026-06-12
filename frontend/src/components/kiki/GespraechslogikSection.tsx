@@ -27,6 +27,8 @@ interface LogicAction {
 export interface GuideFieldOption {
   field_key: string
   label: string
+  /** ON in the Standard-Ablauf → not selectable here (either/or; Kiki would ask twice). */
+  activeInStandard?: boolean
 }
 interface LogicBranch {
   id: string
@@ -181,14 +183,21 @@ export function GespraechslogikSection({
   })
   const guideFields: GuideFieldOption[] = (fieldsData?.fields ?? [])
     .filter((f) => !f.linked_setting || RULE_LINKED_OK.has(f.linked_setting))
-    .map((f) => ({ field_key: f.field_key, label: f.label }))
+    .map((f) => ({ field_key: f.field_key, label: f.label, activeInStandard: f.is_active }))
 
-  // Tell the page which fields the Sonderfälle now own (either/or with Standard).
+  // Tell the page which fields the Sonderfälle own (either/or with the Standard).
   const usedKeys = collectUsedFieldKeys(blocks).join(',')
   useEffect(() => {
     onUsedFieldsChange?.(usedKeys ? usedKeys.split(',') : [])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usedKeys])
+
+  // CONFLICTS: fields used here AND still active in the Standard-Ablauf — Kiki
+  // would ask them twice. Warn loudly; the user resolves on either side.
+  const conflictLabels = (usedKeys ? usedKeys.split(',') : [])
+    .map((k) => guideFields.find((f) => f.field_key === k))
+    .filter((f): f is GuideFieldOption => !!f && !!f.activeInStandard)
+    .map((f) => f.label)
 
   useEffect(() => {
     if (!dirty && data) {
@@ -332,6 +341,12 @@ export function GespraechslogikSection({
           <GroupLabel>Wenn/Dann-Regeln</GroupLabel>
           <span className="text-xs text-muted">Ziehen zum Sortieren</span>
         </div>
+        {conflictLabels.length > 0 && (
+          <div className="mb-3 rounded-md border border-error/40 bg-error-bg/40 px-3 py-2 text-xs font-semibold text-error">
+            ⚠ Doppelt abgefragt: {conflictLabels.join(', ')} — auch im Standard-Ablauf aktiv.
+            Bitte den Schalter dort ausschalten oder das Feld hier aus dem Sonderfall entfernen.
+          </div>
+        )}
         <div className="space-y-3">
           {blocks.length === 0 && (
             <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted">
@@ -573,7 +588,17 @@ function ActionEditor({ action, depth, guideFields, onChange, onRemove }: {
         >
           {!action.field_key && <option value="">Feld wählen…</option>}
           {guideFields.map((f) => (
-            <option key={f.field_key} value={f.field_key}>{f.label}</option>
+            // Either/or: a field that's ON in the Standard-Ablauf is not
+            // selectable here — Kiki would ask it twice. (The currently saved
+            // selection stays selectable so existing rules render; the conflict
+            // banner above pushes the user to resolve it.)
+            <option
+              key={f.field_key}
+              value={f.field_key}
+              disabled={!!f.activeInStandard && f.field_key !== action.field_key}
+            >
+              {f.label}{f.activeInStandard ? ' — im Standard aktiv (dort ausschalten)' : ''}
+            </option>
           ))}
           {/* Saved tree may reference a field that was since deleted/deactivated. */}
           {action.field_key && !guideFields.some((f) => f.field_key === action.field_key) && (
