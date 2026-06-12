@@ -11,10 +11,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_org
+from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.services import pds
 
 router = APIRouter(prefix="/api/pds", tags=["pds"])
+
+
+@router.get("/logs")
+async def pds_logs(limit: int = 50, user: CurrentUser = Depends(require_org_admin)) -> list[dict]:
+    """Verification feed: recent PDS interactions (request + raw response) for this
+    org. Admin-only — the payloads can carry caller PII."""
+    return await run_in_threadpool(pds.recent_logs, user.org_id, limit)
 
 
 class GreetingIn(BaseModel):

@@ -78,8 +78,41 @@ def _ready(cfg: dict | None) -> bool:
     return bool(cfg and (cfg.get("api_url") or "").strip() and cfg.get("api_key_encrypted"))
 
 
-def _post(cfg: dict, path: str, body: dict) -> dict:
-    """One PDS REST call: POST {api_url}/pds/rest/api/{path} with the Bearer key."""
+def _unwrap(data):
+    """PDS often wraps a single object in a 1-element array (observed on
+    listpersonen / person/create / …). Normalise to the object; pass anything
+    else through untouched."""
+    if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
+        return data[0]
+    return data
+
+
+def _audit(ctx: dict | None, *, endpoint: str, request=None, response=None,
+           status: str = "success", error=None) -> None:
+    """Best-effort: record one PDS interaction (request + raw response body) into
+    pds_sync_log for early-stage verification. NEVER raises; skipped when there's
+    no org context (unit-level calls)."""
+    if not ctx or not ctx.get("org_id"):
+        return
+    try:
+        get_service_client().table("pds_sync_log").insert({
+            "org_id": ctx["org_id"],
+            "operation": ctx.get("operation") or "unknown",
+            "endpoint": endpoint,
+            "call_id": ctx.get("call_id"),
+            "status": status,
+            "request_payload": request,
+            "response_payload": response,
+            "error_message": (str(error)[:2000] if error else None),
+        }).execute()
+    except Exception as exc:  # noqa: BLE001 — logging must never break the flow
+        log.warning("pds: audit write failed (op=%s): %s", (ctx or {}).get("operation"), exc)
+
+
+def _post(cfg: dict, path: str, body: dict, *, ctx: dict | None = None) -> dict:
+    """One PDS REST call: POST {api_url}/pds/rest/api/{path} with the Bearer key.
+    Every call (success OR error) is recorded to pds_sync_log when ctx carries an
+    org_id — the raw response body is captured verbatim."""
     base = (cfg.get("api_url") or "").strip().rstrip("/")
     if not base:
         raise PdsError("Keine API-URL hinterlegt.")
@@ -99,15 +132,20 @@ def _post(cfg: dict, path: str, body: dict) -> dict:
             timeout=_TIMEOUT,
         )
     except httpx.HTTPError as exc:
+        _audit(ctx, endpoint=path, request=body, status="error", error=f"nicht erreichbar: {exc}")
         raise PdsError(f"PDS nicht erreichbar: {exc}") from exc
     if resp.status_code == 401:
+        _audit(ctx, endpoint=path, request=body, status="error", error="401 — Anmeldung fehlgeschlagen")
         raise PdsError("PDS-Anmeldung fehlgeschlagen — bitte den API-Schlüssel prüfen.")
     if resp.status_code >= 400:
+        _audit(ctx, endpoint=path, request=body, status="error", error=f"{resp.status_code}: {resp.text[:1000]}")
         raise PdsError(f"PDS-Fehler {resp.status_code}: {resp.text[:200]}")
     try:
-        return resp.json()
+        data = resp.json()
     except ValueError:
-        return {}
+        data = {}
+    _audit(ctx, endpoint=path, request=body, response=data, status="success")
+    return data
 
 
 # ─── Pure helpers (ported 1:1 from the n8n Code nodes) ───────────────────────
@@ -181,20 +219,20 @@ def build_task(call_data: dict, person: dict | None) -> dict:
 
 
 # ─── PDS operations ───────────────────────────────────────────────────────────
-def find_person(cfg: dict, phone: str) -> dict | None:
+def find_person(cfg: dict, phone: str, *, ctx: dict | None = None) -> dict | None:
     """person/listpersonen by 00-format phone; the first hit or None."""
-    out = _post(cfg, "person/listpersonen", {
+    out = _unwrap(_post(cfg, "person/listpersonen", {
         "suchwort": transform_phone(phone),
         "suchfelder": ["ALLES"],
         "page": 0,
         "entriesPerPage": 1,
-    })
-    if (out.get("totalHitCount") or 0) > 0 and out.get("resultList"):
+    }, ctx=ctx))
+    if isinstance(out, dict) and (out.get("totalHitCount") or 0) > 0 and out.get("resultList"):
         return out["resultList"][0]
     return None
 
 
-def create_task(cfg: dict, task: dict) -> dict:
+def create_task(cfg: dict, task: dict, *, ctx: dict | None = None) -> dict:
     body = {
         "betreff": task["subject"],
         "beschreibung": task["description"],
@@ -203,7 +241,7 @@ def create_task(cfg: dict, task: dict) -> dict:
     }
     if task.get("personUUID"):
         body["personUUID"] = task["personUUID"]
-    return _post(cfg, "crm/createaufgabe", body)
+    return _unwrap(_post(cfg, "crm/createaufgabe", body, ctx=ctx))
 
 
 def test_connection(org_id: str) -> dict:
@@ -214,11 +252,12 @@ def test_connection(org_id: str) -> dict:
     if not _ready(cfg):
         return {"success": False, "message": "Bitte zuerst API-URL und API-Schlüssel speichern."}
     try:
-        out = _post(cfg, "person/listpersonen", {
+        out = _unwrap(_post(cfg, "person/listpersonen", {
             "suchwort": "", "suchfelder": ["ALLES"], "page": 0, "entriesPerPage": 1,
-        })
+        }, ctx={"org_id": org_id, "operation": "test_connection"}))
     except PdsError as exc:
         return {"success": False, "message": str(exc)}
+    out = out if isinstance(out, dict) else {}
     total = out.get("totalHitCount") or 0
     sample = ""
     if out.get("resultList"):
@@ -255,10 +294,11 @@ def log_call(org_id: str, call: dict) -> dict:
     cfg = get_config(client, org_id)
     if not _ready(cfg):
         raise PdsError("PDS ist nicht konfiguriert.")
+    ctx = {"org_id": org_id, "operation": "log_call", "call_id": call.get("id")}
     payload = _call_to_payload(call)
-    person = find_person(cfg, payload["originalPhone"]) if payload["originalPhone"] else None
+    person = find_person(cfg, payload["originalPhone"], ctx=ctx) if payload["originalPhone"] else None
     task = build_task(payload, person)
-    created = create_task(cfg, task)
+    created = create_task(cfg, task, ctx=ctx)
     client.table("calls").update({"pds_synced_at": datetime.now(timezone.utc).isoformat()}).eq(
         "org_id", org_id
     ).eq("id", call["id"]).execute()
@@ -328,7 +368,7 @@ def greeting_for_phone(org_id: str, phone: str) -> dict:
     cfg = get_config(client, org_id)
     if not _ready(cfg):
         raise PdsError("PDS ist nicht konfiguriert.")
-    person = find_person(cfg, phone)
+    person = find_person(cfg, phone, ctx={"org_id": org_id, "operation": "greeting"})
     if person is not None:
         return {
             "greeting": f"Hallo {person.get('vorname') or ''} {person.get('name') or ''} , Willkommen zurück.",
@@ -350,18 +390,19 @@ def create_contact(
     cfg = get_config(client, org_id)
     if not _ready(cfg):
         raise PdsError("PDS ist nicht konfiguriert.")
+    ctx = {"org_id": org_id, "operation": "create_contact"}
     name_parts = (full_name or "Unknown").strip().split()
     first = name_parts[0] if name_parts else "Unknown"
     last = " ".join(name_parts[1:]) or first
-    person = _post(cfg, "person/create", {
+    person = _unwrap(_post(cfg, "person/create", {
         "name": last, "vorname": first, "typ": "PRIVATPERSON",
         "apiID": transform_phone(phone),
-    })
-    person_uuid = person.get("uuid")
+    }, ctx=ctx))
+    person_uuid = person.get("uuid") if isinstance(person, dict) else None
     _post(cfg, "person/createEKommunikationsweg", {
         "personUUID": person_uuid,
         "ekommunikationswegDaten": {"typ": "MOBIL", "kategorie": "PRIVAT", "value": phone},
-    })
+    }, ctx=ctx)
     if (city or "").strip():
         _post(cfg, "person/createPostKommunikationsweg", {
             "personUUID": person_uuid,
@@ -369,9 +410,21 @@ def create_contact(
                 "typ": "HAUPTANSCHRIFT", "ort": city,
                 "plz": postal_code or "", "strasse": street or "", "land": "Deutschland",
             },
-        })
+        }, ctx=ctx)
     return {
         "message": f"Vielen Dank, {first}! Ich habe Ihren Namen notiert. Wie kann ich Ihnen heute behilflich sein ?",
         "status": "created",
         "personUUID": person_uuid,
     }
+
+
+# ─── Verification view ────────────────────────────────────────────────────────
+def recent_logs(org_id: str, limit: int = 50) -> list[dict]:
+    """Recent PDS interactions for this org (newest first) — the early-stage
+    verification feed: each row carries the request + raw PDS response body."""
+    client = get_service_client()
+    return (
+        client.table("pds_sync_log").select("*")
+        .eq("org_id", org_id).order("created_at", desc=True)
+        .limit(min(max(limit, 1), 200)).execute().data or []
+    )

@@ -128,14 +128,68 @@ def test_greeting_found_and_new(monkeypatch):
     client = MagicMock()
     monkeypatch.setattr(pds, "get_service_client", lambda: client)
     monkeypatch.setattr(pds, "get_config", lambda c, o: _cfg())
-    monkeypatch.setattr(pds, "find_person", lambda cfg, phone: {"vorname": "Govind", "name": "Yadav"})
+    monkeypatch.setattr(pds, "find_person", lambda cfg, phone, ctx=None: {"vorname": "Govind", "name": "Yadav"})
     out = pds.greeting_for_phone("org1", "+49155")
     assert out == {"greeting": "Hallo Govind Yadav , Willkommen zurück.", "status": "found"}
 
-    monkeypatch.setattr(pds, "find_person", lambda cfg, phone: None)
+    monkeypatch.setattr(pds, "find_person", lambda cfg, phone, ctx=None: None)
     out = pds.greeting_for_phone("org1", "+49155")
     assert out["status"] == "new"
     assert "neuer Anrufer" in out["greeting"]
+
+
+# ─── Audit logging + array-shape tolerance ───────────────────────────────────
+def test_find_person_handles_array_wrapped_response(monkeypatch):
+    # Real PDS sometimes wraps the object in a 1-element array — must still match.
+    _mock_http(monkeypatch, [[{"totalHitCount": 1, "resultList": [{"uuid": "p-1", "vorname": "Max"}]}]])
+    assert pds.find_person(_cfg(), "+49155") == {"uuid": "p-1", "vorname": "Max"}
+
+
+def _capture_client(inserts):
+    class _Tbl:
+        def insert(self, row):
+            inserts.append(row)
+            return self
+        def execute(self):
+            return MagicMock(data=[{}])
+    class _Client:
+        def table(self, name):
+            return _Tbl()
+    return _Client()
+
+
+def test_audit_logs_request_and_raw_response(monkeypatch):
+    _mock_http(monkeypatch, [{"totalHitCount": 0, "resultList": []}])
+    inserts: list[dict] = []
+    monkeypatch.setattr(pds, "get_service_client", lambda: _capture_client(inserts))
+    pds.find_person(_cfg(), "+4915511357330", ctx={"org_id": "org1", "operation": "greeting"})
+    assert len(inserts) == 1
+    row = inserts[0]
+    assert row["org_id"] == "org1"
+    assert row["operation"] == "greeting"
+    assert row["endpoint"] == "person/listpersonen"
+    assert row["status"] == "success"
+    assert row["request_payload"]["suchwort"] == "004915511357330"
+    assert row["response_payload"] == {"totalHitCount": 0, "resultList": []}
+
+
+def test_audit_skipped_without_ctx(monkeypatch):
+    _mock_http(monkeypatch, [{"totalHitCount": 0, "resultList": []}])
+    touched: list[int] = []
+    monkeypatch.setattr(pds, "get_service_client", lambda: touched.append(1) or MagicMock())
+    pds.find_person(_cfg(), "+49155")  # no ctx → no audit write
+    assert touched == []
+
+
+def test_audit_never_raises(monkeypatch):
+    _mock_http(monkeypatch, [{"totalHitCount": 0, "resultList": []}])
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(pds, "get_service_client", _boom)
+    # audit write blows up → swallowed → find_person still returns its result
+    assert pds.find_person(_cfg(), "+49155", ctx={"org_id": "o", "operation": "greeting"}) is None
 
 
 # ─── Auto-sync gating ────────────────────────────────────────────────────────
