@@ -40,6 +40,12 @@ class _Chain:
     def is_(self, *a, **k):
         return self
 
+    def in_(self, *a, **k):
+        return self
+
+    def order(self, *a, **k):
+        return self
+
     def limit(self, *a, **k):
         return self
 
@@ -77,6 +83,11 @@ _OUT_WINDOW = datetime(2026, 6, 15, 1, 0, tzinfo=timezone.utc)
 def _wire(monkeypatch, db, *, level=3):
     monkeypatch.setattr(outbound_dispatch, "get_service_client", lambda: db)
     monkeypatch.setattr(appt_svc, "_get_kiki_level", lambda c, o: level)
+    # The sweep now scopes the query to L3 orgs up front (no L1/L2 starvation).
+    monkeypatch.setattr(
+        outbound_dispatch, "_l3_org_ids",
+        lambda db_, only: (["org-1"] if level >= 3 else []),
+    )
     notified, gdeleted = [], []
     monkeypatch.setattr(
         appointment_notify, "notify_appointment_outcome",
@@ -133,9 +144,36 @@ def test_b5_outside_window_defers_l3_cancel(monkeypatch):
     assert db.updates == [] and notified == []
 
 
-def test_l1_l2_only_flagged_never_cancels(monkeypatch):
+def test_l1_l2_excluded_from_sweep_never_cancels(monkeypatch):
+    # L1/L2 orgs are no longer selected at all (no starvation of L3 rows); the
+    # sweep returns immediately and touches nothing.
     db = _DB({"appointments": [[_row()]]})
     notified, gdeleted = _wire(monkeypatch, db, level=2)
     out = outbound_dispatch.run_due_reschedule_expiry(now=_IN_WINDOW)
-    assert out["flagged"] == 1 and out["cancelled"] == 0
+    assert out["due"] == 0 and out["cancelled"] == 0
     assert db.updates == [] and notified == []
+
+
+def test_l3_org_ids_filters_by_appointments_level():
+    rows = [
+        {"org_id": "a", "appointments_level": 3, "kiki_level": 2},
+        {"org_id": "b", "appointments_level": 2, "kiki_level": 3},
+        {"org_id": "c", "appointments_level": None, "kiki_level": 3},  # legacy fallback
+        {"org_id": "d", "appointments_level": None, "kiki_level": None},  # default 2
+    ]
+
+    class _Q:
+        def select(self, *a, **k):
+            return self
+
+        def eq(self, *a, **k):
+            return self
+
+        def execute(self):
+            return type("R", (), {"data": rows})()
+
+    class _DBx:
+        def table(self, _n):
+            return _Q()
+
+    assert outbound_dispatch._l3_org_ids(_DBx(), None) == ["a", "c"]

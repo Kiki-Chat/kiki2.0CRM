@@ -101,6 +101,24 @@ def conversation_init(org_id: str, caller_id: str | None) -> dict:
                 "customer_email": c.get("email") or "",
             }
 
+    # The shared agent's voicemail_detection tool references {{voicemailMessage}},
+    # which only the OUTBOUND dispatch supplies — inbound left it undefined, so a
+    # (mis)fire on an inbound leg would play nothing or the literal placeholder
+    # (audit 2026-06-11). Always provide a sensible company-aware default here.
+    try:
+        org_row = (
+            client.table("organizations").select("name")
+            .eq("id", org_id).limit(1).execute().data or [{}]
+        )[0]
+        company = (org_row.get("name") or "").strip() or "uns"
+    except Exception:  # noqa: BLE001
+        company = "uns"
+    variables["voicemailMessage"] = (
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Wir können Ihren "
+        "Anruf gerade nicht persönlich entgegennehmen. Bitte hinterlassen Sie Ihren "
+        "Namen und Ihr Anliegen — wir melden uns schnellstmöglich zurück. Auf Wiederhören!"
+    )
+
     result: dict = {
         "type": "conversation_initiation_client_data",
         "dynamic_variables": variables,

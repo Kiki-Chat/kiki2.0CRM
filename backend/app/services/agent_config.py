@@ -51,7 +51,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1537,8 +1539,29 @@ def finish_sync(org_id: str | UUID, seq: int, *, ok: bool, reason: str | None = 
 
 
 # ─── Live re-render + push (Kiki-Zentrale config changes) ────────────────────
+# Per-org serialization for the render→PATCH window. Two overlapping saves used
+# to push independently; with this lock + the supersede check below, a slower
+# stale push can no longer land its OLD prompt after a newer one (audit
+# 2026-06-11). Process-local — fine for the single Railway backend process.
+_REPUSH_LOCKS: dict = defaultdict(threading.Lock)
+
+
+def _current_sync_seq(db, org_id: str | UUID) -> int:
+    """The org's latest agent_sync_seq (the request id begin_sync stamped). A
+    repush whose own seq is below this has been superseded by a newer save."""
+    try:
+        rows = (
+            db.table("agent_configs").select("agent_sync_seq")
+            .eq("org_id", str(org_id)).limit(1).execute().data or []
+        )
+        return int((rows[0] if rows else {}).get("agent_sync_seq") or 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def rerender_and_push_for_org(
-    *, org_id: str | UUID, actor_id: str | UUID | None = None, endpoint_label: str
+    *, org_id: str | UUID, actor_id: str | UUID | None = None, endpoint_label: str,
+    expected_seq: int | None = None,
 ) -> dict:
     """Re-render the org's prompt from the live template + config and push it to
     the agent. Best-effort: NEVER raises to the caller.
@@ -1548,12 +1571,18 @@ def rerender_and_push_for_org(
       the prompt by hand; auto-regeneration would clobber it).
     - If the org has no ``elevenlabs_agent_id`` →
       ``{"updated": False, "reason": "no_agent"}``.
+    - If ``expected_seq`` is given and a NEWER save has since begun →
+      ``{"updated": False, "reason": "superseded"}`` (the newer push owns the
+      latest state; pushing our stale render would clobber it).
     - On an ElevenLabs write error → ``{"updated": False, "reason": str(e)}``.
     - On success → ``{"updated": True}``.
 
     The actual write routes through ``patch_agent_safely`` (snapshot → assert
     audio → PATCH → verify → auto-rollback → audit), so the per-call safety net is
-    identical to provisioning.
+    identical to provisioning. When ``expected_seq`` is provided, the whole
+    render→PATCH section is serialized per org and re-checks the seq under the
+    lock, so overlapping saves apply strictly last-write-wins on the AGENT too,
+    not just on the status banner.
     """
     db = get_service_client()
 
@@ -1586,7 +1615,15 @@ def rerender_and_push_for_org(
     if not agent_id:
         return {"updated": False, "reason": "no_agent"}
 
+    lock = _REPUSH_LOCKS[str(org_id)] if expected_seq is not None else None
+    if lock is not None:
+        lock.acquire()
     try:
+        # Supersede check (under the lock so the winner is deterministic): a save
+        # that began after ours already holds the latest config — let IT push.
+        if expected_seq is not None and _current_sync_seq(db, org_id) > expected_seq:
+            return {"updated": False, "reason": "superseded"}
+
         identity = _fetch_org_identity(org_id)
         prompt_text = render_prompt_for_org(
             org.get("name") or identity.get("name") or "",
@@ -1619,4 +1656,7 @@ def rerender_and_push_for_org(
             org_id, endpoint_label, str(exc)[:200],
         )
         return {"updated": False, "reason": str(exc)}
+    finally:
+        if lock is not None:
+            lock.release()
     return {"updated": True}

@@ -87,9 +87,17 @@ async def apply_cases(payload: ApplyIn, user: CurrentUser = Depends(require_org)
             rows = (
                 client.table("inquiries").select("id, number")
                 .eq("org_id", org_id).eq("customer_id", payload.customer_id)
-                .in_("number", members).neq("status", "deleted").execute().data or []
+                .in_("number", members).neq("status", "deleted")
+                # Only fold UNGROUPED inquiries (audit 2026-06-11): the grouper
+                # proposes case_id-null only, but apply trusted client-supplied
+                # numbers. A stale/double-submit would re-stamp already-cased
+                # inquiries — orphaning their old case as an empty K-numbered row.
+                .is_("case_id", "null")
+                .execute().data or []
             )
             ids = [r["id"] for r in rows]
+            # No fresh inquiries (e.g. a double-submit where they're all already
+            # cased) → don't mint an empty case.
             if not ids:
                 continue
             case = client.table("cases").insert({
@@ -138,7 +146,22 @@ async def move_inquiry_case(
             }).execute().data[0]
             target = case["id"]
         elif target:
-            validate_fk_in_org(client, table="cases", fk_id=target, org_id=org_id, label="Vorgang")
+            # Same-customer guard (audit 2026-06-11): a case is customer-scoped,
+            # so an inquiry may only join a case belonging to ITS customer.
+            # Org-membership alone let staff file customer A's inquiry into
+            # customer B's case, mixing two customers' data under one umbrella.
+            tgt = (
+                client.table("cases").select("id, customer_id")
+                .eq("org_id", org_id).eq("id", target).limit(1).execute().data or []
+            )
+            if not tgt:
+                raise HTTPException(status_code=422, detail="Vorgang nicht gefunden.")
+            if tgt[0].get("customer_id") != inq[0].get("customer_id"):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Dieser Vorgang gehört zu einem anderen Kunden — eine "
+                    "Anfrage kann nur einem Vorgang desselben Kunden zugeordnet werden.",
+                )
         client.table("inquiries").update({
             "case_id": target, "case_source": "human",
             "case_confidence": None if target is None else 1.0,

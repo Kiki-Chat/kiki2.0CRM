@@ -408,18 +408,9 @@ def run_due_outbound(
     }
     # Topic 18: process any due short-hangup re-dials on the same sweep tick.
     summary["retries"] = run_due_retries(now=now, dry_run=dry_run)
-    # Bug #3: resolve pending reschedules whose safety-timer has elapsed. Runs for
-    # ALL orgs (not just outbound-enabled ones) — L1/L2 are only flagged, L3 auto-
-    # resolves — so it lives here, outside the outbound-enabled org loop below.
-    # Best-effort: this secondary sweep must never break the primary reminder sweep.
-    try:
-        summary["reschedule_expiry"] = run_due_reschedule_expiry(
-            now=now, only_org_id=only_org_id, dry_run=dry_run
-        )
-    except Exception as e:  # noqa: BLE001
-        summary["reschedule_expiry"] = {"error": str(e)[:200]}
-        logger.warning("reschedule expiry sweep failed: %s", e)
 
+    # Fetch the primary reminder configs FIRST, so the secondary reschedule sweep
+    # (which now reads agent_configs for its L3-org set) can't disturb this read.
     q = (
         db.table("agent_configs")
         .select(
@@ -432,6 +423,17 @@ def run_due_outbound(
     if only_org_id:
         q = q.eq("org_id", only_org_id)
     configs = q.execute().data or []
+
+    # Bug #3: resolve pending reschedules whose safety-timer has elapsed. Runs for
+    # ALL L3 orgs — independent of outbound_enabled — so it lives here, outside
+    # the org loop below. Best-effort: must never break the primary reminder sweep.
+    try:
+        summary["reschedule_expiry"] = run_due_reschedule_expiry(
+            now=now, only_org_id=only_org_id, dry_run=dry_run
+        )
+    except Exception as e:  # noqa: BLE001
+        summary["reschedule_expiry"] = {"error": str(e)[:200]}
+        logger.warning("reschedule expiry sweep failed: %s", e)
 
     now_local = now.astimezone(_BERLIN)
     weekday_key = _WEEKDAY_KEYS[now_local.weekday()]
@@ -702,6 +704,26 @@ def run_due_retries(now: datetime | None = None, dry_run: bool = False) -> dict:
     return {"due": len(due), "fired": fired, "errors": errors}
 
 
+def _l3_org_ids(db, only_org_id: str | None) -> list[str]:
+    """Org ids whose APPOINTMENTS autonomy is L3 (auto-resolve). appointments_level
+    wins; falls back to the legacy single kiki_level; default 2."""
+    q = db.table("agent_configs").select("org_id, appointments_level, kiki_level")
+    if only_org_id:
+        q = q.eq("org_id", only_org_id)
+    out: list[str] = []
+    for c in q.execute().data or []:
+        v = c.get("appointments_level")
+        if v is None:
+            v = c.get("kiki_level")
+        try:
+            lvl = int(v) if v is not None else 2
+        except (TypeError, ValueError):
+            lvl = 2
+        if lvl >= 3 and c.get("org_id"):
+            out.append(c["org_id"])
+    return out
+
+
 def run_due_reschedule_expiry(
     now: datetime | None = None,
     only_org_id: str | None = None,
@@ -737,6 +759,17 @@ def run_due_reschedule_expiry(
     now_local = now.astimezone(_BERLIN)
     weekday_key = _WEEKDAY_KEYS[now_local.weekday()]
     db = get_service_client()
+
+    # Scope to L3 orgs only (audit 2026-06-11): L1/L2 rows are never mutated by
+    # the sweep — the UI reads reschedule_expires_at directly for the overdue
+    # badge — so including them only burned the limit(200) and could starve due
+    # L3 rows. Building the L3 org set up front removes them from the query, and
+    # .order() makes the selection oldest-due-first (fair + deterministic).
+    out: dict = {"due": 0, "flagged": 0, "expired": 0, "cancelled": 0,
+                 "deferred": 0, "raced": 0, "errors": []}
+    l3_ids = _l3_org_ids(db, only_org_id)
+    if not l3_ids:
+        return out
     q = (
         db.table("appointments")
         .select("id, org_id, reschedule_replace_intent, google_event_id")
@@ -744,14 +777,12 @@ def run_due_reschedule_expiry(
         .not_.is_("reschedule_expires_at", "null")
         .lt("reschedule_expires_at", now.astimezone(timezone.utc).isoformat())
         .neq("status", "cancelled")
+        .in_("org_id", l3_ids)
+        .order("reschedule_expires_at")
         .limit(200)
     )
-    if only_org_id:
-        q = q.eq("org_id", only_org_id)
     rows = q.execute().data or []
-
-    out: dict = {"due": len(rows), "flagged": 0, "expired": 0, "cancelled": 0,
-                 "deferred": 0, "raced": 0, "errors": []}
+    out["due"] = len(rows)
     window_cache: dict = {}
 
     def _in_outbound_window(oid: str) -> bool:

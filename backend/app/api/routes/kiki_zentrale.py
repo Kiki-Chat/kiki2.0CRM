@@ -84,10 +84,15 @@ def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str, seq: int =
     not a failure), failed on a real EL error."""
     try:
         result = ac.rerender_and_push_for_org(
-            org_id=org_id, actor_id=user_id, endpoint_label=endpoint_label
+            org_id=org_id, actor_id=user_id, endpoint_label=endpoint_label,
+            expected_seq=seq,
         )
         reason = result.get("reason")
-        ok = bool(result.get("updated")) or reason in ("manual_override", "no_agent")
+        # 'superseded' = a newer save already owns the latest state and pushed it
+        # — a benign no-op, not a failure (its own finish_sync resolves the banner).
+        ok = bool(result.get("updated")) or reason in (
+            "manual_override", "no_agent", "superseded",
+        )
         # Notdienst-/Telefon-saves also reconfigure the native transfer_to_number
         # system tool (the actual call-bridge mechanism), not just the prompt.
         if endpoint_label in ("kz_emergency", "kz_phone", "kz_retry"):
