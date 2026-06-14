@@ -1,7 +1,7 @@
 # Handover — Call-Log Redesign (Posteingang · Fokus·Agenda)
 
 _Last updated 2026-06-15. Branch `feature/call-log-redesign` (pushed to origin)._
-_Commits: `9da7962` (Posteingang wired to live data) → `31271d0` (case bundling + remove Kiki-empfiehlt/Notiz)._
+_Commits: `9da7962` (Posteingang wired to live data) → `31271d0` (case bundling) → `9f95271` (cockpit triage + named decision cards + audio + call-log deep-links)._
 _UAT only. Nothing deployed. PR: https://github.com/imamber20/kikijarvis-crm/pull/new/feature/call-log-redesign_
 
 ---
@@ -39,22 +39,20 @@ Supabase project = `ifbluvdcbcesuhvkxsfn` (kikiJarvis). Use the Supabase MCP for
 - **Triage** (verified): reversible **spam** `POST /api/calls/{id}/spam` and move-call `POST /api/calls/{id}/assign-inquiry` — **two NEW endpoints** in `backend/app/api/routes/calls.py`; additive migration `supabase/migrations/0071_calls_is_spam.sql` (applied).
 - **CASE BUNDLING (the big one):** the inbox "Alle Fälle" now bundles calls **by ticket = `inquiry.project_id`** (the AI-grouping container; relabeled **"Fall"**, never "Projekt"). One row per case; expand → the call journey (in/out/in) built from `callEntries` (no per-row fetch); multi-call tickets sorted first. Verified with a seeded German multi-call case **Familie Hoffmann** (3 calls, project `PRJ-2026-90001`) in kiki-test-007.
 - Removed **"Kiki empfiehlt"**; removed drawer **"Notiz"** button.
+- **`9f95271` — the 4 resume tasks below, all live-verified (preview-MCP render proof) + adversarial-review fixes:**
+  - **Triage → cockpit:** dropped the inbox "Nicht zugeordnet" section + drawer triage block; added a **"Zuordnung"** section to the cockpit `Workspace` ActionsTab — "Anderem Vorgang zuordnen" (`/assign-inquiry`, same-customer candidates) + "Als Spam markieren" (`/spam`, confirm + clears selection). Drawer now shows a read-only Fall indicator. Note: "Neuer Vorgang" is the idempotent get-or-create the cockpit already auto-calls on view, so it's not a separate button.
+  - **Decision cards:** case-name chip (`project_title`/`inquiry_subject` + ticket, resolved via `buildInquiryMeta(calls)`), a "Zuständig" assignee step (`AssigneeDot`), and **strict assign≠confirm** — Termin `Bestätigen` is disabled until assigned **only when an `inquiry_id` exists** (inquiry-less agent-booked appointments stay confirmable). Optimistic assignee override so assign-then-confirm enables immediately regardless of the calls window.
+  - **Audio:** `AudioPlayer` in `CallDrawer.tsx` fetches `/api/calls/{id}/audio` via `apiBlobUrl` (authed blob) → `<audio autoPlay>`; graceful "Aufnahme derzeit nicht verfügbar." on failure (test backend returns 404 — no recordings).
+  - **Call-log Fall chip:** each `/calls` `CallRow` shows a Fall chip → `navigate('/posteingang?fall=<project_id|inquiry_id>')`; `PosteingangPage` reads `?fall`, opens + scrolls to that case (key = `project_id ?? inquiry_id`, matches the bundling key).
 
 ---
 
-## 3. What REMAINS (resume tasks, in order)
+## 3. What REMAINS (separate follow-up, NOT in this PR)
 
-From the latest 11-point change list (ran out of context mid-list):
+1. **Employee scoping** — the "Meine" filter + role-scoped list/detail endpoints + notify-on-assign. Backend list endpoints currently return ALL org data to every role.
+2. **Relabel** — UI already says "Fall"; the DB-layer relabel is deferred.
 
-1. **(point 4) Move triage out of the inbox into the Anrufe cockpit.** Currently the "Nicht zugeordnet" section is in `PosteingangPage.tsx` and the triage block is in `posteingang/CallDrawer.tsx`. Move "Vorgang zuordnen / Neuer Vorgang / Als Spam" to the existing call-log cockpit's right-pane action area (`pages/calls/Workspace.tsx` / `CallDetail`). Endpoints already exist (`/spam`, `/assign-inquiry`, `POST /api/calls/{id}/inquiry` for new). Then remove the section from the inbox.
-2. **(points 1, 2, 6) Strict assign ≠ confirm + name the case + the specific action on each decision card.** Removing the reco already fixed the assign-also-confirms behavior; still TODO: make assignment visibly its own step, and label each decision card with its **case name + specific action** (map `action.inquiry_id` → the call's `project_title`/`inquiry_subject`). NB: backend requires an assignee before `POST /appointments/{id}/confirm` succeeds.
-3. **(point 10) Make the audio button actually play.** `GET /api/calls/{id}/audio` returns `audio/mpeg` but needs the bearer token → fetch as blob with the auth header → object URL → `<audio>`. In `posteingang/CallDrawer.tsx` (`AudioPlayer` + the "Aufnahme abspielen" button).
-4. **Per-call case LABEL in the call log** that deep-links to that case in the inbox (edit the `/calls` row to show the Fall + link to `/posteingang`).
-
-From the original scope (separate follow-up, not in this PR):
-
-5. **Employee scoping** — the "Meine" filter + role-scoped list/detail endpoints + notify-on-assign. Backend list endpoints currently return ALL org data to every role.
-6. **Relabel** — UI already says "Fall"; the DB-layer relabel is deferred.
+Known small follow-ups (non-blocking, from the review): the `?fall` deep-link effect and the two untouched `CallLogsPage` effects trip `react-hooks/set-state-in-effect` (codebase idiom; build gates on `tsc -b`, not lint). The decision-card `assigneeId` is still derived from the windowed `/api/calls?limit=200` list (mitigated by the optimistic override); sourcing it from the inquiry/action would be cleaner.
 
 ---
 
