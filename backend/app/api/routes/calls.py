@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
@@ -280,6 +281,64 @@ async def ensure_call_inquiry_route(
     if inquiry is None:
         raise HTTPException(status_code=404, detail="Call not found")
     return inquiry
+
+
+# ─── Posteingang triage: spam + move-to-Vorgang ─────────────────────────────
+class SpamBody(BaseModel):
+    spam: bool = True
+
+
+def _set_spam(org_id: str, call_id: str, spam: bool) -> bool:
+    """Mark a single CALL as spam (hide it via deleted_at) or restore it. Touches
+    the call ONLY — never its inquiry (the Vorgang may hold other calls). Fully
+    reversible: spam=false clears is_spam/spam_at/deleted_at."""
+    client = get_service_client()
+    now = datetime.now(timezone.utc).isoformat()
+    patch = (
+        {"is_spam": True, "spam_at": now, "deleted_at": now}
+        if spam
+        else {"is_spam": False, "spam_at": None, "deleted_at": None}
+    )
+    rows = client.table("calls").update(patch).eq("org_id", org_id).eq("id", call_id).execute().data
+    return bool(rows)
+
+
+@router.post("/{call_id}/spam")
+async def set_call_spam(call_id: str, body: SpamBody, user: CurrentUser = Depends(require_org)) -> dict:
+    """'Als Spam' / undo from the Posteingang triage. Hides a junk call from the
+    active log (reversible) without deleting its Vorgang."""
+    ok = await run_in_threadpool(_set_spam, user.org_id, call_id, body.spam)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return {"success": True, "is_spam": body.spam}
+
+
+class AssignInquiryBody(BaseModel):
+    inquiry_id: str
+
+
+def _assign_inquiry(org_id: str, call_id: str, inquiry_id: str) -> str:
+    """Move a call into an existing Vorgang (set calls.inquiry_id). Powers
+    'Vorgang zuordnen' (unsorted call) and 'change case' (wrongly-filed call).
+    Returns 'ok' | 'no_inquiry' | 'no_call'."""
+    client = get_service_client()
+    inq = client.table("inquiries").select("id").eq("org_id", org_id).eq("id", inquiry_id).limit(1).execute().data
+    if not inq:
+        return "no_inquiry"
+    rows = client.table("calls").update({"inquiry_id": inquiry_id}).eq("org_id", org_id).eq("id", call_id).execute().data
+    return "ok" if rows else "no_call"
+
+
+@router.post("/{call_id}/assign-inquiry")
+async def assign_call_inquiry(call_id: str, body: AssignInquiryBody, user: CurrentUser = Depends(require_org)) -> dict:
+    """Attach/move a call to an EXISTING Vorgang — the one capability the triage
+    needed that had no endpoint (changing a single call's inquiry_id)."""
+    res = await run_in_threadpool(_assign_inquiry, user.org_id, call_id, body.inquiry_id)
+    if res == "no_inquiry":
+        raise HTTPException(status_code=404, detail="Vorgang not found")
+    if res == "no_call":
+        raise HTTPException(status_code=404, detail="Call not found")
+    return {"success": True, "call_id": call_id, "inquiry_id": body.inquiry_id}
 
 
 # ─── Gmail-style read/unread (P0.4) ─────────────────────────────────────────

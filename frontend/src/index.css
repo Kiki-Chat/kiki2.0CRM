@@ -47,6 +47,21 @@
   --outbound: #c2740c;
   --glass-bg: rgba(247, 250, 248, 0.66);
   --glass-border: rgba(255, 255, 255, 0.55);
+
+  /* Posteingang (Fokus·Agenda) handoff — radii, inset rings, motion, font aliases.
+     Theme-independent: --ring/--ring-active reference --border/--green-primary
+     which already swap per theme, so they live in :root only. */
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 9999px;
+  --ring: inset 0 0 0 1px var(--border);
+  --ring-active: inset 0 0 0 1.5px var(--green-primary);
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 0.15s;
+  --font-poster: 'Manrope', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 [data-theme='dark'] {

@@ -16,6 +16,8 @@ const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m
 const SetPasswordPage = lazy(() => import('./pages/SetPasswordPage').then((m) => ({ default: m.SetPasswordPage })))
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })))
 const CallLogsPage = lazy(() => import('./pages/CallLogsPage').then((m) => ({ default: m.CallLogsPage })))
+// Rebuilt call log (feature/call-log-redesign) — runs alongside /calls during cutover.
+const PosteingangPage = lazy(() => import('./pages/PosteingangPage').then((m) => ({ default: m.PosteingangPage })))
 const CustomersPage = lazy(() => import('./pages/CustomersPage').then((m) => ({ default: m.CustomersPage })))
 const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage').then((m) => ({ default: m.CustomerDetailPage })))
 const VorgangThreadPage = lazy(() => import('./pages/VorgangThreadPage').then((m) => ({ default: m.VorgangThreadPage })))
@@ -69,6 +71,7 @@ export default function App() {
             <Route element={<AppLayout />}>
               <Route index element={<DashboardPage />} />
               <Route path="calls" element={<CallLogsPage />} />
+              <Route path="posteingang" element={<PosteingangPage />} />
               <Route path="customers" element={<CustomersPage />} />
               <Route path="customers/:id" element={<CustomerDetailPage />} />
               <Route path="vorgang/:id" element={<VorgangThreadPage />} />

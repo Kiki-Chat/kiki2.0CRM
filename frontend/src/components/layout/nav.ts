@@ -1,5 +1,6 @@
 import {
   LayoutDashboard,
+  Inbox,
   Phone,
   Users,
   Calendar,
@@ -38,6 +39,7 @@ export function isGroup(e: NavEntry): e is NavGroupDef {
 
 export const NAV: NavEntry[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/posteingang', icon: Inbox, label: 'Posteingang' },
   { to: '/calls', icon: Phone, label: 'Anrufe', badgeKey: 'calls' },
   { to: '/customers', icon: Users, label: 'Kontakte' },
   { to: '/calendar', icon: Calendar, label: 'Kalender' },
