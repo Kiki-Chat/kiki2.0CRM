@@ -10,6 +10,7 @@ import {
   CircleDot,
   Clock,
   ExternalLink,
+  FolderInput,
   History,
   Info,
   Layers,
@@ -199,6 +200,67 @@ function OutcomePanel({ call }: { call: CallDetailData }) {
   )
 }
 
+// ─── Triage (moved here from the Posteingang inbox) ────────────────────────
+export type MoveCandidate = { inquiryId: string; label: string; ticket: string | null }
+function TriageSection({
+  candidates,
+  onMoveToInquiry,
+  onSpam,
+  busy,
+}: {
+  candidates: MoveCandidate[]
+  onMoveToInquiry: (inquiryId: string) => void
+  onSpam: () => void
+  busy: boolean
+}) {
+  const [picking, setPicking] = useState(false)
+  return (
+    <div>
+      <SectionLabel>Zuordnung</SectionLabel>
+      <div className="flex flex-col gap-2">
+        {candidates.length > 0 && (
+          <>
+            <button
+              onClick={() => setPicking((p) => !p)}
+              disabled={busy}
+              className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-[13px] font-bold text-body transition hover:bg-alt disabled:opacity-50"
+            >
+              <FolderInput size={16} className="text-green-deep" />
+              <span className="flex-1 text-left">Anderem Vorgang zuordnen</span>
+              <ChevronDown size={16} className={cn('text-faint transition-transform', picking && 'rotate-180')} />
+            </button>
+            {picking && (
+              <div className="flex flex-col gap-1.5">
+                {candidates.map((c) => (
+                  <button
+                    key={c.inquiryId}
+                    onClick={() => {
+                      onMoveToInquiry(c.inquiryId)
+                      setPicking(false)
+                    }}
+                    className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-left text-[13px] text-text transition hover:bg-green-tint-50"
+                  >
+                    <Layers size={14} className="flex-shrink-0 text-green-deep" />
+                    <span className="flex-1 truncate">{c.label}</span>
+                    {c.ticket && <span className="flex-shrink-0 font-mono text-[11px] text-muted">{c.ticket}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+        <button
+          onClick={onSpam}
+          disabled={busy}
+          className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface py-2.5 text-[13px] font-bold text-error transition hover:bg-error-bg disabled:opacity-50"
+        >
+          <Trash2 size={15} /> Als Spam markieren
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Aktionen tab ──────────────────────────────────────────────────────────
 function ActionsTab({
   call,
@@ -207,12 +269,15 @@ function ActionsTab({
   status,
   busy,
   appointmentSlot,
+  candidates,
   onStatus,
   onDelete,
   onAssign,
   onEdit,
   onAppointment,
   onKva,
+  onMoveToInquiry,
+  onSpam,
 }: {
   call: CallDetailData
   inquiry: Inquiry | undefined
@@ -220,12 +285,15 @@ function ActionsTab({
   status: string
   busy: boolean
   appointmentSlot?: ReactNode
+  candidates: MoveCandidate[]
   onStatus: (s: string) => void
   onDelete: () => void
   onAssign: (id: string | null) => void
   onEdit: () => void
   onAppointment: () => void
   onKva?: () => void
+  onMoveToInquiry: (inquiryId: string) => void
+  onSpam: () => void
 }) {
   const isOutbound = call.direction === 'outbound'
   return (
@@ -259,6 +327,7 @@ function ActionsTab({
           </div>
         </>
       )}
+      <TriageSection candidates={candidates} onMoveToInquiry={onMoveToInquiry} onSpam={onSpam} busy={busy} />
       <div>
         <SectionLabel>Weitere</SectionLabel>
         <div className="flex gap-2.5">
@@ -483,6 +552,7 @@ export function Workspace({
   timeline,
   timelineLoading,
   appointmentSlot,
+  candidates,
   onStatus,
   onDelete,
   onAssign,
@@ -490,6 +560,8 @@ export function Workspace({
   onAppointment,
   onKva,
   onOpenCustomer,
+  onMoveToInquiry,
+  onSpam,
 }: {
   call: CallDetailData
   inquiry: Inquiry | undefined
@@ -501,6 +573,7 @@ export function Workspace({
   timeline: TimelineEvent[]
   timelineLoading: boolean
   appointmentSlot?: ReactNode
+  candidates: MoveCandidate[]
   onStatus: (s: string) => void
   onDelete: () => void
   onAssign: (id: string | null) => void
@@ -508,6 +581,8 @@ export function Workspace({
   onAppointment: () => void
   onKva?: () => void
   onOpenCustomer: () => void
+  onMoveToInquiry: (inquiryId: string) => void
+  onSpam: () => void
 }) {
   const status = inquiry?.status ?? 'open'
   const navigate = useNavigate()
@@ -602,12 +677,15 @@ export function Workspace({
             status={status}
             busy={busy}
             appointmentSlot={appointmentSlot}
+            candidates={candidates}
             onStatus={onStatus}
             onDelete={onDelete}
             onAssign={onAssign}
             onEdit={onEdit}
             onAppointment={onAppointment}
             onKva={onKva}
+            onMoveToInquiry={onMoveToInquiry}
+            onSpam={onSpam}
           />
         )}
         {tab === 'details' && <DetailsTab call={call} onOpenCustomer={onOpenCustomer} />}

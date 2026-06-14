@@ -1,11 +1,12 @@
-// Right-side call drawer — real transcript · Kiki summary · facts, plus the
-// triage block: an unsorted call gets "Vorgang zuordnen / Neuer Vorgang / Als
-// Spam"; a filed call shows its Vorgang + a "change case" picker.
-import { Clock, Folder, FolderPlus, Inbox, Phone, Play, Sparkles, Trash2, X } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+// Right-side call drawer — a read-only call view: Kiki summary · transcript ·
+// recording playback, plus a read-only Fall indicator. Triage (Vorgang zuordnen /
+// Neuer Vorgang / Als Spam) now lives in the Anrufe cockpit, not in the inbox.
+import { Clock, Folder, Inbox, Phone, Play, Sparkles, X } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
 
+import { apiBlobUrl } from '../../lib/api'
 import { Avatar, DirBadge, NotdienstBadge, StatusPill } from '../calls/atoms'
-import { type CallDetailVM, useCallDetail, type VorgangVM } from './api'
+import { type CallDetailVM, useCallDetail } from './api'
 import { Btn } from './parts'
 
 const KIKI_AV = '/kiki-avatar.png'
@@ -37,45 +38,43 @@ function Bubble({ e }: { e: CallDetailVM['transcript'][number] }) {
   )
 }
 
-function VorgangPicker({ candidates, onPick }: { candidates: VorgangVM[]; onPick: (inquiryId: string) => void }) {
+// On-demand recording playback. The audio route needs the bearer token, so we
+// fetch it as a blob with auth (apiBlobUrl) and feed the object URL to <audio>.
+function AudioPlayer({ callId }: { callId: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [url, setUrl] = useState<string | null>(null)
+  // Revoke the object URL on unmount / change so we don't leak blobs.
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
+
+  const load = async () => {
+    setState('loading')
+    try {
+      setUrl(await apiBlobUrl(`/api/calls/${callId}/audio`))
+      setState('ready')
+    } catch {
+      setState('error')
+    }
+  }
+
+  if (state === 'ready' && url) {
+    return <audio src={url} controls autoPlay aria-label="Anrufaufnahme" style={{ width: '100%' }} />
+  }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
-      {candidates.map((cand) => (
-        <button
-          key={cand.inquiryId}
-          type="button"
-          onClick={() => onPick(cand.inquiryId)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', borderRadius: 'var(--radius-md)', border: 'none', background: 'var(--surface)', boxShadow: 'var(--ring)', cursor: 'pointer', textAlign: 'left', fontSize: 13, color: 'var(--text)' }}
-        >
-          <Folder size={14} style={{ color: 'var(--green-deep)' }} />
-          <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cand.problem}</span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>{cand.ticket}</span>
-        </button>
-      ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+      <Btn variant="secondary" icon={<Play size={15} />} disabled={state === 'loading'} onClick={load}>
+        {state === 'loading' ? 'Lädt Aufnahme…' : 'Aufnahme abspielen'}
+      </Btn>
+      {state === 'error' && (
+        <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Aufnahme derzeit nicht verfügbar.</span>
+      )}
     </div>
   )
 }
 
-export function CallDrawer({
-  callId,
-  onClose,
-  candidates,
-  onMove,
-  onNew,
-  onSpam,
-}: {
-  callId: string | null
-  onClose: () => void
-  candidates: VorgangVM[]
-  onMove: (callId: string, inquiryId: string) => void
-  onNew: (callId: string) => void
-  onSpam: (callId: string) => void
-}) {
-  const [picking, setPicking] = useState(false)
+export function CallDrawer({ callId, onClose }: { callId: string | null; onClose: () => void }) {
   const { data: c, isLoading } = useCallDetail(callId)
   if (!callId) return null
   const dirColor = c?.dir === 'outbound' ? 'var(--outbound)' : 'var(--inbound)'
-  const custCandidates = c ? candidates.filter((v) => v.custId && v.custId === c.custId) : candidates
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 80 }}>
@@ -106,31 +105,20 @@ export function CallDrawer({
                 {c.emergency && <NotdienstBadge small />}
               </div>
 
-              {c.unsorted ? (
-                <div style={{ background: 'var(--warning-bg)', borderRadius: 'var(--radius-xl)', padding: 14, marginBottom: 18, boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--warning) 26%, transparent)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--warning)', fontFamily: 'var(--font-poster)', fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}><Inbox size={13} /> Nicht zugeordnet</div>
-                  <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--body)', lineHeight: 1.45 }}>Dieser Anruf gehört noch zu keinem Vorgang. Ordnen Sie ihn zu oder legen Sie einen neuen an.</p>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {custCandidates.length > 0 && <Btn variant="primary" icon={<Folder size={14} />} onClick={() => setPicking((p) => !p)}>Vorgang zuordnen</Btn>}
-                    <Btn variant="secondary" icon={<FolderPlus size={14} />} onClick={() => onNew(c.id)}>Neuer Vorgang</Btn>
-                    <Btn variant="ghost" icon={<Trash2 size={14} />} onClick={() => onSpam(c.id)}>Als Spam</Btn>
+              {/* Read-only Fall indicator (triage moved to the Anrufe cockpit). */}
+              {c.vorgangProblem ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', background: 'var(--green-tint-50)', borderRadius: 'var(--radius-lg)', marginBottom: 18 }}>
+                  <Folder size={16} color="var(--green-deep)" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: 'var(--font-poster)', fontSize: 13.5, fontWeight: 700, color: 'var(--green-deep)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.vorgangProblem}</div>
+                    {c.ticket && <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--muted)' }}>{c.ticket}</div>}
                   </div>
-                  {picking && <VorgangPicker candidates={custCandidates} onPick={(iid) => onMove(c.id, iid)} />}
+                  {c.status && <StatusPill status={c.status} />}
                 </div>
-              ) : c.vorgangProblem ? (
-                <div style={{ marginBottom: 18 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', background: 'var(--green-tint-50)', borderRadius: 'var(--radius-lg)' }}>
-                    <Folder size={16} color="var(--green-deep)" />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontFamily: 'var(--font-poster)', fontSize: 13.5, fontWeight: 700, color: 'var(--green-deep)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.vorgangProblem}</div>
-                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--muted)' }}>{c.ticket}</div>
-                    </div>
-                    {c.status && <StatusPill status={c.status} />}
-                  </div>
-                  {custCandidates.length > 0 && (
-                    <button type="button" onClick={() => setPicking((p) => !p)} style={{ marginTop: 7, border: 'none', background: 'transparent', color: 'var(--muted)', fontSize: 12, fontFamily: 'var(--font-poster)', fontWeight: 600, cursor: 'pointer' }}>Falsch zugeordnet? Vorgang ändern</button>
-                  )}
-                  {picking && <VorgangPicker candidates={custCandidates} onPick={(iid) => onMove(c.id, iid)} />}
+              ) : c.unsorted ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 13px', background: 'var(--surface-alt)', borderRadius: 'var(--radius-lg)', marginBottom: 18, fontSize: 12.5, color: 'var(--muted)' }}>
+                  <Inbox size={14} style={{ flexShrink: 0 }} />
+                  <span>Noch keinem Vorgang zugeordnet — im Anruf-Cockpit zuordnen.</span>
                 </div>
               ) : null}
 
@@ -151,7 +139,7 @@ export function CallDrawer({
               </div>
 
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 16, borderTop: '1px solid var(--border-faint)' }}>
-                <Btn variant="secondary" icon={<Play size={15} />}>Aufnahme abspielen</Btn>
+                <AudioPlayer callId={c.id} />
               </div>
             </>
           )}

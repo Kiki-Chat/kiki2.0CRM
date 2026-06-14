@@ -2,7 +2,7 @@
 // (identical wiring to the original CallDetail) and composes Transcript + Workspace.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, ListChecks, MessageSquare } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { apiFetch } from '../../lib/api'
@@ -53,6 +53,13 @@ export function CallDetail({
     queryFn: () => apiFetch<Employee[]>('/api/employees'),
   })
 
+  // Sibling cases for the "Anderem Vorgang zuordnen" triage control — other
+  // inquiries for the same customer, read from the already-cached call list.
+  const { data: callsList } = useQuery({
+    queryKey: ['calls'],
+    queryFn: () => apiFetch<{ calls: CallListItem[] }>('/api/calls?limit=100'),
+  })
+
   const patchInquiry = useMutation({
     mutationFn: (body: Partial<Inquiry>) =>
       apiFetch<Inquiry>(`/api/inquiries/${inquiry!.id}`, { method: 'PATCH', body: JSON.stringify(body) }),
@@ -87,6 +94,65 @@ export function CallDetail({
       qc.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
     },
   })
+
+  // ── Cockpit triage (moved here from the Posteingang inbox) ────────────────
+  // Move this call into a different existing Vorgang/Fall.
+  const moveInquiry = useMutation({
+    mutationFn: (inquiryId: string) =>
+      apiFetch(`/api/calls/${callId}/assign-inquiry`, {
+        method: 'POST',
+        body: JSON.stringify({ inquiry_id: inquiryId }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['callInquiry', callId] })
+      qc.invalidateQueries({ queryKey: ['call', callId] })
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['pe'] }) // keep the Posteingang in sync
+    },
+  })
+
+  // Mark a junk call as spam (reversible server-side). Optimistically drops it
+  // from the list and clears the selection, mirroring delete.
+  const setSpam = useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/calls/${callId}/spam`, { method: 'POST', body: JSON.stringify({ spam: true }) }),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ['calls'] })
+      const prev = qc.getQueryData<{ calls: CallListItem[] }>(['calls'])
+      qc.setQueryData<{ calls: CallListItem[] }>(['calls'], (old) =>
+        old ? { ...old, calls: old.calls.filter((c) => c.id !== callId) } : old,
+      )
+      onDeleted?.()
+      return { prev }
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['calls'], ctx.prev)
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] })
+      qc.invalidateQueries({ queryKey: ['pe'] }) // keep the Posteingang in sync
+    },
+  })
+
+  const moveCandidates = useMemo(() => {
+    const custId = call?.customer_id ?? null
+    const seen = new Set<string>()
+    const out: { inquiryId: string; label: string; ticket: string | null }[] = []
+    for (const cc of callsList?.calls ?? []) {
+      if (!cc.inquiry_id || cc.inquiry_id === inquiry?.id) continue
+      // Same customer only (null === null buckets unknown-caller calls together),
+      // so a call can't be filed into an unrelated customer's case.
+      if (cc.customer_id !== custId) continue
+      if (seen.has(cc.inquiry_id)) continue
+      seen.add(cc.inquiry_id)
+      out.push({
+        inquiryId: cc.inquiry_id,
+        label: cc.project_title || cc.inquiry_subject || cc.summary_title || 'Vorgang',
+        ticket: cc.project_number || cc.inquiry_number,
+      })
+    }
+    return out
+  }, [callsList, inquiry?.id, call?.customer_id])
 
   const pendingAppt = usePendingAppointment(callId)
 
@@ -133,7 +199,7 @@ export function CallDetail({
       call={call}
       inquiry={inquiry}
       employees={employees}
-      busy={patchInquiry.isPending || deleteCall.isPending}
+      busy={patchInquiry.isPending || deleteCall.isPending || setSpam.isPending || moveInquiry.isPending}
       emergency={emergency}
       tab={tab}
       setTab={setTab}
@@ -162,6 +228,12 @@ export function CallDetail({
           : undefined
       }
       onOpenCustomer={() => call.customer_id && navigate(`/customers/${call.customer_id}`)}
+      candidates={moveCandidates}
+      onMoveToInquiry={(iid) => moveInquiry.mutate(iid)}
+      onSpam={() => {
+        if (window.confirm('Diesen Anruf als Spam markieren? Er wird aus der Liste entfernt (reversibel).'))
+          setSpam.mutate()
+      }}
     />
   )
 

@@ -22,23 +22,30 @@ export function Btn({
   icon,
   children,
   onClick,
+  disabled = false,
+  title,
 }: {
   variant?: BtnVariant
   icon?: ReactNode
   children: ReactNode
   onClick?: () => void
+  disabled?: boolean
+  title?: string
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      title={title}
       className="pe-btn"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         gap: 7,
         border: 'none',
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
         padding: '8px 14px',
         borderRadius: 'var(--radius-lg)',
         fontFamily: 'var(--font-poster)',

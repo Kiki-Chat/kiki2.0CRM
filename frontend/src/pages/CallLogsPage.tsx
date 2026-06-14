@@ -252,6 +252,7 @@ export function CallLogsPage() {
                     if (!c.inquiry_id) return
                     assignInquiry.mutate({ inquiryId: c.inquiry_id, employeeId })
                   }}
+                  onOpenCase={(caseKey) => navigate(`/posteingang?fall=${caseKey}`)}
                   assigning={assignInquiry.isPending}
                 />
               ))}

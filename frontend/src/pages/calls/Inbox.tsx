@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   Info,
+  Layers,
   Phone,
   Receipt,
   RotateCcw,
@@ -36,6 +37,7 @@ export function CallRow({
   employees,
   onSelect,
   onAssign,
+  onOpenCase,
   assigning,
 }: {
   call: CallListItem
@@ -43,12 +45,18 @@ export function CallRow({
   employees: Employee[]
   onSelect: () => void
   onAssign: (employeeId: string | null) => void
+  onOpenCase: (caseKey: string) => void
   assigning: boolean
 }) {
   const isUnread = call.read_at === null
   // Only admins may (re)assign work to employees — see enforce_self_assignment
   // on the backend. Employees get a read-only avatar.
   const { isAdmin } = useMe()
+  // The Fall (case) this call belongs to — chip deep-links into the Posteingang.
+  // Key mirrors the inbox bundling: project_id if any, else the inquiry.
+  const caseKey = call.project_id ?? call.inquiry_id
+  const caseLabel = call.project_title || call.case_label || call.inquiry_subject || 'Fall'
+  const caseTicket = call.project_number || call.case_number || call.inquiry_number
   return (
     <div
       role="button"
@@ -130,6 +138,20 @@ export function CallRow({
           <span className="h-[3px] w-[3px] flex-shrink-0 rounded-full bg-faint" />
           <span className="tabular-nums">{fmtDuration(call.duration_seconds)}</span>
         </div>
+        {caseKey && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpenCase(caseKey)
+            }}
+            title={`Fall${caseTicket ? ` ${caseTicket}` : ''} · ${caseLabel} — im Posteingang öffnen`}
+            className="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-alt px-1.5 py-0.5 text-[11px] font-bold text-muted transition-colors hover:border-green-primary hover:text-green-deep"
+          >
+            <Layers size={11} className="flex-shrink-0" />
+            <span className="truncate">{caseLabel}</span>
+          </button>
+        )}
       </div>
     </div>
   )

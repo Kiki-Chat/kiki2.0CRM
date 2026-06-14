@@ -3,9 +3,9 @@
 // endpoints; Vorgänge from /api/calls (timeline lazy-loaded from the inquiry
 // thread); the assignee is a real dropdown everywhere; "Kiki empfiehlt" executes;
 // unsorted calls get the triage block (zuordnen / neuer Vorgang / Als Spam).
-import { CalendarPlus, Check, ChevronDown, FileText, FolderPlus, Inbox, Receipt, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { CalendarPlus, Check, ChevronDown, FileText, Folder, Inbox, Receipt } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { initials } from '../lib/utils'
 import { Avatar, StatusPill } from './calls/atoms'
@@ -13,15 +13,31 @@ import { CallDrawer } from './posteingang/CallDrawer'
 import { AssigneeDot, Btn, DecisionPill, ProgressMeter, SectionHead, Timeline, TypeTag } from './posteingang/parts'
 import {
   type DecisionVM,
-  type UnsortedCall,
   usePosteingang,
   usePosteingangActions,
   type VorgangVM,
 } from './posteingang/api'
 
 
-function DecisionCard({ d, onResolve }: { d: DecisionVM; onResolve: (c: 'primary' | 'secondary' | 'tertiary') => void }) {
+function DecisionCard({
+  d,
+  employees,
+  onAssign,
+  onResolve,
+}: {
+  d: DecisionVM
+  employees: Parameters<typeof AssigneeDot>[0]['employees']
+  onAssign: (inquiryId: string, employeeId: string | null) => void
+  onResolve: (c: 'primary' | 'secondary' | 'tertiary') => void
+}) {
   const [hover, setHover] = useState(false)
+  const assignee = d.assigneeId ? employees.find((e) => e.id === d.assigneeId) : null
+  // Strict assign ≠ confirm (point 1): a Termin can only be confirmed once
+  // someone is assigned, so the primary button stays disabled until assignment
+  // happens as its own visible step. Only gate when an inquiry (and therefore an
+  // assign control) actually exists — an inquiry-less appointment has no way to
+  // assign and must stay confirmable.
+  const needsAssignee = d.kind === 'termin_anfrage' && !!d.inquiryId && !d.assigneeId
   return (
     <div
       onMouseEnter={() => setHover(true)}
@@ -38,12 +54,34 @@ function DecisionCard({ d, onResolve }: { d: DecisionVM; onResolve: (c: 'primary
           </div>
           <TypeTag type={d.type} label={d.typeLabel} />
         </div>
+
+        {/* Which case (Fall) this decision belongs to — point 2/6. */}
+        {d.caseName && (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, maxWidth: '100%', marginBottom: 11, padding: '5px 11px', background: 'var(--green-tint-50)', borderRadius: 'var(--radius-md)' }}>
+            <Folder size={13} color="var(--green-deep)" style={{ flexShrink: 0 }} />
+            <span style={{ fontFamily: 'var(--font-poster)', fontSize: 12.5, fontWeight: 700, color: 'var(--green-deep)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.caseName}</span>
+            {d.caseTicket && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>{d.caseTicket}</span>}
+          </div>
+        )}
+
         <div style={{ fontFamily: 'var(--font-poster)', fontSize: 18, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text)', marginBottom: 13, lineHeight: 1.25 }}>{d.title}</div>
+
+        {/* Assignment is its own step (point 1) — never bundled into Bestätigen. */}
+        {d.assignable && d.inquiryId && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
+            <span style={{ fontFamily: 'var(--font-poster)', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)' }}>Zuständig</span>
+            <AssigneeDot inquiryId={d.inquiryId} code={d.assigneeId} employees={employees} onAssign={onAssign} size={26} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: assignee ? 'var(--text)' : 'var(--faint)' }}>
+              {assignee?.display_name ?? 'Niemand — zum Zuweisen klicken'}
+            </span>
+          </div>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px 16px', flexWrap: 'wrap', borderTop: '1px solid var(--border-faint)' }}>
-        <Btn variant={d.type === 'storno' ? 'danger' : 'primary'} onClick={() => onResolve('primary')}>{d.primary}</Btn>
+        <Btn variant={d.type === 'storno' ? 'danger' : 'primary'} onClick={() => onResolve('primary')} disabled={needsAssignee} title={needsAssignee ? 'Erst zuweisen, dann bestätigen' : undefined}>{d.primary}</Btn>
         {d.secondary && <Btn variant="secondary" onClick={() => onResolve('secondary')}>{d.secondary}</Btn>}
         {d.tertiary && <Btn variant="ghost" onClick={() => onResolve('tertiary')}>{d.tertiary}</Btn>}
+        {needsAssignee && <span style={{ fontSize: 12, color: 'var(--warning)', fontWeight: 600 }}>Erst zuweisen</span>}
       </div>
     </div>
   )
@@ -110,83 +148,64 @@ function Row({
   )
 }
 
-function UnsortedRow({
-  c,
-  candidates,
-  onMove,
-  onNew,
-  onSpam,
-  onOpen,
-}: {
-  c: UnsortedCall
-  candidates: VorgangVM[]
-  onMove: (callId: string, inquiryId: string) => void
-  onNew: (callId: string) => void
-  onSpam: (callId: string) => void
-  onOpen: (callId: string) => void
-}) {
-  const [picking, setPicking] = useState(false)
-  return (
-    <div style={{ borderRadius: 'var(--radius-lg)', background: 'var(--surface)', boxShadow: 'var(--ring)', padding: '11px 13px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-        <button type="button" onClick={() => onOpen(c.id)} style={{ display: 'flex', alignItems: 'center', gap: 11, flex: 1, minWidth: 0, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
-          <Avatar employeeId={c.custId} text={initials(c.customer)} size={34} />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontFamily: 'var(--font-poster)', fontSize: 13.5, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.title}</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.customer} · {c.activity}</div>
-          </div>
-        </button>
-        <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {candidates.length > 0 && <Btn variant="primary" icon={<Inbox size={14} />} onClick={() => setPicking((p) => !p)}>Vorgang zuordnen</Btn>}
-          <Btn variant="secondary" icon={<FolderPlus size={14} />} onClick={() => onNew(c.id)}>Neuer Vorgang</Btn>
-          <Btn variant="ghost" icon={<Trash2 size={14} />} onClick={() => onSpam(c.id)}>Als Spam</Btn>
-        </div>
-      </div>
-      {picking && candidates.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-faint)' }}>
-          {candidates.map((cand) => (
-            <button
-              key={cand.inquiryId}
-              type="button"
-              onClick={() => { onMove(c.id, cand.inquiryId); setPicking(false) }}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 'var(--radius-md)', border: 'none', background: 'var(--surface-alt)', cursor: 'pointer', textAlign: 'left', fontSize: 13, color: 'var(--text)' }}
-            >
-              <Inbox size={14} style={{ color: 'var(--green-deep)' }} />
-              <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cand.problem}</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--muted)' }}>{cand.ticket}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export function PosteingangPage() {
   const navigate = useNavigate()
-  const { loading, error, employees, decisions, vorgaenge, unsorted, callsCount } = usePosteingang()
+  const [searchParams] = useSearchParams()
+  const { loading, error, employees, decisions, vorgaenge, callsCount } = usePosteingang()
   const actions = usePosteingangActions()
   const [openId, setOpenId] = useState<string | null>(null)
   const [callId, setCallId] = useState<string | null>(null)
   const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
-  const [hiddenCalls, setHiddenCalls] = useState<Set<string>>(new Set())
-  const [undo, setUndo] = useState<{ callId: string } | null>(null)
+  // Optimistic assignee overrides per inquiry: assigneeId on a decision is derived
+  // from the windowed calls list, so a fresh assignment may not be reflected by the
+  // refetch (the inquiry's call can be outside the window). Override locally so the
+  // assign-then-confirm gating updates immediately.
+  const [assignOverrides, setAssignOverrides] = useState<Map<string, string | null>>(new Map())
 
-  const liveDecisions = useMemo(() => decisions.filter((d) => !resolvedKeys.has(d.actionKey)), [decisions, resolvedKeys])
-  const liveUnsorted = useMemo(() => unsorted.filter((c) => !hiddenCalls.has(c.id)), [unsorted, hiddenCalls])
+  const liveDecisions = useMemo(
+    () =>
+      decisions
+        .filter((d) => !resolvedKeys.has(d.actionKey))
+        .map((d) =>
+          d.inquiryId && assignOverrides.has(d.inquiryId)
+            ? { ...d, assigneeId: assignOverrides.get(d.inquiryId) ?? null }
+            : d,
+        ),
+    [decisions, resolvedKeys, assignOverrides],
+  )
   const total = decisions.length
   const doneCount = total - liveDecisions.length
   const allDone = liveDecisions.length === 0
+
+  // Deep-link from the Anrufe call log (?fall=<project_id|inquiry_id>): open and
+  // scroll to that case once the list loads. Acts once per distinct param value.
+  const fallParam = searchParams.get('fall')
+  const handledFall = useRef<string | null>(null)
+  useEffect(() => {
+    if (!fallParam || loading || handledFall.current === fallParam) return
+    if (!vorgaenge.some((v) => v.key === fallParam)) return
+    handledFall.current = fallParam
+    setOpenId(fallParam)
+    // Re-scroll over a few frames: the decision cards above render after this
+    // effect first runs and push the row down, so a single scroll lands short.
+    let n = 0
+    let id = 0
+    const tick = () => {
+      document.getElementById(`pe-row-${fallParam}`)?.scrollIntoView({ block: 'center' })
+      if (++n < 6) id = window.setTimeout(tick, 120)
+    }
+    id = window.setTimeout(tick, 60)
+    return () => window.clearTimeout(id)
+  }, [fallParam, loading, vorgaenge])
 
   const resolve = (d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') => {
     setResolvedKeys((s) => new Set(s).add(d.actionKey))
     actions.resolve(d, choice).catch(() => setResolvedKeys((s) => { const n = new Set(s); n.delete(d.actionKey); return n }))
   }
-  const onAssign = (inquiryId: string, employeeId: string | null) => actions.assignInquiry.mutate({ inquiryId, employeeId })
-  const onMove = (cid: string, inquiryId: string) => { setHiddenCalls((s) => new Set(s).add(cid)); actions.moveCall.mutate({ callId: cid, inquiryId }) }
-  const onNew = (cid: string) => { setHiddenCalls((s) => new Set(s).add(cid)); actions.newVorgang.mutate({ callId: cid }) }
-  const onSpam = (cid: string) => { setHiddenCalls((s) => new Set(s).add(cid)); setUndo({ callId: cid }); actions.spamCall.mutate({ callId: cid, spam: true }) }
-  const onUndoSpam = () => { if (!undo) return; actions.spamCall.mutate({ callId: undo.callId, spam: false }); setHiddenCalls((s) => { const n = new Set(s); n.delete(undo.callId); return n }); setUndo(null) }
+  const onAssign = (inquiryId: string, employeeId: string | null) => {
+    setAssignOverrides((m) => new Map(m).set(inquiryId, employeeId))
+    actions.assignInquiry.mutate({ inquiryId, employeeId })
+  }
 
   return (
     <>
@@ -230,58 +249,33 @@ export function PosteingangPage() {
                 <SectionHead icon={Inbox} color="var(--error)" label="Jetzt entscheiden" trailing={<ProgressMeter done={doneCount} total={total} />} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 40 }}>
                   {liveDecisions.map((d) => (
-                    <DecisionCard key={d.actionKey} d={d} onResolve={(c) => resolve(d, c)} />
+                    <DecisionCard key={d.actionKey} d={d} employees={employees} onAssign={onAssign} onResolve={(c) => resolve(d, c)} />
                   ))}
                 </div>
               </>
             )}
 
-            {liveUnsorted.length > 0 && (
-              <div style={{ marginBottom: 40 }}>
-                <SectionHead icon={Inbox} color="var(--warning)" label="Nicht zugeordnet" trailing={<span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--warning)' }}>{liveUnsorted.length} brauchen Zuordnung</span>} />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {liveUnsorted.map((c) => (
-                    <UnsortedRow key={c.id} c={c} candidates={vorgaenge.filter((v) => v.custId && v.custId === c.custId)} onMove={onMove} onNew={onNew} onSpam={onSpam} onOpen={setCallId} />
-                  ))}
-                </div>
-              </div>
-            )}
-
             <SectionHead icon={Inbox} label="Alle Vorgänge" trailing={<span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--faint)' }}>{vorgaenge.length}</span>} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {vorgaenge.map((v) => (
-                <Row
-                  key={v.key}
-                  v={v}
-                  open={openId === v.key}
-                  onToggle={() => setOpenId(openId === v.key ? null : v.key)}
-                  employees={employees}
-                  onAssign={onAssign}
-                  onOpenCall={setCallId}
-                  onNav={navigate}
-                />
+                <div key={v.key} id={`pe-row-${v.key}`}>
+                  <Row
+                    v={v}
+                    open={openId === v.key}
+                    onToggle={() => setOpenId(openId === v.key ? null : v.key)}
+                    employees={employees}
+                    onAssign={onAssign}
+                    onOpenCall={setCallId}
+                    onNav={navigate}
+                  />
+                </div>
               ))}
             </div>
           </>
         )}
       </div>
 
-      {undo && (
-        <div style={{ position: 'fixed', bottom: 22, left: '50%', transform: 'translateX(-50%)', zIndex: 70, display: 'flex', alignItems: 'center', gap: 14, padding: '10px 16px', borderRadius: 'var(--radius-xl)', background: 'var(--surface)', boxShadow: 'var(--elevation-3)' }}>
-          <span style={{ fontSize: 13, color: 'var(--body)' }}>Als Spam markiert.</span>
-          <button type="button" onClick={onUndoSpam} style={{ border: 'none', background: 'transparent', color: 'var(--green-primary)', fontFamily: 'var(--font-poster)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Rückgängig</button>
-          <button type="button" onClick={() => setUndo(null)} style={{ border: 'none', background: 'transparent', color: 'var(--faint)', cursor: 'pointer', fontSize: 13 }}>✕</button>
-        </div>
-      )}
-
-      <CallDrawer
-        callId={callId}
-        onClose={() => setCallId(null)}
-        candidates={vorgaenge}
-        onMove={(cid, iid) => { onMove(cid, iid); setCallId(null) }}
-        onNew={(cid) => { onNew(cid); setCallId(null) }}
-        onSpam={(cid) => { onSpam(cid); setCallId(null) }}
-      />
+      <CallDrawer callId={callId} onClose={() => setCallId(null)} />
     </>
   )
 }

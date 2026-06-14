@@ -78,6 +78,13 @@ export interface DecisionVM {
   reco: string
   suggestedEmployeeId: string | null
   inquiryId: string | null
+  // Case context (point 2/6): the named Fall this decision belongs to, resolved
+  // from the call's project_title / inquiry_subject so the card says WHICH case.
+  caseName: string | null
+  caseTicket: string | null
+  // Current assignee of the case — surfaced so assignment is its own visible
+  // step on the card (point 1: assign ≠ confirm).
+  assigneeId: string | null
   primary: string
   secondary: string | null
   tertiary: string | null
@@ -107,16 +114,6 @@ export interface VorgangVM {
   emergency: boolean
   decision: string | null
   project: string | null
-}
-
-export interface UnsortedCall {
-  id: string
-  custId: string | null
-  customer: string
-  title: string
-  number: string | null
-  activity: string
-  durationSeconds: number | null
 }
 
 export interface TLItem {
@@ -156,12 +153,39 @@ function pickSuggested(employees: Employee[]): Employee | null {
   )
 }
 
-function buildDecisions(actions: RawAction[], employees: Employee[]): DecisionVM[] {
+// Per-inquiry context, derived from the calls list: the Fall's display name +
+// ticket + current assignee. Lets each decision card name its case and show who
+// it's assigned to (the latest call per inquiry wins).
+interface InquiryMeta {
+  caseName: string | null
+  caseTicket: string | null
+  assigneeId: string | null
+}
+function buildInquiryMeta(calls: RawCall[]): Map<string, InquiryMeta> {
+  const meta = new Map<string, InquiryMeta>()
+  const seenTs = new Map<string, number>()
+  for (const c of calls) {
+    if (!c.inquiry_id) continue
+    const t = ts(c.started_at || c.created_at)
+    if (meta.has(c.inquiry_id) && t <= (seenTs.get(c.inquiry_id) ?? 0)) continue
+    seenTs.set(c.inquiry_id, t)
+    const isCase = !!c.project_id
+    meta.set(c.inquiry_id, {
+      caseName: (isCase ? c.project_title : c.inquiry_subject) || c.summary_title || null,
+      caseTicket: (isCase ? c.project_number : c.inquiry_number) || null,
+      assigneeId: c.assigned_employee_id,
+    })
+  }
+  return meta
+}
+
+function buildDecisions(actions: RawAction[], employees: Employee[], meta: Map<string, InquiryMeta>): DecisionVM[] {
   const suggested = pickSuggested(employees)
   return actions.map((a) => {
     const cfg = KIND_CFG[a.kind]
     const cust = a.customer_name || 'Unbekannter Kunde'
     const name = firstName(suggested?.display_name)
+    const info = a.inquiry_id ? meta.get(a.inquiry_id) : undefined
     return {
       actionKey: a.action_key,
       kind: a.kind,
@@ -177,6 +201,9 @@ function buildDecisions(actions: RawAction[], employees: Employee[]): DecisionVM
       reco: cfg.reco(name, cust),
       suggestedEmployeeId: cfg.assignable ? suggested?.id ?? null : null,
       inquiryId: a.inquiry_id,
+      caseName: info?.caseName ?? null,
+      caseTicket: info?.caseTicket ?? null,
+      assigneeId: info?.assigneeId ?? null,
       primary: cfg.primary,
       secondary: cfg.secondary,
       tertiary: cfg.tertiary,
@@ -185,31 +212,20 @@ function buildDecisions(actions: RawAction[], employees: Employee[]): DecisionVM
   })
 }
 
-function buildVorgaenge(calls: RawCall[], actions: RawAction[]): { vorgaenge: VorgangVM[]; unsorted: UnsortedCall[] } {
+function buildVorgaenge(calls: RawCall[], actions: RawAction[]): VorgangVM[] {
   const decByInquiry = new Map<string, string>()
   for (const a of actions) if (a.inquiry_id && !decByInquiry.has(a.inquiry_id)) decByInquiry.set(a.inquiry_id, KIND_CFG[a.kind].label)
 
   // Bundle by TICKET = the case (the AI grouping lives on project_id; we just
-  // relabel it "Fall"). A call with no inquiry is unsorted (triage).
+  // relabel it "Fall"). Calls with no inquiry are dropped here — triage of
+  // unsorted calls now lives in the Anrufe cockpit, not the inbox.
   const byTicket = new Map<string, RawCall[]>()
-  const unsorted: UnsortedCall[] = []
   for (const c of calls) {
-    if (c.inquiry_id) {
-      const key = c.project_id ?? c.inquiry_id
-      const arr = byTicket.get(key) ?? []
-      arr.push(c)
-      byTicket.set(key, arr)
-    } else {
-      unsorted.push({
-        id: c.id,
-        custId: c.customer_id,
-        customer: c.customers?.full_name || c.caller_number || 'Unbekannt',
-        title: c.summary_title || 'Anruf',
-        number: c.caller_number,
-        activity: rel(c.started_at || c.created_at),
-        durationSeconds: c.duration_seconds,
-      })
-    }
+    if (!c.inquiry_id) continue
+    const key = c.project_id ?? c.inquiry_id
+    const arr = byTicket.get(key) ?? []
+    arr.push(c)
+    byTicket.set(key, arr)
   }
 
   const vorgaenge: VorgangVM[] = []
@@ -245,7 +261,7 @@ function buildVorgaenge(calls: RawCall[], actions: RawAction[]): { vorgaenge: Vo
     if (!!a.decision !== !!b.decision) return a.decision ? -1 : 1
     return (b.callEntries.at(-1)?.ts ?? 0) - (a.callEntries.at(-1)?.ts ?? 0)
   })
-  return { vorgaenge, unsorted }
+  return vorgaenge
 }
 
 // ── Queries ─────────────────────────────────────────────────────────────────
@@ -261,8 +277,8 @@ export function usePosteingang() {
   const employees = employeesQ.data ?? []
   const actions = (actionsQ.data ?? []).filter((a) => a.kind in KIND_CFG)
   const calls = callsQ.data?.calls ?? []
-  const decisions = buildDecisions(actions, employees)
-  const { vorgaenge, unsorted } = buildVorgaenge(calls, actions)
+  const decisions = buildDecisions(actions, employees, buildInquiryMeta(calls))
+  const vorgaenge = buildVorgaenge(calls, actions)
 
   return {
     loading: actionsQ.isLoading || callsQ.isLoading,
@@ -270,7 +286,6 @@ export function usePosteingang() {
     employees,
     decisions,
     vorgaenge,
-    unsorted,
     callsCount: calls.length,
   }
 }
@@ -379,23 +394,6 @@ export function usePosteingangActions() {
     onSuccess: invalidate,
   })
 
-  const moveCall = useMutation({
-    mutationFn: ({ callId, inquiryId }: { callId: string; inquiryId: string }) =>
-      apiFetch(`/api/calls/${callId}/assign-inquiry`, { method: 'POST', body: JSON.stringify({ inquiry_id: inquiryId }) }),
-    onSuccess: invalidate,
-  })
-
-  const newVorgang = useMutation({
-    mutationFn: ({ callId }: { callId: string }) => apiFetch(`/api/calls/${callId}/inquiry`, { method: 'POST' }),
-    onSuccess: invalidate,
-  })
-
-  const spamCall = useMutation({
-    mutationFn: ({ callId, spam }: { callId: string; spam: boolean }) =>
-      apiFetch(`/api/calls/${callId}/spam`, { method: 'POST', body: JSON.stringify({ spam }) }),
-    onSuccess: invalidate,
-  })
-
   async function runResolve(d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') {
     const id = d.actionKey.split(':').slice(1).join(':') || d.actionKey
     const done = () => apiFetch('/api/actions/state', { method: 'POST', body: JSON.stringify({ action_key: d.actionKey, status: 'done' }) })
@@ -423,13 +421,5 @@ export function usePosteingangActions() {
     invalidate()
   }
 
-  async function applyReco(d: DecisionVM) {
-    if (d.assignable && d.suggestedEmployeeId && d.inquiryId) {
-      await apiFetch(`/api/inquiries/${d.inquiryId}/assign`, { method: 'PATCH', body: JSON.stringify({ employee_id: d.suggestedEmployeeId }) })
-    }
-    await runResolve(d, 'primary')
-    invalidate()
-  }
-
-  return { assignInquiry, moveCall, newVorgang, spamCall, resolve, applyReco }
+  return { assignInquiry, resolve }
 }
