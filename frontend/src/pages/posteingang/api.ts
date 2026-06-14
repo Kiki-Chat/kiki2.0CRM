@@ -52,6 +52,8 @@ interface RawCall {
   inquiry_status: VStatus | null
   inquiry_number: string | null
   inquiry_subject: string | null
+  project_id: string | null
+  project_number: string | null
   project_title: string | null
   emergency_flag: boolean
   assigned_employee_id: string | null
@@ -82,8 +84,17 @@ export interface DecisionVM {
   assignable: boolean
 }
 
+export interface CallEntry {
+  id: string
+  dir: 'inbound' | 'outbound'
+  title: string
+  time: string
+  ts: number
+}
 export interface VorgangVM {
+  key: string
   inquiryId: string
+  callEntries: CallEntry[]
   custId: string | null
   customer: string
   problem: string
@@ -178,13 +189,16 @@ function buildVorgaenge(calls: RawCall[], actions: RawAction[]): { vorgaenge: Vo
   const decByInquiry = new Map<string, string>()
   for (const a of actions) if (a.inquiry_id && !decByInquiry.has(a.inquiry_id)) decByInquiry.set(a.inquiry_id, KIND_CFG[a.kind].label)
 
-  const byInquiry = new Map<string, RawCall[]>()
+  // Bundle by TICKET = the case (the AI grouping lives on project_id; we just
+  // relabel it "Fall"). A call with no inquiry is unsorted (triage).
+  const byTicket = new Map<string, RawCall[]>()
   const unsorted: UnsortedCall[] = []
   for (const c of calls) {
     if (c.inquiry_id) {
-      const arr = byInquiry.get(c.inquiry_id) ?? []
+      const key = c.project_id ?? c.inquiry_id
+      const arr = byTicket.get(key) ?? []
       arr.push(c)
-      byInquiry.set(c.inquiry_id, arr)
+      byTicket.set(key, arr)
     } else {
       unsorted.push({
         id: c.id,
@@ -199,28 +213,37 @@ function buildVorgaenge(calls: RawCall[], actions: RawAction[]): { vorgaenge: Vo
   }
 
   const vorgaenge: VorgangVM[] = []
-  for (const [inquiryId, group] of byInquiry) {
-    const latest = [...group].sort((a, b) => ts(b.started_at) - ts(a.started_at))[0]
+  for (const [key, group] of byTicket) {
+    const sorted = [...group].sort((a, b) => ts(b.started_at) - ts(a.started_at))
+    const latest = sorted[0]
+    const isCase = !!latest.project_id
+    const decision = group.map((c) => (c.inquiry_id ? decByInquiry.get(c.inquiry_id) : null)).find(Boolean) || null
     vorgaenge.push({
-      inquiryId,
+      key,
+      inquiryId: latest.inquiry_id as string,
+      callEntries: [...group]
+        .sort((a, b) => ts(a.started_at) - ts(b.started_at))
+        .map((c) => ({ id: c.id, dir: c.direction === 'outbound' ? 'outbound' : 'inbound', title: c.summary_title || 'Anruf', time: rel(c.started_at || c.created_at), ts: ts(c.started_at) })),
       custId: latest.customer_id,
       customer: latest.customers?.full_name || latest.caller_number || 'Unbekannt',
-      problem: latest.inquiry_subject || latest.summary_title || 'Vorgang',
-      ticket: latest.inquiry_number,
+      problem: (isCase ? latest.project_title : latest.inquiry_subject) || latest.summary_title || 'Fall',
+      ticket: isCase ? latest.project_number : latest.inquiry_number,
       calls: group.length,
       activity: rel(latest.started_at || latest.created_at),
       status: latest.inquiry_status,
       assigneeId: latest.assigned_employee_id,
       assigneeInitials: latest.assigned_employee_initials,
       emergency: group.some((c) => c.emergency_flag),
-      decision: decByInquiry.get(inquiryId) ?? null,
-      project: latest.project_title,
+      decision,
+      project: null,
     })
   }
+  // Emergencies first, then bundled (multi-call) tickets, then those needing a decision.
   vorgaenge.sort((a, b) => {
     if (a.emergency !== b.emergency) return a.emergency ? -1 : 1
+    if (a.calls > 1 !== b.calls > 1) return a.calls > 1 ? -1 : 1
     if (!!a.decision !== !!b.decision) return a.decision ? -1 : 1
-    return 0
+    return (b.callEntries.at(-1)?.ts ?? 0) - (a.callEntries.at(-1)?.ts ?? 0)
   })
   return { vorgaenge, unsorted }
 }

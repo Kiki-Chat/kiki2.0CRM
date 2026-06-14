@@ -1,7 +1,7 @@
 // Right-side call drawer — real transcript · Kiki summary · facts, plus the
 // triage block: an unsorted call gets "Vorgang zuordnen / Neuer Vorgang / Als
 // Spam"; a filed call shows its Vorgang + a "change case" picker.
-import { Clock, FileText, Folder, FolderPlus, Inbox, Phone, Play, Sparkles, Trash2, X } from 'lucide-react'
+import { Clock, Folder, FolderPlus, Inbox, Phone, Play, Sparkles, Trash2, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
 import { Avatar, DirBadge, NotdienstBadge, StatusPill } from '../calls/atoms'
@@ -151,8 +151,7 @@ export function CallDrawer({
               </div>
 
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 16, borderTop: '1px solid var(--border-faint)' }}>
-                <Btn variant="secondary" icon={<Play size={15} />}>Aufnahme</Btn>
-                <Btn variant="ghost" icon={<FileText size={15} />}>Notiz</Btn>
+                <Btn variant="secondary" icon={<Play size={15} />}>Aufnahme abspielen</Btn>
               </div>
             </>
           )}

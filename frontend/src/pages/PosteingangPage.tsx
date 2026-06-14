@@ -16,13 +16,11 @@ import {
   type UnsortedCall,
   usePosteingang,
   usePosteingangActions,
-  useThread,
   type VorgangVM,
 } from './posteingang/api'
 
-const KIKI_AV = '/kiki-avatar.png'
 
-function DecisionCard({ d, onResolve, onReco }: { d: DecisionVM; onResolve: (c: 'primary' | 'secondary' | 'tertiary') => void; onReco: () => void }) {
+function DecisionCard({ d, onResolve }: { d: DecisionVM; onResolve: (c: 'primary' | 'secondary' | 'tertiary') => void }) {
   const [hover, setHover] = useState(false)
   return (
     <div
@@ -42,13 +40,7 @@ function DecisionCard({ d, onResolve, onReco }: { d: DecisionVM; onResolve: (c: 
         </div>
         <div style={{ fontFamily: 'var(--font-poster)', fontSize: 18, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text)', marginBottom: 13, lineHeight: 1.25 }}>{d.title}</div>
       </div>
-      <button type="button" onClick={onReco} title="Empfehlung übernehmen" style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 10, padding: '12px 20px', background: 'var(--ai-bg)', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-        <img src={KIKI_AV} alt="Kiki" style={{ width: 26, height: 26, borderRadius: '50%', objectFit: 'cover', objectPosition: '50% 8%', flexShrink: 0, boxShadow: '0 0 0 2px var(--surface)' }} />
-        <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--ai)', lineHeight: 1.4 }}>
-          <span style={{ fontWeight: 700, fontFamily: 'var(--font-poster)' }}>Kiki empfiehlt</span> · {d.reco}
-        </div>
-      </button>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px 16px', flexWrap: 'wrap', borderTop: '1px solid var(--border-faint)' }}>
         <Btn variant={d.type === 'storno' ? 'danger' : 'primary'} onClick={() => onResolve('primary')}>{d.primary}</Btn>
         {d.secondary && <Btn variant="secondary" onClick={() => onResolve('secondary')}>{d.secondary}</Btn>}
         {d.tertiary && <Btn variant="ghost" onClick={() => onResolve('tertiary')}>{d.tertiary}</Btn>}
@@ -61,8 +53,6 @@ function Row({
   v,
   open,
   onToggle,
-  timeline,
-  loadingTimeline,
   employees,
   onAssign,
   onOpenCall,
@@ -71,8 +61,6 @@ function Row({
   v: VorgangVM
   open: boolean
   onToggle: () => void
-  timeline: { kind: 'inbound' | 'outbound' | 'termin' | 'kva' | 'rechnung'; callId?: string; quote?: string; label?: string; detail?: string; done?: boolean; doneLabel?: string; time: string; ts: number }[]
-  loadingTimeline: boolean
   employees: Parameters<typeof AssigneeDot>[0]['employees']
   onAssign: (inquiryId: string, employeeId: string | null) => void
   onOpenCall: (id: string) => void
@@ -110,11 +98,7 @@ function Row({
       </div>
       {open && (
         <div style={{ borderTop: '1px solid var(--border-faint)', padding: '16px 18px 18px' }}>
-          {loadingTimeline ? (
-            <div style={{ fontSize: 13, color: 'var(--muted)', padding: '4px 0 12px' }}>Verlauf wird geladen…</div>
-          ) : (
-            <Timeline timeline={timeline} onOpenCall={onOpenCall} />
-          )}
+          <Timeline timeline={v.callEntries.map((e) => ({ kind: e.dir, callId: e.id, quote: e.title, time: e.time, ts: e.ts }))} onOpenCall={onOpenCall} />
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 16, marginTop: 4, borderTop: '1px solid var(--border-faint)' }}>
             <Btn variant="secondary" icon={<CalendarPlus size={15} />} onClick={() => onNav('/calendar')}>Termin</Btn>
             <Btn variant="secondary" icon={<Receipt size={15} />} onClick={() => onNav('/cost-estimates/new')}>KVA</Btn>
@@ -188,8 +172,6 @@ export function PosteingangPage() {
   const [hiddenCalls, setHiddenCalls] = useState<Set<string>>(new Set())
   const [undo, setUndo] = useState<{ callId: string } | null>(null)
 
-  const thread = useThread(openId)
-
   const liveDecisions = useMemo(() => decisions.filter((d) => !resolvedKeys.has(d.actionKey)), [decisions, resolvedKeys])
   const liveUnsorted = useMemo(() => unsorted.filter((c) => !hiddenCalls.has(c.id)), [unsorted, hiddenCalls])
   const total = decisions.length
@@ -199,10 +181,6 @@ export function PosteingangPage() {
   const resolve = (d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') => {
     setResolvedKeys((s) => new Set(s).add(d.actionKey))
     actions.resolve(d, choice).catch(() => setResolvedKeys((s) => { const n = new Set(s); n.delete(d.actionKey); return n }))
-  }
-  const applyReco = (d: DecisionVM) => {
-    setResolvedKeys((s) => new Set(s).add(d.actionKey))
-    actions.applyReco(d).catch(() => setResolvedKeys((s) => { const n = new Set(s); n.delete(d.actionKey); return n }))
   }
   const onAssign = (inquiryId: string, employeeId: string | null) => actions.assignInquiry.mutate({ inquiryId, employeeId })
   const onMove = (cid: string, inquiryId: string) => { setHiddenCalls((s) => new Set(s).add(cid)); actions.moveCall.mutate({ callId: cid, inquiryId }) }
@@ -252,7 +230,7 @@ export function PosteingangPage() {
                 <SectionHead icon={Inbox} color="var(--error)" label="Jetzt entscheiden" trailing={<ProgressMeter done={doneCount} total={total} />} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 40 }}>
                   {liveDecisions.map((d) => (
-                    <DecisionCard key={d.actionKey} d={d} onResolve={(c) => resolve(d, c)} onReco={() => applyReco(d)} />
+                    <DecisionCard key={d.actionKey} d={d} onResolve={(c) => resolve(d, c)} />
                   ))}
                 </div>
               </>
@@ -273,12 +251,10 @@ export function PosteingangPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {vorgaenge.map((v) => (
                 <Row
-                  key={v.inquiryId}
+                  key={v.key}
                   v={v}
-                  open={openId === v.inquiryId}
-                  onToggle={() => setOpenId(openId === v.inquiryId ? null : v.inquiryId)}
-                  timeline={openId === v.inquiryId ? thread.data?.timeline ?? [] : []}
-                  loadingTimeline={openId === v.inquiryId && thread.isLoading}
+                  open={openId === v.key}
+                  onToggle={() => setOpenId(openId === v.key ? null : v.key)}
                   employees={employees}
                   onAssign={onAssign}
                   onOpenCall={setCallId}
