@@ -48,7 +48,7 @@ export const NAV: NavEntry[] = [
     icon: Briefcase,
     label: 'Aufträge',
     children: [
-      { to: '/projects', label: 'Projekte' },
+      { to: '/projects', label: 'Fälle' },
       { to: '/planning-board', label: 'Planungstafel' },
     ],
   },

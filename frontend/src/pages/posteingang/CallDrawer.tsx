@@ -118,7 +118,7 @@ export function CallDrawer({ callId, onClose }: { callId: string | null; onClose
               ) : c.unsorted ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 13px', background: 'var(--surface-alt)', borderRadius: 'var(--radius-lg)', marginBottom: 18, fontSize: 12.5, color: 'var(--muted)' }}>
                   <Inbox size={14} style={{ flexShrink: 0 }} />
-                  <span>Noch keinem Vorgang zugeordnet — im Anruf-Cockpit zuordnen.</span>
+                  <span>Noch keinem Fall zugeordnet — im Anruf-Cockpit zuordnen.</span>
                 </div>
               ) : null}
 

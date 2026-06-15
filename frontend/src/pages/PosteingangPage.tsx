@@ -216,12 +216,12 @@ export function PosteingangPage() {
             <h1 style={{ margin: '0 0 8px', fontFamily: 'var(--font-poster)', fontWeight: 800, fontSize: 31, letterSpacing: '-0.025em', color: 'var(--text)', lineHeight: 1.08 }}>
               {loading ? 'Lädt…' : allDone ? 'Alles erledigt — gut gemacht.' : `${liveDecisions.length} ${liveDecisions.length === 1 ? 'Entscheidung wartet' : 'Entscheidungen warten'} auf Sie`}
             </h1>
-            <p style={{ margin: 0, fontSize: 14.5, color: 'var(--muted)', lineHeight: 1.5, maxWidth: 460 }}>Kiki hat Ihre Anrufe bearbeitet und in Vorgänge sortiert. Den Rest haben Sie im Griff.</p>
+            <p style={{ margin: 0, fontSize: 14.5, color: 'var(--muted)', lineHeight: 1.5, maxWidth: 460 }}>Kiki hat Ihre Anrufe bearbeitet und in Fälle sortiert. Den Rest haben Sie im Griff.</p>
           </div>
           <div style={{ display: 'flex', gap: 0, background: 'var(--surface)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--ring)', overflow: 'hidden', flexShrink: 0 }}>
             {[
               { n: callsCount, l: 'Anrufe', c: 'var(--text)' },
-              { n: vorgaenge.length, l: 'Vorgänge', c: 'var(--text)' },
+              { n: vorgaenge.length, l: 'Fälle', c: 'var(--text)' },
               { n: liveDecisions.length, l: 'Offen', c: liveDecisions.length ? 'var(--error)' : 'var(--green-primary)' },
             ].map((s, i) => (
               <div key={s.l} style={{ padding: '13px 18px', textAlign: 'center', borderLeft: i ? '1px solid var(--border-faint)' : 'none', minWidth: 64 }}>
@@ -255,7 +255,7 @@ export function PosteingangPage() {
               </>
             )}
 
-            <SectionHead icon={Inbox} label="Alle Vorgänge" trailing={<span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--faint)' }}>{vorgaenge.length}</span>} />
+            <SectionHead icon={Inbox} label="Alle Fälle" trailing={<span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--faint)' }}>{vorgaenge.length}</span>} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {vorgaenge.map((v) => (
                 <div key={v.key} id={`pe-row-${v.key}`}>

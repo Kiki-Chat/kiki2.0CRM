@@ -49,18 +49,11 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   archived: { label: 'Archiviert', cls: 'bg-alt text-muted' },
 }
 
-const money = (n: number | null) =>
-  '€' + (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const fmtDate = (d: string | null) =>
-  d ? new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Berlin' }) : '—'
-
 export function ProjectsPage() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [customer, setCustomer] = useState('')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
@@ -72,46 +65,30 @@ export function ProjectsPage() {
   })
   const customers = customerData?.customers ?? []
 
-  const overlaps = (p: Project) => {
-    if (from && p.end_date && p.end_date < from) return false
-    if (to && p.start_date && p.start_date > to) return false
-    return true
-  }
   const filtered = projects.filter(
     (p) =>
       (!search ||
         p.title.toLowerCase().includes(search.toLowerCase()) ||
         (p.customer_name ?? '').toLowerCase().includes(search.toLowerCase())) &&
       (status === 'all' || p.status === status) &&
-      (!customer || p.customer_id === customer) &&
-      overlaps(p),
+      (!customer || p.customer_id === customer),
   )
 
   const activeProjects = projects.filter((p) => p.status === 'active' || p.status === 'planning')
-  const totalBudget = activeProjects.reduce((s, p) => s + (p.planned_budget ?? 0), 0)
-  const openItems = projects.reduce((s, p) => s + (p.open_amount ?? 0), 0)
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <FolderOpen size={26} className="text-green-primary" />
-          <div>
-            <h1 className="text-2xl font-bold text-text">Projekte</h1>
-            <p className="mt-0.5 text-sm text-muted">{projects.length} Projekte</p>
-          </div>
+      <div className="mb-6 flex items-center gap-3">
+        <FolderOpen size={26} className="text-green-primary" />
+        <div>
+          <h1 className="text-2xl font-bold text-text">Fälle</h1>
+          <p className="mt-0.5 text-sm text-muted">{projects.length} Fälle · {activeProjects.length} offen — Tickets, die Kiki aus den Anrufen gebündelt hat</p>
         </div>
-        <button
-          onClick={() => navigate('/projects/new')}
-          className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
-        >
-          + Neues Projekt
-        </button>
       </div>
 
       {/* Filter */}
       <div className="mb-4 rounded-xl border border-border bg-surface p-4">
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-3">
           <div>
             <div className="mb-1 text-xs font-medium text-muted">Suche</div>
             <div className="relative">
@@ -136,31 +113,18 @@ export function ProjectsPage() {
               {customers.map((c) => <option key={c.id} value={c.id}>{c.full_name ?? 'Unbenannt'}</option>)}
             </select>
           </div>
-          <div>
-            <div className="mb-1 text-xs font-medium text-muted">Zeitraum</div>
-            <div className="flex items-center gap-2">
-              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={cn(selectCls, 'px-2')} />
-              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={cn(selectCls, 'px-2')} />
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Summary */}
-      <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <SummaryCard label="Aktive Projekte" value={String(activeProjects.length)} cls="text-success" />
-        <SummaryCard label="Gesamtbudget" value={money(totalBudget)} cls="text-info" />
-        <SummaryCard label="Offene Posten" value={money(openItems)} cls="text-warning" />
-      </div>
-
-      {/* Cards */}
+      {/* Cards — a lean Fall is a ticket: customer + the call(s) and the five things
+          (Anfragen/Anrufe · Termine · KVA · Rechnungen · Mitarbeiter). No budget/dates. */}
       <div className="space-y-3">
         {filtered.map((p) => {
           const sm = STATUS_META[p.status] ?? STATUS_META.planning
           return (
             <button
               key={p.id}
-              onClick={() => navigate(`/projects/${p.id}`)}
+              onClick={() => navigate(`/fall/${p.id}`)}
               className="block w-full rounded-xl border border-border bg-surface p-5 text-left transition hover:border-green-primary/50 hover:shadow-e1"
             >
               <div className="flex items-start justify-between gap-3">
@@ -178,46 +142,25 @@ export function ProjectsPage() {
                         {p.customer_name ?? '—'}
                       </span>
                     ) : <span className="text-muted">Kein Kunde</span>}
-                    <span className="text-muted">{p.number}</span>
-                    <span className="text-muted">{fmtDate(p.start_date)} – {fmtDate(p.end_date)}</span>
-                  </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="text-xs text-muted">Budget</div>
-                  <div className="text-sm font-semibold text-text">
-                    Geplant {money(p.planned_budget)}
-                  </div>
-                  <div className={cn('text-xs', (p.planned_budget && p.actual_budget > p.planned_budget) ? 'text-warning' : 'text-muted')}>
-                    Ist {money(p.actual_budget)}
+                    {p.number && <span className="font-mono text-xs text-muted">{p.number}</span>}
                   </div>
                 </div>
               </div>
 
-              {/* Progress */}
-              <div className="mt-3">
-                <div className="mb-1 flex items-center justify-between text-xs text-muted">
-                  <span>Fortschritt ({p.stats.appointments_done}/{p.stats.appointments} Termine)</span>
-                  <span>{p.progress}%</span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-alt">
-                  <div className="h-full rounded-full bg-green-primary" style={{ width: `${p.progress}%` }} />
-                </div>
-              </div>
-
-              {/* Stats */}
+              {/* The five linked things */}
               <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted">
-                <Stat icon={<Phone size={14} />} n={p.stats.calls} />
-                <Stat icon={<ClipboardList size={14} />} n={p.stats.inquiries} />
-                <Stat icon={<Calendar size={14} />} n={p.stats.appointments} />
-                <Stat icon={<FileText size={14} />} n={p.stats.cost_estimates} />
-                <Stat icon={<Receipt size={14} />} n={p.stats.invoices} />
-                <Stat icon={<Users size={14} />} n={p.stats.employees} />
+                <Stat icon={<Phone size={14} />} n={p.stats.calls} title="Anrufe" />
+                <Stat icon={<ClipboardList size={14} />} n={p.stats.inquiries} title="Anfragen" />
+                <Stat icon={<Calendar size={14} />} n={p.stats.appointments} title="Termine" />
+                <Stat icon={<FileText size={14} />} n={p.stats.cost_estimates} title="KVA" />
+                <Stat icon={<Receipt size={14} />} n={p.stats.invoices} title="Rechnungen" />
+                <Stat icon={<Users size={14} />} n={p.stats.employees} title="Mitarbeiter" />
               </div>
             </button>
           )
         })}
         {!filtered.length && (
-          <div className="rounded-xl border border-border bg-surface px-4 py-12 text-center text-muted">Keine Projekte.</div>
+          <div className="rounded-xl border border-border bg-surface px-4 py-12 text-center text-muted">Keine Fälle.</div>
         )}
       </div>
     </div>
@@ -226,18 +169,9 @@ export function ProjectsPage() {
 
 const selectCls = 'w-full rounded-md border border-border bg-alt px-3 py-2 text-sm text-text outline-none focus:border-green-primary'
 
-function SummaryCard({ label, value, cls }: { label: string; value: string; cls: string }) {
+function Stat({ icon, n, title }: { icon: React.ReactNode; n: number; title: string }) {
   return (
-    <div className="rounded-xl border border-border bg-surface p-5">
-      <div className="text-xs text-muted">{label}</div>
-      <div className={cn('mt-1 text-2xl font-bold', cls)}>{value}</div>
-    </div>
-  )
-}
-
-function Stat({ icon, n }: { icon: React.ReactNode; n: number }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1.5" title={title}>
       {icon}
       <span className="font-medium text-body">{n}</span>
     </span>

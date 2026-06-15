@@ -226,7 +226,7 @@ function TriageSection({
               className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-[13px] font-bold text-body transition hover:bg-alt disabled:opacity-50"
             >
               <FolderInput size={16} className="text-green-deep" />
-              <span className="flex-1 text-left">Anderem Vorgang zuordnen</span>
+              <span className="flex-1 text-left">Anderem Fall zuordnen</span>
               <ChevronDown size={16} className={cn('text-faint transition-transform', picking && 'rotate-180')} />
             </button>
             {picking && (
@@ -588,8 +588,9 @@ export function Workspace({
   const navigate = useNavigate()
   const vgNumber = inquiry?.number ?? call.inquiry_number ?? null
   const vgSubject = inquiry?.subject ?? call.inquiry_subject ?? null
-  // Projects merge (item 6): prefer the Projekt chip; old calls without a
-  // project keep their Fall link until the backfill migrates them.
+  // The grouping = the Fall (Case). The active grouping lives on project_id (the
+  // cases↔projects merge); we present it purely as "Fall". An ungrouped call
+  // shows its own Anfrage (inquiry).
   const projectId = call.project_id
   const caseId = call.case_id
   return (
@@ -607,13 +608,13 @@ export function Workspace({
         </div>
         {projectId ? (
           <button
-            onClick={() => navigate(`/projects/${projectId}`)}
-            title="Zum Projekt (alle Anfragen, KVAs, Techniker)"
+            onClick={() => navigate(`/fall/${projectId}`)}
+            title="Zum Fall (alle Anfragen, Termine, KVA, Rechnungen, Techniker)"
             className="mb-3.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-ai-bg bg-ai-bg px-2.5 py-1.5 text-xs font-bold text-ai transition hover:brightness-95"
           >
             <Layers size={13} className="flex-shrink-0" />
             <span className="truncate">
-              Projekt {call.project_number ?? ''}
+              Fall {call.project_number ?? ''}
               {call.project_title ? ` · ${call.project_title}` : ''}
             </span>
             <ChevronRight size={13} className="flex-shrink-0" />
@@ -634,12 +635,12 @@ export function Workspace({
         ) : call.inquiry_id ? (
           <button
             onClick={() => navigate(`/vorgang/${call.inquiry_id}`)}
-            title="Zum Vorgang"
+            title="Zur Anfrage"
             className="mb-3.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-alt px-2.5 py-1.5 text-xs font-bold text-muted transition-colors hover:border-green-primary hover:text-green-deep"
           >
             <ListChecks size={13} className="flex-shrink-0" />
             <span className="truncate">
-              Vorgang {vgNumber ?? ''}
+              Anfrage {vgNumber ?? ''}
               {vgSubject ? ` · ${vgSubject}` : ''}
             </span>
             <ChevronRight size={13} className="flex-shrink-0" />

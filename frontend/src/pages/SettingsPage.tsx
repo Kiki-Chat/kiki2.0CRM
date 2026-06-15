@@ -1378,7 +1378,7 @@ function GefahrenzoneSection({ org, flash }: { org: Org; flash: (m: string) => v
         </div>
         <div className="rounded-lg border border-error/40 bg-error-bg/30 p-4">
           <h3 className="text-sm font-bold text-text">Organisation löschen</h3>
-          <p className="mt-1 text-sm text-muted">Löscht unwiderruflich alle Daten: Kunden, Rechnungen, Termine, Mitarbeiter, Projekte.</p>
+          <p className="mt-1 text-sm text-muted">Löscht unwiderruflich alle Daten: Kunden, Rechnungen, Termine, Mitarbeiter, Fälle.</p>
           <button onClick={() => { setConfirmName(''); setDelOpen(true) }} className="mt-3 rounded-md bg-error px-4 py-2 text-sm font-semibold text-white hover:brightness-110">Organisation löschen</button>
         </div>
       </div>

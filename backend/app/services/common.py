@@ -384,6 +384,89 @@ def get_org_code(client, org_id: str) -> str:
     return (rows[0].get("code") if rows else None) or "K00"
 
 
+# ── Org token for the readable ANF-/FL- numbering (e.g. KC007) ───────────────
+# Company initials + the org's slug number — readable AND unique across client
+# orgs, so case/inquiry numbers never clash between tenants. Persisted on
+# organizations.case_prefix (migration 0072); self-heals + de-clashes on first use.
+_LEGAL_FORMS = {
+    "gmbh", "ag", "kg", "ug", "eg", "mbh", "co", "kgaa", "ohg", "gbr",
+    "ev", "se", "ltd", "inc", "llc", "und", "and",
+}
+
+
+def _org_initials(name: str | None) -> str:
+    if not name:
+        return "X"
+    # Split on whitespace/punctuation FIRST so legal forms ("GmbH") are dropped as
+    # whole words before any camelCase splitting could shatter them ("Gmb"+"H").
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", name) if w]
+    sig = [w for w in words if w.lower() not in _LEGAL_FORMS] or words
+    parts: list[str] = []
+    for w in sig:  # then expand internal CamelCase: TobiasDachdecker → Tobias, Dachdecker
+        parts.extend(re.sub(r"(?<=[a-z])(?=[A-Z])", " ", w).split() or [w])
+    return ("".join(p[0] for p in parts[:3]).upper()) or "X"
+
+
+def _org_slug_num(slug: str | None) -> str:
+    m = re.search(r"(\d+)\s*$", slug or "")
+    return m.group(1) if m else ""
+
+
+def _derive_org_token(name: str | None, slug: str | None, code: str | None) -> str:
+    num = _org_slug_num(slug)
+    if not num:  # no number in the slug → fall back to the numeric part of the K-code
+        m = re.search(r"(\d+)", code or "")
+        num = m.group(1) if m else "00"
+    return f"{_org_initials(name)}{num}"
+
+
+def get_org_token(client, org_id: str) -> str:
+    """The org's readable record-number token (e.g. ``KC007``) used by ANF-/FL-
+    numbers. Reads organizations.case_prefix; derives + persists it (de-clashing
+    against other orgs) on first use. Falls back to get_org_code if the column
+    isn't migrated yet."""
+    try:
+        rows = (
+            client.table("organizations")
+            .select("id, name, slug, code, case_prefix")
+            .eq("id", org_id).limit(1).execute().data
+        )
+    except Exception:  # column not migrated yet
+        return get_org_code(client, org_id)
+    if not rows:
+        return "X00"
+    org = rows[0]
+    if org.get("case_prefix"):
+        return org["case_prefix"]
+    token = _derive_org_token(org.get("name"), org.get("slug"), org.get("code"))
+    try:  # disambiguate if a sibling org already holds this exact token
+        clash = (
+            client.table("organizations").select("id")
+            .eq("case_prefix", token).neq("id", org_id).limit(1).execute().data
+        )
+        if clash:
+            token = f"{token}{(org.get('code') or 'X').replace('K', '', 1) or 'X'}"
+        client.table("organizations").update({"case_prefix": token}).eq("id", org_id).execute()
+    except Exception:  # best-effort persist; numbering still works with the derived token
+        pass
+    return token
+
+
+def _max_seq_for_token(client, table: str, org_id: str, prefix: str) -> int:
+    """Highest trailing integer among this org's ``{prefix}NNNN`` numbers (MAX+1
+    so deletes never re-issue a number). Computed in Python — the suffix isn't
+    relied on for lexical order."""
+    rows = fetch_all_rows(
+        lambda: client.table(table).select("number").eq("org_id", org_id).like("number", f"{prefix}%")
+    )
+    best = 0
+    for r in rows:
+        tail = str(r.get("number") or "").rsplit("-", 1)[-1]
+        if tail.isdigit():
+            best = max(best, int(tail))
+    return best
+
+
 def _max_number_seq(client, table: str, org_id: str, year: int) -> int:
     """Highest numeric suffix among this org's ``…-{year}-…NNNN`` record numbers.
 
@@ -411,23 +494,23 @@ def _max_number_seq(client, table: str, org_id: str, year: int) -> int:
 
 
 def gen_inquiry_number(client, org_id: str) -> str:
-    """Next Anfrage number, org-bound: ``{ORGCODE}-{YYYY}-A{NNNN}`` (e.g.
-    TD04-2026-A0007). The org code makes numbers unique ACROSS orgs; the ``A``
-    keeps Anfrage numbers visually distinct from case numbers. MAX+1 over the
-    existing numbers (backed by the partial unique index from migration 0065 —
-    a racing twin insert now fails loudly instead of corrupting numbering)."""
-    year = now_berlin().year
-    seq = _max_number_seq(client, "inquiries", org_id, year) + 1
-    return f"{get_org_code(client, org_id)}-{year}-A{seq:04d}"
+    """Next Anfrage (individual call) number: ``ANF-{TOKEN}-{NNNN}`` (e.g.
+    ANF-KC007-0007). ``ANF`` marks it an inquiry; the org token (company initials
+    + slug number) makes numbers unique + readable across tenants. Continuous
+    per-org sequence, MAX+1 (deletes never re-issue), backed by the partial unique
+    index from migration 0065."""
+    prefix = f"ANF-{get_org_token(client, org_id)}-"
+    seq = _max_seq_for_token(client, "inquiries", org_id, prefix) + 1
+    return f"{prefix}{seq:04d}"
 
 
 def gen_case_number(client, org_id: str) -> str:
-    """Next staff-facing case (Fall) number, org-bound: ``{ORGCODE}-{YYYY}-{NNNN}``
-    (e.g. TD04-2026-0001). No 'FALL' prefix — the UI already labels it Fall.
-    MAX+1 + unique index, same contract as gen_inquiry_number."""
-    year = now_berlin().year
-    seq = _max_number_seq(client, "cases", org_id, year) + 1
-    return f"{get_org_code(client, org_id)}-{year}-{seq:04d}"
+    """Next case (Fall) number: ``FL-{TOKEN}-{NNNN}`` (e.g. FL-KC007-0001). The
+    case is the bundled ticket; numbers run over the grouping table (``projects``,
+    the active grouping after the cases↔projects merge), continuous per org."""
+    prefix = f"FL-{get_org_token(client, org_id)}-"
+    seq = _max_seq_for_token(client, "projects", org_id, prefix) + 1
+    return f"{prefix}{seq:04d}"
 
 
 CUSTOMER_NUMBER_PREFIX = "KI-"

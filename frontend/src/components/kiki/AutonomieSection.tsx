@@ -19,10 +19,10 @@ const CAPABILITIES: { key: CapKey; label: string; hint: string; backOffice?: boo
     levels: ['Nur Anfrage aufnehmen — keine Buchung', 'Vorläufig buchen — das Team bestätigt', 'Verbindlich buchen & im Gespräch bestätigen'] },
   { key: 'kva', label: 'Kostenvoranschläge (KVA)', hint: 'Die Telefon-KI erstellt Kostenvoranschläge.',
     levels: ['Nur Anfrage aufnehmen — kein KVA', 'Entwurf erstellen — das Team versendet', 'Entwurf erstellen & direkt an den Kunden senden'] },
-  { key: 'projects', label: 'Projekte & Plantafel', hint: 'Im Hintergrund bei Terminbestätigung.', backOffice: true,
-    levels: ['Kein Projekt anlegen', 'Projekt als Entwurf bei Terminbestätigung', 'Projekt automatisch bei Terminbestätigung'] },
-  { key: 'invoices', label: 'Rechnungen', hint: 'Im Hintergrund bei Projektabschluss.', backOffice: true,
-    levels: ['Keine Rechnung anlegen', 'Rechnungsentwurf bei Projektabschluss', 'Rechnung automatisch erstellen (Versand folgt manuell)'] },
+  { key: 'projects', label: 'Fälle & Plantafel', hint: 'Im Hintergrund bei Terminbestätigung.', backOffice: true,
+    levels: ['Keinen Fall anlegen', 'Fall als Entwurf bei Terminbestätigung', 'Fall automatisch bei Terminbestätigung'] },
+  { key: 'invoices', label: 'Rechnungen', hint: 'Im Hintergrund bei Fallabschluss.', backOffice: true,
+    levels: ['Keine Rechnung anlegen', 'Rechnungsentwurf bei Fallabschluss', 'Rechnung automatisch erstellen (Versand folgt manuell)'] },
 ]
 
 export function AutonomieSection({ data, flash }: { data: KzOverview; flash: (m: string) => void }) {

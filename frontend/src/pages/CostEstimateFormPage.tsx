@@ -428,7 +428,7 @@ export function CostEstimateFormPage() {
                   ))}
                 </select>
                 {inquiryId && (
-                  <p className="mt-1 text-xs text-muted">Der KVA wird automatisch dem Projekt dieser Anfrage zugeordnet.</p>
+                  <p className="mt-1 text-xs text-muted">Der KVA wird automatisch dem Fall dieser Anfrage zugeordnet.</p>
                 )}
               </div>
             )}

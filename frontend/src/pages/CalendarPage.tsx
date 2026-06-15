@@ -355,7 +355,7 @@ export function CalendarPage() {
           <h1 className="text-2xl font-bold text-text">Kalender</h1>
           <div className="flex gap-1 rounded-md border border-border bg-alt p-1">
             <button onClick={() => setMode('appointments')} className={cn('rounded px-3 py-1 text-sm', mode === 'appointments' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Termine</button>
-            <button onClick={() => setMode('projects')} className={cn('rounded px-3 py-1 text-sm', mode === 'projects' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Projekt-Timeline</button>
+            <button onClick={() => setMode('projects')} className={cn('rounded px-3 py-1 text-sm', mode === 'projects' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Fall-Timeline</button>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

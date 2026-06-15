@@ -3,32 +3,16 @@
 import logging
 
 from app.db.supabase_client import get_service_client
-from app.services.common import now_berlin
+from app.services.common import gen_case_number
 
 logger = logging.getLogger(__name__)
 
 
 def gen_project_number(client, org_id: str) -> str:
-    # MAX+1 over existing numbers (NOT count+1): with the unique (org_id, number)
-    # index, count+1 re-issues a number after any delete and the insert fails.
-    # Same fix pattern as gen_case_number/gen_inquiry_number (batch D, 2026-06-11).
-    year = now_berlin().year
-    prefix = f"PRJ-{year}-"
-    rows = (
-        client.table("projects")
-        .select("number")
-        .eq("org_id", org_id)
-        .like("number", f"{prefix}%")
-        .execute()
-        .data
-        or []
-    )
-    top = 0
-    for r in rows:
-        tail = (r.get("number") or "")[len(prefix):]
-        if tail.isdigit():
-            top = max(top, int(tail))
-    return f"{prefix}{top + 1:05d}"
+    # A project IS the case (the active grouping after the cases↔projects merge),
+    # so it gets the same FL-{TOKEN}-{NNNN} number as any other case. Delegates to
+    # the single case-number generator so both code paths share one sequence.
+    return gen_case_number(client, org_id)
 
 
 def maybe_create_project_for_appointment(

@@ -327,25 +327,25 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
 
   return (
     <Panel
-      title={`Vorgänge (${inquiries.length})`}
+      title={`Anfragen (${inquiries.length})`}
       action={
         <div className="flex items-center gap-2">
           <button
             onClick={() => propose.mutate()}
             disabled={propose.isPending || inquiries.length < 2}
             className="flex items-center gap-1.5 rounded-md border border-ai-bg px-3 py-1.5 text-xs font-semibold text-ai hover:bg-ai-bg disabled:opacity-50"
-            title="Ähnliche Vorgänge per KI zu Projekten bündeln"
+            title="Ähnliche Anfragen per KI zu Fällen bündeln"
           >
             <Sparkles size={14} /> {propose.isPending ? 'Analysiere…' : 'KI-Gruppierung'}
           </button>
           <button
             onClick={() => {
-              const l = window.prompt('Neues Projekt — Thema:')
+              const l = window.prompt('Neuer Fall — Thema:')
               if (l) createCase.mutate(l)
             }}
             className="flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110"
           >
-            <Plus size={14} /> Neues Projekt
+            <Plus size={14} /> Neuer Fall
           </button>
         </div>
       }
@@ -354,7 +354,7 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Tag variant="info">{open} offen</Tag>
           <Tag variant="success">{done} erledigt</Tag>
-          {cases.length > 0 && <Tag variant="ai">{cases.length} Projekte</Tag>}
+          {cases.length > 0 && <Tag variant="ai">{cases.length} Fälle</Tag>}
         </div>
         <div className="relative mb-3">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
@@ -364,7 +364,7 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
             autoComplete="off"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Vorgänge durchsuchen…"
+            placeholder="Anfragen durchsuchen…"
             className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
           />
         </div>
@@ -376,10 +376,10 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
                 <button
                   onClick={() => navigate(`/projects/${cid}`)}
                   className="mb-1.5 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition hover:bg-ai-bg"
-                  title="Projekt öffnen (alle Anfragen)"
+                  title="Fall öffnen (alle Anfragen)"
                 >
                   <Layers size={14} className="flex-shrink-0 text-ai" />
-                  <span className="truncate text-sm font-bold text-text">{c.label || 'Projekt'}</span>
+                  <span className="truncate text-sm font-bold text-text">{c.label || 'Fall'}</span>
                   {c.number && <span className="font-mono text-[11px] text-ai">{c.number}</span>}
                   <span className="flex-1" />
                   <span className="text-xs text-muted">{items.length} Anfragen</span>
@@ -396,7 +396,7 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
           {ungrouped.map((i) => (
             <InquiryRow key={i.id} i={i} cases={cases} onChanged={refresh} />
           ))}
-          {!filtered.length && <p className="py-6 text-center text-sm text-muted">Keine Vorgänge.</p>}
+          {!filtered.length && <p className="py-6 text-center text-sm text-muted">Keine Anfragen.</p>}
         </div>
       </>
       {proposal && (
@@ -417,7 +417,7 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
 function InquiryRow({ i, cases, caseId, onChanged }: { i: Inquiry; cases: CaseRow[]; caseId?: string; onChanged: () => void }) {
   const navigate = useNavigate()
   const st = STATUS_TAG[i.status] ?? { label: i.status, variant: 'neutral' as const }
-  const topic = i.subject || i.title || 'Vorgang'
+  const topic = i.subject || i.title || 'Anfrage'
   return (
     <div className="group relative rounded-lg border border-border bg-surface p-3 transition hover:border-green-primary hover:bg-alt">
       <div onClick={() => navigate(caseId ? `/projects/${caseId}` : `/vorgang/${i.id}`)} className="cursor-pointer">
@@ -468,7 +468,7 @@ function MoveMenu({ inquiry, cases, onMoved }: { inquiry: Inquiry; cases: CaseRo
           setOpen((o) => !o)
         }}
         className="rounded p-1 text-faint hover:bg-border"
-        title="In anderes Projekt verschieben"
+        title="In anderen Fall verschieben"
       >
         <MoreVertical size={15} />
       </button>
@@ -478,23 +478,23 @@ function MoveMenu({ inquiry, cases, onMoved }: { inquiry: Inquiry; cases: CaseRo
           <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-border bg-surface p-1 shadow-e3">
             {inquiry.case_id && (
               <button onClick={() => move.mutate({ case_id: null })} className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
-                Aus Projekt lösen
+                Aus Fall lösen
               </button>
             )}
-            {others.length > 0 && <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Projekt verschieben</div>}
+            {others.length > 0 && <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Fall verschieben</div>}
             {others.map((c) => (
               <button key={c.id} onClick={() => move.mutate({ case_id: c.id })} className="block w-full truncate rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
-                → {c.label || 'Projekt'}
+                → {c.label || 'Fall'}
               </button>
             ))}
             <button
               onClick={() => {
-                const l = window.prompt('Neues Projekt — Thema:')
+                const l = window.prompt('Neuer Fall — Thema:')
                 if (l) move.mutate({ new_case_label: l })
               }}
               className="block w-full rounded px-2.5 py-1.5 text-left text-sm font-medium text-green-deep hover:bg-alt"
             >
-              ＋ Neues Projekt…
+              ＋ Neuer Fall…
             </button>
           </div>
         </>
@@ -539,7 +539,7 @@ function GroupingReviewModal({
     <Modal
       open
       onOpenChange={(o) => !o && onClose()}
-      title="KI-Vorschlag: Vorgänge zu Projekten bündeln"
+      title="KI-Vorschlag: Anfragen zu Fällen bündeln"
       widthClass="max-w-2xl"
       footer={
         <button
@@ -547,16 +547,16 @@ function GroupingReviewModal({
           disabled={apply.isPending || picked.size === 0}
           className="w-full rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
         >
-          {picked.size} Projekte übernehmen
+          {picked.size} Fälle übernehmen
         </button>
       }
     >
       <div className="space-y-2">
         <p className="text-xs text-muted">
-          {proposal.n_inquiries} Vorgänge analysiert ({proposal.model}). Haken = als ein Projekt bündeln; einzelne Vorgänge
+          {proposal.n_inquiries} Anfragen analysiert ({proposal.model}). Haken = als einen Fall bündeln; einzelne Anfragen
           kannst du danach jederzeit verschieben.
         </p>
-        {merges.length === 0 && <p className="py-6 text-center text-sm text-muted">Kein Bündelungsvorschlag — alle Vorgänge wirken eigenständig.</p>}
+        {merges.length === 0 && <p className="py-6 text-center text-sm text-muted">Kein Bündelungsvorschlag — alle Anfragen wirken eigenständig.</p>}
         {merges.map((c, idx) => (
           <label
             key={idx}
