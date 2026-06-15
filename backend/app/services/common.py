@@ -454,10 +454,18 @@ def get_org_token(client, org_id: str) -> str:
 
 def _max_seq_for_token(client, table: str, org_id: str, prefix: str) -> int:
     """Highest trailing integer among this org's ``{prefix}NNNN`` numbers (MAX+1
-    so deletes never re-issue a number). Computed in Python — the suffix isn't
-    relied on for lexical order."""
-    rows = fetch_all_rows(
-        lambda: client.table(table).select("number").eq("org_id", org_id).like("number", f"{prefix}%")
+    so deletes never re-issue a number). The suffix is zero-padded, so lexical
+    DESC = numeric DESC; take the top few and parse defensively."""
+    rows = (
+        client.table(table)
+        .select("number")
+        .eq("org_id", org_id)
+        .like("number", f"{prefix}%")
+        .order("number", desc=True)
+        .limit(5)
+        .execute()
+        .data
+        or []
     )
     best = 0
     for r in rows:

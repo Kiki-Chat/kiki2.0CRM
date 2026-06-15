@@ -39,24 +39,55 @@ def _cosine(a, b) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
-def _inquiry_signal(inquiry: dict) -> str:
-    parts = [inquiry.get("subject") or inquiry.get("title") or "Anfrage", inquiry.get("notes") or ""]
-    return " | ".join(p.strip().replace("\n", " ") for p in parts if p)[:360]
+def _call_content(client, org_id: str, inquiry_ids: list[str], with_transcript: bool) -> dict[str, str]:
+    """The ACTUAL call content per inquiry — summary (+ the customer's transcript
+    turns) — so grouping reads what the call was really about, not the vague (often
+    empty) subject. A subject says "Heizung"; the content says which room, which
+    error code, which appointment — that's what decides the right case."""
+    if not inquiry_ids:
+        return {}
+    cols = "inquiry_id, summary_title, summary" + (", transcript" if with_transcript else "")
+    rows = (
+        client.table("calls").select(cols)
+        .eq("org_id", org_id).in_("inquiry_id", inquiry_ids).is_("deleted_at", "null")
+        .execute().data or []
+    )
+    by: dict[str, list[str]] = {}
+    for c in rows:
+        parts = [c.get("summary_title") or "", c.get("summary") or ""]
+        if with_transcript and isinstance(c.get("transcript"), list):
+            parts.append(" ".join(
+                str(t.get("message") or "") for t in c["transcript"]
+                if isinstance(t, dict) and (t.get("role") or "") != "agent" and t.get("message")
+            ))
+        blob = " ".join(p for p in parts if p)
+        if blob:
+            by.setdefault(c["inquiry_id"], []).append(blob)
+    return {k: " ".join(v).replace("\n", " ") for k, v in by.items()}
+
+
+def _inquiry_signal(inquiry: dict, content: str = "") -> str:
+    # The subject is just a headline (often vague/empty); the call content is what
+    # actually disambiguates (bedroom vs kitchen heating, F28 vs leak, …).
+    parts = [inquiry.get("subject") or inquiry.get("title") or "Anfrage", content, inquiry.get("notes") or ""]
+    return " | ".join(p.strip() for p in parts if p).replace("\n", " ")[:700]
 
 
 def _project_signal(client, org_id: str, project: dict) -> str:
     members = (
         client.table("inquiries")
-        .select("subject, title, notes")
+        .select("id, subject, title")
         .eq("org_id", org_id).eq("project_id", project["id"])
         .neq("status", "deleted").order("created_at", desc=True)
         .limit(_MEMBER_SAMPLE).execute().data or []
     )
+    content = _call_content(client, org_id, [m["id"] for m in members], with_transcript=False)
     member_txt = "; ".join(
-        (m.get("subject") or m.get("title") or "")[:60] for m in members if (m.get("subject") or m.get("title"))
+        f"{m.get('subject') or m.get('title') or ''} {content.get(m['id'], '')}".strip()[:140]
+        for m in members if (m.get("subject") or m.get("title") or content.get(m["id"]))
     )
     head = f"{project.get('title') or ''} {project.get('description') or ''}".strip()
-    return f"{head} | {member_txt}".replace("\n", " ")[:360]
+    return f"{head} | {member_txt}".replace("\n", " ")[:700]
 
 
 def _create_project_for_inquiry(client, org_id: str, inquiry: dict) -> dict:
@@ -108,7 +139,10 @@ def auto_assign_inquiry_to_project(client, org_id: str, inquiry: dict) -> dict |
     if open_projects:
         try:
             if ai_usage.within_cap(org_id):
-                texts = [_inquiry_signal(inquiry)] + [
+                # The new call's own content (summary + transcript) is what decides
+                # which case it belongs to — not its headline subject.
+                inq_content = _call_content(client, org_id, [inquiry["id"]], with_transcript=True).get(inquiry["id"], "")
+                texts = [_inquiry_signal(inquiry, inq_content)] + [
                     _project_signal(client, org_id, p) for p in open_projects
                 ]
                 vecs, _tok = ai_client.embed(texts, model=_EMB_MODEL)

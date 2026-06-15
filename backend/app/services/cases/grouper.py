@@ -78,7 +78,7 @@ def _gather_signals(client, org_id: str, customer_id: str) -> list[dict]:
     ids = [i["id"] for i in inqs]
     calls = (
         client.table("calls")
-        .select("inquiry_id, summary_title, summary, direction, started_at")
+        .select("inquiry_id, summary_title, summary, direction, started_at, transcript")
         .eq("org_id", org_id).in_("inquiry_id", ids).is_("deleted_at", "null").execute().data or []
     )
     appts = (
@@ -98,7 +98,18 @@ def _gather_signals(client, org_id: str, customer_id: str) -> list[dict]:
         cs = calls_by.get(i["id"], [])
         titles = ", ".join(_truncate(c.get("summary_title"), 50) for c in cs if c.get("summary_title"))
         cdir = ",".join(sorted({c.get("direction") or "?" for c in cs})) if cs else "—"
-        summ = _truncate(" ".join(c.get("summary") or "" for c in cs), 260)
+        # Content, not just the headline: call summaries + the customer's own
+        # transcript words — that's what distinguishes e.g. bedroom from kitchen
+        # heating when the subject only says "Heizung".
+        summ_parts = [c.get("summary") or "" for c in cs]
+        for c in cs:
+            tr = c.get("transcript")
+            if isinstance(tr, list):
+                summ_parts.append(" ".join(
+                    str(t.get("message") or "") for t in tr
+                    if isinstance(t, dict) and (t.get("role") or "") != "agent" and t.get("message")
+                ))
+        summ = _truncate(" ".join(p for p in summ_parts if p), 500)
         ap = appts_by.get(i["id"], [])
         appt_txt = "; ".join(f"{_truncate(a.get('title'), 36)}@{(a.get('scheduled_at') or '')[:10]}" for a in ap)
         signal = (
@@ -108,7 +119,7 @@ def _gather_signals(client, org_id: str, customer_id: str) -> list[dict]:
         out.append({
             "id": i["id"], "number": i["number"], "topic": topic,
             "is_action": _is_action(f"{topic} {titles}"),
-            "signal": _truncate(signal, 360),
+            "signal": _truncate(signal, 700),
         })
     return out
 
