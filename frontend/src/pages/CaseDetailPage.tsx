@@ -175,9 +175,10 @@ export function CaseDetailPage() {
   const customerProjects = projects.filter((p) => !customerId || p.customer_id === customerId)
   const technicians = data.employees.filter((e) => e.is_technician)
 
-  // The KVA inherits the case via the (case-member) inquiry; the invoice gets the customer.
-  const goKva = () => navigate(`/cost-estimates/new?customer_id=${customerId ?? ''}${firstInq ? `&inquiry_id=${firstInq}` : ''}`)
-  const goInvoice = () => navigate(`/invoices/new?customer_id=${customerId ?? ''}`)
+  // Pass case_id so the KVA/invoice links straight back to this Fall (+ a member
+  // inquiry on the KVA for the inquiry-level chain).
+  const goKva = () => navigate(`/cost-estimates/new?customer_id=${customerId ?? ''}&case_id=${cs.id}${firstInq ? `&inquiry_id=${firstInq}` : ''}`)
+  const goInvoice = () => navigate(`/invoices/new?customer_id=${customerId ?? ''}&case_id=${cs.id}`)
 
   // Synthetic "call" so the shared CreateAppointmentModal can pre-fill from the case.
   const apptCall = {
