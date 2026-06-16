@@ -106,7 +106,7 @@ def _tables() -> dict[str, list[dict]]:
             {"id": "cust-A", "org_id": "org-A"},
             {"id": "cust-B", "org_id": "org-B"},
         ],
-        "projects": [
+        "cases": [
             {"id": "proj-A", "org_id": "org-A"},
             {"id": "proj-B", "org_id": "org-B"},
         ],
@@ -141,9 +141,9 @@ def test_inquiry_create_rejects_cross_org_customer(monkeypatch):
     assert "Organisation" in r.json()["detail"]
 
 
-def test_inquiry_create_rejects_cross_org_project(monkeypatch):
+def test_inquiry_create_rejects_cross_org_case(monkeypatch):
     _override(monkeypatch, inq)
-    r = client.post("/api/inquiries", json={"project_id": "proj-B", "title": "X"})
+    r = client.post("/api/inquiries", json={"case_id": "proj-B", "title": "X"})
     assert r.status_code == 422, r.text
 
 
@@ -153,9 +153,9 @@ def test_inquiry_create_accepts_same_org_customer(monkeypatch):
     assert r.status_code == 200, r.text  # no regression on valid same-org FK
 
 
-def test_inquiry_update_rejects_cross_org_project(monkeypatch):
+def test_inquiry_update_rejects_cross_org_case(monkeypatch):
     _override(monkeypatch, inq)
-    r = client.patch("/api/inquiries/inq-A", json={"project_id": "proj-B"})
+    r = client.patch("/api/inquiries/inq-A", json={"case_id": "proj-B"})
     assert r.status_code == 422, r.text
 
 

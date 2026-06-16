@@ -1,6 +1,6 @@
 import {
   LayoutDashboard,
-  Inbox,
+  Layers,
   Phone,
   Users,
   Calendar,
@@ -39,7 +39,7 @@ export function isGroup(e: NavEntry): e is NavGroupDef {
 
 export const NAV: NavEntry[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/posteingang', icon: Inbox, label: 'Posteingang' },
+  { to: '/cases', icon: Layers, label: 'Fälle' },
   { to: '/calls', icon: Phone, label: 'Anrufe', badgeKey: 'calls' },
   { to: '/customers', icon: Users, label: 'Kontakte' },
   { to: '/calendar', icon: Calendar, label: 'Kalender' },
@@ -48,7 +48,7 @@ export const NAV: NavEntry[] = [
     icon: Briefcase,
     label: 'Aufträge',
     children: [
-      { to: '/projects', label: 'Fälle' },
+      { to: '/projects', label: 'Projekte' },
       { to: '/planning-board', label: 'Planungstafel' },
     ],
   },

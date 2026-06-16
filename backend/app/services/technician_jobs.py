@@ -275,25 +275,25 @@ def add_photo(token: str, *, filename: str, content: bytes, mime_type: str) -> d
         "id", link["id"]
     ).execute()
     # Mirror into the customer's documents so the CRM shows the photos in place.
-    # Stamped with inquiry + Projekt + technician name, so the project's
+    # Stamped with inquiry + Fall (case) + technician name, so the case's
     # Dokumente tab shows WHO uploaded each Einsatzbericht photo (item 6).
     customer = ctx.get("customer")
     if customer:
         try:
-            project_id = None
+            case_id = None
             if link.get("inquiry_id"):
                 inq = (
-                    client.table("inquiries").select("project_id")
+                    client.table("inquiries").select("case_id")
                     .eq("org_id", link["org_id"]).eq("id", link["inquiry_id"])
                     .limit(1).execute().data
                 )
-                project_id = inq[0].get("project_id") if inq else None
+                case_id = inq[0].get("case_id") if inq else None
             technician = (ctx.get("employee") or {}).get("display_name")
             client.table("documents").insert({
                 "org_id": link["org_id"],
                 "customer_id": customer["id"],
                 "inquiry_id": link.get("inquiry_id"),
-                "project_id": project_id,
+                "case_id": case_id,
                 "name": safe_name,
                 "path": path,
                 "category": "Einsatzbericht",

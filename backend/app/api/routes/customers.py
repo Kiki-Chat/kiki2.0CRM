@@ -195,7 +195,7 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     def _inq():
         return (
             client.table("inquiries")
-            .select("id, number, subject, title, type, status, created_at, updated_at, project_id, case_id, case_confidence, case_reason")
+            .select("id, number, subject, title, type, status, created_at, updated_at, case_id, case_confidence, case_reason")
             .eq("org_id", org_id).eq("customer_id", customer_id)
             .neq("status", "deleted").order("created_at", desc=True)
             .execute().data or []
@@ -258,22 +258,40 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
         inq["open_count"] = open_count.get(iid, 0)
         inq["last_activity_at"] = last_act.get(iid) or inq.get("updated_at") or inq.get("created_at")
 
-    # Projects merge (item 6): the umbrella layer IS projects now. Serve them in
-    # the historical `cases` shape (id/number/label/status) and alias each
-    # inquiry's case_id to its project_id — the detail page's grouping UI, move
-    # menu and /fall/:id links (→ project umbrella) all keep working unchanged.
-    projects = (
-        client.table("projects").select("id, number, title, status, created_at")
+    # The grouping umbrella is the CASE (Fall) now. After the split (migration 0073)
+    # `cases` is the renamed former projects table → FL- number, display name in
+    # `title`, status planning|active|completed|archived. Serve them in the historical
+    # grouping shape (id/number/label/status) the detail page's grouping UI, move menu
+    # and /fall/:id links expect — `label` = case.title. Each inquiry already carries
+    # its real `case_id` (the former inquiries.project_id was renamed), so no aliasing.
+    cases = (
+        client.table("cases").select("id, number, title, status, created_at, project_id")
         .eq("org_id", org_id).eq("customer_id", customer_id)
-        .neq("status", "archived").execute().data or []
+        .neq("status", "archived").order("created_at", desc=True).execute().data or []
     )
     customer["cases"] = [
-        {"id": p["id"], "number": p.get("number"), "label": p.get("title"),
-         "status": p.get("status"), "created_at": p.get("created_at")}
-        for p in projects
+        {"id": c["id"], "number": c.get("number"), "label": c.get("title"),
+         "status": c.get("status"), "created_at": c.get("created_at"),
+         "project_id": c.get("project_id")}
+        for c in cases
     ]
-    for inq in customer["inquiries"]:
-        inq["case_id"] = inq.get("project_id")
+
+    # Optional top-layer Projekt the cases roll up into (above cases; joined manually,
+    # never auto-created). Serve the same grouping shape so the frontend can render a
+    # Project chip/section; empty for customers with no top-layer project (the norm).
+    project_ids = [c["project_id"] for c in cases if c.get("project_id")]
+    if project_ids:
+        projects = (
+            client.table("projects").select("id, number, title, status, created_at")
+            .eq("org_id", org_id).in_("id", list(set(project_ids))).execute().data or []
+        )
+        customer["projects"] = [
+            {"id": p["id"], "number": p.get("number"), "label": p.get("title"),
+             "status": p.get("status"), "created_at": p.get("created_at")}
+            for p in projects
+        ]
+    else:
+        customer["projects"] = []
     return customer
 
 

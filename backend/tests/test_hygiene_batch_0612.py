@@ -130,7 +130,7 @@ def test_conversation_init_sets_voicemail_default(monkeypatch):
 def test_move_inquiry_case_rejects_other_customers_case(monkeypatch):
     db = _DB({
         "inquiries": [[{"id": "inq-1", "customer_id": "cust-A"}]],
-        "projects": [[{"id": "proj-B", "customer_id": "cust-B"}]],  # another customer's
+        "cases": [[{"id": "proj-B", "customer_id": "cust-B"}]],  # another customer's
     })
     monkeypatch.setattr(cases_routes, "get_service_client", lambda: db)
     monkeypatch.setattr(cases_routes, "validate_fk_in_org", lambda *a, **k: None)
@@ -145,7 +145,7 @@ def test_move_inquiry_case_rejects_other_customers_case(monkeypatch):
 def test_move_inquiry_case_allows_same_customer(monkeypatch):
     db = _DB({
         "inquiries": [[{"id": "inq-1", "customer_id": "cust-A"}]],
-        "projects": [[{"id": "proj-A", "customer_id": "cust-A"}]],
+        "cases": [[{"id": "proj-A", "customer_id": "cust-A"}]],
     })
     monkeypatch.setattr(cases_routes, "get_service_client", lambda: db)
     monkeypatch.setattr(cases_routes, "validate_fk_in_org", lambda *a, **k: None)

@@ -115,7 +115,7 @@ def _build_row(org_id: str, payload: CostEstimateUpsert, user_id: str | None) ->
         "org_id": org_id,
         "customer_id": payload.customer_id,
         "inquiry_id": payload.inquiry_id,
-        "project_id": payload.project_id,
+        "case_id": payload.case_id,
         "type": payload.type,
         "subject": payload.subject,
         "reference_number": payload.reference_number,
@@ -138,25 +138,26 @@ def _build_row(org_id: str, payload: CostEstimateUpsert, user_id: str | None) ->
 
 
 def _validate_fks(client, org_id: str, payload: CostEstimateUpsert) -> None:
-    """Reject cross-tenant customer/inquiry/project ids (service-role bypasses RLS)."""
+    """Reject cross-tenant customer/inquiry/case ids (service-role bypasses RLS).
+    payload.case_id is the grouping pointer → the `cases` table (FL-)."""
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
     validate_fk_in_org(client, table="inquiries", fk_id=payload.inquiry_id, org_id=org_id, label="Anfrage")
-    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
 
 
 def _create(org_id: str, user_id: str | None, payload: CostEstimateUpsert) -> dict:
     client = get_service_client()
     _validate_fks(client, org_id, payload)
     row = _build_row(org_id, payload, user_id)
-    # Projects merge (item 6): a KVA for an inquiry belongs to that inquiry's
-    # Projekt — inherit it when the form didn't set one explicitly.
-    if row.get("inquiry_id") and not row.get("project_id"):
+    # Case grouping: a KVA for an inquiry belongs to that inquiry's
+    # Fall (case) — inherit it when the form didn't set one explicitly.
+    if row.get("inquiry_id") and not row.get("case_id"):
         inq = (
-            client.table("inquiries").select("project_id")
+            client.table("inquiries").select("case_id")
             .eq("org_id", org_id).eq("id", row["inquiry_id"]).limit(1).execute().data
         )
-        if inq and inq[0].get("project_id"):
-            row["project_id"] = inq[0]["project_id"]
+        if inq and inq[0].get("case_id"):
+            row["case_id"] = inq[0]["case_id"]
     row["number"] = gen_number(client, org_id, payload.type)
     row["status"] = "draft"
     return client.table("cost_estimates").insert(row).execute().data[0]

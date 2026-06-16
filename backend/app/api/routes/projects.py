@@ -1,14 +1,31 @@
+"""Top-layer Project (Projekt) CRUD — the container ABOVE cases.
+
+Case↔Project split (migration 0073): the grouping ticket the user files calls
+into is the **Fall (case)** — see routes/cases.py + services/projects_auto.py.
+A **Project** is the optional restored top container that bundles several cases
+(``PR-{TOKEN}-NNNN``). It owns NO inquiries/actions directly; every per-project
+relation resolves through the chain
+
+    Project → its cases (cases.project_id = {id})
+            → their inquiries (inquiries.case_id ∈ case_ids)
+            → actions (action.inquiry_id ∈ inquiry_ids  OR  action.case_id ∈ case_ids)
+
+There is NO ``inquiries.project_id`` / ``appointments.project_id`` etc. anymore —
+those columns were renamed to ``case_id`` and re-pointed at ``cases``. The team
+table is ``case_employees`` (case-level); a project's team is the UNION of its
+cases' teams (see the /employees endpoints + their POST/DELETE notes).
+"""
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import ProjectEmployeeAdd, ProjectPatch, ProjectUpsert
 from app.services.common import fetch_all_rows, now_berlin, run_parallel, validate_fk_in_org
-from app.services.invoices import maybe_create_invoice_for_project
 from app.services.projects import gen_project_number
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -26,22 +43,66 @@ def _today() -> str:
     return now_berlin().date().isoformat()
 
 
-def _member_inquiry_ids(client, org_id: str, project_id: str) -> list[str]:
-    """The project's member inquiries — the LINK CHAIN of the projects merge.
-    Appointments/KVAs created from calls only carry inquiry_id, so every project
-    relation resolves as: direct project_id OR inquiry_id ∈ members."""
+# ─── Project → cases → inquiries chain ────────────────────────────────────────
+def _case_ids(client, org_id: str, project_id: str) -> list[str]:
+    """The project's member CASE ids (cases.project_id = project_id, this org)."""
     rows = (
-        client.table("inquiries").select("id")
-        .eq("org_id", org_id).eq("project_id", project_id)
-        .neq("status", "deleted").execute().data or []
+        client.table("cases").select("id")
+        .eq("org_id", org_id).eq("project_id", project_id).execute().data or []
     )
     return [r["id"] for r in rows]
 
 
-def _merged(direct: list[dict], via_chain: list[dict]) -> list[dict]:
-    """Union two row lists by id (direct project_id hits win)."""
-    seen = {r["id"] for r in direct}
-    return direct + [r for r in via_chain if r["id"] not in seen]
+def _inquiry_ids(client, org_id: str, case_ids: list[str]) -> list[str]:
+    """Inquiries belonging to the project's cases (inquiries.case_id ∈ case_ids).
+    Actions created from calls only carry inquiry_id, so the project's action set =
+    inquiry_id ∈ these OR case_id ∈ case_ids."""
+    if not case_ids:
+        return []
+    rows = fetch_all_rows(
+        lambda: client.table("inquiries").select("id")
+        .eq("org_id", org_id).in_("case_id", case_ids).neq("status", "deleted")
+    )
+    return [r["id"] for r in rows]
+
+
+def _chain_ids(client, org_id: str, project_id: str) -> tuple[list[str], list[str]]:
+    """(case_ids, inquiry_ids) for one project — the two filters every per-project
+    relation read needs."""
+    case_ids = _case_ids(client, org_id, project_id)
+    return case_ids, _inquiry_ids(client, org_id, case_ids)
+
+
+def _action_rows(
+    client, org_id: str, table: str, sel: str,
+    case_ids: list[str], inquiry_ids: list[str],
+) -> list[dict]:
+    """Read an action table for a project: union of rows whose case_id ∈ case_ids
+    OR inquiry_id ∈ inquiry_ids (both columns exist on appointments/cost_estimates/
+    documents). De-duped by id."""
+    by_case = fetch_all_rows(
+        lambda: client.table(table).select(sel).eq("org_id", org_id).in_("case_id", case_ids)
+    ) if case_ids else []
+    by_inq = fetch_all_rows(
+        lambda: client.table(table).select(sel).eq("org_id", org_id).in_("inquiry_id", inquiry_ids)
+    ) if inquiry_ids else []
+    seen = {r["id"] for r in by_case}
+    return by_case + [r for r in by_inq if r["id"] not in seen]
+
+
+def _invoice_rows(
+    client, org_id: str, sel: str, case_ids: list[str], kva_ids: list[str],
+) -> list[dict]:
+    """Invoices for a project: case_id ∈ case_ids OR cost_estimate_id ∈ kva_ids
+    (invoices have NO inquiry_id — only case_id + cost_estimate_id)."""
+    by_case = fetch_all_rows(
+        lambda: client.table("invoices").select(sel).eq("org_id", org_id).in_("case_id", case_ids)
+    ) if case_ids else []
+    by_kva = fetch_all_rows(
+        lambda: client.table("invoices").select(sel).eq("org_id", org_id).in_("cost_estimate_id", kva_ids)
+    ) if kva_ids else []
+    seen = {r["id"] for r in by_case}
+    return by_case + [r for r in by_kva if r["id"] not in seen]
 
 
 def _fetch(client, org_id: str, project_id: str) -> dict | None:
@@ -98,25 +159,71 @@ def _list(org_id: str, status: str | None, customer_id: str | None, search: str 
     pids = [p["id"] for p in projects]
     cids = list({p["customer_id"] for p in projects if p.get("customer_id")})
 
-    def rows(table: str, sel: str) -> list[dict]:
-        # Paged: these feed per-project COUNTS, so a silent 1000-row truncation
-        # would undercount stats for orgs with many projects/rows.
-        return fetch_all_rows(
-            lambda: client.table(table).select(sel).eq("org_id", org_id).in_("project_id", pids)
-        )
+    # Project → cases: map every member case to its parent project, then carry the
+    # case set forward to resolve inquiries/actions (a project owns nothing direct).
+    cases = fetch_all_rows(
+        lambda: client.table("cases").select("id, project_id")
+        .eq("org_id", org_id).in_("project_id", pids)
+    )
+    proj_of_case = {c["id"]: c["project_id"] for c in cases}
+    case_ids = list(proj_of_case.keys())
+    cases_per_project: dict[str, int] = {}
+    for c in cases:
+        cases_per_project[c["project_id"]] = cases_per_project.get(c["project_id"], 0) + 1
 
-    # Five independent enrichment reads — run them concurrently instead of serially.
-    inq, appts, kvas, invs, pe = run_parallel(
-        lambda: rows("inquiries", "project_id, status"),
-        lambda: rows("appointments", "project_id, status"),
-        lambda: rows("cost_estimates", "project_id"),
-        lambda: rows("invoices", "project_id, total, status"),
-        lambda: fetch_all_rows(
-            lambda: client.table("project_employees")
-            .select("project_id, employee_id")
-            .in_("project_id", pids)
+    # cases → inquiries: keep each inquiry's case_id so counts roll up to a project.
+    inquiries = fetch_all_rows(
+        lambda: client.table("inquiries").select("id, status, case_id")
+        .eq("org_id", org_id).in_("case_id", case_ids).neq("status", "deleted")
+    ) if case_ids else []
+    proj_of_inq: dict[str, str] = {}
+    for i in inquiries:
+        pid = proj_of_case.get(i.get("case_id"))
+        if pid:
+            proj_of_inq[i["id"]] = pid
+    inquiry_ids = list(proj_of_inq.keys())
+
+    def _proj_of_action(r: dict) -> str | None:
+        # Action rolls up to a project via its case OR its inquiry.
+        return proj_of_case.get(r.get("case_id")) or proj_of_inq.get(r.get("inquiry_id"))
+
+    def actions(table: str, sel: str) -> list[dict]:
+        by_case = fetch_all_rows(
+            lambda: client.table(table).select(sel).eq("org_id", org_id).in_("case_id", case_ids)
+        ) if case_ids else []
+        by_inq = fetch_all_rows(
+            lambda: client.table(table).select(sel).eq("org_id", org_id).in_("inquiry_id", inquiry_ids)
+        ) if inquiry_ids else []
+        seen = {r["id"] for r in by_case}
+        return by_case + [r for r in by_inq if r["id"] not in seen]
+
+    # Independent enrichment reads — concurrently. Team is case-level (case_employees).
+    appts, kvas, pe = run_parallel(
+        lambda: actions("appointments", "id, case_id, inquiry_id, status"),
+        lambda: actions("cost_estimates", "id, case_id, inquiry_id"),
+        lambda: (
+            fetch_all_rows(
+                lambda: client.table("case_employees").select("case_id, employee_id").in_("case_id", case_ids)
+            ) if case_ids else []
         ),
     )
+
+    # Invoices: case_id ∈ cases OR via the KVA chain (no inquiry_id on invoices).
+    kva_ids = [k["id"] for k in kvas]
+    proj_of_kva = {k["id"]: _proj_of_action(k) for k in kvas}
+    invs_by_case = fetch_all_rows(
+        lambda: client.table("invoices").select("id, case_id, total, status")
+        .eq("org_id", org_id).in_("case_id", case_ids)
+    ) if case_ids else []
+    invs_by_kva = fetch_all_rows(
+        lambda: client.table("invoices").select("id, cost_estimate_id, total, status")
+        .eq("org_id", org_id).in_("cost_estimate_id", kva_ids)
+    ) if kva_ids else []
+    seen_inv = {v["id"] for v in invs_by_case}
+    invs = invs_by_case + [v for v in invs_by_kva if v["id"] not in seen_inv]
+
+    def _proj_of_invoice(v: dict) -> str | None:
+        return proj_of_case.get(v.get("case_id")) or proj_of_kva.get(v.get("cost_estimate_id"))
 
     customers: dict[str, str] = {}
     calls_by_cust: dict[str, int] = {}
@@ -136,25 +243,43 @@ def _list(org_id: str, status: str | None, customer_id: str | None, search: str 
         for cl in call_rows:
             calls_by_cust[cl["customer_id"]] = calls_by_cust.get(cl["customer_id"], 0) + 1
 
-    def count(rs: list[dict]) -> dict[str, int]:
-        d: dict[str, int] = {}
-        for r in rs:
-            d[r["project_id"]] = d.get(r["project_id"], 0) + 1
-        return d
-
-    inq_c, kva_c, emp_c = count(inq), count(kvas), count(pe)
+    # ── Roll the chain rows up to per-project counts ──
+    inq_c: dict[str, int] = {}
     open_inq: dict[str, int] = {}
-    for r in inq:
-        if r.get("status") in ("open", "in_progress"):
-            open_inq[r["project_id"]] = open_inq.get(r["project_id"], 0) + 1
+    for i in inquiries:
+        pid = proj_of_case.get(i.get("case_id"))
+        if not pid:
+            continue
+        inq_c[pid] = inq_c.get(pid, 0) + 1
+        if i.get("status") in ("open", "in_progress"):
+            open_inq[pid] = open_inq.get(pid, 0) + 1
+
     appt_total, appt_done = {}, {}
     for a in appts:
-        appt_total[a["project_id"]] = appt_total.get(a["project_id"], 0) + 1
+        pid = _proj_of_action(a)
+        if not pid:
+            continue
+        appt_total[pid] = appt_total.get(pid, 0) + 1
         if a.get("status") == "completed":
-            appt_done[a["project_id"]] = appt_done.get(a["project_id"], 0) + 1
+            appt_done[pid] = appt_done.get(pid, 0) + 1
+
+    kva_c: dict[str, int] = {}
+    for k in kvas:
+        pid = _proj_of_action(k)
+        if pid:
+            kva_c[pid] = kva_c.get(pid, 0) + 1
+
+    emp_sets: dict[str, set] = {}
+    for e in pe:
+        pid = proj_of_case.get(e.get("case_id"))
+        if pid:
+            emp_sets.setdefault(pid, set()).add(e.get("employee_id"))
+
     inv_count, inv_actual, inv_open = {}, {}, {}
     for v in invs:
-        pid = v["project_id"]
+        pid = _proj_of_invoice(v)
+        if not pid:
+            continue
         inv_count[pid] = inv_count.get(pid, 0) + 1
         if v.get("status") != "cancelled":
             inv_actual[pid] = inv_actual.get(pid, 0) + (v.get("total") or 0)
@@ -167,13 +292,14 @@ def _list(org_id: str, status: str | None, customer_id: str | None, search: str 
         total, done = appt_total.get(pid, 0), appt_done.get(pid, 0)
         p["stats"] = {
             "calls": calls_by_cust.get(p.get("customer_id"), 0),
+            "cases": cases_per_project.get(pid, 0),
             "inquiries": inq_c.get(pid, 0),
             "open_inquiries": open_inq.get(pid, 0),
             "appointments": total,
             "appointments_done": done,
             "cost_estimates": kva_c.get(pid, 0),
             "invoices": inv_count.get(pid, 0),
-            "employees": emp_c.get(pid, 0),
+            "employees": len(emp_sets.get(pid, ())),
         }
         p["progress"] = round(done / total * 100) if total else 0
         p["actual_budget"] = round(inv_actual.get(pid, 0), 2)
@@ -245,47 +371,28 @@ def _detail(org_id: str, project_id: str) -> dict | None:
         p["customer_name"] = cust.get("full_name")
         p["customer"] = cust
 
-    # Relation reads resolve via the LINK CHAIN (direct project_id OR inquiry_id
-    # ∈ member inquiries) — call-driven appointments/KVAs only carry inquiry_id,
-    # so project_id-only filters left the workspace half-empty (Amber 2026-06-12).
-    # Member ids first, then the dependent reads run concurrently + paged.
-    member_rows = fetch_all_rows(
-        lambda: client.table("inquiries").select("id, status").eq("org_id", org_id)
-        .eq("project_id", project_id).neq("status", "deleted")
-    )
-    member_ids = [r["id"] for r in member_rows]
+    # Project owns nothing direct — resolve via Project → cases → inquiries → actions.
+    case_ids, member_ids = _chain_ids(client, org_id, project_id)
+
+    def _inq():
+        if not case_ids:
+            return []
+        return fetch_all_rows(
+            lambda: client.table("inquiries").select("id, status").eq("org_id", org_id)
+            .in_("case_id", case_ids).neq("status", "deleted")
+        )
 
     def _appts():
-        direct = fetch_all_rows(
-            lambda: client.table("appointments").select("id, status, scheduled_at").eq("org_id", org_id).eq("project_id", project_id)
-        )
-        chained = fetch_all_rows(
-            lambda: client.table("appointments").select("id, status, scheduled_at").eq("org_id", org_id).in_("inquiry_id", member_ids)
-        ) if member_ids else []
-        return _merged(direct, chained)
+        return _action_rows(client, org_id, "appointments", "id, status, scheduled_at", case_ids, member_ids)
 
     def _kvas():
-        direct = fetch_all_rows(
-            lambda: client.table("cost_estimates").select("id").eq("org_id", org_id).eq("project_id", project_id)
-        )
-        chained = fetch_all_rows(
-            lambda: client.table("cost_estimates").select("id").eq("org_id", org_id).in_("inquiry_id", member_ids)
-        ) if member_ids else []
-        return _merged(direct, chained)
-
-    def _invs():
-        return fetch_all_rows(
-            lambda: client.table("invoices").select("id, total, status").eq("org_id", org_id).eq("project_id", project_id)
-        )
+        return _action_rows(client, org_id, "cost_estimates", "id", case_ids, member_ids)
 
     def _docs():
-        return fetch_all_rows(
-            lambda: client.table("documents").select("id").eq("org_id", org_id).eq("project_id", project_id)
-        )
+        return _action_rows(client, org_id, "documents", "id", case_ids, member_ids)
 
     def _calls_count():
-        # Calls belong to the project via its member inquiries — NOT all customer
-        # calls (a customer can have several projects).
+        # Calls belong to the project via its member inquiries.
         if not member_ids:
             return 0
         return (
@@ -294,38 +401,40 @@ def _detail(org_id: str, project_id: str) -> dict | None:
             .is_("deleted_at", "null").execute().count or 0
         )
 
-    appts, kvas, invs, docs, calls = run_parallel(_appts, _kvas, _invs, _docs, _calls_count)
-    inquiries = member_rows
+    inquiries, appts, kvas, docs, calls = run_parallel(_inq, _appts, _kvas, _docs, _calls_count)
 
-    # Invoices linked via their KVA (created from a call's KVA, no project set).
+    # Invoices: case_id ∈ cases OR via the KVA chain (no project/inquiry on invoices).
     kva_ids = [k["id"] for k in kvas]
-    if kva_ids:
-        inv_chained = fetch_all_rows(
-            lambda: client.table("invoices").select("id, total, status").eq("org_id", org_id).in_("cost_estimate_id", kva_ids)
-        )
-        invs = _merged(invs, inv_chained)
+    invs = _invoice_rows(client, org_id, "id, total, status", case_ids, kva_ids)
 
+    # Team = UNION of the member cases' case_employees rows.
     pe = fetch_all_rows(
-        lambda: client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id)
-    )
+        lambda: client.table("case_employees").select("employee_id, added_at").in_("case_id", case_ids)
+    ) if case_ids else []
     employees: list[dict] = []
     if pe:
+        # One row per distinct employee (earliest added_at wins) across the cases.
+        first_added: dict[str, str] = {}
+        for e in pe:
+            eid = e["employee_id"]
+            if eid not in first_added or (e.get("added_at") or "") < first_added[eid]:
+                first_added[eid] = e.get("added_at")
         edata = {
             e["id"]: e
             for e in (
                 client.table("employees")
                 .select("id, display_name, role_in_company, access_role, calendar_color")
-                .eq("org_id", org_id).in_("id", [e["employee_id"] for e in pe]).execute().data or []
+                .eq("org_id", org_id).in_("id", list(first_added)).execute().data or []
             )
         }
-        for e in pe:
-            emp = edata.get(e["employee_id"]) or {}
+        for eid, added in first_added.items():
+            emp = edata.get(eid) or {}
             employees.append({
-                "id": e["employee_id"],
+                "id": eid,
                 "name": emp.get("display_name"),
                 "role": emp.get("role_in_company") or emp.get("access_role"),
                 "color": emp.get("calendar_color"),
-                "added_at": e["added_at"],
+                "added_at": added,
             })
 
     today = _today()
@@ -341,6 +450,7 @@ def _detail(org_id: str, project_id: str) -> dict | None:
     p["employees"] = employees
     p["stats"] = {
         "calls": calls,
+        "cases": len(case_ids),
         "inquiries": len(inquiries),
         "open_inquiries": sum(1 for i in inquiries if i.get("status") in ("open", "in_progress")),
         "appointments": total_appt,
@@ -391,14 +501,6 @@ async def update_project(
     row = await run_in_threadpool(_patch, user.org_id, project_id, payload)
     if not row:
         raise HTTPException(status_code=404, detail="Project not found")
-    # Back-office automation: a completed project auto-drafts an invoice from its
-    # accepted KVA, gated by invoices_enabled/level. Best-effort, non-blocking.
-    if getattr(payload, "status", None) == "completed":
-        invoice = await run_in_threadpool(
-            maybe_create_invoice_for_project, user.org_id, row, user.id
-        )
-        if invoice:
-            row["_auto_invoice_id"] = invoice["id"]
     return row
 
 
@@ -426,33 +528,25 @@ def _activity(org_id: str, project_id: str, limit: int) -> list[dict] | None:
     if not p:
         return None
     items: list[dict] = []
-    # LINK CHAIN (projects merge): each relation = direct project_id OR via the
-    # project's member inquiries — mirrors the workspace tab endpoints.
-    member_ids = _member_inquiry_ids(client, org_id, project_id)
+    # Project → cases → inquiries → actions. Each relation = case_id ∈ cases OR
+    # inquiry_id ∈ member inquiries — mirrors the workspace tab endpoints.
+    case_ids, member_ids = _chain_ids(client, org_id, project_id)
 
-    def _two(table: str, sel: str) -> list[dict]:
-        direct = client.table(table).select("id, " + sel).eq("org_id", org_id).eq("project_id", project_id).execute().data or []
-        chained = (
-            client.table(table).select("id, " + sel).eq("org_id", org_id).in_("inquiry_id", member_ids).execute().data or []
-        ) if member_ids else []
-        return _merged(direct, chained)
-
-    for i in client.table("inquiries").select("title, created_at, number").eq("org_id", org_id).eq("project_id", project_id).execute().data or []:
-        items.append({"type": "inquiry", "date": i.get("created_at"), "label": f"Neue Anfrage: {i.get('title') or ''}".strip()})
-    for a in _two("appointments", "title, scheduled_at, status"):
+    if case_ids:
+        for i in (
+            client.table("inquiries").select("title, created_at, number")
+            .eq("org_id", org_id).in_("case_id", case_ids).neq("status", "deleted").execute().data or []
+        ):
+            items.append({"type": "inquiry", "date": i.get("created_at"), "label": f"Neue Anfrage: {i.get('title') or ''}".strip()})
+    for a in _action_rows(client, org_id, "appointments", "id, title, scheduled_at, status", case_ids, member_ids):
         done = a.get("status") == "completed"
         verb = "abgeschlossen" if done else "geplant"
         items.append({"type": "appointment_done" if done else "appointment", "date": a.get("scheduled_at"), "label": f"Termin {verb}: {a.get('title') or ''}".strip()})
-    kvas = _two("cost_estimates", "number, created_at, total")
+    kvas = _action_rows(client, org_id, "cost_estimates", "id, number, created_at, total", case_ids, member_ids)
     for k in kvas:
         items.append({"type": "cost_estimate", "date": k.get("created_at"), "amount": k.get("total"), "label": f"{k.get('number') or 'KVA'} erstellt"})
-    inv_direct = client.table("invoices").select("id, number, created_at, total, status, sent_at, paid_at").eq("org_id", org_id).eq("project_id", project_id).execute().data or []
     kva_ids = [k["id"] for k in kvas]
-    inv_chained = (
-        client.table("invoices").select("id, number, created_at, total, status, sent_at, paid_at")
-        .eq("org_id", org_id).in_("cost_estimate_id", kva_ids).execute().data or []
-    ) if kva_ids else []
-    for v in _merged(inv_direct, inv_chained):
+    for v in _invoice_rows(client, org_id, "id, number, created_at, total, status, sent_at, paid_at", case_ids, kva_ids):
         items.append({"type": "invoice", "date": v.get("sent_at") or v.get("created_at"), "amount": v.get("total"), "label": f"{v.get('number') or 'RE'} {'bezahlt' if v.get('status') == 'paid' else 'erstellt'}"})
         if v.get("paid_at"):
             items.append({"type": "payment", "date": v.get("paid_at"), "amount": v.get("total"), "label": f"Zahlung eingegangen · {v.get('number') or ''}".strip()})
@@ -473,17 +567,46 @@ async def project_activity(project_id: str, limit: int = 20, user: CurrentUser =
     return items
 
 
+# ─── Member cases (the project's case list) ───────────────────────────────────
+@router.get("/{project_id}/cases")
+async def project_cases(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict] | None:
+    def _q():
+        client = get_service_client()
+        if not _fetch(client, user.org_id, project_id):
+            return None
+        rows = fetch_all_rows(
+            lambda: client.table("cases")
+            .select("id, number, title, status, customer_id, created_at, updated_at")
+            .eq("org_id", user.org_id).eq("project_id", project_id).order("created_at", desc=True)
+        )
+        cids = {r.get("customer_id") for r in rows if r.get("customer_id")}
+        if cids:
+            cn = {
+                c["id"]: c.get("full_name")
+                for c in client.table("customers").select("id, full_name")
+                .eq("org_id", user.org_id).in_("id", list(cids)).execute().data or []
+            }
+            for r in rows:
+                r["customer_name"] = cn.get(r.get("customer_id"))
+        # JSON contract: expose the grouping label under case_label (= case.title).
+        for r in rows:
+            r["case_label"] = r.get("title")
+        return rows
+    rows = await run_in_threadpool(_q)
+    if rows is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return rows
+
+
 # ─── Sub-resource lists (per workspace tab) ───────────────────────────────────
 @router.get("/{project_id}/calls")
 async def project_calls(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
     def _q():
         client = get_service_client()
-        p = _fetch(client, user.org_id, project_id)
-        if not p:
+        if not _fetch(client, user.org_id, project_id):
             return None
-        # THIS project's calls = calls of its member inquiries (a customer can
-        # have several projects — all-customer-calls was wrong).
-        member_ids = _member_inquiry_ids(client, user.org_id, project_id)
+        # THIS project's calls = calls of its cases' member inquiries.
+        _, member_ids = _chain_ids(client, user.org_id, project_id)
         if not member_ids:
             return []
         return (
@@ -500,33 +623,39 @@ async def project_calls(project_id: str, user: CurrentUser = Depends(require_org
 
 
 @router.get("/{project_id}/inquiries")
-async def project_inquiries(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
+async def project_inquiries(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict] | None:
     def _q():
         client = get_service_client()
+        if not _fetch(client, user.org_id, project_id):
+            return None
+        case_ids = _case_ids(client, user.org_id, project_id)
+        if not case_ids:
+            return []
         rows = (
             client.table("inquiries").select("*").eq("org_id", user.org_id)
-            .eq("project_id", project_id).order("created_at", desc=True).execute().data or []
+            .in_("case_id", case_ids).neq("status", "deleted")
+            .order("created_at", desc=True).execute().data or []
         )
         _attach_employee_names(client, user.org_id, rows)
         return rows
-    return await run_in_threadpool(_q)
+    rows = await run_in_threadpool(_q)
+    if rows is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return rows
 
 
 @router.get("/{project_id}/appointments")
-async def project_appointments(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
+async def project_appointments(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict] | None:
     def _q():
         client = get_service_client()
-        member_ids = _member_inquiry_ids(client, user.org_id, project_id)
-        _APPT_COLS = "id, title, scheduled_at, duration_minutes, status, color, customer_id, assigned_employee_id, location, notes"
-        direct = (
-            client.table("appointments").select(_APPT_COLS)
-            .eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []
+        if not _fetch(client, user.org_id, project_id):
+            return None
+        case_ids, member_ids = _chain_ids(client, user.org_id, project_id)
+        _APPT_COLS = "id, title, scheduled_at, duration_minutes, status, color, customer_id, assigned_employee_id, location, notes, case_id, inquiry_id"
+        rows = sorted(
+            _action_rows(client, user.org_id, "appointments", _APPT_COLS, case_ids, member_ids),
+            key=lambda r: r.get("scheduled_at") or "",
         )
-        chained = (
-            client.table("appointments").select(_APPT_COLS)
-            .eq("org_id", user.org_id).in_("inquiry_id", member_ids).execute().data or []
-        ) if member_ids else []
-        rows = sorted(_merged(direct, chained), key=lambda r: r.get("scheduled_at") or "")
         _attach_employee_names(client, user.org_id, rows)
         cids = {r.get("customer_id") for r in rows if r.get("customer_id")}
         if cids:
@@ -534,58 +663,52 @@ async def project_appointments(project_id: str, user: CurrentUser = Depends(requ
             for r in rows:
                 r["customer_name"] = cn.get(r.get("customer_id"))
         return rows
-    return await run_in_threadpool(_q)
+    rows = await run_in_threadpool(_q)
+    if rows is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return rows
 
 
 @router.get("/{project_id}/cost-estimates")
-async def project_cost_estimates(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
+async def project_cost_estimates(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict] | None:
     def _q():
         client = get_service_client()
-        member_ids = _member_inquiry_ids(client, user.org_id, project_id)
-        _KVA_COLS = "id, number, status, subject, total, created_at, valid_until, type"
-        direct = (
-            client.table("cost_estimates").select(_KVA_COLS)
-            .eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []
-        )
-        chained = (
-            client.table("cost_estimates").select(_KVA_COLS)
-            .eq("org_id", user.org_id).in_("inquiry_id", member_ids).execute().data or []
-        ) if member_ids else []
-        return sorted(_merged(direct, chained), key=lambda r: r.get("created_at") or "", reverse=True)
-    return await run_in_threadpool(_q)
+        if not _fetch(client, user.org_id, project_id):
+            return None
+        case_ids, member_ids = _chain_ids(client, user.org_id, project_id)
+        _KVA_COLS = "id, number, status, subject, total, created_at, valid_until, type, case_id, inquiry_id"
+        rows = _action_rows(client, user.org_id, "cost_estimates", _KVA_COLS, case_ids, member_ids)
+        return sorted(rows, key=lambda r: r.get("created_at") or "", reverse=True)
+    rows = await run_in_threadpool(_q)
+    if rows is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return rows
 
 
 @router.get("/{project_id}/invoices")
-async def project_invoices(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
+async def project_invoices(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict] | None:
     def _q():
         client = get_service_client()
-        _INV_COLS = "id, number, status, invoice_date, due_date, total, sent_at, paid_at, created_at"
-        direct = (
-            client.table("invoices").select(_INV_COLS)
-            .eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []
+        if not _fetch(client, user.org_id, project_id):
+            return None
+        case_ids, member_ids = _chain_ids(client, user.org_id, project_id)
+        # KVA chain: invoice → cost_estimate → (case_id ∈ cases OR inquiry_id ∈ members).
+        kvas = _action_rows(client, user.org_id, "cost_estimates", "id", case_ids, member_ids)
+        kva_ids = [k["id"] for k in kvas]
+        _INV_COLS = "id, number, status, invoice_date, due_date, total, sent_at, paid_at, created_at, case_id, cost_estimate_id"
+        rows = sorted(
+            _invoice_rows(client, user.org_id, _INV_COLS, case_ids, kva_ids),
+            key=lambda r: r.get("created_at") or "", reverse=True,
         )
-        # Also via the KVA chain: invoice → cost_estimate → (project_id OR member inquiry).
-        member_ids = _member_inquiry_ids(client, user.org_id, project_id)
-        kva_direct = (
-            client.table("cost_estimates").select("id")
-            .eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []
-        )
-        kva_chained = (
-            client.table("cost_estimates").select("id")
-            .eq("org_id", user.org_id).in_("inquiry_id", member_ids).execute().data or []
-        ) if member_ids else []
-        kva_ids = list({k["id"] for k in kva_direct + kva_chained})
-        chained = (
-            client.table("invoices").select(_INV_COLS)
-            .eq("org_id", user.org_id).in_("cost_estimate_id", kva_ids).execute().data or []
-        ) if kva_ids else []
-        rows = sorted(_merged(direct, chained), key=lambda r: r.get("created_at") or "", reverse=True)
         today = _today()
         for r in rows:
             if r.get("status") == "sent" and r.get("due_date") and str(r["due_date"]) < today:
                 r["status"] = "overdue"
         return rows
-    return await run_in_threadpool(_q)
+    rows = await run_in_threadpool(_q)
+    if rows is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return rows
 
 
 @router.get("/{project_id}/documents")
@@ -595,12 +718,15 @@ async def project_documents(project_id: str, user: CurrentUser = Depends(require
         p = _fetch(client, user.org_id, project_id)
         if not p:
             return None
-        rows = client.table("documents").select("*").eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []
+        case_ids, member_ids = _chain_ids(client, user.org_id, project_id)
+        rows = _action_rows(client, user.org_id, "documents", "*", case_ids, member_ids)
         seen = {r["id"] for r in rows}
+        # Customer-wide docs (uploaded against the customer, not a case/inquiry).
         if p.get("customer_id"):
             for d in client.table("documents").select("*").eq("org_id", user.org_id).eq("customer_id", p["customer_id"]).execute().data or []:
                 if d["id"] not in seen:
                     rows.append(d)
+                    seen.add(d["id"])
         rows.sort(key=lambda d: d.get("uploaded_at") or "", reverse=True)
         for d in rows:
             d["url"] = _signed_url(client, d["path"])
@@ -631,8 +757,10 @@ async def upload_project_document(
         safe = (file.filename or "datei").replace("/", "_")
         path = f"{user.org_id}/projects/{project_id}/{uuid.uuid4().hex}_{safe}"
         client.storage.from_(BUCKET).upload(path, content, {"content-type": file.content_type or "application/octet-stream"})
+        # A top-layer project has no case_id column on documents; file it against
+        # the customer (project-scoped view re-discovers it via the customer fan-in).
         row = client.table("documents").insert({
-            "org_id": user.org_id, "project_id": project_id, "customer_id": p.get("customer_id"),
+            "org_id": user.org_id, "customer_id": p.get("customer_id"),
             "name": file.filename, "path": path, "category": category,
             "mime_type": file.content_type, "size_bytes": len(content), "is_image": is_image,
         }).execute().data[0]
@@ -646,18 +774,27 @@ async def upload_project_document(
 
 
 # ─── Team (assigned employees) ────────────────────────────────────────────────
+# A top-layer project has NO project_employees table — the team lives at CASE
+# level (case_employees). GET aggregates the UNION of the member cases' teams.
 @router.get("/{project_id}/employees")
 async def list_project_employees(project_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
     def _q():
         client = get_service_client()
         if not _fetch(client, user.org_id, project_id):
             return None
+        case_ids, member_ids = _chain_ids(client, user.org_id, project_id)
         pe = fetch_all_rows(
-            lambda: client.table("project_employees").select("employee_id, added_at").eq("project_id", project_id)
-        )
+            lambda: client.table("case_employees").select("employee_id, added_at, case_id").in_("case_id", case_ids)
+        ) if case_ids else []
         if not pe:
             return []
-        ids = [e["employee_id"] for e in pe]
+        # Distinct employee, earliest added_at across the cases.
+        first_added: dict[str, str] = {}
+        for e in pe:
+            eid = e["employee_id"]
+            if eid not in first_added or (e.get("added_at") or "") < (first_added[eid] or ""):
+                first_added[eid] = e.get("added_at")
+        ids = list(first_added)
         edata = {
             e["id"]: e
             for e in (
@@ -666,21 +803,22 @@ async def list_project_employees(project_id: str, user: CurrentUser = Depends(re
                 .eq("org_id", user.org_id).in_("id", ids).execute().data or []
             )
         }
+        # Appointments handled across the project's cases/inquiries.
         counts: dict[str, int] = {}
-        for a in client.table("appointments").select("assigned_employee_id").eq("org_id", user.org_id).eq("project_id", project_id).execute().data or []:
+        for a in _action_rows(client, user.org_id, "appointments", "id, assigned_employee_id", case_ids, member_ids):
             k = a.get("assigned_employee_id")
             if k:
                 counts[k] = counts.get(k, 0) + 1
         out = []
-        for e in pe:
-            emp = edata.get(e["employee_id"]) or {}
+        for eid, added in first_added.items():
+            emp = edata.get(eid) or {}
             out.append({
-                "id": e["employee_id"],
+                "id": eid,
                 "name": emp.get("display_name"),
                 "role": emp.get("role_in_company") or emp.get("access_role"),
                 "color": emp.get("calendar_color"),
-                "appointments_handled": counts.get(e["employee_id"], 0),
-                "added_at": e["added_at"],
+                "appointments_handled": counts.get(eid, 0),
+                "added_at": added,
             })
         return out
 
@@ -698,9 +836,7 @@ async def add_project_employee(
         client = get_service_client()
         if not _fetch(client, user.org_id, project_id):
             return "no_project"
-        # Wave 2 — validate the employee belongs to THIS org before linking
-        # (same pattern as inquiries._assign). Without this, employee_id from the
-        # request body could reference another org's employee (cross-tenant FK).
+        # Validate the employee belongs to THIS org before linking (cross-tenant FK).
         emp = (
             client.table("employees").select("id")
             .eq("org_id", user.org_id).eq("id", payload.employee_id)
@@ -708,12 +844,20 @@ async def add_project_employee(
         )
         if not emp:
             return "bad_employee"
-        try:
-            client.table("project_employees").insert(
-                {"project_id": project_id, "employee_id": payload.employee_id}
-            ).execute()
-        except Exception:
-            pass  # already assigned (unique constraint)
+        # The team table is case_employees (case-level) — a project-level team needs
+        # a target case. Attach the employee to EVERY member case so the project's
+        # aggregated team (UNION over cases) includes them. No member cases → there
+        # is nowhere to attach a project-level member.
+        case_ids = _case_ids(client, user.org_id, project_id)
+        if not case_ids:
+            return "no_cases"
+        for cid in case_ids:
+            try:
+                client.table("case_employees").insert(
+                    {"case_id": cid, "employee_id": payload.employee_id}
+                ).execute()
+            except Exception:
+                pass  # already assigned (unique constraint)
         return "ok"
 
     res = await run_in_threadpool(_add)
@@ -721,6 +865,13 @@ async def add_project_employee(
         raise HTTPException(status_code=404, detail="Project not found")
     if res == "bad_employee":
         raise HTTPException(status_code=404, detail="Mitarbeiter nicht gefunden")
+    if res == "no_cases":
+        raise HTTPException(
+            status_code=400,
+            detail="Das Projekt hat noch keine Fälle — ein Teammitglied kann erst "
+            "zugewiesen werden, wenn dem Projekt mindestens ein Fall zugeordnet ist "
+            "(das Team wird auf Fall-Ebene geführt).",
+        )
     return {"success": True}
 
 
@@ -732,10 +883,86 @@ async def remove_project_employee(
         client = get_service_client()
         if not _fetch(client, user.org_id, project_id):
             return None
-        client.table("project_employees").delete().eq("project_id", project_id).eq("employee_id", employee_id).execute()
+        # Remove from EVERY member case (mirror of the add fan-out).
+        case_ids = _case_ids(client, user.org_id, project_id)
+        if case_ids:
+            client.table("case_employees").delete().in_("case_id", case_ids).eq("employee_id", employee_id).execute()
         return True
 
     ok = await run_in_threadpool(_rm)
     if not ok:
         raise HTTPException(status_code=404, detail="Project not found")
     return {"success": True}
+
+
+# ─── Link a case into / out of a project ("Add to project") ───────────────────
+class CaseLinkIn(BaseModel):
+    case_id: str
+
+
+@router.post("/{project_id}/cases")
+async def link_case_to_project(
+    project_id: str, payload: CaseLinkIn, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Add a case to this top-layer project: set cases.project_id = project_id.
+    Validates the case + project are the SAME org and (when both carry one) the
+    SAME customer — a project bundles cases of one customer."""
+    def _run():
+        client = get_service_client()
+        org_id = user.org_id
+        proj = _fetch(client, org_id, project_id)
+        if not proj:
+            return "no_project"
+        case = (
+            client.table("cases").select("id, customer_id, project_id")
+            .eq("org_id", org_id).eq("id", payload.case_id).limit(1).execute().data
+        )
+        if not case:
+            return "no_case"
+        case = case[0]
+        if (
+            proj.get("customer_id") and case.get("customer_id")
+            and proj["customer_id"] != case["customer_id"]
+        ):
+            return "wrong_customer"
+        client.table("cases").update({"project_id": project_id, "updated_at": _now()}) \
+            .eq("org_id", org_id).eq("id", payload.case_id).execute()
+        return "ok"
+
+    res = await run_in_threadpool(_run)
+    if res == "no_project":
+        raise HTTPException(status_code=404, detail="Project not found")
+    if res == "no_case":
+        raise HTTPException(status_code=404, detail="Fall nicht gefunden")
+    if res == "wrong_customer":
+        raise HTTPException(
+            status_code=422,
+            detail="Dieser Fall gehört zu einem anderen Kunden — ein Projekt bündelt "
+            "nur Fälle desselben Kunden.",
+        )
+    return {"success": True, "project_id": project_id, "case_id": payload.case_id}
+
+
+@router.delete("/{project_id}/cases/{case_id}")
+async def unlink_case_from_project(
+    project_id: str, case_id: str, user: CurrentUser = Depends(require_org)
+) -> dict:
+    """Remove a case from this project (cases.project_id → null). Only clears the
+    pointer when the case is actually linked to THIS project."""
+    def _run():
+        client = get_service_client()
+        org_id = user.org_id
+        if not _fetch(client, org_id, project_id):
+            return "no_project"
+        res = (
+            client.table("cases").update({"project_id": None, "updated_at": _now()})
+            .eq("org_id", org_id).eq("id", case_id).eq("project_id", project_id).execute()
+        )
+        return "ok" if res.data else "not_linked"
+
+    res = await run_in_threadpool(_run)
+    if res == "no_project":
+        raise HTTPException(status_code=404, detail="Project not found")
+    if res == "not_linked":
+        raise HTTPException(status_code=404, detail="Fall ist diesem Projekt nicht zugeordnet")
+    return {"success": True, "project_id": project_id, "case_id": case_id}

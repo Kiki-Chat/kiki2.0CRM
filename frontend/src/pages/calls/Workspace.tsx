@@ -588,11 +588,10 @@ export function Workspace({
   const navigate = useNavigate()
   const vgNumber = inquiry?.number ?? call.inquiry_number ?? null
   const vgSubject = inquiry?.subject ?? call.inquiry_subject ?? null
-  // The grouping = the Fall (Case). The active grouping lives on project_id (the
-  // cases↔projects merge); we present it purely as "Fall". An ungrouped call
-  // shows its own Anfrage (inquiry).
-  const projectId = call.project_id
+  // The grouping = the Fall (Case), now on case_id. An ungrouped call shows its
+  // own Anfrage (inquiry). project_id is the optional top-layer Projekt (PR-).
   const caseId = call.case_id
+  const projectId = call.project_id
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface">
       <div className="px-[18px] pt-4">
@@ -606,32 +605,31 @@ export function Workspace({
           <StatusPill status={status} />
           {inquiry?.type && <Tag variant="green">{inquiry.type}</Tag>}
         </div>
-        {projectId ? (
-          <button
-            onClick={() => navigate(`/fall/${projectId}`)}
-            title="Zum Fall (alle Anfragen, Termine, KVA, Rechnungen, Techniker)"
-            className="mb-3.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-ai-bg bg-ai-bg px-2.5 py-1.5 text-xs font-bold text-ai transition hover:brightness-95"
-          >
-            <Layers size={13} className="flex-shrink-0" />
-            <span className="truncate">
-              Fall {call.project_number ?? ''}
-              {call.project_title ? ` · ${call.project_title}` : ''}
-            </span>
-            <ChevronRight size={13} className="flex-shrink-0" />
-          </button>
-        ) : caseId ? (
-          <button
-            onClick={() => navigate(`/fall/${caseId}`)}
-            title="Zum Fall (alle Anfragen)"
-            className="mb-3.5 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-ai-bg bg-ai-bg px-2.5 py-1.5 text-xs font-bold text-ai transition hover:brightness-95"
-          >
-            <Layers size={13} className="flex-shrink-0" />
-            <span className="truncate">
-              Fall {call.case_number ?? ''}
-              {call.case_label ? ` · ${call.case_label}` : ''}
-            </span>
-            <ChevronRight size={13} className="flex-shrink-0" />
-          </button>
+        {caseId ? (
+          <div className="mb-3.5 flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => navigate(`/fall/${caseId}`)}
+              title="Zum Fall (alle Anfragen, Termine, KVA, Rechnungen, Techniker)"
+              className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-ai-bg bg-ai-bg px-2.5 py-1.5 text-xs font-bold text-ai transition hover:brightness-95"
+            >
+              <Layers size={13} className="flex-shrink-0" />
+              <span className="truncate">
+                Fall {call.case_number ?? ''}
+                {call.case_label ? ` · ${call.case_label}` : ''}
+              </span>
+              <ChevronRight size={13} className="flex-shrink-0" />
+            </button>
+            {projectId && (
+              <button
+                onClick={() => navigate(`/projects/${projectId}`)}
+                title="Zum Projekt (übergeordnet)"
+                className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-alt px-2.5 py-1.5 text-xs font-bold text-muted transition-colors hover:border-green-primary hover:text-green-deep"
+              >
+                <Layers size={13} className="flex-shrink-0" />
+                <span className="truncate">Projekt {call.project_number ?? ''}</span>
+              </button>
+            )}
+          </div>
         ) : call.inquiry_id ? (
           <button
             onClick={() => navigate(`/vorgang/${call.inquiry_id}`)}

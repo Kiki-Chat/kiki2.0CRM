@@ -11,7 +11,7 @@ from app.services import calendar_sync
 from app.services.appointment_notify import notify_appointment_outcome
 from app.services.appointments import import_ics
 from app.services.common import enforce_self_assignment, format_address, validate_fk_in_org
-from app.services.projects import maybe_create_project_for_appointment
+from app.services.projects import maybe_create_case_for_appointment
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
 
@@ -118,7 +118,7 @@ def _create(user: CurrentUser, payload: AppointmentCreate) -> dict:
     client = get_service_client()
     # FK hardening: every foreign-key id in the body must belong to this org.
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
-    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
     validate_fk_in_org(client, table="inquiries", fk_id=payload.inquiry_id, org_id=org_id, label="Anfrage")
     validate_fk_in_org(
         client, table="employees", fk_id=payload.assigned_employee_id,
@@ -133,7 +133,7 @@ def _create(user: CurrentUser, payload: AppointmentCreate) -> dict:
         "org_id": org_id,
         "customer_id": payload.customer_id,
         "inquiry_id": payload.inquiry_id,
-        "project_id": payload.project_id,
+        "case_id": payload.case_id,
         "title": payload.title or "Termin",
         "scheduled_at": payload.scheduled_at,
         "duration_minutes": payload.duration_minutes,
@@ -400,13 +400,13 @@ async def confirm_appointment(
     appt = await run_in_threadpool(_confirm, user.org_id, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
-    # Back-office automation: auto-create a project (+ planning-board presence),
+    # Back-office automation: auto-create a case (+ planning-board presence),
     # gated by agent_configs.projects_enabled/level. Best-effort, non-blocking.
-    project = await run_in_threadpool(
-        maybe_create_project_for_appointment, user.org_id, appt, user.id
+    case = await run_in_threadpool(
+        maybe_create_case_for_appointment, user.org_id, appt, user.id
     )
-    if project:
-        appt["project_id"] = project["id"]
+    if case:
+        appt["case_id"] = case["id"]
     # Best-effort outbound side-effect (call + email) — gated by the org's master
     # Appointment-Reminders toggle, scope-guarded, non-blocking (a failure never
     # rolls back the already-committed confirmation).

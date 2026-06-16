@@ -354,11 +354,13 @@ def test_pending_for_call_404_when_call_missing(monkeypatch):
 def test_approve_proposal_applies_slot_and_confirms(monkeypatch):
     """Approving a customer counter-proposal sets scheduled_at to it, confirms
     the appointment, and consumes the proposal fields."""
+    # Far-future slot so the "not in the past" guard stays satisfied as real time
+    # advances (this test previously hard-coded a date that has since gone stale).
     proposed = {
         "id": "a", "org_id": "org-1", "status": "pending",
-        "customer_proposed_start_time": "2026-06-15T12:00:00+00:00",
+        "customer_proposed_start_time": "2099-06-15T12:00:00+00:00",
     }
-    confirmed = {**proposed, "status": "confirmed", "scheduled_at": "2026-06-15T12:00:00+00:00"}
+    confirmed = {**proposed, "status": "confirmed", "scheduled_at": "2099-06-15T12:00:00+00:00"}
     client = _FakeClient([[proposed], [confirmed]])
     monkeypatch.setattr(appt_routes, "get_service_client", lambda: client)
 
@@ -367,7 +369,7 @@ def test_approve_proposal_applies_slot_and_confirms(monkeypatch):
     )
     assert result["status"] == "confirmed"
     upd = client._last_update_payload
-    assert upd["scheduled_at"] == "2026-06-15T12:00:00+00:00"
+    assert upd["scheduled_at"] == "2099-06-15T12:00:00+00:00"
     assert upd["status"] == "confirmed" and upd["confirmed_at"] is not None
     assert upd["customer_proposed_start_time"] is None  # consumed
     assert upd["customer_proposed_at"] is None

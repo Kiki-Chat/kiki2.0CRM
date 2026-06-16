@@ -83,7 +83,7 @@ export function InvoiceFormPage() {
 
   const [customerId, setCustomerId] = useState(params.get('customer_id') || '')
   const [kvaId, setKvaId] = useState('')
-  const [projectId, setProjectId] = useState(params.get('project_id') || '')
+  const [caseId, setCaseId] = useState(params.get('case_id') || '')
   const [subject, setSubject] = useState('')
   const [reference, setReference] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(todayIso())
@@ -108,7 +108,10 @@ export function InvoiceFormPage() {
   const customers = customerData?.customers ?? []
   const { data: catalog = [] } = useQuery({ queryKey: ['catalog-active'], queryFn: () => apiFetch<CatalogItem[]>('/api/catalog?status=active') })
   const { data: estimates = [] } = useQuery({ queryKey: ['cost-estimates'], queryFn: () => apiFetch<Estimate[]>('/api/cost-estimates') })
-  const acceptedKvas = estimates.filter((e) => e.customer_id === customerId && e.status === 'accepted')
+  // KVAs you can turn into an invoice: any of this customer's that aren't rejected
+  // (draft/sent/accepted) — not only 'accepted', so the dropdown isn't empty.
+  const KVA_STATUS_DE: Record<string, string> = { draft: 'Entwurf', sent: 'Gesendet', accepted: 'Angenommen' }
+  const selectableKvas = estimates.filter((e) => e.customer_id === customerId && e.status !== 'rejected')
 
   // Import positions/subject/customer from a cost estimate (KVA → Rechnung).
   const importKva = useCallback(async (estimateId: string) => {
@@ -232,7 +235,7 @@ export function InvoiceFormPage() {
           body: JSON.stringify({
             customer_id: cid || null,
             kva_id: null,
-            project_id: null,
+            case_id: null,
             subject: subj,
             reference_number: '',
             invoice_date: todayIso(),
@@ -281,7 +284,7 @@ export function InvoiceFormPage() {
     if (!existing) return
     setCustomerId((existing.customer_id as string) || '')
     setKvaId((existing.kva_id as string) || (existing.cost_estimate_id as string) || '')
-    setProjectId((existing.project_id as string) || '')
+    setCaseId((existing.case_id as string) || '')
     setSubject((existing.subject as string) || '')
     setReference((existing.reference_number as string) || '')
     setInvoiceDate(((existing.invoice_date as string) || '').slice(0, 10) || todayIso())
@@ -305,7 +308,7 @@ export function InvoiceFormPage() {
   const payload = useMemo(() => ({
     customer_id: customerId || null,
     kva_id: kvaId || null,
-    project_id: projectId || null,
+    case_id: caseId || null,
     subject, reference_number: reference,
     invoice_date: invoiceDate, performance_date: performanceDate || null,
     payment_terms_days: paymentTermsDays,
@@ -313,7 +316,7 @@ export function InvoiceFormPage() {
     positions: positions.map(({ _id, ...p }) => p),
     intro_text: introText, closing_text: closingText, payment_terms_text: paymentTermsText,
     surcharge, surcharge_description: surchargeDesc, total_discount_pct: discountPct,
-  }), [customerId, kvaId, projectId, subject, reference, invoiceDate, performanceDate, paymentTermsDays, skontoPct, skontoDays, positions, introText, closingText, paymentTermsText, surcharge, surchargeDesc, discountPct])
+  }), [customerId, kvaId, caseId, subject, reference, invoiceDate, performanceDate, paymentTermsDays, skontoPct, skontoDays, positions, introText, closingText, paymentTermsText, surcharge, surchargeDesc, discountPct])
 
   // ── Live PDF preview (debounced) ──
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -423,8 +426,8 @@ export function InvoiceFormPage() {
             {!!customerId && (
               <div className="mt-3"><div className={labelCls}>Aus KVA übernehmen (optional)</div>
                 <select value="" onChange={(e) => { if (e.target.value) importKva(e.target.value); e.currentTarget.value = '' }} className={inputCls}>
-                  <option value="">Akzeptierten KVA wählen…</option>
-                  {acceptedKvas.map((k) => <option key={k.id} value={k.id}>{k.number} — {k.subject || 'KVA'} ({money(k.total ?? 0)})</option>)}
+                  <option value="">KVA übernehmen…</option>
+                  {selectableKvas.map((k) => <option key={k.id} value={k.id}>{k.number} — {k.subject || 'KVA'} ({money(k.total ?? 0)}) · {KVA_STATUS_DE[k.status] ?? k.status}</option>)}
                 </select>
                 {kvaId && <p className="mt-1 text-xs text-green-deep">Positionen aus {estimates.find((e) => e.id === kvaId)?.number ?? 'KVA'} übernommen.</p>}
               </div>

@@ -374,7 +374,7 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
             return (
               <div key={cid} className="rounded-xl border border-ai-bg bg-ai-bg/40 p-2">
                 <button
-                  onClick={() => navigate(`/projects/${cid}`)}
+                  onClick={() => navigate(`/fall/${cid}`)}
                   className="mb-1.5 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition hover:bg-ai-bg"
                   title="Fall öffnen (alle Anfragen)"
                 >
@@ -420,7 +420,7 @@ function InquiryRow({ i, cases, caseId, onChanged }: { i: Inquiry; cases: CaseRo
   const topic = i.subject || i.title || 'Anfrage'
   return (
     <div className="group relative rounded-lg border border-border bg-surface p-3 transition hover:border-green-primary hover:bg-alt">
-      <div onClick={() => navigate(caseId ? `/projects/${caseId}` : `/vorgang/${i.id}`)} className="cursor-pointer">
+      <div onClick={() => navigate(caseId ? `/fall/${caseId}` : `/vorgang/${i.id}`)} className="cursor-pointer">
         <div className="flex items-center gap-2 pr-7">
           <Tag variant={st.variant}>{st.label}</Tag>
           <span className="flex-1 truncate text-sm font-semibold text-text">{topic}</span>

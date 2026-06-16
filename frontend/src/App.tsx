@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Navigate, Route, Routes, useParams } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { ChunkErrorBoundary } from './components/ChunkErrorBoundary'
@@ -24,7 +24,10 @@ const VorgangThreadPage = lazy(() => import('./pages/VorgangThreadPage').then((m
 const CaseDetailPage = lazy(() => import('./pages/CaseDetailPage').then((m) => ({ default: m.CaseDetailPage })))
 const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const MyAbsencePage = lazy(() => import('./pages/MyAbsencePage').then((m) => ({ default: m.MyAbsencePage })))
+const CasesPage = lazy(() => import('./pages/CasesPage').then((m) => ({ default: m.CasesPage })))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((m) => ({ default: m.ProjectsPage })))
+const ProjectWorkspacePage = lazy(() => import('./pages/ProjectWorkspacePage').then((m) => ({ default: m.ProjectWorkspacePage })))
+const ProjectFormPage = lazy(() => import('./pages/ProjectFormPage').then((m) => ({ default: m.ProjectFormPage })))
 const PlanningBoardPage = lazy(() => import('./pages/PlanningBoardPage').then((m) => ({ default: m.PlanningBoardPage })))
 const CostEstimatesPage = lazy(() => import('./pages/CostEstimatesPage').then((m) => ({ default: m.CostEstimatesPage })))
 const CostEstimateFormPage = lazy(() =>
@@ -43,13 +46,6 @@ const JobLinkPage = lazy(() => import('./pages/JobLinkPage').then((m) => ({ defa
 const TechnicianPortalPage = lazy(() =>
   import('./pages/TechnicianPortalPage').then((m) => ({ default: m.TechnicianPortalPage })),
 )
-
-// The bloated Projekt workspace is retired — every grouping is now a lean "Fall".
-// Old /projects/:id links (calendar, copilot, bookmarks) redirect to the case view.
-function ProjectIdRedirect() {
-  const { id } = useParams()
-  return <Navigate to={`/fall/${id}`} replace />
-}
 
 export default function App() {
   return (
@@ -75,6 +71,7 @@ export default function App() {
               <Route index element={<DashboardPage />} />
               <Route path="calls" element={<CallLogsPage />} />
               <Route path="posteingang" element={<PosteingangPage />} />
+              <Route path="cases" element={<CasesPage />} />
               <Route path="customers" element={<CustomersPage />} />
               <Route path="customers/:id" element={<CustomerDetailPage />} />
               <Route path="vorgang/:id" element={<VorgangThreadPage />} />
@@ -84,10 +81,10 @@ export default function App() {
               <Route path="calendar/business-hours" element={<Navigate to="/kiki-zentrale/geschaeftszeiten" replace />} />
               <Route path="meine-abwesenheit" element={<MyAbsencePage />} />
               <Route path="projects" element={<ProjectsPage />} />
-              {/* Case = lean Fall; the project create/edit/workspace views are retired. */}
-              <Route path="projects/new" element={<Navigate to="/projects" replace />} />
-              <Route path="projects/:id" element={<ProjectIdRedirect />} />
-              <Route path="projects/:id/edit" element={<ProjectIdRedirect />} />
+              {/* Top-layer Projekt (restored above the Case): full workspace + create/edit form. */}
+              <Route path="projects/new" element={<ProjectFormPage />} />
+              <Route path="projects/:id" element={<ProjectWorkspacePage />} />
+              <Route path="projects/:id/edit" element={<ProjectFormPage />} />
               <Route path="planning-board" element={<PlanningBoardPage />} />
               <Route path="cost-estimates" element={<CostEstimatesPage />} />
               <Route path="cost-estimates/new" element={<CostEstimateFormPage />} />
