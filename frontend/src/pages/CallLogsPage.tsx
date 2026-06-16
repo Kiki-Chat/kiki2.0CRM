@@ -1,111 +1,80 @@
-// Call Logs ("Anrufe") — 3-pane cockpit. This file is the thin orchestrator:
-// it owns the LEFT inbox's queries/mutations/state/realtime exactly as before
-// and composes the presentational modules in ./calls. The center+right detail
-// orchestration lives in ./calls/CallDetail. No data shapes / endpoints changed.
+// Anrufe — the call log. A read-only, full-width stream of every call Kiki took or
+// made: a pinned "Braucht Aufmerksamkeit" section (no case yet / emergencies) on top,
+// then day-grouped history (Heute · Gestern · Diese Woche · Dieser Monat · Älter).
+// Click a row → detail drawer (transcript · audio · summary + triage). The old 3-pane
+// cockpit + Aktionen worklist were retired here; actions now live inside the cases.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Inbox, ListChecks, Search } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { Inbox } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { apiFetch } from '../lib/api'
 import { supabase } from '../lib/supabase'
-import { cn } from '../lib/utils'
-import { useMediaQuery } from '../lib/useMediaQuery'
 import { useMe } from '../lib/useMe'
 import { useToast } from '../lib/useToast'
-import { FilterPopover, PagerNumbered, Segmented } from './calls/atoms'
-import { CallDetail } from './calls/CallDetail'
-import { ActionRow, CallRow, EmptyAktionen } from './calls/Inbox'
-import { RescheduleApprovalModal } from './calls/Modals'
-import { ResizeHandle, useColumnResize } from './calls/resize'
-import { NoCallSelected } from './calls/Transcript'
+import { LogDrawer } from './calls/log/LogDrawer'
+import { LogFilters, type PillCounts } from './calls/log/LogFilters'
+import { LogRow } from './calls/log/LogRow'
 import {
-  type ActionItem,
-  type CallListItem,
-  displayName,
-  type Employee,
-  type InboxFilters,
-  matchesDateFilter,
-} from './calls/shared'
+  BUCKET_LABEL,
+  BUCKET_ORDER,
+  type Bucket,
+  bucketOf,
+  callMatches,
+  DEFAULT_FILTERS,
+  type LogFilters as LogFiltersT,
+  needsAttention,
+  type StatusF,
+} from './calls/log/util'
+import type { CallListItem, Employee } from './calls/shared'
 
-const PAGE_SIZE = 8
+const startedMs = (c: CallListItem) => {
+  const t = Date.parse(c.started_at || c.created_at || '')
+  return Number.isNaN(t) ? 0 : t
+}
+const byNewest = (a: CallListItem, b: CallListItem) => startedMs(b) - startedMs(a)
 
 export function CallLogsPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const { me } = useMe()
+  const orgId = me?.org_id
 
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Deep-link seeding (dashboard CTAs + projectTabs "Zum Transkript").
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('call_id'))
   const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
-  // Customer-proposed reschedule being approved/declined in the popup.
-  const [reschedule, setReschedule] = useState<{
-    id: string
-    name: string | null
-    time: string | null
-    originalTime: string | null
-    expiresAt: string | null
-    replaceIntent: boolean | null
-  } | null>(null)
-  const [rightOpen, setRightOpen] = useState(true)
-  // Deep-link seeding (dashboard CTAs): ?direction=&status=&tab=.
-  const [filters, setFilters] = useState<InboxFilters>(() => {
+  // Single wall-clock baseline for date filtering + day bucketing (kept out of render
+  // so the two always agree and the purity rule is satisfied).
+  const [nowMs] = useState(() => Date.now())
+  const [filters, setFilters] = useState<LogFiltersT>(() => {
     const d = searchParams.get('direction')
     const s = searchParams.get('status')
+    const valid: StatusF[] = ['unread', 'open', 'in_progress', 'completed']
     return {
+      ...DEFAULT_FILTERS,
       dir: d === 'inbound' || d === 'outbound' ? d : 'all',
-      status: s === 'open' || s === 'in_progress' || s === 'completed' ? s : 'all',
-      date: 'all',
-      from: '',
-      to: '',
+      status: valid.includes(s as StatusF) ? (s as StatusF) : 'all',
     }
   })
-  const [tab, setTab] = useState<'anfragen' | 'aktionen'>(() =>
-    searchParams.get('tab') === 'aktionen' ? 'aktionen' : 'anfragen',
-  )
-
-  const { me, role } = useMe()
-  const orgId = me?.org_id
-  const isSuperAdmin = role === 'super_admin'
-  // Below `lg` the 3-pane cockpit (inbox | transcript | workspace ≈ 700px of
-  // fixed panes) can't fit, so we switch to single-pane navigation: the inbox
-  // is full-width, and selecting a call swaps in the detail with a back button.
-  const isWide = useMediaQuery('(min-width: 1024px)')
 
   const callsQuery = useQuery({
     queryKey: ['calls'],
-    queryFn: () => apiFetch<{ calls: CallListItem[] }>('/api/calls?limit=100'),
+    queryFn: () => apiFetch<{ calls: CallListItem[] }>('/api/calls?limit=200'),
   })
   const calls = useMemo(() => callsQuery.data?.calls ?? [], [callsQuery.data])
 
-  const actionsQuery = useQuery({
-    queryKey: ['actions', 'pending'],
-    queryFn: () => apiFetch<ActionItem[]>('/api/actions/pending'),
-    refetchInterval: 30_000,
-    staleTime: 10_000,
-  })
-  const actions = actionsQuery.data ?? []
-  const actionsCount = actions.length
-
-  const employeesQuery = useQuery({
+  const { data: employees = [] } = useQuery({
     queryKey: ['employees'],
     queryFn: () => apiFetch<Employee[]>('/api/employees'),
   })
-  const employees = employeesQuery.data ?? []
+  const employeeName = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const e of employees) if (e.display_name) m.set(e.id, e.display_name)
+    return m
+  }, [employees])
 
-  const assignInquiry = useMutation({
-    mutationFn: ({ inquiryId, employeeId }: { inquiryId: string; employeeId: string | null }) =>
-      apiFetch(`/api/inquiries/${inquiryId}/assign`, {
-        method: 'PATCH',
-        body: JSON.stringify({ employee_id: employeeId }),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['calls'] })
-      qc.invalidateQueries({ queryKey: ['callInquiry'] })
-    },
-  })
-
-  // Gmail-style mark-read on open (idempotent; only fire when currently unread).
+  // Gmail-style mark-read on open (idempotent; only when currently unread).
   const markRead = useMutation({
     mutationFn: (callId: string) => apiFetch(`/api/calls/${callId}/mark-read`, { method: 'POST' }),
     onSuccess: () => {
@@ -113,43 +82,10 @@ export function CallLogsPage() {
       qc.invalidateQueries({ queryKey: ['dashboard', 'overview'] })
     },
   })
-
-  // Aktionen to-do controls: Übernehmen / Erledigt / Löschen / reopen.
-  // OPTIMISTIC: update the cache instantly so the click feels immediate. The
-  // /api/actions/pending refetch is a 6-table aggregate (~slow) — previously the
-  // row sat unchanged until that refetch landed, so the buttons felt dead/late.
-  // Now the refetch only reconciles on settle; errors roll back + flash a message.
-  const { toast: actionToast, flash: flashAction } = useToast()
-  const setActionState = useMutation({
-    mutationFn: ({ action_key, status }: { action_key: string; status: 'open' | 'claimed' | 'done' | 'dismissed' }) =>
-      apiFetch('/api/actions/state', { method: 'POST', body: JSON.stringify({ action_key, status }) }),
-    onMutate: async ({ action_key, status }) => {
-      await qc.cancelQueries({ queryKey: ['actions', 'pending'] })
-      const prev = qc.getQueryData<ActionItem[]>(['actions', 'pending'])
-      qc.setQueryData<ActionItem[]>(['actions', 'pending'], (old) =>
-        !old
-          ? old
-          : status === 'dismissed'
-            ? old.filter((a) => a.action_key !== action_key)
-            : old.map((a) => {
-                if (a.action_key !== action_key) return a
-                if (status === 'claimed') return { ...a, state: 'claimed' as const }
-                if (status === 'done') return { ...a, state: 'done' as const, done_at_task: new Date().toISOString() }
-                return { ...a, state: 'open' as const, done_at_task: null }
-              }),
-      )
-      return { prev }
-    },
-    onError: (_e, _v, ctx) => {
-      if (ctx?.prev) qc.setQueryData(['actions', 'pending'], ctx.prev)
-      flashAction('Aktion konnte nicht gespeichert werden.')
-    },
-    onSettled: () => qc.invalidateQueries({ queryKey: ['actions', 'pending'] }),
-  })
   useEffect(() => {
     if (!selectedId) return
-    const selected = calls.find((c) => c.id === selectedId)
-    if (selected && selected.read_at === null) markRead.mutate(selectedId)
+    const sel = calls.find((c) => c.id === selectedId)
+    if (sel && sel.read_at === null) markRead.mutate(selectedId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, calls])
 
@@ -166,192 +102,137 @@ export function CallLogsPage() {
     }
   }, [orgId, qc])
 
-  // Auto-select the first call once loaded — DESKTOP ONLY. On mobile we want to
-  // land on the inbox list, not jump straight into a call's detail pane.
+  // Same-route deep-links (?call_id=): open that call's drawer when the param appears
+  // or changes. The ref guards against re-opening after the user closes the drawer.
+  const appliedCallId = useRef<string | null>(searchParams.get('call_id'))
   useEffect(() => {
-    if (isWide && !selectedId && calls.length) setSelectedId(calls[0].id)
-  }, [calls, selectedId, isWide])
+    const cid = searchParams.get('call_id')
+    if (cid && cid !== appliedCallId.current) {
+      appliedCallId.current = cid
+      setSelectedId(cid)
+    }
+  }, [searchParams])
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return calls.filter((c) => {
-      if (filters.dir !== 'all' && c.direction !== filters.dir) return false
-      if (filters.status !== 'all' && c.inquiry_status !== filters.status) return false
-      if (!matchesDateFilter(c, filters)) return false
-      if (q && !displayName(c).toLowerCase().includes(q) && !(c.summary_title ?? '').toLowerCase().includes(q))
-        return false
-      return true
-    })
-  }, [calls, search, filters])
+  const { toast, flash } = useToast()
 
-  // Reset to page 1 when the result set changes.
-  useEffect(() => {
-    setPage(1)
-  }, [search, filters])
-  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const pageClamped = Math.min(page, pages)
-  const paged = filtered.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE)
+  const q = search.trim().toLowerCase()
+  // Pill counts reflect every active filter EXCEPT direction, so each pill shows
+  // how many calls it would surface given the other filters.
+  const preDir = useMemo(
+    () => calls.filter((c) => callMatches(c, { ...filters, dir: 'all' }, q, nowMs)),
+    [calls, filters, q, nowMs],
+  )
+  const counts: PillCounts = useMemo(
+    () => ({
+      all: preDir.length,
+      inbound: preDir.filter((c) => c.direction === 'inbound').length,
+      outbound: preDir.filter((c) => c.direction === 'outbound').length,
+      emergency: preDir.filter((c) => c.emergency_flag).length,
+    }),
+    [preDir],
+  )
 
-  const listResize = useColumnResize('hk-calls-list-w', 340, { min: 260, max: 540, side: 'left' })
-  const selectedEmergency = calls.find((c) => c.id === selectedId)?.emergency_flag ?? false
+  const filtered = useMemo(
+    () => calls.filter((c) => callMatches(c, filters, q, nowMs)).sort(byNewest),
+    [calls, filters, q, nowMs],
+  )
+
+  // Partition: pinned attention (no case / emergency) vs the day-grouped rest.
+  const { attention, groups } = useMemo(() => {
+    const att: CallListItem[] = []
+    const buckets: Record<Bucket, CallListItem[]> = { today: [], yesterday: [], week: [], month: [], older: [] }
+    for (const c of filtered) {
+      if (needsAttention(c)) att.push(c)
+      else buckets[bucketOf(c.started_at || c.created_at, nowMs)].push(c)
+    }
+    return { attention: att, groups: buckets }
+  }, [filtered, nowMs])
+
+  const renderRow = (c: CallListItem, mixed: boolean) => (
+    <LogRow
+      key={c.id}
+      call={c}
+      active={c.id === selectedId}
+      mixed={mixed}
+      assigneeName={c.assigned_employee_id ? (employeeName.get(c.assigned_employee_id) ?? null) : null}
+      onSelect={() => setSelectedId(c.id)}
+      onOpenCase={(to) => navigate(to)}
+    />
+  )
+
+  const nonEmptyGroups = BUCKET_ORDER.filter((b) => groups[b].length > 0)
+  const isEmpty = !callsQuery.isLoading && !attention.length && !nonEmptyGroups.length
 
   return (
-    <div className="flex h-full min-h-0 font-poster">
-      {actionToast && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-md bg-error-bg px-4 py-2 text-sm font-medium text-error shadow-e2">
-          {actionToast}
+    <div className="scroll h-full overflow-y-auto bg-bg font-poster">
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-[90] -translate-x-1/2 rounded-lg bg-text px-4 py-2 text-sm font-semibold text-bg shadow-e3">
+          {toast}
         </div>
       )}
-      <aside
-        style={isWide ? { width: listResize.width } : undefined}
-        className={cn(
-          'flex-col border-r border-border bg-bg',
-          isWide ? 'flex flex-shrink-0' : selectedId ? 'hidden' : 'flex w-full',
-        )}
-      >
-        <div className="border-b border-border bg-surface p-4">
-          <Segmented
-            full
-            value={tab}
-            onChange={(v) => setTab(v as 'anfragen' | 'aktionen')}
-            options={[
-              { value: 'anfragen', label: 'Anfragen', icon: Inbox, badge: calls.length },
-              { value: 'aktionen', label: 'Aktionen', icon: ListChecks, badge: actionsCount || null, badgeTone: 'red' },
-            ]}
-          />
-          {tab === 'anfragen' && (
-            <div className="mt-3 flex gap-2">
-              <div className="relative flex-1">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
-                <input
-                  type="search"
-                  name="call-inquiry-search"
-                  autoComplete="off"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Suchen…"
-                  className="w-full rounded-lg border border-border bg-alt py-2 pl-9 pr-3 text-sm text-body outline-none focus:border-green-primary"
-                />
-              </div>
-              <FilterPopover filters={filters} setFilters={setFilters} />
-            </div>
-          )}
+
+      <div className="mx-auto max-w-[1100px] px-4 py-7 sm:px-8">
+        {/* header */}
+        <div className="mb-6">
+          <h1 className="text-[26px] font-extrabold tracking-tight text-text">Anrufe</h1>
+          <p className="mt-1 text-[14px] text-muted">
+            Jeder Anruf, den Kiki angenommen oder geführt hat — durchsuchbar und direkt bearbeitbar.
+          </p>
         </div>
 
-        {tab === 'anfragen' ? (
-          <>
-            <div className="scroll flex-1 space-y-2 overflow-y-auto p-2.5">
-              {paged.map((c) => (
-                <CallRow
-                  key={c.id}
-                  call={c}
-                  active={c.id === selectedId}
-                  employees={employees}
-                  onSelect={() => setSelectedId(c.id)}
-                  onAssign={(employeeId) => {
-                    if (!c.inquiry_id) return
-                    assignInquiry.mutate({ inquiryId: c.inquiry_id, employeeId })
-                  }}
-                  onOpenCase={(caseKey) => navigate(`/posteingang?fall=${caseKey}`)}
-                  assigning={assignInquiry.isPending}
-                />
-              ))}
-              {!callsQuery.isLoading && !filtered.length && <p className="p-3 text-sm text-muted">Keine Anrufe.</p>}
-            </div>
-            <PagerNumbered page={pageClamped} pages={pages} onPage={setPage} />
-          </>
-        ) : actions.length ? (
-          <div className="scroll flex-1 space-y-2 overflow-y-auto p-2.5">
-            {actions.map((item) => (
-              <ActionRow
-                key={`${item.kind}:${item.id}`}
-                item={item}
-                onSetState={(status) => setActionState.mutate({ action_key: item.action_key, status })}
-                onSelect={() => {
-                  // Customer-proposed reschedule → approve/decline in a popup right
-                  // here (pre-filled with the proposed slot). One click moves +
-                  // confirms the appointment — no need to find the call.
-                  if (item.kind === 'alt_time_proposal' && item.proposal_role === 'customer') {
-                    setReschedule({
-                      id: item.id,
-                      name: item.customer_name,
-                      time: item.due_at,
-                      originalTime: item.original_time ?? null,
-                      expiresAt: item.expires_at ?? null,
-                      replaceIntent: item.replace_intent ?? null,
-                    })
-                    return
-                  }
-                  // Route each Aktion to the surface where it can actually be acted
-                  // on — not blanket-to the customer card (the old fallback, which
-                  // had no way to confirm an appointment or send a KVA).
-                  switch (item.kind) {
-                    // Appointment decisions (confirm / reschedule approval) and the
-                    // "Termin storniert" notice live on the call's inline card → open
-                    // that call (falls through to the customer card if no call linked).
-                    case 'termin_anfrage':
-                    case 'alt_time_proposal':
-                    case 'appointment_cancelled':
-                      if (item.call_id) {
-                        setTab('anfragen')
-                        setSelectedId(item.call_id)
-                        return
-                      }
-                      break
-                    // Cost estimates: open the KVA itself (send / review decision).
-                    case 'kva_to_send':
-                    case 'kva_pending_acceptance':
-                      navigate(`/cost-estimates/${item.id}`)
-                      return
-                    // Missed call owed a callback: the customer card has the number.
-                    case 'callback_owed':
-                      break
-                  }
-                  // Fallback: the customer card (used for callback_owed and for any
-                  // appointment action whose call_id couldn't be resolved).
-                  if (item.customer_id) navigate(`/customers/${item.customer_id}`)
-                }}
-              />
-            ))}
+        {/* filters */}
+        <div className="mb-6">
+          <LogFilters
+            filters={filters}
+            setFilters={setFilters}
+            search={search}
+            setSearch={setSearch}
+            employees={employees}
+            counts={counts}
+          />
+        </div>
+
+        {callsQuery.isLoading ? (
+          <div className="py-16 text-center text-sm text-muted">Anrufe werden geladen…</div>
+        ) : isEmpty ? (
+          <div className="rounded-2xl border border-dashed border-border py-16 text-center">
+            <Inbox size={28} className="mx-auto mb-3 text-faint" />
+            <p className="text-sm font-semibold text-body">Keine Anrufe gefunden</p>
+            <p className="mt-1 text-[13px] text-muted">Passen Sie die Filter an oder setzen Sie sie zurück.</p>
           </div>
         ) : (
-          <EmptyAktionen />
+          <div className="flex flex-col gap-6">
+            {/* pinned: needs attention */}
+            {attention.length > 0 && (
+              <section className="overflow-hidden rounded-2xl border border-warning/40 bg-warning-bg/40">
+                <div className="flex items-center gap-2 px-4 pb-1.5 pt-3.5">
+                  <Inbox size={15} className="text-warning" />
+                  <span className="text-[12.5px] font-extrabold uppercase tracking-wider text-warning">Braucht Aufmerksamkeit</span>
+                  <span className="text-[12.5px] font-bold text-warning/80">
+                    {attention.length} {attention.length === 1 ? 'Anruf' : 'Anrufe'}
+                  </span>
+                </div>
+                <div className="space-y-0.5 p-1.5">{attention.map((c) => renderRow(c, true))}</div>
+              </section>
+            )}
+
+            {/* day-grouped history */}
+            {nonEmptyGroups.map((b) => (
+              <section key={b}>
+                <div className="mb-2 flex items-center gap-2 px-1">
+                  <span className="text-[12px] font-extrabold uppercase tracking-wider text-muted">{BUCKET_LABEL[b]}</span>
+                  <span className="text-[12px] font-bold text-faint">{groups[b].length}</span>
+                </div>
+                <div className="space-y-0.5 rounded-2xl border border-border bg-surface p-1.5">
+                  {groups[b].map((c) => renderRow(c, false))}
+                </div>
+              </section>
+            ))}
+          </div>
         )}
-      </aside>
+      </div>
 
-      {isWide && <ResizeHandle onMouseDown={listResize.onMouseDown} />}
-
-      {selectedId ? (
-        <CallDetail
-          callId={selectedId}
-          isSuperAdmin={isSuperAdmin}
-          emergency={selectedEmergency}
-          rightOpen={rightOpen}
-          onToggleRight={() => setRightOpen((o) => !o)}
-          onDeleted={() => setSelectedId(null)}
-          isWide={isWide}
-          onBack={() => setSelectedId(null)}
-        />
-      ) : (
-        isWide && <NoCallSelected />
-      )}
-
-      <RescheduleApprovalModal
-        open={!!reschedule}
-        appointmentId={reschedule?.id ?? null}
-        customerName={reschedule?.name ?? null}
-        proposedTime={reschedule?.time ?? null}
-        originalTime={reschedule?.originalTime ?? null}
-        expiresAt={reschedule?.expiresAt ?? null}
-        replaceIntent={reschedule?.replaceIntent ?? null}
-        onClose={() => setReschedule(null)}
-        onResolved={() => {
-          qc.invalidateQueries({ queryKey: ['actions', 'pending'] })
-          qc.invalidateQueries({ queryKey: ['appointments'] })
-          qc.invalidateQueries({ queryKey: ['calls'] })
-          qc.invalidateQueries({ queryKey: ['pendingAppointment'] })
-        }}
-      />
+      <LogDrawer callId={selectedId} onClose={() => setSelectedId(null)} flash={flash} />
     </div>
   )
 }

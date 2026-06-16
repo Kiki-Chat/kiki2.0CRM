@@ -188,18 +188,24 @@ export const fmtDuration = (s: number | null) =>
 // Date/time formatters live in lib/datetime (pinned to Europe/Berlin so times don't
 // render in the viewer's browser tz). Re-exported here so the many call-log modules
 // that import them from './shared' keep working unchanged.
-export { fmtTime, relativeTimeDe, absoluteTimeDe } from '../../lib/datetime'
+export { fmtTime, fmtClock, relativeTimeDe, absoluteTimeDe } from '../../lib/datetime'
 
 export const isMeaningful = (v?: string | null) =>
   !!v && !['unbekannt', 'keiner', 'anonymous'].includes(v.toLowerCase())
 
-export function displayName(c: CallListItem): string {
+// The caller's real name (customer record → AI-collected name), or null when the
+// call is from an unidentified number. Shared by displayName (which falls back to the
+// number) and the call-log title (which shows "Unbekannte Nummer" instead).
+export function resolvedCustomerName(c: CallListItem): string | null {
   return (
     (isMeaningful(c.customers?.full_name) && c.customers!.full_name!) ||
     (isMeaningful(c.data_collection?.customer_name) && c.data_collection!.customer_name!) ||
-    (isMeaningful(c.caller_number) && c.caller_number!) ||
-    'Unbekannt'
+    null
   )
+}
+
+export function displayName(c: CallListItem): string {
+  return resolvedCustomerName(c) || (isMeaningful(c.caller_number) && c.caller_number!) || 'Unbekannt'
 }
 
 // Client-side date-filter predicate over a call's started_at/created_at.

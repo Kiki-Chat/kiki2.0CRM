@@ -21,6 +21,16 @@ export const fmtTime = (iso: string | null): string =>
       })
     : '—'
 
+// "14:30" — time only (the day is implied by the call-log group header).
+export const fmtClock = (iso: string | null): string =>
+  iso
+    ? new Date(iso).toLocaleTimeString('de-DE', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: BERLIN_TZ,
+      })
+    : '—'
+
 // "08.06.2026" — date only.
 export const fmtDate = (iso: string | null): string =>
   iso
