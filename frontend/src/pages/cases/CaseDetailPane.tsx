@@ -533,7 +533,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                       {technicians.map((e) => <option key={e.id} value={e.id}>{e.display_name ?? 'Techniker'}</option>)}
                     </select>
                   </label>
-                  <button disabled={!techAppt || !techEmp || dispatchTech.isPending} onClick={() => dispatchTech.mutate()} className="inline-flex items-center gap-1.5 rounded-lg bg-green-primary px-3 py-2 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-50">
+                  <button disabled={!techAppt || !techEmp || dispatchTech.isPending || !data.appointments.some((a) => a.id === techAppt)} onClick={() => { if (data.appointments.some((a) => a.id === techAppt)) dispatchTech.mutate() }} className="inline-flex items-center gap-1.5 rounded-lg bg-green-primary px-3 py-2 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-50">
                     <Send size={14} /> Link senden
                   </button>
                 </div>
@@ -595,7 +595,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
         employees={employees}
         onCreated={() => { setApptOpen(false); qc.invalidateQueries({ queryKey: ['caseDetail', caseId] }); flash('Termin erstellt ✓') }}
       />
-      {editOpen && <CustomerFormModal open mode="edit" customer={fullCustomer} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); qc.invalidateQueries({ queryKey: ['caseDetail', caseId] }) }} />}
+      {editOpen && fullCustomer && <CustomerFormModal open mode="edit" customer={fullCustomer} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); qc.invalidateQueries({ queryKey: ['caseDetail', caseId] }) }} />}
     </div>
   )
 }

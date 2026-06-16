@@ -329,6 +329,15 @@ function CaseStatChips({ c }: { c: CaseListRow }) {
   )
 }
 
+// Case status labels match the Cases redesign (Offen / In Arbeit / Fertig), NOT
+// the project STATUS_META wording, so a case reads the same here as in /cases.
+const CASE_STATUS_META: Record<string, { label: string; cls: string }> = {
+  planning: { label: 'Offen', cls: 'bg-info-bg text-info' },
+  active: { label: 'In Arbeit', cls: 'bg-warning-bg text-warning' },
+  completed: { label: 'Fertig', cls: 'bg-success-bg text-success' },
+  archived: { label: 'Archiviert', cls: 'bg-alt text-muted' },
+}
+
 function CasesTab({ project }: { project: Project }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -383,7 +392,7 @@ function CasesTab({ project }: { project: Project }) {
       {members.length ? (
         <div className="space-y-3">
           {members.map((c) => {
-            const sm = STATUS_META[c.status] ?? STATUS_META.planning
+            const sm = CASE_STATUS_META[c.status] ?? CASE_STATUS_META.planning
             return (
               <div key={c.id} className="rounded-xl border border-border bg-surface p-4">
                 <div className="flex items-start justify-between gap-3">

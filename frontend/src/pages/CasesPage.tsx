@@ -51,6 +51,7 @@ export function CasesPage() {
       )}
       <CaseList cases={cases} selectedId={effectiveId} onSelect={select} />
       <CaseDetailPane
+        key={effectiveId ?? 'none'}
         caseId={effectiveId}
         employees={employees}
         projects={projects}
