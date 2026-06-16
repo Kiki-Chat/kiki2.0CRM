@@ -17,6 +17,7 @@ import {
   Plus,
   Receipt,
   Sparkles,
+  UserPlus,
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -238,6 +239,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
   const [actioned, setActioned] = useState<{ appt: PendingAppointment; result: 'confirmed' | 'rejected' } | null>(null)
   const [modal, setModal] = useState<'appointment' | null>(null)
   const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const [summaryOpen, setSummaryOpen] = useState(true)
 
   // Assign the call's Vorgang to an employee (the "Zuständig" shown on the row).
   const assignEmp = useMutation({
@@ -285,6 +287,9 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
   const assigneeName = call?.assigned_employee_id
     ? (employees.find((e) => e.id === call.assigned_employee_id)?.display_name ?? null)
     : null
+  // Only INBOUND calls (new requests) get an employee assigned — outbound calls are
+  // Kiki-initiated and inherit their case's owner, so no assign control there.
+  const canAssign = !!call && call.direction === 'inbound' && !!call.inquiry_id
 
   const goKva = () =>
     call &&
@@ -297,7 +302,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
     call && navigate(`/invoices/new?customer_id=${call.customer_id ?? ''}${call.case_id ? `&case_id=${call.case_id}` : ''}`)
 
   return (
-    <div className="fixed inset-0 z-[80]">
+    <div className="fixed inset-0 z-[30]">
       <div onClick={onClose} className="absolute inset-0 bg-black/40" />
       <div
         ref={panelRef}
@@ -362,7 +367,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                   </div>
                 )}
 
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="flex flex-wrap gap-1.5">
                   <ActionBtn variant="secondary" icon={<CalendarPlus size={15} />} onClick={() => setModal('appointment')}>
                     Termin
                   </ActionBtn>
@@ -372,10 +377,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                   <ActionBtn variant="secondary" icon={<Receipt size={15} />} disabled={!call.customer_id} onClick={goInvoice}>
                     Rechnung
                   </ActionBtn>
-                </div>
-
-                {call.inquiry_id && (
-                  <div className="mt-1.5">
+                  {canAssign && (
                     <AssignDropdown
                       current={call.assigned_employee_id}
                       employees={employees}
@@ -384,23 +386,20 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                     >
                       <button
                         type="button"
-                        className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-left text-[13px] font-bold text-body transition hover:bg-alt"
+                        title={assigneeName ? `Zuständig: ${assigneeName}` : 'Mitarbeiter zuweisen'}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-bold text-body transition hover:bg-alt"
                       >
                         {call.assigned_employee_id ? (
-                          <Avatar employeeId={call.assigned_employee_id} text={call.assigned_employee_initials || '?'} size={22} />
+                          <Avatar employeeId={call.assigned_employee_id} text={call.assigned_employee_initials || '?'} size={18} />
                         ) : (
-                          <span className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-full border border-dashed border-border text-[11px] font-bold text-faint">
-                            –
-                          </span>
+                          <UserPlus size={15} />
                         )}
-                        <span className="flex-1 truncate">
-                          {assigneeName ? `Zuständig: ${assigneeName}` : 'Mitarbeiter zuweisen'}
-                        </span>
-                        <ChevronDown size={14} className="flex-shrink-0 text-faint" />
+                        <span className="max-w-[110px] truncate">{assigneeName ?? 'Zuständig'}</span>
+                        <ChevronDown size={13} className="flex-shrink-0 text-faint" />
                       </button>
                     </AssignDropdown>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               {/* case box / triage */}
@@ -515,16 +514,26 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                 </div>
               )}
 
-              {/* Kiki summary */}
-              <div className="mb-6 rounded-2xl bg-ai-bg p-4">
-                <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-extrabold uppercase tracking-wider text-ai">
+              {/* Kiki summary — its own collapsible section (default open) */}
+              <div className="mb-6 overflow-hidden rounded-2xl bg-ai-bg">
+                <button
+                  type="button"
+                  onClick={() => setSummaryOpen((o) => !o)}
+                  aria-expanded={summaryOpen}
+                  className="flex w-full items-center gap-1.5 px-4 py-3 text-[10.5px] font-extrabold uppercase tracking-wider text-ai"
+                >
                   <Sparkles size={13} /> Kiki-Zusammenfassung
-                </div>
-                <p className="text-[14px] leading-relaxed text-body">{call.summary || 'Keine Zusammenfassung verfügbar.'}</p>
-                {nextAction && (
-                  <div className="mt-3 flex items-start gap-2 text-[13px] text-text">
-                    <span className="whitespace-nowrap font-bold text-ai">Nächste Aktion:</span>
-                    <span>{nextAction}</span>
+                  <ChevronDown size={14} className={cn('ml-auto transition-transform', summaryOpen && 'rotate-180')} />
+                </button>
+                {summaryOpen && (
+                  <div className="px-4 pb-4">
+                    <p className="text-[14px] leading-relaxed text-body">{call.summary || 'Keine Zusammenfassung verfügbar.'}</p>
+                    {nextAction && (
+                      <div className="mt-3 flex items-start gap-2 rounded-xl bg-surface/60 p-3 text-[13px] text-text">
+                        <span className="whitespace-nowrap font-bold text-ai">Nächste Aktion:</span>
+                        <span>{nextAction}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
