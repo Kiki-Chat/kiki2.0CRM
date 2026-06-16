@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Clock, Euro, LayoutDashboard, Phone, Sparkles } from 'lucide-react'
+import { Calendar, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FileText, LayoutDashboard, Phone, Sparkles, X } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -8,22 +8,14 @@ import { FinanzenTab } from '../components/dashboard/FinanzenTab'
 import { KiInsightsTab } from '../components/dashboard/KiInsightsTab'
 import { KiNutzungTab } from '../components/dashboard/KiNutzungTab'
 import { Card } from '../components/ui/Card'
-import kikiAvatar from '../assets/kiki-avatar.png'
 import { apiFetch } from '../lib/api'
 import { isSupabaseConfigured } from '../lib/env'
 import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
+import { usePosteingang, usePosteingangActions, type DecisionVM } from './posteingang/api'
 
-// The overview tab now leads with call performance (Gesamtanrufe / Beantwortet /
-// Durchschnittsdauer + graphs, via <AnrufeTab/>). The hero bubble reads the two
-// OPEN-total counts (open requests + pending actions), so this is all we read
-// from /api/dashboard/overview.
-interface OverviewData {
-  kpis: {
-    open_inquiries: number
-    pending_actions: number
-  }
-}
+// The overview tab leads with the "Jetzt entscheiden" decision deck (the pending
+// decisions from /api/actions/pending) + call performance (<AnrufeTab/>).
 
 const TABS = [
   { id: 'overview', label: 'Übersicht', icon: LayoutDashboard },
@@ -100,7 +92,7 @@ export function DashboardPage() {
       </div>
 
       <div key={tab} style={{ animation: 'fadeUp 220ms ease' }}>
-        {tab === 'overview' && <OverviewTab company={company} />}
+        {tab === 'overview' && <OverviewTab />}
         {tab === 'finanzen' && <FinanzenTab />}
         {tab === 'ki-nutzung' && <KiNutzungTab />}
         {tab === 'ki-insights' && <KiInsightsTab />}
@@ -109,18 +101,7 @@ export function DashboardPage() {
   )
 }
 
-function OverviewTab({ company }: { company: string }) {
-  const navigate = useNavigate()
-  // The hero bubble shows the OPEN totals (open requests + pending actions) — not
-  // a per-day slice; the stats + graphs below come from <AnrufeTab/> (its own
-  // period-filtered query). A slow/failed overview fetch just leaves the bubble at
-  // 0 — it never blocks the call-stats block from rendering.
-  const { data } = useQuery<OverviewData>({
-    queryKey: ['dashboard-overview'],
-    queryFn: () => apiFetch<OverviewData>('/api/dashboard/overview'),
-    enabled: isSupabaseConfigured,
-  })
-
+function OverviewTab() {
   if (!isSupabaseConfigured) {
     return (
       <Card className="text-sm text-muted">
@@ -128,70 +109,174 @@ function OverviewTab({ company }: { company: string }) {
       </Card>
     )
   }
-
-  const kpis = data?.kpis
-  const openCalls = kpis?.open_inquiries ?? 0
-  const openActions = kpis?.pending_actions ?? 0
-
   return (
     <div className="space-y-5">
-      {/* ── Hero (poster stays; "Anfragen" → "Aktionen") ─────────────────── */}
-      <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-green-tint-50 via-surface to-surface shadow-e1">
-        {/* soft glow behind the avatar */}
-        <div
-          aria-hidden
-          className="kiki-glow pointer-events-none absolute right-[130px] top-1/2 hidden h-[340px] w-[340px] rounded-full bg-green-primary/20 blur-3xl lg:block"
-        />
-        <div className="relative z-10 max-w-[600px] p-8 sm:p-10">
-          <div className="inline-flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.08em] text-green-deep">
-            <span className="h-1.5 w-1.5 rounded-full bg-green-primary shadow-[0_0_0_4px_var(--green-tint-100)]" />
-            HeyKiki
-          </div>
-          <h2 className="mt-3 text-2xl font-extrabold leading-tight tracking-tight text-text sm:text-[28px]">
-            Kiki, die erste KI‑Sekretärin für{' '}
-            <span className="text-green-primary">Handwerksbetriebe</span>
-          </h2>
-
-          <div className="speech-bubble relative mt-5 max-w-[480px] rounded-2xl rounded-bl-md border border-border bg-surface p-4 shadow-e1">
-            <p className="text-[15px] leading-relaxed text-body">
-              Hey <strong className="font-bold text-text">{company}</strong>, aktuell sind{' '}
-              <span className="font-extrabold text-info">
-                {openCalls} {openCalls === 1 ? 'Anfrage' : 'Anfragen'}
-              </span>{' '}
-              und{' '}
-              <span className="font-extrabold text-green-primary">
-                {openActions} {openActions === 1 ? 'Aktion' : 'Aktionen'}
-              </span>{' '}
-              offen. Wie soll ich fortfahren?
-            </p>
-          </div>
-
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              onClick={() => navigate('/calls?status=open&tab=anfragen')}
-              className="inline-flex items-center gap-2 rounded-lg border border-border bg-alt px-4 py-2.5 text-sm font-bold text-text transition hover:border-green-tint-200 hover:bg-green-tint-50"
-            >
-              <Phone size={15} /> {openCalls} {openCalls === 1 ? 'Anfrage' : 'Anfragen'} ansehen
-            </button>
-            <button
-              onClick={() => navigate('/calls?status=open&tab=aktionen')}
-              className="inline-flex items-center gap-2 rounded-lg border border-border bg-alt px-4 py-2.5 text-sm font-bold text-text transition hover:border-green-tint-200 hover:bg-green-tint-50"
-            >
-              <Sparkles size={15} /> {openActions} {openActions === 1 ? 'Aktion' : 'Aktionen'} ansehen
-            </button>
-          </div>
-        </div>
-
-        {/* avatar bleeding off the right edge (clipped by overflow-hidden) */}
-        <img
-          src={kikiAvatar}
-          alt="Kiki"
-          className="kiki-live pointer-events-none absolute bottom-0 right-[-24px] hidden h-[300px] w-auto select-none lg:block xl:right-2"
-        />
-      </section>
-
-      {/* ── Call performance — the new headline stats + graphs ───────────── */}
+      <DecideNow />
       <AnrufeTab />
     </div>
+  )
+}
+
+const TYPE_ICON: Record<string, typeof Phone> = {
+  termin: Calendar,
+  rueckruf: Phone,
+  storno: X,
+  kva: FileText,
+  reschedule: Clock,
+}
+
+// "Jetzt entscheiden" — an iOS-widget-style stacked deck of the pending decisions
+// (/api/actions/pending). The top card is live; the next ones peek behind it.
+// Arrows (or clicking a peeking card) advance; each card's buttons resolve the
+// decision in place. Replaces the old greeting hero.
+function DecideNow() {
+  const navigate = useNavigate()
+  const { decisions, callsCount, loading } = usePosteingang()
+  const { resolve } = usePosteingangActions()
+  const { data: cases } = useQuery({
+    queryKey: ['cases'],
+    queryFn: () => apiFetch<{ id: string }[]>('/api/cases'),
+    enabled: isSupabaseConfigured,
+  })
+  const [index, setIndex] = useState(0)
+  const [busy, setBusy] = useState(false)
+
+  const total = decisions.length
+  const casesCount = cases?.length ?? 0
+  const i = total ? Math.min(index, total - 1) : 0
+
+  async function act(d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') {
+    if (busy) return
+    setBusy(true)
+    try {
+      await resolve(d, choice)
+    } finally {
+      setBusy(false)
+    }
+    setIndex((x) => Math.max(0, Math.min(x, total - 2)))
+  }
+
+  return (
+    <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-green-tint-50 via-surface to-surface p-6 shadow-e1 sm:p-7">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="inline-flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[0.08em] text-green-deep">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-primary shadow-[0_0_0_4px_var(--green-tint-100)]" />
+            Jetzt entscheiden
+          </div>
+          <h2 className="mt-1.5 text-xl font-extrabold tracking-tight text-text sm:text-2xl">
+            {total === 0
+              ? 'Alles erledigt 🎉'
+              : `${total} ${total === 1 ? 'Entscheidung wartet' : 'Entscheidungen warten'} auf Sie`}
+          </h2>
+          <p className="mt-1 text-xs font-medium text-muted">
+            {callsCount} Anrufe · {casesCount} Fälle · {total} offen
+          </p>
+        </div>
+        {total > 1 && (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setIndex((x) => Math.max(0, x - 1))}
+              disabled={i === 0}
+              className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface text-muted transition hover:text-text disabled:opacity-30"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="min-w-[44px] text-center text-xs font-semibold text-muted">{i + 1} / {total}</span>
+            <button
+              onClick={() => setIndex((x) => Math.min(total - 1, x + 1))}
+              disabled={i >= total - 1}
+              className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface text-muted transition hover:text-text disabled:opacity-30"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="relative mt-4 h-[176px]">
+        {loading && total === 0 && (
+          <div className="flex h-full items-center justify-center text-sm text-muted">Lädt Entscheidungen…</div>
+        )}
+        {!loading && total === 0 && (
+          <div className="flex h-full flex-col items-center justify-center gap-1 text-center">
+            <CheckCircle2 size={28} className="text-green-primary" />
+            <p className="text-sm font-semibold text-text">Keine offenen Entscheidungen</p>
+            <p className="text-xs text-muted">Kiki hat alles abgearbeitet — neue Anrufe erscheinen hier automatisch.</p>
+          </div>
+        )}
+        {decisions.map((d, j) => {
+          const p = j - i
+          if (p < 0 || p > 2) return null
+          const Icon = TYPE_ICON[d.type] ?? Sparkles
+          const front = p === 0
+          return (
+            <div
+              key={d.actionKey}
+              onClick={() => !front && setIndex(j)}
+              className="absolute inset-x-0 top-0 rounded-xl border bg-surface p-4 shadow-e1 transition-all duration-300"
+              style={{
+                transform: `translateY(${p * 12}px) scale(${1 - p * 0.04})`,
+                opacity: p === 0 ? 1 : p === 1 ? 0.65 : 0.4,
+                zIndex: 30 - p,
+                borderColor: front ? d.accent : 'var(--border)',
+                pointerEvents: front ? 'auto' : 'none',
+              }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold"
+                  style={{ color: d.accent, backgroundColor: `color-mix(in srgb, ${d.accent} 12%, transparent)` }}
+                >
+                  <Icon size={12} /> {d.typeLabel}
+                </span>
+                {d.caseTicket && <span className="truncate font-mono text-[11px] text-muted">{d.caseTicket}</span>}
+              </div>
+              <p className="mt-2 truncate text-[15px] font-bold text-text">{d.title}</p>
+              <p className="mt-0.5 truncate text-xs text-muted">
+                {d.customer}
+                {d.caseName ? ` · ${d.caseName}` : ''}
+              </p>
+              {front && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    disabled={busy}
+                    onClick={() => act(d, 'primary')}
+                    className="rounded-lg px-3 py-1.5 text-xs font-bold text-white transition disabled:opacity-50"
+                    style={{ backgroundColor: d.accent }}
+                  >
+                    {d.primary}
+                  </button>
+                  {d.secondary && (
+                    <button
+                      disabled={busy}
+                      onClick={() => act(d, 'secondary')}
+                      className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-text transition hover:border-green-tint-200 disabled:opacity-50"
+                    >
+                      {d.secondary}
+                    </button>
+                  )}
+                  {d.tertiary && (
+                    <button
+                      disabled={busy}
+                      onClick={() => act(d, 'tertiary')}
+                      className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-muted transition hover:text-text disabled:opacity-50"
+                    >
+                      {d.tertiary}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => navigate('/posteingang')}
+                    className="ml-auto self-center text-xs font-medium text-muted hover:text-text"
+                  >
+                    Alle ansehen →
+                  </button>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }

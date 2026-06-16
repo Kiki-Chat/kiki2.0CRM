@@ -147,8 +147,8 @@ export function CallDetail({
       seen.add(cc.inquiry_id)
       out.push({
         inquiryId: cc.inquiry_id,
-        label: cc.project_title || cc.inquiry_subject || cc.summary_title || 'Fall',
-        ticket: cc.project_number || cc.inquiry_number,
+        label: cc.case_label || cc.inquiry_subject || cc.summary_title || 'Fall',
+        ticket: cc.case_number || cc.inquiry_number,
       })
     }
     return out

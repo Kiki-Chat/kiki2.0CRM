@@ -3,10 +3,8 @@ import {
   Calendar,
   ClipboardList,
   FileText,
-  FolderOpen,
   Layers,
   Phone,
-  Plus,
   Receipt,
   Search,
   Users,
@@ -17,8 +15,7 @@ import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import { cn } from '../lib/utils'
 
-interface ProjectStats {
-  cases: number
+interface CaseStats {
   calls: number
   inquiries: number
   open_inquiries: number
@@ -28,20 +25,16 @@ interface ProjectStats {
   invoices: number
   employees: number
 }
-interface Project {
+interface Case {
   id: string
   number: string | null
   title: string
   status: string
   customer_id: string | null
   customer_name: string | null
-  start_date: string | null
-  end_date: string | null
-  planned_budget: number | null
-  actual_budget: number
-  open_amount: number
-  progress: number
-  stats: ProjectStats
+  created_at: string | null
+  project_id: string | null
+  stats: CaseStats
 }
 interface CustomerOption { id: string; full_name: string | null }
 
@@ -52,15 +45,15 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   archived: { label: 'Archiviert', cls: 'bg-alt text-muted' },
 }
 
-export function ProjectsPage() {
+export function CasesPage() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [customer, setCustomer] = useState('')
 
-  const { data: projects = [] } = useQuery({
-    queryKey: ['projects'],
-    queryFn: () => apiFetch<Project[]>('/api/projects'),
+  const { data: cases = [] } = useQuery({
+    queryKey: ['cases'],
+    queryFn: () => apiFetch<Case[]>('/api/cases'),
   })
   const { data: customerData } = useQuery({
     queryKey: ['customers-options'],
@@ -68,33 +61,25 @@ export function ProjectsPage() {
   })
   const customers = customerData?.customers ?? []
 
-  const filtered = projects.filter(
-    (p) =>
+  const filtered = cases.filter(
+    (c) =>
       (!search ||
-        p.title.toLowerCase().includes(search.toLowerCase()) ||
-        (p.customer_name ?? '').toLowerCase().includes(search.toLowerCase())) &&
-      (status === 'all' || p.status === status) &&
-      (!customer || p.customer_id === customer),
+        c.title.toLowerCase().includes(search.toLowerCase()) ||
+        (c.customer_name ?? '').toLowerCase().includes(search.toLowerCase())) &&
+      (status === 'all' || c.status === status) &&
+      (!customer || c.customer_id === customer),
   )
 
-  const activeProjects = projects.filter((p) => p.status === 'active' || p.status === 'planning')
+  const openCases = cases.filter((c) => c.status === 'active' || c.status === 'planning')
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <FolderOpen size={26} className="text-green-primary" />
-          <div>
-            <h1 className="text-2xl font-bold text-text">Projekte</h1>
-            <p className="mt-0.5 text-sm text-muted">{projects.length} Projekte · {activeProjects.length} offen — übergeordnete Aufträge, die mehrere Fälle bündeln</p>
-          </div>
+      <div className="mb-6 flex items-center gap-3">
+        <Layers size={26} className="text-green-primary" />
+        <div>
+          <h1 className="text-2xl font-bold text-text">Fälle</h1>
+          <p className="mt-0.5 text-sm text-muted">{cases.length} Fälle · {openCases.length} offen — Tickets, die Kiki aus den Anrufen gebündelt hat</p>
         </div>
-        <button
-          onClick={() => navigate('/projects/new')}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-green-primary px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-95"
-        >
-          <Plus size={16} /> Neues Projekt
-        </button>
       </div>
 
       {/* Filter */}
@@ -127,52 +112,54 @@ export function ProjectsPage() {
         </div>
       </div>
 
-      {/* Cards — a lean Fall is a ticket: customer + the call(s) and the five things
-          (Anfragen/Anrufe · Termine · KVA · Rechnungen · Mitarbeiter). No budget/dates. */}
+      {/* Cards — a Fall is a ticket: customer + the call(s) and the five things
+          (Anfragen/Anrufe · Termine · KVA · Rechnungen · Mitarbeiter). */}
       <div className="space-y-3">
-        {filtered.map((p) => {
-          const sm = STATUS_META[p.status] ?? STATUS_META.planning
+        {filtered.map((c) => {
+          const sm = STATUS_META[c.status] ?? STATUS_META.planning
           return (
             <button
-              key={p.id}
-              onClick={() => navigate(`/projects/${p.id}`)}
+              key={c.id}
+              onClick={() => navigate(`/fall/${c.id}`)}
               className="block w-full rounded-xl border border-border bg-surface p-5 text-left transition hover:border-green-primary/50 hover:shadow-e1"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="truncate text-base font-bold text-text">{p.title}</h3>
+                    <h3 className="truncate text-base font-bold text-text">{c.title}</h3>
                     <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium', sm.cls)}>{sm.label}</span>
+                    {c.project_id && (
+                      <span className="shrink-0 rounded-full bg-alt px-2 py-0.5 text-[11px] font-medium text-muted" title="Teil eines Projekts">im Projekt</span>
+                    )}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                    {p.customer_id ? (
+                    {c.customer_id ? (
                       <span
-                        onClick={(ev) => { ev.stopPropagation(); navigate(`/customers/${p.customer_id}`) }}
+                        onClick={(ev) => { ev.stopPropagation(); navigate(`/customers/${c.customer_id}`) }}
                         className="text-green-deep hover:underline"
                       >
-                        {p.customer_name ?? '—'}
+                        {c.customer_name ?? '—'}
                       </span>
                     ) : <span className="text-muted">Kein Kunde</span>}
-                    {p.number && <span className="font-mono text-xs text-muted">{p.number}</span>}
+                    {c.number && <span className="font-mono text-xs text-muted">{c.number}</span>}
                   </div>
                 </div>
               </div>
 
               {/* The five linked things */}
               <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted">
-                <Stat icon={<Layers size={14} />} n={p.stats.cases ?? 0} title="Fälle" />
-                <Stat icon={<Phone size={14} />} n={p.stats.calls} title="Anrufe" />
-                <Stat icon={<ClipboardList size={14} />} n={p.stats.inquiries} title="Anfragen" />
-                <Stat icon={<Calendar size={14} />} n={p.stats.appointments} title="Termine" />
-                <Stat icon={<FileText size={14} />} n={p.stats.cost_estimates} title="KVA" />
-                <Stat icon={<Receipt size={14} />} n={p.stats.invoices} title="Rechnungen" />
-                <Stat icon={<Users size={14} />} n={p.stats.employees} title="Mitarbeiter" />
+                <Stat icon={<Phone size={14} />} n={c.stats.calls} title="Anrufe" />
+                <Stat icon={<ClipboardList size={14} />} n={c.stats.inquiries} title="Anfragen" />
+                <Stat icon={<Calendar size={14} />} n={c.stats.appointments} title="Termine" />
+                <Stat icon={<FileText size={14} />} n={c.stats.cost_estimates} title="KVA" />
+                <Stat icon={<Receipt size={14} />} n={c.stats.invoices} title="Rechnungen" />
+                <Stat icon={<Users size={14} />} n={c.stats.employees} title="Mitarbeiter" />
               </div>
             </button>
           )
         })}
         {!filtered.length && (
-          <div className="rounded-xl border border-border bg-surface px-4 py-12 text-center text-muted">Keine Projekte.</div>
+          <div className="rounded-xl border border-border bg-surface px-4 py-12 text-center text-muted">Keine Fälle.</div>
         )}
       </div>
     </div>

@@ -53,10 +53,10 @@ export function CallRow({
   // on the backend. Employees get a read-only avatar.
   const { isAdmin } = useMe()
   // The Fall (case) this call belongs to — chip deep-links into the Posteingang.
-  // Key mirrors the inbox bundling: project_id if any, else the inquiry.
-  const caseKey = call.project_id ?? call.inquiry_id
-  const caseLabel = call.project_title || call.case_label || call.inquiry_subject || 'Fall'
-  const caseTicket = call.project_number || call.case_number || call.inquiry_number
+  // Key mirrors the inbox bundling: case_id (the Fall) if any, else the inquiry.
+  const caseKey = call.case_id ?? call.inquiry_id
+  const caseLabel = call.case_label || call.inquiry_subject || 'Fall'
+  const caseTicket = call.case_number || call.inquiry_number
   return (
     <div
       role="button"
