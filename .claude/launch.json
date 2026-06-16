@@ -3,9 +3,9 @@
   "configurations": [
     {
       "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "cwd": "frontend",
+      "runtimeExecutable": "node_modules/.bin/vite",
+      "runtimeArgs": [],
+      "cwd": "/Users/iamber/Code Jamming/KikiJarvis/frontend",
       "port": 5173,
       "autoPort": false
     },
