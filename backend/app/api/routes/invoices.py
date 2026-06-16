@@ -53,7 +53,7 @@ def _build_row(org_id: str, payload: InvoiceUpsert, user_id: str | None) -> dict
         "org_id": org_id,
         "customer_id": payload.customer_id,
         "cost_estimate_id": payload.kva_id,
-        "project_id": payload.project_id,
+        "case_id": payload.case_id,
         "subject": payload.subject,
         "reference_number": payload.reference_number,
         "invoice_date": inv_date,
@@ -120,30 +120,32 @@ async def list_invoices(user: CurrentUser = Depends(require_org)) -> list[dict]:
 def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
     client = get_service_client()
     # The service-role client BYPASSES RLS, so a client-supplied FK is trusted
-    # unless we check it. Reject pointers to another org's customer / KVA / project
+    # unless we check it. Reject pointers to another org's customer / KVA / case
     # (cross-tenant integrity, IDOR) before writing anything.
+    # payload.case_id is the grouping pointer → the `cases` table (FL-).
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
     validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Kostenvoranschlag")
-    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
 
     row = _build_row(org_id, payload, user_id)
-    # Projects merge (item 6): an invoice built from a KVA belongs to that KVA's
-    # Projekt (directly, or via the KVA's inquiry) — inherit when not set.
-    if row.get("cost_estimate_id") and not row.get("project_id"):
+    # Case grouping: an invoice built from a KVA belongs to that KVA's
+    # Fall (case, directly or via the KVA's inquiry) — inherit when not set.
+    # (invoices have no inquiry_id; the case is resolved through the KVA.)
+    if row.get("cost_estimate_id") and not row.get("case_id"):
         kva = (
-            client.table("cost_estimates").select("project_id, inquiry_id")
+            client.table("cost_estimates").select("case_id, inquiry_id")
             .eq("org_id", org_id).eq("id", row["cost_estimate_id"]).limit(1).execute().data
         )
         if kva:
-            pid = kva[0].get("project_id")
-            if not pid and kva[0].get("inquiry_id"):
+            cid = kva[0].get("case_id")
+            if not cid and kva[0].get("inquiry_id"):
                 inq = (
-                    client.table("inquiries").select("project_id")
+                    client.table("inquiries").select("case_id")
                     .eq("org_id", org_id).eq("id", kva[0]["inquiry_id"]).limit(1).execute().data
                 )
-                pid = inq[0].get("project_id") if inq else None
-            if pid:
-                row["project_id"] = pid
+                cid = inq[0].get("case_id") if inq else None
+            if cid:
+                row["case_id"] = cid
     row["number"] = gen_invoice_number(client, org_id)
     row["status"] = "draft"
     created = client.table("invoices").insert(row).execute().data[0]
@@ -206,9 +208,10 @@ async def get_invoice(inv_id: str, user: CurrentUser = Depends(require_org)) -> 
 def _update(org_id: str, inv_id: str, payload: InvoiceUpsert) -> dict | None:
     client = get_service_client()
     # Same FK-in-org guards as _create — the UPDATE path is just as exposed.
+    # payload.case_id is the grouping pointer → the `cases` table (FL-).
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
     validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Kostenvoranschlag")
-    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
     row = _build_row(org_id, payload, None)
     row.pop("created_by", None)
     row["updated_at"] = _now()

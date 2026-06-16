@@ -66,7 +66,7 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
 
             pending = (
                 client.table("appointments")
-                .select("id, status, customer_id, title, project_id")
+                .select("id, status, customer_id, title, case_id")
                 .eq("org_id", org_id)
                 .eq("source_conversation_id", conversation_id)
                 .eq("status", "pending")
@@ -78,7 +78,7 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
                 return
 
             from app.services.appointment_notify import notify_appointment_outcome
-            from app.services.projects import maybe_create_project_for_appointment
+            from app.services.projects import maybe_create_case_for_appointment
 
             for appt in pending:
                 appt_id = appt["id"]
@@ -106,7 +106,7 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
                     if not confirmed:
                         continue  # already confirmed by a concurrent delivery
                     notify_appointment_outcome(org_id, appt_id, "confirm")
-                    maybe_create_project_for_appointment(org_id, appt, None, client)
+                    maybe_create_case_for_appointment(org_id, appt, None, client)
                 except Exception:  # noqa: BLE001 — one bad appt must not stop the rest
                     logger.exception(
                         "L3 auto-confirm failed for appointment %s (conv %s)",

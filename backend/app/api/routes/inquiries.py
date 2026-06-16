@@ -18,18 +18,18 @@ class InquiryCreate(BaseModel):
     title: str | None = None
     type: str | None = None
     notes: str | None = None
-    project_id: str | None = None
+    case_id: str | None = None  # grouping ticket (Fall) — FK → cases (was project_id)
 
 
 def _create(org_id: str, payload: InquiryCreate) -> dict:
     client = get_service_client()
-    # FK hardening: a customer_id / project_id from the body must belong to this org.
+    # FK hardening: a customer_id / case_id from the body must belong to this org.
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
-    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
     row = {
         "org_id": org_id,
         "customer_id": payload.customer_id,
-        "project_id": payload.project_id,
+        "case_id": payload.case_id,
         "title": payload.title or "Neue Anfrage",
         "type": payload.type or "info",
         "status": "open",
@@ -49,10 +49,10 @@ async def create_inquiry(
 def _update(user: CurrentUser, inquiry_id: str, payload: InquiryUpdate) -> dict | None:
     org_id = user.org_id
     client = get_service_client()
-    # FK hardening: project_id / assigned_employee_id from the body must be same-org.
+    # FK hardening: case_id / assigned_employee_id from the body must be same-org.
     # (The dedicated /assign route already validates the employee; the generic
     # PATCH path did not — close that gap here.)
-    validate_fk_in_org(client, table="projects", fk_id=payload.project_id, org_id=org_id, label="Projekt")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
     validate_fk_in_org(
         client, table="employees", fk_id=payload.assigned_employee_id,
         org_id=org_id, label="Mitarbeiter", require_active=True,
@@ -89,8 +89,8 @@ def _update(user: CurrentUser, inquiry_id: str, payload: InquiryUpdate) -> dict 
         fields["notes"] = payload.notes
     if payload.assigned_employee_id is not None:
         fields["assigned_employee_id"] = payload.assigned_employee_id or None
-    if payload.project_id is not None:
-        fields["project_id"] = payload.project_id or None
+    if payload.case_id is not None:
+        fields["case_id"] = payload.case_id or None
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
     fields["updated_at"] = "now()"

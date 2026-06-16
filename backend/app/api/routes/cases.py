@@ -1,10 +1,11 @@
 """Grouping endpoints — propose (LLM), apply (confirm), and move.
 
-PROJECTS MERGE (Luca-meeting item 6, Amber's ruling 2026-06-12): the former
-"case" layer materialises as PROJEKTE now. Same URLs (frontend contract), same
-propose/confirm flow — but apply/move/create write `projects` rows and stamp
-`inquiries.project_id`. The old `cases` table stays read-only for history
-(migration 0067 backfilled every case into a project).
+Case↔Project split (migration 0073): the grouping ticket the user sees is the
+**Fall (case)** again — apply/move/create write `cases` rows and stamp
+`inquiries.case_id`. `cases` IS the renamed former `projects` table, so it carries
+the project-style schema (`title`/`description`/status planning|active|…) and the
+`FL-` number. A top-layer **Project** sits above cases (see routes/projects.py) and
+is joined manually; it is never created here.
 """
 from __future__ import annotations
 
@@ -15,8 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.services.cases.grouper import propose_cases_for_customer
-from app.services.common import validate_fk_in_org
-from app.services.projects import gen_project_number
+from app.services.common import gen_case_number, validate_fk_in_org
 
 router = APIRouter(prefix="/api", tags=["cases"])
 
@@ -31,6 +31,102 @@ def _customer_name(client, org_id: str, customer_id: str) -> str | None:
         .eq("org_id", org_id).eq("id", customer_id).limit(1).execute().data
     )
     return r[0].get("full_name") if r else None
+
+
+_CLOSED_INQ = {"completed", "closed", "done", "resolved", "deleted"}
+
+
+@router.get("/cases")
+async def list_cases(user: CurrentUser = Depends(require_org)) -> list[dict]:
+    """All Fälle for the org with per-case rollup stats (powers the Cases page).
+    A Fall is a ticket: customer + the call(s) and the five linked things
+    (Anfragen/Anrufe · Termine · KVA · Rechnungen · Mitarbeiter). Batched (no N+1)."""
+    def _run():
+        client = get_service_client()
+        org_id = user.org_id
+        cases = (
+            client.table("cases")
+            .select("id, number, title, status, customer_id, created_at, project_id")
+            .eq("org_id", org_id).order("created_at", desc=True).execute().data or []
+        )
+        if not cases:
+            return []
+        case_ids = [c["id"] for c in cases]
+
+        cust_ids = list({c["customer_id"] for c in cases if c.get("customer_id")})
+        cust_name: dict[str, str | None] = {}
+        if cust_ids:
+            for r in (client.table("customers").select("id, full_name")
+                      .eq("org_id", org_id).in_("id", cust_ids).execute().data or []):
+                cust_name[r["id"]] = r.get("full_name")
+
+        # inquiries per case (+ inquiry→case map for the call rollup)
+        inqs = (client.table("inquiries").select("id, case_id, status")
+                .eq("org_id", org_id).in_("case_id", case_ids).neq("status", "deleted")
+                .execute().data or [])
+        inq_by_case: dict[str, list[dict]] = {}
+        case_of_inq: dict[str, str] = {}
+        for i in inqs:
+            inq_by_case.setdefault(i["case_id"], []).append(i)
+            case_of_inq[i["id"]] = i["case_id"]
+        inq_ids = list(case_of_inq.keys())
+
+        def _count_by_case(table: str, by_inquiry: bool = False) -> dict[str, int]:
+            col = "inquiry_id" if by_inquiry else "case_id"
+            ids = inq_ids if by_inquiry else case_ids
+            out: dict[str, int] = {}
+            if not ids:
+                return out
+            q = client.table(table).select(col).eq("org_id", org_id).in_(col, ids)
+            if table == "calls":
+                q = q.is_("deleted_at", "null")
+            for r in (q.execute().data or []):
+                cid = case_of_inq.get(r[col]) if by_inquiry else r[col]
+                if cid:
+                    out[cid] = out.get(cid, 0) + 1
+            return out
+
+        calls_n = _count_by_case("calls", by_inquiry=True)
+        kva_n = _count_by_case("cost_estimates")
+        inv_n = _count_by_case("invoices")
+
+        appt_n: dict[str, int] = {}
+        appt_done: dict[str, int] = {}
+        for r in (client.table("appointments").select("case_id, status")
+                  .eq("org_id", org_id).in_("case_id", case_ids).execute().data or []):
+            cid = r["case_id"]
+            appt_n[cid] = appt_n.get(cid, 0) + 1
+            if r.get("status") in ("completed", "done"):
+                appt_done[cid] = appt_done.get(cid, 0) + 1
+
+        emp_n: dict[str, int] = {}
+        for r in (client.table("case_employees").select("case_id")
+                  .in_("case_id", case_ids).execute().data or []):
+            emp_n[r["case_id"]] = emp_n.get(r["case_id"], 0) + 1
+
+        out = []
+        for c in cases:
+            cid = c["id"]
+            members = inq_by_case.get(cid, [])
+            out.append({
+                "id": cid, "number": c.get("number"), "title": c.get("title"),
+                "status": c.get("status"), "customer_id": c.get("customer_id"),
+                "customer_name": cust_name.get(c.get("customer_id")),
+                "created_at": c.get("created_at"), "project_id": c.get("project_id"),
+                "stats": {
+                    "calls": calls_n.get(cid, 0),
+                    "inquiries": len(members),
+                    "open_inquiries": sum(1 for i in members if (i.get("status") or "") not in _CLOSED_INQ),
+                    "appointments": appt_n.get(cid, 0),
+                    "appointments_done": appt_done.get(cid, 0),
+                    "cost_estimates": kva_n.get(cid, 0),
+                    "invoices": inv_n.get(cid, 0),
+                    "employees": emp_n.get(cid, 0),
+                },
+            })
+        return out
+
+    return await run_in_threadpool(_run)
 
 
 @router.post("/customers/{customer_id}/cases/propose")
@@ -51,7 +147,7 @@ async def propose_cases(customer_id: str, user: CurrentUser = Depends(require_or
             raise HTTPException(
                 status_code=429,
                 detail="Das monatliche KI-Budget Ihrer Organisation ist erreicht — "
-                "die automatische Vorgangs-Gruppierung ist bis zum Monatswechsel pausiert.",
+                "die automatische Fall-Gruppierung ist bis zum Monatswechsel pausiert.",
             )
         client = get_service_client()
         validate_fk_in_org(client, table="customers", fk_id=customer_id, org_id=user.org_id, label="Kunde")
@@ -75,8 +171,8 @@ class ApplyIn(BaseModel):
 
 @router.post("/cases/apply")
 async def apply_cases(payload: ApplyIn, user: CurrentUser = Depends(require_org)) -> dict:
-    """Materialise confirmed groups: create a PROJEKT per group and stamp its
-    inquiries' project_id (+ confidence/reason for the audit trail)."""
+    """Materialise confirmed groups: create a Fall per group and stamp its
+    inquiries' case_id (+ confidence/reason for the audit trail)."""
     def _run():
         client = get_service_client()
         org_id = user.org_id
@@ -91,33 +187,33 @@ async def apply_cases(payload: ApplyIn, user: CurrentUser = Depends(require_org)
                 .eq("org_id", org_id).eq("customer_id", payload.customer_id)
                 .in_("number", members).neq("status", "deleted")
                 # Only fold UNGROUPED inquiries (audit 2026-06-11): the grouper
-                # proposes project_id-null only, but apply trusted client-supplied
+                # proposes case_id-null only, but apply trusted client-supplied
                 # numbers. A stale/double-submit would re-stamp already-grouped
-                # inquiries — orphaning their old project as an empty row.
-                .is_("project_id", "null")
+                # inquiries — orphaning their old case as an empty row.
+                .is_("case_id", "null")
                 .execute().data or []
             )
             ids = [r["id"] for r in rows]
             # No fresh inquiries (e.g. a double-submit where they're all already
-            # grouped) → don't mint an empty project.
+            # grouped) → don't mint an empty case.
             if not ids:
                 continue
-            project = client.table("projects").insert({
+            case = client.table("cases").insert({
                 "org_id": org_id, "customer_id": payload.customer_id,
-                "title": (g.label or "Projekt")[:120], "created_by": _uid(user),
-                "number": gen_project_number(client, org_id),
+                "title": (g.label or "Fall")[:120], "created_by": _uid(user),
+                "number": gen_case_number(client, org_id),
                 "status": "active",
                 "description": "Aus KI-Gruppierung erstellt.",
             }).execute().data[0]
             client.table("inquiries").update({
-                "project_id": project["id"],
+                "case_id": case["id"],
                 "case_confidence": g.confidence,
                 "case_reason": ((g.reason or "")[:200] or None),
                 "case_source": "ai_confirmed",
             }).eq("org_id", org_id).in_("id", ids).execute()
             created.append({
-                "id": project["id"], "label": project["title"],
-                "number": project.get("number"),
+                "id": case["id"], "label": case["title"],
+                "number": case.get("number"),
                 "members": [r["number"] for r in rows],
             })
         return {"created": created, "count": len(created)}
@@ -126,17 +222,16 @@ async def apply_cases(payload: ApplyIn, user: CurrentUser = Depends(require_org)
 
 
 class MoveIn(BaseModel):
-    case_id: str | None = None       # existing PROJECT to move into; null = ungroup
-    new_case_label: str | None = None  # create a new project and move into it
+    case_id: str | None = None        # existing case to move into; null = ungroup
+    new_case_label: str | None = None  # create a new case and move into it
 
 
 @router.post("/inquiries/{inquiry_id}/case")
 async def move_inquiry_case(
     inquiry_id: str, payload: MoveIn, user: CurrentUser = Depends(require_org)
 ) -> dict:
-    """Move one inquiry to another PROJEKT (the one-click override): into an
-    existing project, into a brand-new one, or out (project_id=null). Field names
-    keep the historical 'case' wording — same frontend contract, project ids."""
+    """Move one inquiry to another Fall (the one-click override): into an existing
+    case, into a brand-new one, or out (case_id=null)."""
     def _run():
         client = get_service_client()
         org_id = user.org_id
@@ -148,30 +243,30 @@ async def move_inquiry_case(
             return None
         target = payload.case_id
         if payload.new_case_label:
-            project = client.table("projects").insert({
+            case = client.table("cases").insert({
                 "org_id": org_id, "customer_id": inq[0].get("customer_id"),
                 "title": payload.new_case_label[:120], "created_by": _uid(user),
-                "number": gen_project_number(client, org_id),
+                "number": gen_case_number(client, org_id),
                 "status": "active",
             }).execute().data[0]
-            target = project["id"]
+            target = case["id"]
         elif target:
-            # Same-customer guard (audit 2026-06-11): a project is customer-scoped,
-            # so an inquiry may only join a project belonging to ITS customer.
+            # Same-customer guard (audit 2026-06-11): a case is customer-scoped,
+            # so an inquiry may only join a case belonging to ITS customer.
             tgt = (
-                client.table("projects").select("id, customer_id")
+                client.table("cases").select("id, customer_id")
                 .eq("org_id", org_id).eq("id", target).limit(1).execute().data or []
             )
             if not tgt:
-                raise HTTPException(status_code=422, detail="Projekt nicht gefunden.")
+                raise HTTPException(status_code=422, detail="Fall nicht gefunden.")
             if tgt[0].get("customer_id") and tgt[0].get("customer_id") != inq[0].get("customer_id"):
                 raise HTTPException(
                     status_code=422,
-                    detail="Dieses Projekt gehört zu einem anderen Kunden — eine "
-                    "Anfrage kann nur einem Projekt desselben Kunden zugeordnet werden.",
+                    detail="Dieser Fall gehört zu einem anderen Kunden — eine "
+                    "Anfrage kann nur einem Fall desselben Kunden zugeordnet werden.",
                 )
         client.table("inquiries").update({
-            "project_id": target, "case_source": "human",
+            "case_id": target, "case_source": "human",
             "case_confidence": None if target is None else 1.0,
             "case_reason": None if target is None else "manuell zugeordnet",
         }).eq("org_id", org_id).eq("id", inquiry_id).execute()
@@ -185,17 +280,13 @@ async def move_inquiry_case(
 
 @router.get("/cases/{case_id}")
 async def get_case(case_id: str, user: CurrentUser = Depends(require_org)) -> dict:
-    """The umbrella view: PROJECT header + member inquiries + ONE timeline across
-    them all (URL keeps the historical /cases/ path; the id is a project id).
-    Legacy fallback: an OLD case id (pre-backfill /fall links) still resolves via
-    the case umbrella, so history keeps working until migration 0067 runs."""
-    from app.api.routes.calls import build_case_umbrella, build_project_umbrella
+    """The umbrella view: Fall header + member inquiries + ONE timeline across them
+    all. The id is a case id (cases table)."""
+    from app.api.routes.calls import build_case_umbrella
 
-    bundle = await run_in_threadpool(build_project_umbrella, user.org_id, case_id)
+    bundle = await run_in_threadpool(build_case_umbrella, user.org_id, case_id)
     if bundle is None:
-        bundle = await run_in_threadpool(build_case_umbrella, user.org_id, case_id)
-    if bundle is None:
-        raise HTTPException(status_code=404, detail="Projekt not found")
+        raise HTTPException(status_code=404, detail="Fall not found")
     return bundle
 
 
@@ -207,15 +298,15 @@ class CaseCreateIn(BaseModel):
 async def create_case(
     customer_id: str, payload: CaseCreateIn, user: CurrentUser = Depends(require_org)
 ) -> dict:
-    """Create a new empty PROJEKT for a customer; inquiries are moved into it via
-    the per-inquiry move action."""
+    """Create a new empty Fall for a customer; inquiries are moved into it via the
+    per-inquiry move action."""
     def _run():
         client = get_service_client()
         validate_fk_in_org(client, table="customers", fk_id=customer_id, org_id=user.org_id, label="Kunde")
-        return client.table("projects").insert({
+        return client.table("cases").insert({
             "org_id": user.org_id, "customer_id": customer_id,
-            "title": (payload.label or "Neues Projekt")[:120], "created_by": _uid(user),
-            "number": gen_project_number(client, user.org_id),
+            "title": (payload.label or "Neuer Fall")[:120], "created_by": _uid(user),
+            "number": gen_case_number(client, user.org_id),
             "status": "active",
         }).execute().data[0]
 

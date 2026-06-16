@@ -10,7 +10,7 @@ class InquiryUpdate(BaseModel):
     subject: str | None = None  # short customer-facing topic — the Vorgang label
     type: str | None = None  # appointment | offer | info | recall
     notes: str | None = None
-    project_id: str | None = None
+    case_id: str | None = None  # grouping ticket (Fall) — FK → cases (was project_id)
 
     # Distinguish "set to null" from "not provided" for assignment.
     model_config = {"extra": "ignore"}
@@ -166,7 +166,7 @@ class CostEstimatePosition(BaseModel):
 class CostEstimateUpsert(BaseModel):
     customer_id: str | None = None
     inquiry_id: str | None = None
-    project_id: str | None = None
+    case_id: str | None = None  # grouping ticket (Fall) — FK → cases (was project_id)
     type: str = "kva"  # kva | offer | invoice
     subject: str | None = None
     reference_number: str | None = None
@@ -196,7 +196,7 @@ class CostEstimateSend(BaseModel):
 class InvoiceUpsert(BaseModel):
     customer_id: str | None = None
     kva_id: str | None = None  # source cost estimate (stored in cost_estimate_id)
-    project_id: str | None = None
+    case_id: str | None = None  # grouping ticket (Fall) — FK → cases (was project_id)
     subject: str | None = None
     reference_number: str | None = None
     invoice_date: str | None = None  # ISO date; defaults to today
@@ -235,7 +235,31 @@ class AppointmentCreate(BaseModel):
     assigned_employee_id: str | None = None
     notes: str | None = None
     inquiry_id: str | None = None
-    project_id: str | None = None
+    case_id: str | None = None  # grouping ticket (Fall) — FK → cases (was project_id)
+
+
+class CaseUpsert(BaseModel):
+    """Lean create/update for a CASE (Fall). ``cases`` IS the renamed former
+    ``projects`` table (migration 0073), so it carries the project schema:
+    ``title`` (NOT label) and status planning | active | completed | archived.
+    Numbering (FL-{TOKEN}-NNNN) is stamped server-side via
+    ``services.common.gen_case_number`` — never taken from the request.
+    ``project_id`` is the optional link UP to the top-layer Project (PR-)."""
+    customer_id: str | None = None
+    title: str
+    description: str | None = None
+    status: str | None = None  # planning | active | completed | archived
+    project_id: str | None = None  # optional link → top-layer Project (projects.id)
+
+
+class CasePatch(BaseModel):
+    customer_id: str | None = None
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None  # planning | active | completed | archived
+    project_id: str | None = None  # optional link → top-layer Project (projects.id)
+
+    model_config = {"extra": "ignore"}
 
 
 class ProjectUpsert(BaseModel):

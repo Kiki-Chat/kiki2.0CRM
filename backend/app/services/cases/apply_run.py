@@ -64,7 +64,10 @@ def main() -> None:
             if not ids:
                 continue
             case = client.table("cases").insert(
-                {"org_id": org_id, "customer_id": cid, "label": (c["label"] or "Vorgang")[:120],
+                {"org_id": org_id, "customer_id": cid,
+                 "title": (c["label"] or "Fall")[:120],
+                 "status": "active",
+                 "description": "Aus KI-Gruppierung erstellt (Offline-Lauf).",
                  "number": gen_case_number(client, org_id)}
             ).execute().data[0]
             client.table("inquiries").update(

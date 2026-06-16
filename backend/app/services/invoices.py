@@ -42,19 +42,24 @@ def today_iso() -> str:
 
 
 def maybe_create_invoice_for_project(
-    org_id: str, project: dict, user_id: str | None = None, client=None
+    org_id: str, case: dict, user_id: str | None = None, client=None
 ) -> dict | None:
-    """Back-office automation (topic 19): when a project is marked 'completed',
-    auto-draft an invoice from the project's ACCEPTED KVA, gated by
+    """Back-office automation (topic 19): when a **Fall (case)** is marked
+    'completed', auto-draft an invoice from the case's ACCEPTED KVA, gated by
     agent_configs.invoices_enabled + invoices_level.
 
-    off / level 1 → nothing. Levels 2 and 3 → a 'draft' invoice (one per project).
+    Case↔Project split (migration 0073): KVAs and invoices anchor on
+    ``case_id`` now (the renamed former ``project_id`` column → ``cases`` table),
+    so the lookup keys on the case id. The public name is kept for callers; the
+    ``case`` row carries the project-style schema (id / number / customer_id).
+
+    off / level 1 → nothing. Levels 2 and 3 → a 'draft' invoice (one per case).
     NOTE: the actual e-mail SEND (the L3 "auto-send" step) is intentionally NOT
     done here — it rides the separate Brevo/e-mail-send chain. Best-effort: never
-    raises (a failure must not roll back the project update)."""
+    raises (a failure must not roll back the case update)."""
     try:
-        project_id = project.get("id")
-        if not project_id:
+        case_id = case.get("id")
+        if not case_id:
             return None
         client = client or get_service_client()
         cfg = (
@@ -74,24 +79,24 @@ def maybe_create_invoice_for_project(
             level = 2
         if level <= 1:
             return None
-        # One auto-invoice per project.
+        # One auto-invoice per case.
         existing = (
             client.table("invoices")
             .select("id")
             .eq("org_id", org_id)
-            .eq("project_id", project_id)
+            .eq("case_id", case_id)
             .limit(1)
             .execute()
             .data
         )
         if existing:
             return None
-        # Source = the project's ACCEPTED KVA (only invoice an agreed quote).
+        # Source = the case's ACCEPTED KVA (only invoice an agreed quote).
         kvas = (
             client.table("cost_estimates")
             .select("id, customer_id, line_items, subtotal, vat_amount, total")
             .eq("org_id", org_id)
-            .eq("project_id", project_id)
+            .eq("case_id", case_id)
             .eq("type", "kva")
             .eq("status", "accepted")
             .order("created_at", desc=True)
@@ -105,10 +110,10 @@ def maybe_create_invoice_for_project(
         inv_date = today_iso()
         inv = {
             "org_id": org_id,
-            "customer_id": kva.get("customer_id") or project.get("customer_id"),
+            "customer_id": kva.get("customer_id") or case.get("customer_id"),
             "cost_estimate_id": kva["id"],
-            "project_id": project_id,
-            "subject": f"Rechnung zu Projekt {project.get('number') or ''}".strip(),
+            "case_id": case_id,
+            "subject": f"Rechnung zu Fall {case.get('number') or ''}".strip(),
             "invoice_date": inv_date,
             "payment_terms_days": 14,
             "due_date": add_days(inv_date, 14),
@@ -132,6 +137,6 @@ def maybe_create_invoice_for_project(
                 .execute()
             )
         return invoice
-    except Exception:  # noqa: BLE001 — never break the project update
-        logger.exception("invoice auto-draft failed for project %s", project.get("id"))
+    except Exception:  # noqa: BLE001 — never break the case update
+        logger.exception("invoice auto-draft failed for case %s", case.get("id"))
         return None
