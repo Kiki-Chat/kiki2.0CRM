@@ -276,8 +276,12 @@ export function useEmployees() {
 
 export function usePosteingang() {
   const employeesQ = useEmployees()
-  const actionsQ = useQuery({ queryKey: ['pe', 'actions'], queryFn: () => apiFetch<RawAction[]>('/api/actions/pending'), refetchInterval: 30_000 })
-  const callsQ = useQuery({ queryKey: ['pe', 'calls'], queryFn: () => apiFetch<{ calls: RawCall[] }>('/api/calls?limit=200') })
+  // Decisions render from /api/actions/pending alone; the heavy /api/calls fetch
+  // only enriches each card with its Fall name/ticket, so it must NOT gate the
+  // loading state (that was the dashboard "cards take time to load" lag).
+  // staleTime keeps revisits instant (served from cache, refetched in the bg).
+  const actionsQ = useQuery({ queryKey: ['pe', 'actions'], queryFn: () => apiFetch<RawAction[]>('/api/actions/pending'), refetchInterval: 30_000, staleTime: 15_000 })
+  const callsQ = useQuery({ queryKey: ['pe', 'calls'], queryFn: () => apiFetch<{ calls: RawCall[] }>('/api/calls?limit=200'), staleTime: 60_000 })
 
   const employees = employeesQ.data ?? []
   const actions = (actionsQ.data ?? []).filter((a) => a.kind in KIND_CFG)
@@ -286,7 +290,7 @@ export function usePosteingang() {
   const vorgaenge = buildVorgaenge(calls, actions)
 
   return {
-    loading: actionsQ.isLoading || callsQ.isLoading,
+    loading: actionsQ.isLoading,
     error: actionsQ.isError || callsQ.isError,
     employees,
     decisions,

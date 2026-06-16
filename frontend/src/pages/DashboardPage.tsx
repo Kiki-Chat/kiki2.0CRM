@@ -138,6 +138,7 @@ function HeroDeck() {
     queryKey: ['cases'],
     queryFn: () => apiFetch<{ id: string }[]>('/api/cases'),
     enabled: isSupabaseConfigured,
+    staleTime: 60_000,
   })
   const [index, setIndex] = useState(0)
   const [busy, setBusy] = useState(false)

@@ -9,6 +9,8 @@ is joined manually; it is never created here.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -19,6 +21,10 @@ from app.services.cases.grouper import propose_cases_for_customer
 from app.services.common import gen_case_number, validate_fk_in_org
 
 router = APIRouter(prefix="/api", tags=["cases"])
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _uid(user: CurrentUser):
@@ -309,5 +315,76 @@ async def create_case(
             "number": gen_case_number(client, user.org_id),
             "status": "active",
         }).execute().data[0]
+
+    return await run_in_threadpool(_run)
+
+
+class CaseUpdateIn(BaseModel):
+    status: str | None = None       # planning|active|completed|archived
+    title: str | None = None
+    project_id: str | None = None   # link to a top-layer Projekt (PR-); empty string unlinks
+    model_config = {"extra": "ignore"}
+
+
+@router.patch("/cases/{case_id}")
+async def update_case(case_id: str, payload: CaseUpdateIn, user: CurrentUser = Depends(require_org)) -> dict:
+    """Update a Fall: status (Offen/In Bearbeitung/Abgeschlossen), title, or its
+    link to a top-layer Projekt — the case action panel's status + Add-to-Project."""
+    def _run():
+        client = get_service_client()
+        org_id = user.org_id
+        cur = client.table("cases").select("id").eq("org_id", org_id).eq("id", case_id).limit(1).execute().data
+        if not cur:
+            raise HTTPException(status_code=404, detail="Fall nicht gefunden.")
+        fields: dict = {}
+        if payload.status is not None:
+            fields["status"] = payload.status
+        if payload.title is not None:
+            fields["title"] = payload.title[:200]
+        if payload.project_id is not None:
+            pid = payload.project_id or None
+            if pid:
+                validate_fk_in_org(client, table="projects", fk_id=pid, org_id=org_id, label="Projekt")
+            fields["project_id"] = pid
+        if not fields:
+            return client.table("cases").select("*").eq("id", case_id).limit(1).execute().data[0]
+        fields["updated_at"] = _now()
+        return client.table("cases").update(fields).eq("org_id", org_id).eq("id", case_id).execute().data[0]
+
+    return await run_in_threadpool(_run)
+
+
+class CaseEmployeeIn(BaseModel):
+    employee_id: str
+
+
+@router.post("/cases/{case_id}/employees")
+async def add_case_employee(case_id: str, payload: CaseEmployeeIn, user: CurrentUser = Depends(require_org)) -> dict:
+    """Assign an employee to a Fall (case_employees). Idempotent."""
+    def _run():
+        client = get_service_client()
+        org_id = user.org_id
+        validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Fall")
+        validate_fk_in_org(client, table="employees", fk_id=payload.employee_id, org_id=org_id, label="Mitarbeiter", require_active=True)
+        dup = (
+            client.table("case_employees").select("id")
+            .eq("case_id", case_id).eq("employee_id", payload.employee_id).limit(1).execute().data
+        )
+        if not dup:
+            client.table("case_employees").insert({"case_id": case_id, "employee_id": payload.employee_id}).execute()
+        return {"success": True}
+
+    return await run_in_threadpool(_run)
+
+
+@router.delete("/cases/{case_id}/employees/{employee_id}")
+async def remove_case_employee(case_id: str, employee_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+    """Unassign an employee from a Fall."""
+    def _run():
+        client = get_service_client()
+        org_id = user.org_id
+        validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Fall")
+        client.table("case_employees").delete().eq("case_id", case_id).eq("employee_id", employee_id).execute()
+        return {"success": True}
 
     return await run_in_threadpool(_run)

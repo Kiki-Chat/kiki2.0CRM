@@ -940,7 +940,23 @@ def build_case_umbrella(org_id: str, case_id: str) -> dict | None:
         .eq("org_id", org_id).eq("case_id", case_id).neq("status", "deleted")
         .order("created_at").execute().data or []
     )
-    return _umbrella_bundle(client, org_id, header, inquiries)
+    bundle = _umbrella_bundle(client, org_id, header, inquiries)
+    # Case-level extras the action panel needs (Rechnungen + Mitarbeiter), keyed
+    # directly on the case (not via member inquiries).
+    bundle["invoices"] = (
+        client.table("invoices").select("id, number, total, status, created_at")
+        .eq("org_id", org_id).eq("case_id", case_id).order("created_at", desc=True).execute().data or []
+    )
+    emp_rows = (
+        client.table("case_employees").select("employee_id, added_at")
+        .eq("case_id", case_id).execute().data or []
+    )
+    emp_ids = [e["employee_id"] for e in emp_rows if e.get("employee_id")]
+    bundle["employees"] = (
+        client.table("employees").select("id, display_name, is_technician")
+        .eq("org_id", org_id).in_("id", emp_ids).execute().data or []
+    ) if emp_ids else []
+    return bundle
 
 
 def build_project_umbrella(org_id: str, project_id: str) -> dict | None:
