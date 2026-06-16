@@ -142,17 +142,7 @@ export function callMatches(c: CallListItem, f: LogFilters, q: string, nowMs: nu
   return true
 }
 
-// ─── Date bucketing (Berlin calendar days) ──────────────────────────────────
-export type Bucket = 'today' | 'yesterday' | 'week' | 'month' | 'older'
-export const BUCKET_ORDER: Bucket[] = ['today', 'yesterday', 'week', 'month', 'older']
-export const BUCKET_LABEL: Record<Bucket, string> = {
-  today: 'Heute',
-  yesterday: 'Gestern',
-  week: 'Diese Woche',
-  month: 'Dieser Monat',
-  older: 'Älter',
-}
-
+// ─── Chronological day grouping (Berlin calendar days) ──────────────────────
 // "YYYY-MM-DD" of a timestamp as seen on a Berlin wall clock (en-CA gives ISO order).
 const berlinDayKey = (ms: number): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: BERLIN_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(
@@ -164,16 +154,39 @@ const berlinDayKey = (ms: number): string =>
 const dayDiff = (fromKey: string, toKey: string): number =>
   Math.round((Date.parse(`${toKey}T00:00:00Z`) - Date.parse(`${fromKey}T00:00:00Z`)) / 86400000)
 
-export function bucketOf(iso: string | null, nowMs: number): Bucket {
-  if (!iso) return 'older'
+// Stable Berlin day key used to group rows under one date divider.
+export const dayKeyOf = (iso: string | null): string => (iso ? berlinDayKey(Date.parse(iso)) : 'unknown')
+
+// Divider label for a day: Heute / Gestern / "Mittwoch, 4. Juni".
+export function dayDividerLabel(iso: string | null, nowMs: number): string {
+  if (!iso) return 'Ohne Datum'
   const t = Date.parse(iso)
-  if (Number.isNaN(t)) return 'older'
-  const ck = berlinDayKey(t)
-  const nk = berlinDayKey(nowMs)
-  const d = dayDiff(ck, nk)
-  if (d <= 0) return 'today'
-  if (d === 1) return 'yesterday'
-  if (d <= 6) return 'week'
-  if (ck.slice(0, 7) === nk.slice(0, 7)) return 'month'
-  return 'older'
+  if (Number.isNaN(t)) return 'Ohne Datum'
+  const d = dayDiff(berlinDayKey(t), berlinDayKey(nowMs))
+  if (d <= 0) return 'Heute'
+  if (d === 1) return 'Gestern'
+  return new Date(t).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: BERLIN_TZ })
+}
+
+// ─── Subject emoji (keyword → emoji; emergency always wins) ─────────────────
+const EMOJI_RULES: [RegExp, string][] = [
+  [/wartung|service|inspekt|maintenance/i, '🛠️'],
+  [/heiz|therme|warm|kalt|boiler|radiator/i, '🔥'],
+  [/wasser|rohr|leck|tropf|sanitär|\bbad\b|dusche|abfluss|verstopf|pipe|plumb|leak|burst|flow/i, '🚿'],
+  [/strom|elektr|electr|sicherung/i, '⚡'],
+  [/dach|roof|ziegel/i, '🏠'],
+  [/angebot|kostenvoranschlag|\bkva\b|preis|quote|offer/i, '💰'],
+  [/rechnung|invoice|zahlung|payment/i, '🧾'],
+  [/storno|absage|cancel|kündig/i, '❌'],
+  [/reschedul|verschieb|umbuch/i, '🔄'],
+  [/termin|appointment|bestätig|confirm|booking/i, '📅'],
+  [/rückruf|callback|melde|nachricht|voicemail/i, '💬'],
+  [/werbung|spam|akquise/i, '🚫'],
+]
+
+export function subjectEmoji(c: CallListItem): string {
+  if (c.emergency_flag) return '🚨'
+  const s = `${c.summary_title ?? ''} ${c.inquiry_subject ?? ''}`.toLowerCase()
+  for (const [re, e] of EMOJI_RULES) if (re.test(s)) return e
+  return '📞'
 }

@@ -1,8 +1,7 @@
-// Anrufe — the call log. A read-only, full-width stream of every call Kiki took or
-// made: a pinned "Braucht Aufmerksamkeit" section (no case yet / emergencies) on top,
-// then day-grouped history (Heute · Gestern · Diese Woche · Dieser Monat · Älter).
-// Click a row → detail drawer (transcript · audio · summary + triage). The old 3-pane
-// cockpit + Aktionen worklist were retired here; actions now live inside the cases.
+// Anrufe — the call log. A read-only, full-width chronological stream of every call
+// Kiki took or made, grouped under date dividers (Heute · Gestern · "Mittwoch, 4. Juni"),
+// newest first — like a phone messages app. Click a row → detail drawer (actions +
+// audio + summary + collapsible transcript).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Inbox } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -16,14 +15,11 @@ import { LogDrawer } from './calls/log/LogDrawer'
 import { LogFilters, type PillCounts } from './calls/log/LogFilters'
 import { LogRow } from './calls/log/LogRow'
 import {
-  BUCKET_LABEL,
-  BUCKET_ORDER,
-  type Bucket,
-  bucketOf,
   callMatches,
+  dayDividerLabel,
+  dayKeyOf,
   DEFAULT_FILTERS,
   type LogFilters as LogFiltersT,
-  needsAttention,
   type StatusF,
 } from './calls/log/util'
 import type { CallListItem, Employee } from './calls/shared'
@@ -137,31 +133,32 @@ export function CallLogsPage() {
     [calls, filters, q, nowMs],
   )
 
-  // Partition: pinned attention (no case / emergency) vs the day-grouped rest.
-  const { attention, groups } = useMemo(() => {
-    const att: CallListItem[] = []
-    const buckets: Record<Bucket, CallListItem[]> = { today: [], yesterday: [], week: [], month: [], older: [] }
+  // Chronological day groups for the date-divider timeline. `filtered` is already
+  // newest-first, so consecutive same-day calls fold into one divider (newest day on top).
+  const dayGroups = useMemo(() => {
+    const out: { key: string; label: string; calls: CallListItem[] }[] = []
     for (const c of filtered) {
-      if (needsAttention(c)) att.push(c)
-      else buckets[bucketOf(c.started_at || c.created_at, nowMs)].push(c)
+      const iso = c.started_at || c.created_at
+      const key = dayKeyOf(iso)
+      const last = out[out.length - 1]
+      if (last && last.key === key) last.calls.push(c)
+      else out.push({ key, label: dayDividerLabel(iso, nowMs), calls: [c] })
     }
-    return { attention: att, groups: buckets }
+    return out
   }, [filtered, nowMs])
 
-  const renderRow = (c: CallListItem, mixed: boolean) => (
+  const renderRow = (c: CallListItem) => (
     <LogRow
       key={c.id}
       call={c}
       active={c.id === selectedId}
-      mixed={mixed}
       assigneeName={c.assigned_employee_id ? (employeeName.get(c.assigned_employee_id) ?? null) : null}
       onSelect={() => setSelectedId(c.id)}
       onOpenCase={(to) => navigate(to)}
     />
   )
 
-  const nonEmptyGroups = BUCKET_ORDER.filter((b) => groups[b].length > 0)
-  const isEmpty = !callsQuery.isLoading && !attention.length && !nonEmptyGroups.length
+  const isEmpty = !callsQuery.isLoading && dayGroups.length === 0
 
   return (
     <div className="scroll h-full overflow-y-auto bg-bg font-poster">
@@ -201,30 +198,18 @@ export function CallLogsPage() {
             <p className="mt-1 text-[13px] text-muted">Passen Sie die Filter an oder setzen Sie sie zurück.</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-6">
-            {/* pinned: needs attention */}
-            {attention.length > 0 && (
-              <section className="overflow-hidden rounded-2xl border border-warning/40 bg-warning-bg/40">
-                <div className="flex items-center gap-2 px-4 pb-1.5 pt-3.5">
-                  <Inbox size={15} className="text-warning" />
-                  <span className="text-[12.5px] font-extrabold uppercase tracking-wider text-warning">Braucht Aufmerksamkeit</span>
-                  <span className="text-[12.5px] font-bold text-warning/80">
-                    {attention.length} {attention.length === 1 ? 'Anruf' : 'Anrufe'}
+          <div className="flex flex-col gap-5">
+            {dayGroups.map((g) => (
+              <section key={g.key}>
+                <div className="mb-2 flex items-center gap-2 px-1">
+                  <span className="text-[12.5px] font-extrabold capitalize tracking-wide text-muted">{g.label}</span>
+                  <span className="h-px flex-1 bg-border-faint" aria-hidden />
+                  <span className="text-[11.5px] font-bold text-faint">
+                    {g.calls.length} {g.calls.length === 1 ? 'Anruf' : 'Anrufe'}
                   </span>
                 </div>
-                <div className="space-y-0.5 p-1.5">{attention.map((c) => renderRow(c, true))}</div>
-              </section>
-            )}
-
-            {/* day-grouped history */}
-            {nonEmptyGroups.map((b) => (
-              <section key={b}>
-                <div className="mb-2 flex items-center gap-2 px-1">
-                  <span className="text-[12px] font-extrabold uppercase tracking-wider text-muted">{BUCKET_LABEL[b]}</span>
-                  <span className="text-[12px] font-bold text-faint">{groups[b].length}</span>
-                </div>
                 <div className="space-y-0.5 rounded-2xl border border-border bg-surface p-1.5">
-                  {groups[b].map((c) => renderRow(c, false))}
+                  {g.calls.map((c) => renderRow(c))}
                 </div>
               </section>
             ))}

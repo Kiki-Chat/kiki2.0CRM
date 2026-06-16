@@ -1,16 +1,33 @@
-// Right-side detail drawer for one call. Read-only history + the three triage
-// actions Amber asked for (assign to existing Vorgang / new Vorgang / spam) — no
-// appointment/KVA/invoice. Audio is fetched on demand from ElevenLabs; summary +
-// transcript come from the call detail endpoint.
+// Right-side detail drawer for one call. Action-first: the appointment-confirmation
+// card + create-actions (Termin / KVA / Rechnung) + Zuständig live up top, then the
+// Fall/Projekt link + triage, the Kiki summary, audio, and a collapsible transcript.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Ban, ChevronRight, Clock, Folder, Inbox, Layers, Phone, Play, Plus, Sparkles, X } from 'lucide-react'
+import {
+  Ban,
+  CalendarPlus,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  FileText,
+  Folder,
+  Inbox,
+  Layers,
+  Phone,
+  Play,
+  Plus,
+  Receipt,
+  Sparkles,
+  X,
+} from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { apiBlobUrl, apiFetch } from '../../../lib/api'
 import { cn } from '../../../lib/utils'
-import { Avatar, DirBadge, MoodPill, NotdienstBadge, StatusPill } from '../atoms'
-import { fmtDuration, fmtTime, type CallDetailData, type CallListItem } from '../shared'
+import { AppointmentCard, type PendingAppointment, usePendingAppointment } from '../AppointmentCard'
+import { CreateAppointmentModal } from '../Modals'
+import { AssignDropdown, Avatar, DirBadge, MoodPill, NotdienstBadge, StatusPill } from '../atoms'
+import { fmtDuration, fmtTime, type CallDetailData, type CallListItem, type Employee } from '../shared'
 import { callerTitle, caseLink, projectLink, sentimentOf } from './util'
 
 const KIKI_AV = '/kiki-avatar.png'
@@ -208,6 +225,34 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
     },
   })
 
+  // Employees — for the appointment modal + the Zuständig assignment control.
+  const { data: employees = [] } = useQuery({
+    queryKey: ['employees'],
+    queryFn: () => apiFetch<Employee[]>('/api/employees'),
+    enabled: !!callId,
+  })
+
+  // Pending appointment for this call → the confirm / reschedule / cancel card.
+  const pendingAppt = usePendingAppointment(callId)
+  const [dismissedApptIds, setDismissedApptIds] = useState<Set<string>>(new Set())
+  const [actioned, setActioned] = useState<{ appt: PendingAppointment; result: 'confirmed' | 'rejected' } | null>(null)
+  const [modal, setModal] = useState<'appointment' | null>(null)
+  const [transcriptOpen, setTranscriptOpen] = useState(false)
+
+  // Assign the call's Vorgang to an employee (the "Zuständig" shown on the row).
+  const assignEmp = useMutation({
+    mutationFn: (employeeId: string | null) =>
+      apiFetch(`/api/inquiries/${call?.inquiry_id}/assign`, {
+        method: 'PATCH',
+        body: JSON.stringify({ employee_id: employeeId }),
+      }),
+    onSuccess: () => {
+      refresh()
+      flash('Zuständigkeit aktualisiert.')
+    },
+    onError: () => flash('Zuweisung fehlgeschlagen.'),
+  })
+
   // Modal-dialog behaviour: close on Escape, move focus into the panel on open, and
   // restore focus to the triggering row on close.
   const panelRef = useRef<HTMLDivElement>(null)
@@ -231,6 +276,25 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
   const proj = call ? projectLink(call) : null
   const sentiment = call ? sentimentOf(call) : null
   const nextAction = call?.data_collection?.next_action ?? null
+
+  // Appointment card state (kept on screen after confirm/reject via the snapshot).
+  const livePending = pendingAppt.data?.appointment ?? null
+  const shownAppt = livePending ?? actioned?.appt ?? null
+  const shownResult = actioned && shownAppt?.id === actioned.appt.id ? actioned.result : undefined
+  const showApptCard = !!shownAppt && !dismissedApptIds.has(shownAppt.id)
+  const assigneeName = call?.assigned_employee_id
+    ? (employees.find((e) => e.id === call.assigned_employee_id)?.display_name ?? null)
+    : null
+
+  const goKva = () =>
+    call &&
+    navigate(
+      `/cost-estimates/new?customer_id=${call.customer_id ?? ''}` +
+        (call.case_id ? `&case_id=${call.case_id}` : '') +
+        (call.inquiry_id ? `&inquiry_id=${call.inquiry_id}` : ''),
+    )
+  const goInvoice = () =>
+    call && navigate(`/invoices/new?customer_id=${call.customer_id ?? ''}${call.case_id ? `&case_id=${call.case_id}` : ''}`)
 
   return (
     <div className="fixed inset-0 z-[80]">
@@ -279,6 +343,64 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                 </span>
                 {sentiment && <MoodPill mood={sentiment} />}
                 {call.emergency_flag && <NotdienstBadge small />}
+              </div>
+
+              {/* ─── Actions (appointment card + create + Zuständig) ─────────── */}
+              <div className="mb-5">
+                <div className="mb-2 text-[10.5px] font-extrabold uppercase tracking-wider text-muted">Aktionen</div>
+
+                {showApptCard && shownAppt && (
+                  <div className="mb-2.5">
+                    <AppointmentCard
+                      appointment={shownAppt}
+                      callId={call.id}
+                      result={shownResult}
+                      onConfirmed={() => setActioned({ appt: shownAppt, result: 'confirmed' })}
+                      onRejected={() => setActioned({ appt: shownAppt, result: 'rejected' })}
+                      onRemove={() => setDismissedApptIds((p) => new Set(p).add(shownAppt.id))}
+                    />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  <ActionBtn variant="secondary" icon={<CalendarPlus size={15} />} onClick={() => setModal('appointment')}>
+                    Termin
+                  </ActionBtn>
+                  <ActionBtn variant="secondary" icon={<FileText size={15} />} disabled={!call.customer_id} onClick={goKva}>
+                    KVA
+                  </ActionBtn>
+                  <ActionBtn variant="secondary" icon={<Receipt size={15} />} disabled={!call.customer_id} onClick={goInvoice}>
+                    Rechnung
+                  </ActionBtn>
+                </div>
+
+                {call.inquiry_id && (
+                  <div className="mt-1.5">
+                    <AssignDropdown
+                      current={call.assigned_employee_id}
+                      employees={employees}
+                      onAssign={(id) => assignEmp.mutate(id)}
+                      disabled={assignEmp.isPending}
+                    >
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-left text-[13px] font-bold text-body transition hover:bg-alt"
+                      >
+                        {call.assigned_employee_id ? (
+                          <Avatar employeeId={call.assigned_employee_id} text={call.assigned_employee_initials || '?'} size={22} />
+                        ) : (
+                          <span className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-full border border-dashed border-border text-[11px] font-bold text-faint">
+                            –
+                          </span>
+                        )}
+                        <span className="flex-1 truncate">
+                          {assigneeName ? `Zuständig: ${assigneeName}` : 'Mitarbeiter zuweisen'}
+                        </span>
+                        <ChevronDown size={14} className="flex-shrink-0 text-faint" />
+                      </button>
+                    </AssignDropdown>
+                  </div>
+                )}
               </div>
 
               {/* case box / triage */}
@@ -412,15 +534,43 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                 <AudioPlayer callId={call.id} />
               </div>
 
-              {/* transcript */}
-              <div className="mb-3 text-[10.5px] font-extrabold uppercase tracking-wider text-muted">Transkript</div>
-              <div>
-                {call.transcript && call.transcript.length > 0 ? (
-                  call.transcript.map((t, i) => <Bubble key={i} turn={t} />)
-                ) : (
-                  <p className="text-[13px] text-muted">Kein Transkript verfügbar.</p>
+              {/* transcript — collapsed by default so the actions get the prime space */}
+              <button
+                type="button"
+                onClick={() => setTranscriptOpen((o) => !o)}
+                aria-expanded={transcriptOpen}
+                className="flex w-full items-center gap-2 border-t border-border-faint pt-4 text-[10.5px] font-extrabold uppercase tracking-wider text-muted transition-colors hover:text-body"
+              >
+                <ChevronDown size={14} className={cn('transition-transform', transcriptOpen && 'rotate-180')} />
+                Transkript
+                {call.transcript && call.transcript.length > 0 && (
+                  <span className="font-mono text-[11px] font-bold text-faint">{call.transcript.length}</span>
                 )}
-              </div>
+              </button>
+              {transcriptOpen && (
+                <div className="mt-3">
+                  {call.transcript && call.transcript.length > 0 ? (
+                    call.transcript.map((t, i) => <Bubble key={i} turn={t} />)
+                  ) : (
+                    <p className="text-[13px] text-muted">Kein Transkript verfügbar.</p>
+                  )}
+                </div>
+              )}
+
+              <CreateAppointmentModal
+                open={modal === 'appointment'}
+                onClose={() => setModal(null)}
+                call={call}
+                inquiryId={call.inquiry_id ?? undefined}
+                employees={employees}
+                onCreated={() => {
+                  setModal(null)
+                  qc.invalidateQueries({ queryKey: ['pendingAppointment', callId] })
+                  qc.invalidateQueries({ queryKey: ['appointments'] })
+                  refresh()
+                  flash('Termin erstellt.')
+                }}
+              />
             </>
           )}
         </div>
