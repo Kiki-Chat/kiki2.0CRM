@@ -157,6 +157,16 @@ const dayDiff = (fromKey: string, toKey: string): number =>
 // Stable Berlin day key used to group rows under one date divider.
 export const dayKeyOf = (iso: string | null): string => (iso ? berlinDayKey(Date.parse(iso)) : 'unknown')
 
+// Full weekday + date for the table's Datum column — always the long
+// "Sonntag, 14. Juni" form, Berlin-pinned. Distinct from dayDividerLabel, which
+// collapses recent days to Heute / Gestern for the section header.
+export function fmtDayDate(iso: string | null): string {
+  if (!iso) return '—'
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return '—'
+  return new Date(t).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: BERLIN_TZ })
+}
+
 // Divider label for a day: Heute / Gestern / "Mittwoch, 4. Juni".
 export function dayDividerLabel(iso: string | null, nowMs: number): string {
   if (!iso) return 'Ohne Datum'
