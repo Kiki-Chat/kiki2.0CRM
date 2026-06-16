@@ -269,7 +269,7 @@ export function CaseDetailPage() {
             <div className="relative">
               <ActionBtn icon={FolderPlus} label={currentProject ? 'Projekt ändern' : 'Zu Projekt'} tone="steel" onClick={() => setProjOpen((o) => !o)} />
               {projOpen && (
-                <Dropdown onClose={() => setProjOpen(false)} empty={!customerProjects.length} emptyLabel="Kein Projekt — erst anlegen">
+                <Dropdown onClose={() => setProjOpen(false)} empty={false} emptyLabel="">
                   {currentProject && (
                     <button onClick={() => { patchCase.mutate({ project_id: '' }); setProjOpen(false) }} className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
                       Aus Projekt lösen
@@ -280,6 +280,10 @@ export function CaseDetailPage() {
                       → {p.title}
                     </button>
                   ))}
+                  {!customerProjects.length && <p className="px-2.5 py-1.5 text-xs text-muted">Noch kein Projekt für diesen Kunden.</p>}
+                  <button onClick={() => navigate('/projects/new')} className="mt-0.5 flex w-full items-center gap-1.5 rounded border-t border-border px-2.5 py-1.5 text-left text-sm font-semibold text-green-deep hover:bg-alt">
+                    <FolderPlus size={14} /> Neues Projekt erstellen
+                  </button>
                 </Dropdown>
               )}
             </div>
@@ -346,7 +350,7 @@ export function CaseDetailPage() {
         ) : (
           <div className="space-y-2">
             {data.appointments.map((a) => (
-              <button key={a.id} onClick={() => navigate('/calendar')} className="flex w-full items-center gap-2 rounded-lg border border-border p-3 text-left transition hover:border-green-primary hover:bg-alt">
+              <button key={a.id} onClick={() => navigate(`/calendar?appointment=${a.id}${a.scheduled_at ? `&date=${a.scheduled_at.slice(0, 10)}` : ''}`)} className="flex w-full items-center gap-2 rounded-lg border border-border p-3 text-left transition hover:border-green-primary hover:bg-alt">
                 <CalendarClock size={15} className="text-green-deep" />
                 <span className="flex-1 truncate text-sm font-semibold text-text">{a.title ?? 'Termin'}</span>
                 <span className="text-xs text-muted">{a.scheduled_at ? fmtDateTime(a.scheduled_at) : 'offen'}</span>

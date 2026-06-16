@@ -108,7 +108,10 @@ export function InvoiceFormPage() {
   const customers = customerData?.customers ?? []
   const { data: catalog = [] } = useQuery({ queryKey: ['catalog-active'], queryFn: () => apiFetch<CatalogItem[]>('/api/catalog?status=active') })
   const { data: estimates = [] } = useQuery({ queryKey: ['cost-estimates'], queryFn: () => apiFetch<Estimate[]>('/api/cost-estimates') })
-  const acceptedKvas = estimates.filter((e) => e.customer_id === customerId && e.status === 'accepted')
+  // KVAs you can turn into an invoice: any of this customer's that aren't rejected
+  // (draft/sent/accepted) — not only 'accepted', so the dropdown isn't empty.
+  const KVA_STATUS_DE: Record<string, string> = { draft: 'Entwurf', sent: 'Gesendet', accepted: 'Angenommen' }
+  const selectableKvas = estimates.filter((e) => e.customer_id === customerId && e.status !== 'rejected')
 
   // Import positions/subject/customer from a cost estimate (KVA → Rechnung).
   const importKva = useCallback(async (estimateId: string) => {
@@ -423,8 +426,8 @@ export function InvoiceFormPage() {
             {!!customerId && (
               <div className="mt-3"><div className={labelCls}>Aus KVA übernehmen (optional)</div>
                 <select value="" onChange={(e) => { if (e.target.value) importKva(e.target.value); e.currentTarget.value = '' }} className={inputCls}>
-                  <option value="">Akzeptierten KVA wählen…</option>
-                  {acceptedKvas.map((k) => <option key={k.id} value={k.id}>{k.number} — {k.subject || 'KVA'} ({money(k.total ?? 0)})</option>)}
+                  <option value="">KVA übernehmen…</option>
+                  {selectableKvas.map((k) => <option key={k.id} value={k.id}>{k.number} — {k.subject || 'KVA'} ({money(k.total ?? 0)}) · {KVA_STATUS_DE[k.status] ?? k.status}</option>)}
                 </select>
                 {kvaId && <p className="mt-1 text-xs text-green-deep">Positionen aus {estimates.find((e) => e.id === kvaId)?.number ?? 'KVA'} übernommen.</p>}
               </div>
