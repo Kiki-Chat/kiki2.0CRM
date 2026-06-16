@@ -135,6 +135,25 @@ body {
   }
 }
 
+/* Cases detail entrance — translateY only (NO opacity change, so print /
+   reduced-motion never hide the case content). */
+@keyframes caseFadeUp {
+  from {
+    transform: translateY(8px);
+  }
+  to {
+    transform: none;
+  }
+}
+.case-fade-up {
+  animation: caseFadeUp 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .case-fade-up {
+    animation: none;
+  }
+}
+
 /* ─── Dashboard hero — live 3D Kiki avatar (float + glow) ─────────────────── */
 @keyframes kikiLive {
   0% {

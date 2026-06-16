@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { ChunkErrorBoundary } from './components/ChunkErrorBoundary'
@@ -21,7 +21,6 @@ const PosteingangPage = lazy(() => import('./pages/PosteingangPage').then((m) =>
 const CustomersPage = lazy(() => import('./pages/CustomersPage').then((m) => ({ default: m.CustomersPage })))
 const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage').then((m) => ({ default: m.CustomerDetailPage })))
 const VorgangThreadPage = lazy(() => import('./pages/VorgangThreadPage').then((m) => ({ default: m.VorgangThreadPage })))
-const CaseDetailPage = lazy(() => import('./pages/CaseDetailPage').then((m) => ({ default: m.CaseDetailPage })))
 const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const MyAbsencePage = lazy(() => import('./pages/MyAbsencePage').then((m) => ({ default: m.MyAbsencePage })))
 const CasesPage = lazy(() => import('./pages/CasesPage').then((m) => ({ default: m.CasesPage })))
@@ -46,6 +45,12 @@ const JobLinkPage = lazy(() => import('./pages/JobLinkPage').then((m) => ({ defa
 const TechnicianPortalPage = lazy(() =>
   import('./pages/TechnicianPortalPage').then((m) => ({ default: m.TechnicianPortalPage })),
 )
+
+// Legacy single-Fall route → pre-select that case in the new /cases split view.
+function FallRedirect() {
+  const { id } = useParams()
+  return <Navigate to={`/cases?case=${id ?? ''}`} replace />
+}
 
 export default function App() {
   return (
@@ -75,7 +80,9 @@ export default function App() {
               <Route path="customers" element={<CustomersPage />} />
               <Route path="customers/:id" element={<CustomerDetailPage />} />
               <Route path="vorgang/:id" element={<VorgangThreadPage />} />
-              <Route path="fall/:id" element={<CaseDetailPage />} />
+              {/* Cases are now the split view at /cases; deep-links to a single Fall
+                  pre-select it in that view. */}
+              <Route path="fall/:id" element={<FallRedirect />} />
               <Route path="calendar" element={<CalendarPage />} />
               {/* Business hours moved into Kiki-Zentrale (UAT); keep the old path as a redirect. */}
               <Route path="calendar/business-hours" element={<Navigate to="/kiki-zentrale/geschaeftszeiten" replace />} />

@@ -52,7 +52,7 @@ async def list_cases(user: CurrentUser = Depends(require_org)) -> list[dict]:
         org_id = user.org_id
         cases = (
             client.table("cases")
-            .select("id, number, title, status, customer_id, created_at, project_id")
+            .select("id, number, title, status, customer_id, created_at, updated_at, project_id")
             .eq("org_id", org_id).order("created_at", desc=True).execute().data or []
         )
         if not cases:
@@ -66,8 +66,9 @@ async def list_cases(user: CurrentUser = Depends(require_org)) -> list[dict]:
                       .eq("org_id", org_id).in_("id", cust_ids).execute().data or []):
                 cust_name[r["id"]] = r.get("full_name")
 
-        # inquiries per case (+ inquiry→case map for the call rollup)
-        inqs = (client.table("inquiries").select("id, case_id, status")
+        # inquiries per case (+ inquiry→case map for the call rollup). emergency_flag
+        # rolls up so the list can show the Notdienst pill + drive the status filter.
+        inqs = (client.table("inquiries").select("id, case_id, status, emergency_flag")
                 .eq("org_id", org_id).in_("case_id", case_ids).neq("status", "deleted")
                 .execute().data or [])
         inq_by_case: dict[str, list[dict]] = {}
@@ -118,7 +119,9 @@ async def list_cases(user: CurrentUser = Depends(require_org)) -> list[dict]:
                 "id": cid, "number": c.get("number"), "title": c.get("title"),
                 "status": c.get("status"), "customer_id": c.get("customer_id"),
                 "customer_name": cust_name.get(c.get("customer_id")),
-                "created_at": c.get("created_at"), "project_id": c.get("project_id"),
+                "created_at": c.get("created_at"), "updated_at": c.get("updated_at"),
+                "project_id": c.get("project_id"),
+                "emergency": any(bool(i.get("emergency_flag")) for i in members),
                 "stats": {
                     "calls": calls_n.get(cid, 0),
                     "inquiries": len(members),
@@ -294,6 +297,68 @@ async def get_case(case_id: str, user: CurrentUser = Depends(require_org)) -> di
     if bundle is None:
         raise HTTPException(status_code=404, detail="Fall not found")
     return bundle
+
+
+def _job_status(link: dict) -> str:
+    if link.get("submitted_at"):
+        return "abgeschlossen"
+    if link.get("started_at"):
+        return "läuft"
+    return "offen"
+
+
+@router.get("/cases/{case_id}/jobs")
+async def list_case_jobs(case_id: str, user: CurrentUser = Depends(require_org)) -> list[dict]:
+    """Technician job links for a Fall — every dispatch on the case's inquiries, with
+    the technician, the appointment, the live status (offen/läuft/abgeschlossen) and the
+    submitted report. Powers the case's Techniker table. Revoked (re-dispatched) links
+    are excluded so only the live link per appointment shows."""
+    from app.services import technician_jobs
+
+    def _run():
+        client = get_service_client()
+        org_id = user.org_id
+        validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Fall")
+        inq_ids = [
+            r["id"] for r in (
+                client.table("inquiries").select("id")
+                .eq("org_id", org_id).eq("case_id", case_id).neq("status", "deleted").execute().data or []
+            )
+        ]
+        if not inq_ids:
+            return []
+        links = (
+            client.table("technician_job_links")
+            .select("id, token, appointment_id, inquiry_id, employee_id, started_at, "
+                    "finished_at, submitted_at, report, photo_paths, created_at, revoked_at")
+            .eq("org_id", org_id).in_("inquiry_id", inq_ids).is_("revoked_at", "null")
+            .order("created_at", desc=True).execute().data or []
+        )
+        if not links:
+            return []
+        emp_ids = list({l["employee_id"] for l in links if l.get("employee_id")})
+        appt_ids = list({l["appointment_id"] for l in links if l.get("appointment_id")})
+        emp_name = {r["id"]: r.get("display_name") for r in (
+            client.table("employees").select("id, display_name").eq("org_id", org_id).in_("id", emp_ids).execute().data or []
+        )} if emp_ids else {}
+        appt = {r["id"]: r for r in (
+            client.table("appointments").select("id, title, scheduled_at").eq("org_id", org_id).in_("id", appt_ids).execute().data or []
+        )} if appt_ids else {}
+        out = []
+        for l in links:
+            a = appt.get(l.get("appointment_id"), {})
+            out.append({
+                "id": l["id"], "token": l["token"], "url": technician_jobs.job_link_url(l["token"]),
+                "employee_id": l.get("employee_id"), "employee_name": emp_name.get(l.get("employee_id")),
+                "appointment_id": l.get("appointment_id"), "appointment_title": a.get("title"),
+                "scheduled_at": a.get("scheduled_at"), "status": _job_status(l),
+                "started_at": l.get("started_at"), "finished_at": l.get("finished_at"),
+                "submitted_at": l.get("submitted_at"), "photo_count": len(l.get("photo_paths") or []),
+                "report": l.get("report"), "created_at": l.get("created_at"),
+            })
+        return out
+
+    return await run_in_threadpool(_run)
 
 
 class CaseCreateIn(BaseModel):

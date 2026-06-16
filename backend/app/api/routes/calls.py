@@ -936,10 +936,13 @@ def build_case_umbrella(org_id: str, case_id: str) -> dict | None:
     }
     inquiries = (
         client.table("inquiries")
-        .select("id, number, subject, title, type, status, created_at, updated_at, case_confidence, case_reason")
+        .select("id, number, subject, title, type, status, created_at, updated_at, "
+                "case_confidence, case_reason, call_id, emergency_flag")
         .eq("org_id", org_id).eq("case_id", case_id).neq("status", "deleted")
         .order("created_at").execute().data or []
     )
+    # Case-level Notdienst flag = any member inquiry flagged as an emergency.
+    header["emergency"] = any(bool(i.get("emergency_flag")) for i in inquiries)
     bundle = _umbrella_bundle(client, org_id, header, inquiries)
     # Case-level extras the action panel needs (Rechnungen + Mitarbeiter), keyed
     # directly on the case (not via member inquiries).
@@ -986,10 +989,12 @@ def build_project_umbrella(org_id: str, project_id: str) -> dict | None:
     if case_ids:
         inquiries = (
             client.table("inquiries")
-            .select("id, number, subject, title, type, status, created_at, updated_at, case_confidence, case_reason")
+            .select("id, number, subject, title, type, status, created_at, updated_at, "
+                    "case_confidence, case_reason, call_id, emergency_flag")
             .eq("org_id", org_id).in_("case_id", case_ids).neq("status", "deleted")
             .order("created_at").execute().data or []
         )
+    header["emergency"] = any(bool(i.get("emergency_flag")) for i in inquiries)
     return _umbrella_bundle(client, org_id, header, inquiries)
 
 
@@ -1052,7 +1057,7 @@ def _umbrella_bundle(client, org_id: str, case: dict, inquiries: list[dict]) -> 
     return {
         "case": {"id": case["id"], "number": case.get("number"), "label": case.get("label"),
                  "status": case.get("status"), "customer": customer, "created_at": case.get("created_at"),
-                 "project_id": case.get("project_id")},
+                 "project_id": case.get("project_id"), "emergency": bool(case.get("emergency"))},
         "inquiries": inquiries,
         "timeline": events,
         "calls": sorted(calls, key=lambda c: c.get("started_at") or c.get("created_at") or "", reverse=True),

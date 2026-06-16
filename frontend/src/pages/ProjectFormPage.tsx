@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, FolderOpen, Save, X } from 'lucide-react'
+import { ArrowLeft, FolderOpen, Link2, Save, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { apiFetch } from '../lib/api'
 import { cn } from '../lib/utils'
@@ -30,9 +30,17 @@ export function ProjectFormPage() {
   const isEdit = !!id
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const [params] = useSearchParams()
+
+  // Project-from-case context: when launched from a Fall ("Neues Projekt erstellen"),
+  // the customer is pre-filled + locked, the address auto-pulled, and on save the
+  // case is attached to the new project (POST /api/projects/{id}/cases).
+  const fromCustomerId = !isEdit ? params.get('customer_id') || '' : ''
+  const attachCaseId = !isEdit ? params.get('case_id') || '' : ''
+  const attachCaseNumber = params.get('case_number') || ''
 
   const [title, setTitle] = useState('')
-  const [customerId, setCustomerId] = useState('')
+  const [customerId, setCustomerId] = useState(fromCustomerId)
   const [description, setDescription] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -40,7 +48,7 @@ export function ProjectFormPage() {
   const [street, setStreet] = useState('')
   const [postcode, setPostcode] = useState('')
   const [city, setCity] = useState('')
-  const [useCustomerAddr, setUseCustomerAddr] = useState(false)
+  const [useCustomerAddr, setUseCustomerAddr] = useState(!!fromCustomerId)
   const [notes, setNotes] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -104,7 +112,7 @@ export function ProjectFormPage() {
   }, [useCustomerAddr, customerId])
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const hasAddr = street || postcode || city
       const payload = {
         title: title.trim(),
@@ -116,14 +124,26 @@ export function ProjectFormPage() {
         project_address: hasAddr ? { street, postcode, city } : null,
         internal_notes: notes || null,
       }
-      return apiFetch<{ id: string }>(isEdit ? `/api/projects/${id}` : '/api/projects', {
+      const res = await apiFetch<{ id: string }>(isEdit ? `/api/projects/${id}` : '/api/projects', {
         method: isEdit ? 'PATCH' : 'POST',
         body: JSON.stringify(payload),
       })
+      // Attach the originating Fall to the freshly-created Projekt.
+      if (attachCaseId && res.id) {
+        await apiFetch(`/api/projects/${res.id}/cases`, { method: 'POST', body: JSON.stringify({ case_id: attachCaseId }) })
+      }
+      return res
     },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['projects'] })
       if (isEdit) qc.invalidateQueries({ queryKey: ['project', id] })
+      if (attachCaseId) {
+        // Back to the case — it now shows the project attachment.
+        qc.invalidateQueries({ queryKey: ['cases'] })
+        qc.invalidateQueries({ queryKey: ['caseDetail', attachCaseId] })
+        navigate(`/cases?case=${attachCaseId}`)
+        return
+      }
       navigate(`/projects/${isEdit ? id : data.id}`)
     },
     onError: () => setError('Speichern fehlgeschlagen.'),
@@ -141,6 +161,15 @@ export function ProjectFormPage() {
         <div className="mx-auto max-w-3xl space-y-5 pb-24">
           {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
 
+          {attachCaseId && (
+            <div className="flex items-center gap-2.5 rounded-lg border border-green-tint-200 bg-green-tint-50 px-3.5 py-2.5 text-sm text-green-deep">
+              <Link2 size={16} className="flex-shrink-0" />
+              <span>
+                Der Fall <span className="font-bold">{attachCaseNumber || 'FL-…'}</span> wird diesem Projekt zugeordnet — Kunde &amp; Adresse sind bereits übernommen.
+              </span>
+            </div>
+          )}
+
           {/* Grunddaten */}
           <Card title="Grunddaten">
             <div className="space-y-4">
@@ -153,10 +182,11 @@ export function ProjectFormPage() {
               </div>
               <div>
                 <div className={labelCls}>Kunde *</div>
-                <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={inputCls}>
+                <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={!!attachCaseId} className={cn(inputCls, attachCaseId && 'cursor-not-allowed opacity-70')}>
                   <option value="">Kunde suchen…</option>
                   {customers.map((c) => <option key={c.id} value={c.id}>{c.full_name ?? 'Unbenannt'}</option>)}
                 </select>
+                {attachCaseId && <p className="mt-1 text-xs text-muted">Aus dem Fall übernommen — nicht änderbar.</p>}
               </div>
               <div>
                 <div className={labelCls}>Beschreibung</div>

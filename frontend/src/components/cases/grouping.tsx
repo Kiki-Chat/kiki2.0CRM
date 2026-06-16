@@ -4,7 +4,8 @@
 // POST /api/customers/{id}/cases/propose + POST /api/cases/apply (AI grouping).
 import { useMutation } from '@tanstack/react-query'
 import { MoreVertical } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { apiFetch } from '../../lib/api'
 import { cn } from '../../lib/utils'
@@ -18,7 +19,9 @@ export interface MoveTarget {
 }
 
 /** A per-inquiry "⋮" menu: ungroup, move into another of the customer's cases, or
- *  spin up a new case. Render inside a `relative` row. */
+ *  spin up a new case. Render inside a `relative` row. The popover is portalled to
+ *  <body> (fixed-positioned under the trigger) so it is never clipped by a scroll/
+ *  overflow ancestor — e.g. the case detail's `overflow-x-auto` record tables. */
 export function MoveMenu({
   inquiryId,
   currentCaseId,
@@ -31,6 +34,8 @@ export function MoveMenu({
   onMoved: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
   const move = useMutation({
     mutationFn: (body: { case_id?: string | null; new_case_label?: string }) =>
       apiFetch(`/api/inquiries/${inquiryId}/case`, { method: 'POST', body: JSON.stringify(body) }),
@@ -40,47 +45,66 @@ export function MoveMenu({
     },
   })
   const others = cases.filter((c) => c.id !== currentCaseId)
+  const toggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) })
+    }
+    setOpen((o) => !o)
+  }
+  const itemCls = 'block w-full truncate rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt'
   return (
     <div className="absolute right-2 top-2">
       <button
+        ref={btnRef}
         onClick={(e) => {
           e.stopPropagation()
-          setOpen((o) => !o)
+          toggle()
         }}
         className="rounded p-1 text-faint hover:bg-border"
         title="In anderen Fall verschieben"
       >
         <MoreVertical size={15} />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-border bg-surface p-1 shadow-e3">
-            {currentCaseId && (
-              <button onClick={() => move.mutate({ case_id: null })} className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
-                Aus Fall lösen
-              </button>
-            )}
-            {others.length > 0 && (
-              <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Fall verschieben</div>
-            )}
-            {others.map((c) => (
-              <button key={c.id} onClick={() => move.mutate({ case_id: c.id })} className="block w-full truncate rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
-                → {c.label || 'Fall'}
-              </button>
-            ))}
-            <button
-              onClick={() => {
-                const l = window.prompt('Neuer Fall — Thema:')
-                if (l) move.mutate({ new_case_label: l })
-              }}
-              className="block w-full rounded px-2.5 py-1.5 text-left text-sm font-medium text-green-deep hover:bg-alt"
+      {open &&
+        pos &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+            <div
+              className="fixed z-[61] max-h-[60vh] w-60 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-e3"
+              style={{ top: pos.top, right: pos.right }}
+              onClick={(e) => e.stopPropagation()}
             >
-              ＋ Neuer Fall…
-            </button>
-          </div>
-        </>
-      )}
+              {currentCaseId && (
+                <button onClick={() => move.mutate({ case_id: null })} className={itemCls}>
+                  Aus Fall lösen
+                </button>
+              )}
+              <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Fall verschieben</div>
+              {others.length > 0 ? (
+                others.map((c) => (
+                  <button key={c.id} onClick={() => move.mutate({ case_id: c.id })} className={itemCls}>
+                    → {c.label || 'Fall'}
+                    {c.number ? <span className="ml-1 font-mono text-xs text-muted">{c.number}</span> : null}
+                  </button>
+                ))
+              ) : (
+                <div className="px-2.5 py-1.5 text-xs text-muted">Keine weiteren Fälle dieses Kunden.</div>
+              )}
+              <button
+                onClick={() => {
+                  const l = window.prompt('Neuer Fall — Thema:')
+                  if (l) move.mutate({ new_case_label: l })
+                }}
+                className="block w-full rounded px-2.5 py-1.5 text-left text-sm font-medium text-green-deep hover:bg-alt"
+              >
+                ＋ Neuer Fall…
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   )
 }

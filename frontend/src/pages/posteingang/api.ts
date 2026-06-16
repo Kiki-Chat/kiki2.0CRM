@@ -19,7 +19,7 @@ export type DecisionType = 'termin' | 'rueckruf' | 'storno' | 'kva' | 'reschedul
 export type VStatus = 'open' | 'in_progress' | 'completed'
 type TagVariant = 'info' | 'green' | 'error' | 'warning' | 'ai'
 
-interface RawAction {
+export interface RawAction {
   action_key: string
   kind: ActionKind
   id: string
@@ -184,7 +184,7 @@ function buildInquiryMeta(calls: RawCall[]): Map<string, InquiryMeta> {
   return meta
 }
 
-function buildDecisions(actions: RawAction[], employees: Employee[], meta: Map<string, InquiryMeta>): DecisionVM[] {
+export function buildDecisions(actions: RawAction[], employees: Employee[], meta: Map<string, InquiryMeta>): DecisionVM[] {
   const suggested = pickSuggested(employees)
   return actions.map((a) => {
     const cfg = KIND_CFG[a.kind]

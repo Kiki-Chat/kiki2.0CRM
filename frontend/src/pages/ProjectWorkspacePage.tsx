@@ -7,13 +7,16 @@ import {
   ClipboardList,
   FileText,
   FolderOpen,
+  Layers,
   LayoutDashboard,
   Loader2,
   MoreHorizontal,
   Pencil,
   Phone,
+  Plus,
   Receipt,
   StickyNote,
+  Trash2,
   Users,
   type LucideIcon,
 } from 'lucide-react'
@@ -22,6 +25,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { apiFetch } from '../lib/api'
 import { cn } from '../lib/utils'
+import type { CaseListRow } from './cases/types'
 import {
   AppointmentsTab,
   CallsTab,
@@ -77,6 +81,7 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 
 const TABS: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'overview', label: 'Übersicht', icon: LayoutDashboard },
+  { key: 'cases', label: 'Fälle', icon: Layers },
   { key: 'calls', label: 'Anrufe', icon: Phone },
   { key: 'inquiries', label: 'Anfragen', icon: ClipboardList },
   { key: 'appointments', label: 'Termine', icon: Calendar },
@@ -161,6 +166,7 @@ export function ProjectWorkspacePage() {
         <TopBar project={project} onPatch={(b) => patch.mutate(b)} onDelete={() => del.mutate()} />
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
           {tab === 'overview' && <OverviewTab project={project} />}
+          {tab === 'cases' && <CasesTab project={project} />}
           {tab === 'calls' && <CallsTab project={project} />}
           {tab === 'inquiries' && <InquiriesTab project={project} />}
           {tab === 'appointments' && <AppointmentsTab project={project} />}
@@ -297,6 +303,115 @@ function OverviewTab({ project }: { project: Project }) {
           <p className="py-6 text-center text-sm text-muted">Noch keine Aktivitäten.</p>
         )}
       </div>
+    </div>
+  )
+}
+
+// ─── Fälle tab — the member cases of this project + attach/detach ───────────
+// Attaching a case (cases.project_id = project) auto-rolls its calls / Anfragen /
+// Termine / KVA / Rechnungen / Team into the project's other tabs (the backend
+// aggregates every per-project resource by case_id), so the chips here preview
+// exactly what each case brings in.
+function CaseStatChips({ c }: { c: CaseListRow }) {
+  const s = c.stats
+  const chips: [string, number][] = [
+    ['Anrufe', s.calls], ['Anfragen', s.inquiries], ['Termine', s.appointments],
+    ['KVA', s.cost_estimates], ['Rechnungen', s.invoices], ['Mitarbeiter', s.employees],
+  ]
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {chips.map(([label, n]) => (
+        <span key={label} className={cn('rounded-md px-2 py-0.5 text-xs font-medium', n > 0 ? 'bg-alt text-body' : 'bg-alt/60 text-faint')}>
+          {label} <span className="font-bold">{n}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function CasesTab({ project }: { project: Project }) {
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [adding, setAdding] = useState(false)
+  const { data: cases = [] } = useQuery({ queryKey: ['cases'], queryFn: () => apiFetch<CaseListRow[]>('/api/cases'), staleTime: STALE })
+
+  const members = cases.filter((c) => c.project_id === project.id)
+  // Candidates to attach: same customer, not already in this project.
+  const candidates = cases.filter((c) => c.project_id !== project.id && (!project.customer_id || c.customer_id === project.customer_id))
+
+  // Attach/detach changes what rolls up — refetch the project + all its tab queries.
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['cases'] })
+    qc.invalidateQueries({ queryKey: ['projects'] })
+    qc.invalidateQueries({ queryKey: ['project', project.id] })
+    qc.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey.some((k) => k === project.id) })
+  }
+  const attach = useMutation({
+    mutationFn: (caseId: string) => apiFetch(`/api/projects/${project.id}/cases`, { method: 'POST', body: JSON.stringify({ case_id: caseId }) }),
+    onSuccess: () => { refresh(); setAdding(false) },
+  })
+  const detach = useMutation({
+    mutationFn: (caseId: string) => apiFetch(`/api/cases/${caseId}`, { method: 'PATCH', body: JSON.stringify({ project_id: '' }) }),
+    onSuccess: refresh,
+  })
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold text-text">Fälle in diesem Projekt <span className="text-muted">({members.length})</span></h3>
+        <div className="relative">
+          <button onClick={() => setAdding((o) => !o)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-sm font-semibold text-white hover:brightness-105">
+            <Plus size={15} /> Fall hinzufügen
+          </button>
+          {adding && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setAdding(false)} />
+              <div className="absolute right-0 z-20 mt-1 max-h-80 w-80 overflow-auto rounded-xl border border-border bg-surface p-1.5 shadow-e3">
+                <div className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wide text-faint">Fall des Kunden zuordnen</div>
+                {candidates.length ? candidates.map((c) => (
+                  <button key={c.id} onClick={() => attach.mutate(c.id)} className="block w-full rounded-lg px-2.5 py-2 text-left hover:bg-alt">
+                    <div className="truncate text-sm font-semibold text-text">{c.title || 'Fall'}</div>
+                    <div className="truncate text-xs text-muted">{c.customer_name ?? '—'} · {c.number} · {c.stats.calls} Anrufe · {c.stats.inquiries} Anfragen</div>
+                  </button>
+                )) : <p className="px-2.5 py-3 text-xs text-muted">Keine freien Fälle für diesen Kunden.</p>}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {members.length ? (
+        <div className="space-y-3">
+          {members.map((c) => {
+            const sm = STATUS_META[c.status] ?? STATUS_META.planning
+            return (
+              <div key={c.id} className="rounded-xl border border-border bg-surface p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <button onClick={() => navigate(`/cases?case=${c.id}`)} className="min-w-0 flex-1 text-left">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-base font-bold text-text">{c.title || 'Fall'}</span>
+                      <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium', sm.cls)}>{sm.label}</span>
+                      {c.emergency && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-error" title="Notdienst" />}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-sm text-muted">
+                      <span>{c.customer_name ?? '—'}</span>
+                      <span className="font-mono text-xs">{c.number}</span>
+                    </div>
+                    <CaseStatChips c={c} />
+                  </button>
+                  <button onClick={() => detach.mutate(c.id)} title="Aus Projekt entfernen" className="shrink-0 rounded-md border border-border p-2 text-muted hover:bg-alt hover:text-error">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-border bg-surface px-4 py-12 text-center text-muted">
+          Noch keine Fälle zugeordnet. Über „Fall hinzufügen" einen Fall des Kunden anhängen — seine Anrufe, KVA, Rechnungen und Mitarbeiter erscheinen dann automatisch in den übrigen Tabs.
+        </div>
+      )}
     </div>
   )
 }
