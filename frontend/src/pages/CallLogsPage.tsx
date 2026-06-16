@@ -13,7 +13,7 @@ import { useMe } from '../lib/useMe'
 import { useToast } from '../lib/useToast'
 import { LogDrawer } from './calls/log/LogDrawer'
 import { LogFilters, type PillCounts } from './calls/log/LogFilters'
-import { LogRow } from './calls/log/LogRow'
+import { LogTable } from './calls/log/LogTable'
 import {
   callMatches,
   dayDividerLabel,
@@ -147,17 +147,6 @@ export function CallLogsPage() {
     return out
   }, [filtered, nowMs])
 
-  const renderRow = (c: CallListItem) => (
-    <LogRow
-      key={c.id}
-      call={c}
-      active={c.id === selectedId}
-      assigneeName={c.assigned_employee_id ? (employeeName.get(c.assigned_employee_id) ?? null) : null}
-      onSelect={() => setSelectedId(c.id)}
-      onOpenCase={(to) => navigate(to)}
-    />
-  )
-
   const isEmpty = !callsQuery.isLoading && dayGroups.length === 0
 
   return (
@@ -198,22 +187,13 @@ export function CallLogsPage() {
             <p className="mt-1 text-[13px] text-muted">Passen Sie die Filter an oder setzen Sie sie zurück.</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-5">
-            {dayGroups.map((g) => (
-              <section key={g.key}>
-                <div className="mb-2 flex items-center gap-2 px-1">
-                  <span className="text-[12.5px] font-extrabold capitalize tracking-wide text-muted">{g.label}</span>
-                  <span className="h-px flex-1 bg-border-faint" aria-hidden />
-                  <span className="text-[11.5px] font-bold text-faint">
-                    {g.calls.length} {g.calls.length === 1 ? 'Anruf' : 'Anrufe'}
-                  </span>
-                </div>
-                <div className="space-y-0.5 rounded-2xl border border-border bg-surface p-1.5">
-                  {g.calls.map((c) => renderRow(c))}
-                </div>
-              </section>
-            ))}
-          </div>
+          <LogTable
+            dayGroups={dayGroups}
+            selectedId={selectedId}
+            employeeName={employeeName}
+            onSelect={(id) => setSelectedId(id)}
+            onOpenCase={(to) => navigate(to)}
+          />
         )}
       </div>
 
