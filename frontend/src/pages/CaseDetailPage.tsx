@@ -1,18 +1,20 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   CalendarClock,
-  ChevronRight,
   Euro,
   History,
   Layers,
   MessageSquare,
   Phone,
+  Sparkles,
   User,
   type LucideIcon,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
+import { GroupingReviewModal, MoveMenu, type GroupProposal, type MoveTarget } from '../components/cases/grouping'
 import { Tag } from '../components/ui/Tag'
 import { apiFetch } from '../lib/api'
 import { fmtDate, fmtDateTime } from '../lib/datetime'
@@ -80,16 +82,36 @@ const TL: Record<string, { Icon: LucideIcon; cls: string }> = {
 export function CaseDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [proposal, setProposal] = useState<GroupProposal | null>(null)
   const { data, isLoading } = useQuery({
     queryKey: ['caseDetail', id],
     queryFn: () => apiFetch<CaseBundle>(`/api/cases/${id}`),
     enabled: !!id,
   })
+  // The customer's other cases = the move targets for "verschieben".
+  const { data: allCases } = useQuery({
+    queryKey: ['cases'],
+    queryFn: () => apiFetch<{ id: string; number: string | null; title: string; customer_id: string | null }[]>('/api/cases'),
+    enabled: !!id,
+  })
+  const customerId = data?.case.customer?.id ?? null
+  const propose = useMutation({
+    mutationFn: () => apiFetch<GroupProposal>(`/api/customers/${customerId}/cases/propose`, { method: 'POST' }),
+    onSuccess: (p) => setProposal(p),
+  })
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['caseDetail', id] })
+    qc.invalidateQueries({ queryKey: ['cases'] })
+  }
   if (isLoading || !data) {
     return <div className="flex h-full items-center justify-center text-muted">Lädt…</div>
   }
   const cs = data.case
   const st = STATUS[cs.status] ?? { label: cs.status, variant: 'neutral' as const }
+  const moveTargets: MoveTarget[] = (allCases ?? [])
+    .filter((c) => customerId && c.customer_id === customerId)
+    .map((c) => ({ id: c.id, label: c.title, number: c.number }))
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-4 md:p-6 lg:p-8">
       <button
@@ -126,25 +148,38 @@ export function CaseDetailPage() {
         </div>
       </div>
 
-      {/* MEMBER INQUIRIES */}
+      {/* MEMBER INQUIRIES — with per-inquiry move + customer-wide KI-Gruppierung */}
       <div className="rounded-lg border border-border bg-surface p-5 shadow-e1">
-        <h2 className="mb-4 text-sm font-bold text-text">Anfragen in diesem Fall ({data.inquiries.length})</h2>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-bold text-text">Anfragen in diesem Fall ({data.inquiries.length})</h2>
+          {customerId && (
+            <button
+              onClick={() => propose.mutate()}
+              disabled={propose.isPending}
+              className="flex items-center gap-1.5 rounded-md border border-ai-bg px-3 py-1.5 text-xs font-semibold text-ai hover:bg-ai-bg disabled:opacity-50"
+              title="Ähnliche Anfragen dieses Kunden per KI zu Fällen bündeln"
+            >
+              <Sparkles size={14} /> {propose.isPending ? 'Analysiere…' : 'KI-Gruppierung'}
+            </button>
+          )}
+        </div>
         <div className="space-y-2">
           {data.inquiries.map((i) => {
             const ist = INQ_STATUS[i.status] ?? { label: i.status, variant: 'neutral' as const }
             return (
-              <button
+              <div
                 key={i.id}
-                onClick={() => navigate(`/vorgang/${i.id}`)}
-                className="block w-full rounded-lg border border-border p-3 text-left transition hover:border-green-primary hover:bg-alt"
+                className="group relative rounded-lg border border-border transition hover:border-green-primary hover:bg-alt"
               >
-                <div className="flex items-center gap-2">
-                  <Tag variant={ist.variant}>{ist.label}</Tag>
-                  <span className="flex-1 truncate text-sm font-semibold text-text">{i.subject || i.title || 'Anfrage'}</span>
-                  <span className="font-mono text-xs text-muted">{i.number}</span>
-                  <ChevronRight size={15} className="text-faint" />
+                <div onClick={() => navigate(`/vorgang/${i.id}`)} className="cursor-pointer p-3 pr-9">
+                  <div className="flex items-center gap-2">
+                    <Tag variant={ist.variant}>{ist.label}</Tag>
+                    <span className="flex-1 truncate text-sm font-semibold text-text">{i.subject || i.title || 'Anfrage'}</span>
+                    <span className="font-mono text-xs text-muted">{i.number}</span>
+                  </div>
                 </div>
-              </button>
+                <MoveMenu inquiryId={i.id} currentCaseId={cs.id} cases={moveTargets} onMoved={refresh} />
+              </div>
             )
           })}
           {data.inquiries.length === 0 && <p className="py-4 text-sm text-muted">Keine Anfragen in diesem Fall.</p>}
@@ -181,6 +216,18 @@ export function CaseDetailPage() {
       </div>
 
       <div className="rounded-lg border border-border bg-surface px-5 py-3 text-xs text-muted">Eröffnet: {fmtDate(cs.created_at)}</div>
+
+      {proposal && customerId && (
+        <GroupingReviewModal
+          customerId={customerId}
+          proposal={proposal}
+          onClose={() => setProposal(null)}
+          onApplied={() => {
+            setProposal(null)
+            refresh()
+          }}
+        />
+      )}
     </div>
   )
 }

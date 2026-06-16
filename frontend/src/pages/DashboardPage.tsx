@@ -8,6 +8,7 @@ import { FinanzenTab } from '../components/dashboard/FinanzenTab'
 import { KiInsightsTab } from '../components/dashboard/KiInsightsTab'
 import { KiNutzungTab } from '../components/dashboard/KiNutzungTab'
 import { Card } from '../components/ui/Card'
+import kikiAvatar from '../assets/kiki-avatar.png'
 import { apiFetch } from '../lib/api'
 import { isSupabaseConfigured } from '../lib/env'
 import { useMe } from '../lib/useMe'
@@ -111,7 +112,7 @@ function OverviewTab() {
   }
   return (
     <div className="space-y-5">
-      <DecideNow />
+      <HeroDeck />
       <AnrufeTab />
     </div>
   )
@@ -125,11 +126,11 @@ const TYPE_ICON: Record<string, typeof Phone> = {
   reschedule: Clock,
 }
 
-// "Jetzt entscheiden" — an iOS-widget-style stacked deck of the pending decisions
-// (/api/actions/pending). The top card is live; the next ones peek behind it.
-// Arrows (or clicking a peeking card) advance; each card's buttons resolve the
-// decision in place. Replaces the old greeting hero.
-function DecideNow() {
+// The dashboard hero: keeps the brand slogan + 3D Kiki on the right; the left
+// column carries a COMPACT "Jetzt entscheiden" stacked deck of the pending
+// decisions (/api/actions/pending). The slogan stays the headline; the decision
+// count is only a subheading so it never crowds the slogan or the 3D model.
+function HeroDeck() {
   const navigate = useNavigate()
   const { decisions, callsCount, loading } = usePosteingang()
   const { resolve } = usePosteingangActions()
@@ -157,22 +158,32 @@ function DecideNow() {
   }
 
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-green-tint-50 via-surface to-surface p-6 shadow-e1 sm:p-7">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="inline-flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[0.08em] text-green-deep">
-            <span className="h-1.5 w-1.5 rounded-full bg-green-primary shadow-[0_0_0_4px_var(--green-tint-100)]" />
-            Jetzt entscheiden
-          </div>
-          <h2 className="mt-1.5 text-xl font-extrabold tracking-tight text-text sm:text-2xl">
-            {total === 0
-              ? 'Alles erledigt 🎉'
-              : `${total} ${total === 1 ? 'Entscheidung wartet' : 'Entscheidungen warten'} auf Sie`}
-          </h2>
-          <p className="mt-1 text-xs font-medium text-muted">
-            {callsCount} Anrufe · {casesCount} Fälle · {total} offen
-          </p>
+    <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-green-tint-50 via-surface to-surface shadow-e1">
+      <div
+        aria-hidden
+        className="kiki-glow pointer-events-none absolute right-[130px] top-1/2 hidden h-[340px] w-[340px] rounded-full bg-green-primary/20 blur-3xl lg:block"
+      />
+      <div className="relative z-10 max-w-[640px] p-6 sm:p-7">
+        <div className="inline-flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-[0.08em] text-green-deep">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-primary shadow-[0_0_0_4px_var(--green-tint-100)]" />
+          HeyKiki
         </div>
+        <h2 className="mt-2.5 text-[22px] font-extrabold leading-tight tracking-tight text-text sm:text-[26px]">
+          Kiki, die erste KI‑Sekretärin für{' '}
+          <span className="text-green-primary">Handwerksbetriebe</span>
+        </h2>
+
+        <div className="mt-4 flex items-end justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold text-text">
+              {total === 0
+                ? 'Alles erledigt 🎉'
+                : `${total} ${total === 1 ? 'Entscheidung wartet' : 'Entscheidungen warten'} auf Sie`}
+            </p>
+            <p className="mt-0.5 text-[11px] font-medium text-muted">
+              {callsCount} Anrufe · {casesCount} Fälle · {total} offen
+            </p>
+          </div>
         {total > 1 && (
           <div className="flex items-center gap-1.5">
             <button
@@ -194,7 +205,7 @@ function DecideNow() {
         )}
       </div>
 
-      <div className="relative mt-4 h-[176px]">
+        <div className="relative mt-3 h-[150px] max-w-[440px]">
         {loading && total === 0 && (
           <div className="flex h-full items-center justify-center text-sm text-muted">Lädt Entscheidungen…</div>
         )}
@@ -214,7 +225,7 @@ function DecideNow() {
             <div
               key={d.actionKey}
               onClick={() => !front && setIndex(j)}
-              className="absolute inset-x-0 top-0 rounded-xl border bg-surface p-4 shadow-e1 transition-all duration-300"
+              className="absolute inset-x-0 top-0 rounded-xl border bg-surface p-3.5 shadow-e1 transition-all duration-300"
               style={{
                 transform: `translateY(${p * 12}px) scale(${1 - p * 0.04})`,
                 opacity: p === 0 ? 1 : p === 1 ? 0.65 : 0.4,
@@ -232,13 +243,13 @@ function DecideNow() {
                 </span>
                 {d.caseTicket && <span className="truncate font-mono text-[11px] text-muted">{d.caseTicket}</span>}
               </div>
-              <p className="mt-2 truncate text-[15px] font-bold text-text">{d.title}</p>
-              <p className="mt-0.5 truncate text-xs text-muted">
+              <p className="mt-1.5 truncate text-sm font-bold text-text">{d.title}</p>
+              <p className="mt-0.5 truncate text-[11px] text-muted">
                 {d.customer}
                 {d.caseName ? ` · ${d.caseName}` : ''}
               </p>
               {front && (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                   <button
                     disabled={busy}
                     onClick={() => act(d, 'primary')}
@@ -276,7 +287,13 @@ function DecideNow() {
             </div>
           )
         })}
+        </div>
       </div>
+      <img
+        src={kikiAvatar}
+        alt="Kiki"
+        className="kiki-live pointer-events-none absolute bottom-0 right-[-24px] hidden h-[280px] w-auto select-none lg:block xl:right-2"
+      />
     </section>
   )
 }
