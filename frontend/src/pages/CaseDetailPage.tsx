@@ -8,6 +8,7 @@ import {
   Clock,
   FileText,
   FolderPlus,
+  HardHat,
   History,
   Layers,
   MessageSquare,
@@ -22,11 +23,13 @@ import {
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
+import { CustomerFormModal, type CustomerFormValues } from '../components/CustomerFormModal'
 import { MoveMenu, type MoveTarget } from '../components/cases/grouping'
 import { Tag } from '../components/ui/Tag'
 import { apiFetch } from '../lib/api'
 import { fmtDate, fmtDateTime } from '../lib/datetime'
 import { cn } from '../lib/utils'
+import { CreateAppointmentModal } from './calls/Modals'
 
 interface CaseInquiry {
   id: string
@@ -65,9 +68,10 @@ interface CaseBundle {
   employees: CaseEmp[]
   open_count: number
 }
-interface Emp { id: string; display_name: string | null; is_active?: boolean; is_absent?: boolean }
+interface Emp { id: string; display_name: string | null; is_active?: boolean; is_absent?: boolean; is_technician?: boolean }
 interface ProjRow { id: string; number: string | null; title: string; status: string; customer_id: string | null }
 interface CaseRow { id: string; number: string | null; title: string; customer_id: string | null }
+interface CasePatchResp { status?: string; project_id?: string | null; title?: string }
 
 // Case status → the user-facing Offen / In Bearbeitung / Abgeschlossen control.
 const CASE_STATUS = [
@@ -101,6 +105,11 @@ export function CaseDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const [apptOpen, setApptOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [empOpen, setEmpOpen] = useState(false)
+  const [projOpen, setProjOpen] = useState(false)
+
   const { data, isLoading } = useQuery({
     queryKey: ['caseDetail', id],
     queryFn: () => apiFetch<CaseBundle>(`/api/cases/${id}`),
@@ -116,24 +125,41 @@ export function CaseDetailPage() {
   const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: () => apiFetch<ProjRow[]>('/api/projects'), staleTime: 60_000 })
 
   const customerId = data?.case.customer?.id ?? null
-  const refresh = () => {
-    qc.invalidateQueries({ queryKey: ['caseDetail', id] })
-    qc.invalidateQueries({ queryKey: ['cases'] })
-  }
+  const { data: fullCustomer } = useQuery({
+    queryKey: ['customerDetail', customerId],
+    queryFn: () => apiFetch<CustomerFormValues>(`/api/customers/${customerId}`),
+    enabled: !!customerId,
+  })
+
+  const setCase = (mut: (c: CaseBundle['case']) => Partial<CaseBundle['case']>) =>
+    qc.setQueryData<CaseBundle>(['caseDetail', id], (old) => (old ? { ...old, case: { ...old.case, ...mut(old.case) } } : old))
+  const setEmployees = (mut: (e: CaseEmp[]) => CaseEmp[]) =>
+    qc.setQueryData<CaseBundle>(['caseDetail', id], (old) => (old ? { ...old, employees: mut(old.employees) } : old))
+
+  // Status + project PATCH — OPTIMISTIC + authoritative response, so the pill flips
+  // instantly and never lags behind a refetch.
   const patchCase = useMutation({
-    mutationFn: (body: Record<string, unknown>) => apiFetch(`/api/cases/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-    onSuccess: refresh,
+    mutationFn: (body: Record<string, unknown>) => apiFetch<CasePatchResp>(`/api/cases/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    onMutate: (body) =>
+      setCase(() => ({
+        ...('status' in body ? { status: body.status as string } : {}),
+        ...('project_id' in body ? { project_id: (body.project_id || null) as string | null } : {}),
+      })),
+    onSuccess: (resp) => {
+      setCase((c) => ({ status: resp.status ?? c.status, project_id: resp.project_id ?? null, label: resp.title ?? c.label }))
+      qc.invalidateQueries({ queryKey: ['cases'] })
+    },
   })
   const assignEmp = useMutation({
-    mutationFn: (employeeId: string) => apiFetch(`/api/cases/${id}/employees`, { method: 'POST', body: JSON.stringify({ employee_id: employeeId }) }),
-    onSuccess: refresh,
+    mutationFn: (emp: Emp) => apiFetch(`/api/cases/${id}/employees`, { method: 'POST', body: JSON.stringify({ employee_id: emp.id }) }),
+    onMutate: (emp) => setEmployees((es) => (es.some((e) => e.id === emp.id) ? es : [...es, { id: emp.id, display_name: emp.display_name, is_technician: emp.is_technician }])),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['caseDetail', id] }),
   })
   const removeEmp = useMutation({
     mutationFn: (employeeId: string) => apiFetch(`/api/cases/${id}/employees/${employeeId}`, { method: 'DELETE' }),
-    onSuccess: refresh,
+    onMutate: (employeeId) => setEmployees((es) => es.filter((e) => e.id !== employeeId)),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['caseDetail', id] }),
   })
-  const [empOpen, setEmpOpen] = useState(false)
-  const [projOpen, setProjOpen] = useState(false)
 
   if (isLoading || !data) {
     return <div className="flex h-full items-center justify-center text-muted">Lädt…</div>
@@ -147,9 +173,20 @@ export function CaseDetailPage() {
   const freeEmployees = employees.filter((e) => !assignedIds.has(e.id) && e.is_active !== false)
   const currentProject = projects.find((p) => p.id === cs.project_id) ?? null
   const customerProjects = projects.filter((p) => !customerId || p.customer_id === customerId)
+  const technicians = data.employees.filter((e) => e.is_technician)
 
+  // The KVA inherits the case via the (case-member) inquiry; the invoice gets the customer.
   const goKva = () => navigate(`/cost-estimates/new?customer_id=${customerId ?? ''}${firstInq ? `&inquiry_id=${firstInq}` : ''}`)
   const goInvoice = () => navigate(`/invoices/new?customer_id=${customerId ?? ''}`)
+
+  // Synthetic "call" so the shared CreateAppointmentModal can pre-fill from the case.
+  const apptCall = {
+    customer_id: cs.customer?.id ?? null,
+    summary_title: cs.label ?? 'Fall',
+    summary: '',
+    customers: cs.customer ? { full_name: cs.customer.full_name, phone: cs.customer.phone } : null,
+    data_collection: {},
+  } as unknown as Parameters<typeof CreateAppointmentModal>[0]['call']
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6 lg:p-8">
@@ -160,8 +197,8 @@ export function CaseDetailPage() {
         <ArrowLeft size={15} /> {cs.customer ? `Zurück zu ${cs.customer.full_name ?? 'Kunde'}` : 'Zurück'}
       </button>
 
-      {/* HEADER — gradient workspace banner */}
-      <div className="overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-green-tint-50 via-surface to-surface shadow-e1">
+      {/* HEADER — gradient banner. overflow-visible so the action dropdowns aren't clipped. */}
+      <div className="overflow-visible rounded-2xl border border-border bg-gradient-to-br from-green-tint-50 via-surface to-surface shadow-e1">
         <div className="p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -213,7 +250,7 @@ export function CaseDetailPage() {
 
           {/* ACTION BAR */}
           <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">
-            <ActionBtn icon={CalendarPlus} label="Termin" tone="green" onClick={() => navigate('/calendar')} />
+            <ActionBtn icon={CalendarPlus} label="Termin" tone="green" onClick={() => setApptOpen(true)} />
             <ActionBtn icon={Receipt} label="KVA" tone="ai" onClick={goKva} disabled={!customerId} />
             <ActionBtn icon={FileText} label="Rechnung" tone="ai" onClick={goInvoice} disabled={!customerId} />
             <div className="relative">
@@ -221,8 +258,8 @@ export function CaseDetailPage() {
               {empOpen && (
                 <Dropdown onClose={() => setEmpOpen(false)} empty={!freeEmployees.length} emptyLabel="Alle zugewiesen">
                   {freeEmployees.map((e) => (
-                    <button key={e.id} onClick={() => { assignEmp.mutate(e.id); setEmpOpen(false) }} className="block w-full truncate rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
-                      {e.display_name ?? 'Mitarbeiter'}
+                    <button key={e.id} onClick={() => { assignEmp.mutate(e); setEmpOpen(false) }} className="block w-full truncate rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
+                      {e.display_name ?? 'Mitarbeiter'}{e.is_technician ? ' · Techniker' : ''}
                     </button>
                   ))}
                 </Dropdown>
@@ -245,7 +282,7 @@ export function CaseDetailPage() {
                 </Dropdown>
               )}
             </div>
-            <ActionBtn icon={Pencil} label="Kunde bearbeiten" tone="steel" onClick={() => customerId && navigate(`/customers/${customerId}`)} disabled={!customerId} />
+            <ActionBtn icon={Pencil} label="Kunde bearbeiten" tone="steel" onClick={() => setEditOpen(true)} disabled={!customerId} />
           </div>
         </div>
       </div>
@@ -293,7 +330,7 @@ export function CaseDetailPage() {
                     <span className="font-mono text-xs text-muted">{i.number}</span>
                   </div>
                 </div>
-                <MoveMenu inquiryId={i.id} currentCaseId={cs.id} cases={moveTargets} onMoved={refresh} />
+                <MoveMenu inquiryId={i.id} currentCaseId={cs.id} cases={moveTargets} onMoved={() => qc.invalidateQueries({ queryKey: ['caseDetail', id] })} />
               </div>
             )
           })}
@@ -302,7 +339,7 @@ export function CaseDetailPage() {
       </Section>
 
       {/* TERMINE */}
-      <Section icon={CalendarClock} title="Termine" count={data.appointments.length}>
+      <Section icon={CalendarClock} title="Termine" count={data.appointments.length} action={<MiniBtn onClick={() => setApptOpen(true)} label="+ Termin" />}>
         {data.appointments.length === 0 ? (
           <p className="text-sm text-muted">Keine Termine.</p>
         ) : (
@@ -314,6 +351,21 @@ export function CaseDetailPage() {
                 <span className="text-xs text-muted">{a.scheduled_at ? fmtDateTime(a.scheduled_at) : 'offen'}</span>
                 <Tag variant={a.status === 'confirmed' ? 'success' : a.status === 'cancelled' || a.status === 'rejected' ? 'neutral' : 'warning'}>{a.status}</Tag>
               </button>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* TECHNIKER */}
+      <Section icon={HardHat} title="Techniker" count={technicians.length}>
+        {technicians.length === 0 ? (
+          <p className="text-sm text-muted">Kein Techniker zugewiesen. Weisen Sie über „Mitarbeiter" einen Techniker zu — der Techniker-Einsatz wird dann am bestätigten Termin ausgelöst.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {technicians.map((t) => (
+              <span key={t.id} className="inline-flex items-center gap-1.5 rounded-full border border-green-tint-200 bg-green-tint-50 px-3 py-1 text-sm font-medium text-green-deep">
+                <HardHat size={13} /> {t.display_name ?? 'Techniker'}
+              </span>
             ))}
           </div>
         )}
@@ -357,7 +409,7 @@ export function CaseDetailPage() {
         )}
       </Section>
 
-      {/* VERLAUF — fixed colored icon tiles */}
+      {/* VERLAUF */}
       <Section icon={History} title="Gesamter Verlauf" count={data.timeline.length}>
         {data.timeline.length === 0 ? (
           <p className="text-sm text-muted">Noch keine Aktivitäten.</p>
@@ -384,6 +436,28 @@ export function CaseDetailPage() {
       </Section>
 
       <div className="rounded-lg border border-border bg-surface px-5 py-3 text-xs text-muted">Eröffnet: {fmtDate(cs.created_at)}</div>
+
+      <CreateAppointmentModal
+        open={apptOpen}
+        onClose={() => setApptOpen(false)}
+        call={apptCall}
+        inquiryId={firstInq}
+        employees={employees}
+        onCreated={() => { setApptOpen(false); qc.invalidateQueries({ queryKey: ['caseDetail', id] }) }}
+      />
+      {editOpen && (
+        <CustomerFormModal
+          open
+          mode="edit"
+          customer={fullCustomer}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => {
+            setEditOpen(false)
+            qc.invalidateQueries({ queryKey: ['caseDetail', id] })
+            if (customerId) qc.invalidateQueries({ queryKey: ['customerDetail', customerId] })
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -403,8 +477,8 @@ function ActionBtn({ icon: Icon, label, tone, onClick, disabled }: { icon: Lucid
 function Dropdown({ children, onClose, empty, emptyLabel }: { children: React.ReactNode; onClose: () => void; empty: boolean; emptyLabel: string }) {
   return (
     <>
-      <div className="fixed inset-0 z-10" onClick={onClose} />
-      <div className="absolute left-0 z-20 mt-1 max-h-64 w-60 overflow-auto rounded-lg border border-border bg-surface p-1 shadow-e3">
+      <div className="fixed inset-0 z-30" onClick={onClose} />
+      <div className="absolute left-0 z-40 mt-1 max-h-64 w-60 overflow-auto rounded-lg border border-border bg-surface p-1 shadow-e3">
         {empty ? <p className="px-2.5 py-2 text-xs text-muted">{emptyLabel}</p> : children}
       </div>
     </>
