@@ -51,6 +51,7 @@ ActionKind = Literal[
     "callback_owed",
     "alt_time_proposal",
     "appointment_cancelled",
+    "reschedule_unmatched",
 ]
 
 
@@ -380,6 +381,55 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
     return out
 
 
+def _unmatched_reschedule(client, org_id: str) -> list[dict[str, Any]]:
+    """Reschedule requests the agent could NOT link to an appointment.
+
+    `_record_unmatched_change_request` (services/appointments.py) inserts an
+    inquiry of type='appointment_change', status='open', notes prefixed
+    'NICHT ZUGEORDNET …' with NO appointment row — so without this aggregator the
+    request is invisible (no appointment-derived Open Action surfaces). The
+    'NICHT ZUGEORDNET%' marker is what EXCLUDES the matched change_appointment
+    path (also appointment_change/open, but it surfaces via the customer_proposed_*
+    / alternative_proposed_* appointment rows in `_alt_time_proposal`) — so we
+    never double-list a request that already has a proposal card."""
+    rows = (
+        client.table("inquiries")
+        .select("id, customer_id, created_at, notes, status, type")
+        .eq("org_id", org_id)
+        .eq("type", "appointment_change")
+        .eq("status", "open")
+        .ilike("notes", "NICHT ZUGEORDNET%")
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        return []
+    name_by_cust = _customer_name_map(
+        client, org_id, [r.get("customer_id") for r in rows]
+    )
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
+        out.append(
+            {
+                "kind": "reschedule_unmatched",
+                "id": r["id"],
+                "inquiry_id": r["id"],
+                "call_id": None,
+                "customer_name": nm,
+                "customer_id": r.get("customer_id"),
+                "summary": "Terminänderung konnte nicht zugeordnet werden — "
+                "bitte manuell zuordnen",
+                "created_at": r.get("created_at"),
+                "due_at": None,
+                "priority": "high",
+            }
+        )
+    return out
+
+
 def _appointment_cancelled(client, org_id: str) -> list[dict[str, Any]]:
     """Recently-cancelled appointments — kept visible so the team is INFORMED instead
     of the worklist item silently vanishing on cancel. Windowed to the last 14 days
@@ -512,6 +562,7 @@ def _aggregate(org_id: str) -> list[dict[str, Any]]:
     items.extend(_kva_pending_acceptance(client, org_id))
     items.extend(_callback_owed(client, org_id))
     items.extend(_alt_time_proposal(client, org_id))
+    items.extend(_unmatched_reschedule(client, org_id))
     items.extend(_appointment_cancelled(client, org_id))
 
     # Stable per-action key so the manual to-do state (claim/done/dismiss) sticks.

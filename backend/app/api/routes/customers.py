@@ -551,6 +551,11 @@ def _update(org_id: str, customer_id: str, payload: CustomerUpsert) -> dict | No
     if payload.notes is not None:
         fields["notes"] = payload.notes
     if payload.customer_number is not None:
+        if not payload.customer_number.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Kundennummer darf nicht leer sein.",
+            )
         fields["customer_number"] = payload.customer_number
     fields["updated_at"] = "now()"
     res = (

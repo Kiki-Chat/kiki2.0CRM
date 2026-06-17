@@ -525,6 +525,11 @@ def gen_case_number(client, org_id: str) -> str:
 CUSTOMER_NUMBER_PREFIX = "KI-"
 
 
+def format_ki_number(seq: int) -> str:
+    """Format an integer sequence as a canonical ``KI-NNNNNN`` customer number."""
+    return f"{CUSTOMER_NUMBER_PREFIX}{seq:06d}"
+
+
 def ki_customer_seq(value: str | None) -> int | None:
     """Return the integer sequence of a ``KI-NNNNNN`` customer number, else None.
 
@@ -552,4 +557,4 @@ def gen_customer_number(client, org_id: str) -> str:
         lambda: client.table("customers").select("customer_number").eq("org_id", org_id)
     )
     seqs = [s for r in rows if (s := ki_customer_seq(r.get("customer_number"))) is not None]
-    return f"{CUSTOMER_NUMBER_PREFIX}{(max(seqs) + 1 if seqs else 1):06d}"
+    return format_ki_number(max(seqs) + 1 if seqs else 1)

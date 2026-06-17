@@ -24,7 +24,7 @@ import re
 from collections import Counter
 
 from app.db.supabase_client import get_service_client
-from app.services.common import fetch_all_rows, gen_customer_number, ki_customer_seq
+from app.services.common import fetch_all_rows, format_ki_number, gen_customer_number, ki_customer_seq
 from app.services.identify import _to_e164
 
 _CHUNK = 500
@@ -422,10 +422,12 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
             continue
 
         num = _get(row, mapping, "customer_number")
-        if num:
-            num = str(num)  # keep the CSV's own Kundennummer verbatim
+        if num and not str(num).startswith("KI-"):
+            num = str(num)  # keep the CSV's own Kundennummer verbatim (non-KI- namespace)
         else:
-            num = f"KI-{ki_seq:06d}"
+            # Auto-mint: either no number provided, or the CSV carries a KI- value
+            # that would collide with / poison our auto-sequence — replace with a fresh one.
+            num = format_ki_number(ki_seq)
             ki_seq += 1
 
         street = _get(row, mapping, "street")

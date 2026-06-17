@@ -929,17 +929,34 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
         hours=_reschedule_timeout_hours(client, org_id)
     )
     try:
-        client.table("appointments").update(
-            {
-                "customer_proposed_start_time": new_dt.isoformat(),
-                "customer_proposed_at": now_berlin().isoformat(),
-                "customer_proposal_source": "agent_call",
-                "reschedule_expires_at": expires_at.isoformat(),
-                "reschedule_replace_intent": bool(payload.replace_original),
-            }
-        ).eq("org_id", org_id).eq("id", appt["id"]).execute()
-    except Exception:  # pragma: no cover — never break the live change flow
-        pass
+        stamp_res = (
+            client.table("appointments")
+            .update(
+                {
+                    "customer_proposed_start_time": new_dt.isoformat(),
+                    "customer_proposed_at": now_berlin().isoformat(),
+                    "customer_proposal_source": "agent_call",
+                    "reschedule_expires_at": expires_at.isoformat(),
+                    "reschedule_replace_intent": bool(payload.replace_original),
+                }
+            )
+            .eq("org_id", org_id)
+            .eq("id", appt["id"])
+            .execute()
+        )
+        if not (stamp_res.data):
+            logger.warning(
+                "change_appointment: customer_proposed stamp updated 0 rows for appt %s (org %s)",
+                appt["id"],
+                org_id,
+            )
+    except Exception as exc:  # pragma: no cover — never break the live change flow
+        logger.warning(
+            "change_appointment: customer_proposed stamp failed for appt %s (org %s): %s",
+            appt["id"],
+            org_id,
+            exc,
+        )
     return {
         "success": True,
         "changeRequestId": change["id"],

@@ -14,6 +14,7 @@ export type ActionKind =
   | 'callback_owed'
   | 'alt_time_proposal'
   | 'appointment_cancelled'
+  | 'reschedule_unmatched'
 
 export type DecisionType = 'termin' | 'rueckruf' | 'storno' | 'kva' | 'reschedule'
 export type VStatus = 'open' | 'in_progress' | 'completed'
@@ -143,10 +144,11 @@ const KIND_CFG: Record<
 > = {
   termin_anfrage: { type: 'termin', accent: 'var(--info)', label: 'Termin', variant: 'info', title: () => 'Termin bestätigen?', primary: 'Bestätigen', secondary: 'Verschieben', tertiary: 'Ablehnen', reco: (n) => `${n} zuweisen und Termin bestätigen`, assignable: true },
   alt_time_proposal: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschieben', variant: 'warning', title: () => 'Neuen Termin annehmen?', primary: 'Annehmen', secondary: null, tertiary: 'Ablehnen', reco: () => 'Vorgeschlagenen Termin annehmen', assignable: false },
-  appointment_cancelled: { type: 'storno', accent: 'var(--error)', label: 'Storno', variant: 'error', title: () => 'Stornierung bestätigen?', primary: 'Bestätigen', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
+  appointment_cancelled: { type: 'storno', accent: 'var(--error)', label: 'Storno', variant: 'error', title: () => 'Termin storniert', primary: 'Zur Kenntnis', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
   callback_owed: { type: 'rueckruf', accent: 'var(--green-primary)', label: 'Rückruf', variant: 'green', title: (a) => `Rückruf an ${a.customer_name || 'Kunde'}?`, primary: 'Erledigt', secondary: 'Zuweisen', tertiary: null, reco: (n) => `${n} den Rückruf zuweisen`, assignable: true },
   kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'KVA', variant: 'ai', title: (a) => `KVA an ${a.customer_name || 'Kunde'} senden?`, primary: 'KVA senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `KVA jetzt an ${c} senden`, assignable: false },
   kva_pending_acceptance: { type: 'kva', accent: 'var(--ai)', label: 'KVA-Antwort', variant: 'ai', title: () => 'Kundenantwort erfassen', primary: 'Angenommen', secondary: null, tertiary: 'Abgelehnt', reco: () => 'Antwort des Kunden eintragen', assignable: false },
+  reschedule_unmatched: { type: 'reschedule', accent: 'var(--warning)', label: 'Zuordnen', variant: 'warning', title: () => 'Terminänderung zuordnen', primary: 'Zuordnen', secondary: null, tertiary: 'Erledigt', reco: () => 'Terminänderung manuell einem Termin zuordnen', assignable: false },
 }
 
 function pickSuggested(employees: Employee[]): Employee | null {
@@ -413,8 +415,12 @@ export function usePosteingangActions() {
     } else if (d.kind === 'alt_time_proposal') {
       await apiFetch(`/api/appointments/${id}/${choice === 'primary' ? 'approve-proposal' : 'decline-proposal'}`, { method: 'POST' })
     } else if (d.kind === 'appointment_cancelled') {
-      if (choice === 'primary') await apiFetch(`/api/appointments/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'Kunde hat storniert' }) })
-      else await done()
+      // Informational card: the cancellation already happened (status='cancelled').
+      // 'Zur Kenntnis' just acknowledges it — DON'T POST /reject (requires
+      // status='pending' → always 409; would also double-fire a customer cancel).
+      await done()
+    } else if (d.kind === 'reschedule_unmatched') {
+      await done()
     } else if (d.kind === 'callback_owed') {
       await done()
     } else if (d.kind === 'kva_to_send') {

@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom'
 import { Modal } from '../components/ui/Modal'
 import { apiBlobUrl, apiFetch, apiUpload } from '../lib/api'
 import { cn } from '../lib/utils'
+import type { CaseListRow } from './cases/types'
 
 const STALE = 5 * 60 * 1000
 
@@ -473,6 +474,14 @@ const initials = (name: string | null) => (name ?? '?').split(' ').map((p) => p[
 export function TeamTab({ project }: { project: ProjectLite }) {
   const qc = useQueryClient()
   const [addOpen, setAddOpen] = useState(false)
+  // Read from the shared cases cache (populated by CasesTab or DashboardPage).
+  // staleTime matches STALE so no extra request is fired if data is fresh.
+  const { data: allCases = [] } = useQuery({
+    queryKey: ['cases'],
+    queryFn: () => apiFetch<CaseListRow[]>('/api/cases'),
+    staleTime: STALE,
+  })
+  const hasNoCases = allCases.filter((c) => c.project_id === project.id).length === 0
   const { data: team = [] } = useQuery({
     queryKey: ['project-employees', project.id],
     queryFn: () => apiFetch<TeamMember[]>(`/api/projects/${project.id}/employees`),
@@ -489,8 +498,20 @@ export function TeamTab({ project }: { project: ProjectLite }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110"><Plus size={14} /> Mitarbeiter hinzufügen</button>
+        <button
+          onClick={() => { if (!hasNoCases) setAddOpen(true) }}
+          disabled={hasNoCases}
+          title={hasNoCases ? 'Zuerst einen Fall zum Projekt hinzufügen' : undefined}
+          className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Plus size={14} /> Mitarbeiter hinzufügen
+        </button>
       </div>
+      {hasNoCases && (
+        <div className="rounded-xl border border-border bg-alt px-4 py-3 text-sm text-muted">
+          Fügen Sie dem Projekt zuerst einen Fall hinzu, um Mitarbeiter zuzuweisen.
+        </div>
+      )}
       {team.length ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {team.map((m) => (
@@ -505,7 +526,7 @@ export function TeamTab({ project }: { project: ProjectLite }) {
           ))}
         </div>
       ) : (
-        <EmptyState>Noch keine Mitarbeiter zugewiesen.</EmptyState>
+        !hasNoCases && <EmptyState>Noch keine Mitarbeiter zugewiesen.</EmptyState>
       )}
       {addOpen && <AddEmployeeModal project={project} existing={team.map((t) => t.id)} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); refresh() }} />}
     </div>
