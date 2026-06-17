@@ -108,6 +108,20 @@ HK_TOOL_NAMES: list[str] = [
 # ``settings.backend_public_url`` so it follows local vs. prod automatically.
 _CONVERSATION_INIT_PATH = "/api/elevenlabs/conversation-init"
 
+# Production backend public URL — the conversation-initiation webhook on a
+# live agent MUST point here (verify_agent_health's webhook_url_is_prod check).
+# Defined explicitly per the Batch-2 contract; the configured
+# ``settings.backend_public_url`` follows local-vs-prod for the WRITE side, while
+# this constant is the read-side assertion target for the prod health board.
+_PROD_BACKEND_URL = "https://backend-production-3f88a.up.railway.app"
+_PROD_WEBHOOK_URL = f"{_PROD_BACKEND_URL}{_CONVERSATION_INIT_PATH}"
+
+# Actionable German message surfaced when an agent has no phone bound (2.3).
+NO_PHONE_MESSAGE = (
+    "Keine Telefonnummer im ElevenLabs-Agent hinterlegt — bitte zuerst eine "
+    "Nummer zuweisen"
+)
+
 # Module-level cache: {tool_name: tool_id}. Populated on first lookup and
 # refreshed on a TTL so a tool DELETED or RENAMED in the workspace can't be served
 # stale for the whole process lifetime (the old code never re-fetched once a name
@@ -1133,10 +1147,28 @@ def configure_agent(
     NOTE on the prompt step: SKIPPED when ``organizations.agent_provisioned_at``
     is already set (re-runs on existing orgs do not trample customer edits).
     Other steps are additive and safe to re-run.
+
+    2.2 SEED-AT-PROVISION investigation (conservative — intentionally a no-op):
+      (a) Post-call summaries: ``app.services.post_call`` reads
+          ``analysis.transcript_summary`` + ``analysis.call_summary_title`` from
+          the ElevenLabs post-call webhook payload. Those are ElevenLabs BUILT-IN
+          analysis fields produced server-side for every conversation — they need
+          NO per-agent analysis/eval config. Nothing to seed here.
+      (b) Outbound occasion scripts/enablement: every occasion's spoken text is
+          rendered in-backend per call (``outbound_occasions.build_call_content``)
+          and shipped via the Path-A ``conversation_config_override`` — whose
+          agent-side whitelist flags are already enabled in B.6 above. The org's
+          outbound config row is created at provision (``agent_configs`` insert in
+          ``provisioning.provision_org``) with the DB defaults
+          (``outbound_enabled=false``, empty ``outbound_occasions``, sensible
+          time/weekday windows). Outbound being OFF until the customer opts in is
+          the intended default, not a gap — so no seeding is added.
     """
     summary: dict[str, Any] = {
         "phone_number": None,
         "phone_number_id": None,
+        "phone_bound": False,
+        "phone_message": None,
         "tools_attached": [],
         "prompt_applied": False,
         "prompt_skipped_reason": None,
@@ -1147,12 +1179,31 @@ def configure_agent(
     is_first_run = not _is_agent_already_provisioned(org_id)
 
     # ─── B.1 Phone (number + the ElevenLabs phone_number_id for outbound) ────
-    phone_meta = fetch_phone_meta_for_agent(agent_id)
-    _store_phone_on_org(
-        org_id, phone_meta["phone_number"], phone_meta.get("phone_number_id")
-    )
-    summary["phone_number"] = phone_meta["phone_number"]
-    summary["phone_number_id"] = phone_meta.get("phone_number_id")
+    # 2.3 — GRACEFUL NO-PHONE: a missing phone must NOT abort the whole provision.
+    # We record phone_bound=false + an actionable German message and continue with
+    # B.2-B.6 (tools, prompt, webhook, audio, overrides) so the agent is otherwise
+    # fully wired; verify_agent_health surfaces the missing phone as a red check.
+    # The happy path (a phone IS bound) is unchanged.
+    try:
+        phone_meta = fetch_phone_meta_for_agent(agent_id)
+        _store_phone_on_org(
+            org_id, phone_meta["phone_number"], phone_meta.get("phone_number_id")
+        )
+        summary["phone_number"] = phone_meta["phone_number"]
+        summary["phone_number_id"] = phone_meta.get("phone_number_id")
+        summary["phone_bound"] = True
+    except HTTPException:
+        # fetch_phone_meta_for_agent raises HTTPException(400) only for the
+        # zero-phones-bound case (an operator-actionable state). Any other
+        # failure (EL HTTP error etc.) is an ElevenLabsWriteError and still
+        # propagates. Degrade gracefully here instead of failing provision.
+        summary["phone_bound"] = False
+        summary["phone_message"] = NO_PHONE_MESSAGE
+        logger.warning(
+            "Agent %s (org %s) has no phone bound — provisioning the rest of "
+            "the config and reporting phone_bound=false.",
+            agent_id, org_id,
+        )
 
     # ─── B.2 Tools (additive merge of tool_ids) ──────────────────────────────
     tool_map = _resolve_hk_tool_ids(HK_TOOL_NAMES)
@@ -1299,6 +1350,168 @@ def configure_agent(
         _stamp_agent_provisioned(org_id)
 
     return summary
+
+
+# ─── 2.1 + 2.4: post-provision verify gate / agent-health report ─────────────
+def _check(name: str, ok: bool, detail: str) -> dict:
+    """Shape one check row for the agent-health contract."""
+    return {"name": name, "ok": bool(ok), "detail": detail}
+
+
+def _fetch_provisioned_at(org_id: str | UUID) -> str | None:
+    db = get_service_client()
+    rows = (
+        db.table("organizations")
+        .select("agent_provisioned_at")
+        .eq("id", str(org_id))
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0].get("agent_provisioned_at") if rows else None
+
+
+def verify_agent_health(org_id: str | UUID, agent_id: str) -> dict:
+    """Read-only post-provision verify gate (2.1).
+
+    Re-reads the LIVE ElevenLabs agent via the direct REST
+    ``get_agent_config`` (never the MCP — the MCP omits tools / client_events)
+    and asserts every check in the Batch-2 contract. NEVER writes to the agent.
+
+    Returns::
+
+        {
+          "ok": bool,                      # AND of every check.ok
+          "provisioned_at": str | None,    # organizations.agent_provisioned_at
+          "checks": [{name, ok, detail}],  # the 7 contract checks, in order
+        }
+
+    Checks (names are the contract):
+      * hk_tools_attached    — all 11 hk_* tool ids are on the agent
+      * webhook_url_is_prod  — conversation-init webhook url == prod backend url
+      * webhook_enabled      — the init-webhook toggle is on
+      * audio_event_present  — 'audio' is in client_events (else the agent is silent)
+      * prompt_rendered      — prompt non-empty AND no unsubstituted '{{' tokens
+      * override_flags_on    — Path-A per-call override flags all true
+      * phone_bound          — a phone number is bound to the agent
+
+    If the agent is unreachable, returns ok=false with every check failed and
+    the error in each detail (so a no-agent / unreachable org reads red, not 500).
+    """
+    provisioned_at = _fetch_provisioned_at(org_id)
+
+    try:
+        cfg = get_agent_config(agent_id)
+    except Exception as exc:  # noqa: BLE001 — surface unreachable as red, not 500
+        msg = f"Agent nicht erreichbar: {str(exc)[:200]}"
+        names = [
+            "hk_tools_attached", "webhook_url_is_prod", "webhook_enabled",
+            "audio_event_present", "prompt_rendered", "override_flags_on",
+            "phone_bound",
+        ]
+        return {
+            "ok": False,
+            "provisioned_at": provisioned_at,
+            "checks": [_check(n, False, msg) for n in names],
+        }
+
+    checks: list[dict] = []
+
+    # hk_tools_attached — all 11 required hk_* ids present on the agent.
+    try:
+        tool_map = _resolve_hk_tool_ids(HK_TOOL_NAMES)
+        required_ids = set(tool_map.values())
+        current_ids = set(_get_path(cfg, TOOL_IDS_PATH) or [])
+        missing_ids = required_ids - current_ids
+        # Map any missing id back to its tool name for an actionable detail.
+        id_to_name = {tid: n for n, tid in tool_map.items()}
+        missing_names = sorted(id_to_name.get(tid, tid) for tid in missing_ids)
+        checks.append(_check(
+            "hk_tools_attached",
+            not missing_ids,
+            "Alle 11 hk_*-Tools sind verknüpft."
+            if not missing_ids
+            else f"Fehlende Tools: {', '.join(missing_names)}",
+        ))
+    except HTTPException as exc:
+        # Workspace is missing a required tool entirely (config decision upstream).
+        checks.append(_check("hk_tools_attached", False, str(exc.detail)))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(_check("hk_tools_attached", False, f"Tool-Prüfung fehlgeschlagen: {str(exc)[:150]}"))
+
+    # webhook_url_is_prod — the conversation-init webhook points at prod.
+    cur_url = _get_path(cfg, WEBHOOK_URL_PATH)
+    checks.append(_check(
+        "webhook_url_is_prod",
+        cur_url == _PROD_WEBHOOK_URL,
+        f"Webhook-URL: {cur_url or '—'}"
+        if cur_url == _PROD_WEBHOOK_URL
+        else f"Webhook-URL ist nicht die Produktions-URL (ist: {cur_url or '—'}).",
+    ))
+
+    # webhook_enabled — the init-webhook toggle is on.
+    enabled = bool(_get_path(cfg, WEBHOOK_ENABLED_PATH))
+    checks.append(_check(
+        "webhook_enabled",
+        enabled,
+        "Webhook ist aktiviert." if enabled else "Webhook ist deaktiviert.",
+    ))
+
+    # audio_event_present — 'audio' in client_events (else the agent goes silent).
+    ce = _get_path(cfg, CLIENT_EVENTS_PATH) or []
+    has_audio = REQUIRED_AUDIO_EVENT in ce
+    checks.append(_check(
+        "audio_event_present",
+        has_audio,
+        "'audio' ist in client_events."
+        if has_audio
+        else "'audio' fehlt in client_events — der Agent bliebe im Anruf stumm.",
+    ))
+
+    # prompt_rendered — non-empty AND no unsubstituted '{{' template tokens.
+    prompt = (_get_path(cfg, PROMPT_PATH) or "").strip()
+    has_unsubstituted = "{{" in prompt
+    prompt_ok = bool(prompt) and not has_unsubstituted
+    if not prompt:
+        prompt_detail = "Prompt ist leer."
+    elif has_unsubstituted:
+        prompt_detail = "Prompt enthält nicht ersetzte '{{…}}'-Platzhalter."
+    else:
+        prompt_detail = "Prompt ist gesetzt und vollständig ersetzt."
+    checks.append(_check("prompt_rendered", prompt_ok, prompt_detail))
+
+    # override_flags_on — Path-A per-call override flags all true.
+    flags_ok = override_flags_ok(_get_path(cfg, OVERRIDES_WHITELIST_AGENT_PATH))
+    checks.append(_check(
+        "override_flags_on",
+        flags_ok,
+        "Path-A Override-Flags sind aktiv."
+        if flags_ok
+        else "Path-A Override-Flags (prompt/first_message/language) sind nicht alle aktiv.",
+    ))
+
+    # phone_bound — a phone number is bound to the agent in ElevenLabs.
+    try:
+        phone_meta = fetch_phone_meta_for_agent(agent_id)
+        phone_no = phone_meta.get("phone_number")
+        checks.append(_check(
+            "phone_bound",
+            bool(phone_no),
+            f"Telefonnummer: {phone_no}" if phone_no else NO_PHONE_MESSAGE,
+        ))
+    except HTTPException:
+        checks.append(_check("phone_bound", False, NO_PHONE_MESSAGE))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(_check(
+            "phone_bound", False, f"Telefon-Prüfung fehlgeschlagen: {str(exc)[:150]}"
+        ))
+
+    return {
+        "ok": all(c["ok"] for c in checks),
+        "provisioned_at": provisioned_at,
+        "checks": checks,
+    }
 
 
 # ─── Native transfer_to_number system tool sync ──────────────────────────────

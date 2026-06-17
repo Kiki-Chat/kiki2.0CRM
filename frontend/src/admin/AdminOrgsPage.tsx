@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, MinusCircle, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, MinusCircle, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { apiFetch } from '../lib/adminApi'
 import { cn } from '../lib/utils'
+import { AgentHealthModal } from './AgentHealthModal'
 
 interface OrgRow {
   id: string
@@ -26,6 +27,13 @@ interface OrgStats {
   last_activity: string | null
 }
 
+interface AgentHealthSummary {
+  org_id: string
+  name: string | null
+  ok: boolean
+  red_checks: string[]
+}
+
 const fmtDate = (s: string | null) =>
   s ? new Date(s).toLocaleDateString('de-DE', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Europe/Berlin' }) : '—'
 
@@ -37,6 +45,7 @@ export function AdminOrgsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<OrgRow | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState('')
+  const [healthTarget, setHealthTarget] = useState<OrgRow | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['admin', 'orgs'],
@@ -48,6 +57,17 @@ export function AdminOrgsPage() {
     queryFn: () => apiFetch<{ stats: Record<string, OrgStats> }>('/api/super-admin/orgs-stats'),
     staleTime: 60 * 1000,
   })
+
+  const agentHealthQuery = useQuery({
+    queryKey: ['admin', 'agent-health'],
+    queryFn: () => apiFetch<AgentHealthSummary[]>('/api/super-admin/agent-health'),
+    staleTime: 60 * 1000,
+    retry: false,
+  })
+  // Build a lookup map by org_id for O(1) access in the table
+  const agentHealthMap = Object.fromEntries(
+    (agentHealthQuery.data ?? []).map((h) => [h.org_id, h]),
+  )
 
   const setDisabled = useMutation({
     mutationFn: ({ id, disabled }: { id: string; disabled: boolean }) =>
@@ -119,6 +139,7 @@ export function AdminOrgsPage() {
                 <th className="px-4 py-3">Org</th>
                 <th className="px-4 py-3">Kontakt</th>
                 <th className="px-4 py-3">Agent</th>
+                <th className="px-4 py-3">Agent-Zustand</th>
                 <th className="px-4 py-3 text-right">Nutzung</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Erstellt</th>
@@ -130,6 +151,7 @@ export function AdminOrgsPage() {
               {data.orgs.map((o) => {
                 const disabled = o.disabled_at !== null
                 const s = statsQuery.data?.stats[o.id]
+                const ah = agentHealthMap[o.id]
                 return (
                   <tr key={o.id} className="hover:bg-slate-800/40">
                     <td className="px-4 py-3">
@@ -141,6 +163,35 @@ export function AdminOrgsPage() {
                       <div className="text-slate-500">{o.phone_number ?? '—'}</div>
                     </td>
                     <td className="px-4 py-3 font-mono text-[11px] text-slate-400">{o.elevenlabs_agent_id ?? '—'}</td>
+                    {/* Agent-health indicator */}
+                    <td className="px-4 py-3">
+                      {agentHealthQuery.isLoading ? (
+                        <span className="text-xs text-slate-600">…</span>
+                      ) : !ah ? (
+                        /* No agent provisioned or not in the health board response */
+                        <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-slate-700">
+                          kein Agent
+                        </span>
+                      ) : ah.ok ? (
+                        <button
+                          onClick={() => setHealthTarget(o)}
+                          className="flex items-center gap-1 rounded-full bg-emerald-950/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-900/60 hover:ring-emerald-500/60"
+                          title="Details anzeigen"
+                        >
+                          <CheckCircle2 size={11} />
+                          OK
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setHealthTarget(o)}
+                          className="flex items-center gap-1.5 rounded-full bg-red-950/60 px-2 py-0.5 text-[11px] font-semibold text-red-300 ring-1 ring-red-900/60 hover:ring-red-500/60"
+                          title={ah.red_checks.join(', ')}
+                        >
+                          <AlertTriangle size={11} />
+                          <span>{ah.red_checks.length} Problem{ah.red_checks.length === 1 ? '' : 'e'}</span>
+                        </button>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right text-xs">
                       {s ? (
                         <div className="space-y-0.5 text-slate-300">
@@ -201,7 +252,7 @@ export function AdminOrgsPage() {
               })}
               {data.orgs.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={9} className="px-4 py-12 text-center text-slate-500">
                     Keine Organisationen — legen Sie die erste an.
                   </td>
                 </tr>
@@ -209,6 +260,15 @@ export function AdminOrgsPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Agent-health detail modal */}
+      {healthTarget && (
+        <AgentHealthModal
+          orgId={healthTarget.id}
+          orgName={healthTarget.name}
+          onClose={() => setHealthTarget(null)}
+        />
       )}
 
       {/* Hard-delete confirmation — slate/dark modal (no shared Modal component to keep the surface visually distinct). */}

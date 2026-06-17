@@ -18,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_super_admin
 from app.db.supabase_client import get_service_client
 from app.schemas.provision import ProvisionRequest
-from app.services.agent_config import configure_agent
+from app.services.agent_config import configure_agent, verify_agent_health
 from app.services.history_import import import_agent_history
 from app.services.provisioning import provision_org
 
@@ -381,17 +381,37 @@ class SyncAgentConfigRequest(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class AgentHealthCheck(BaseModel):
+    name: str
+    ok: bool
+    detail: str
+
+
+class AgentHealthReport(BaseModel):
+    """2.1 verify-gate report — matches verify_agent_health()'s return shape and
+    the shared per-org agent-health contract."""
+
+    ok: bool
+    provisioned_at: str | None = None
+    checks: list[AgentHealthCheck]
+
+
 class SyncAgentConfigResponse(BaseModel):
-    """Response shape mirrors the summary dict returned by ``configure_agent``."""
+    """Response shape mirrors the summary dict returned by ``configure_agent``,
+    plus the 2.1 post-provision verify report so the caller sees ok/red and is
+    never silently told a red agent is provisioned."""
 
     org_id: str
     agent_id: str
     phone_number: str | None
+    phone_bound: bool
+    phone_message: str | None
     tools_attached: list[str]
     prompt_applied: bool
     prompt_skipped_reason: str | None
     webhook_enabled: bool
     audio_ok: bool
+    verify: AgentHealthReport
 
 
 @router.post("/orgs/{org_id}/sync-agent-config", response_model=SyncAgentConfigResponse)
@@ -467,16 +487,118 @@ async def sync_agent_config(
         # via patch_agent_safely; manual rollback is possible.
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    # 2.1 — post-provision verify gate: re-read the live agent and assert every
+    # contract check. Surfaced in the response so the operator sees ok/red and is
+    # NOT silently told a red agent is provisioned. Read-only; never writes.
+    report = await run_in_threadpool(verify_agent_health, org_id, agent_id)
+
     return SyncAgentConfigResponse(
         org_id=org_id,
         agent_id=agent_id,
         phone_number=summary.get("phone_number"),
+        phone_bound=bool(summary.get("phone_bound")),
+        phone_message=summary.get("phone_message"),
         tools_attached=list(summary.get("tools_attached") or []),
         prompt_applied=bool(summary.get("prompt_applied")),
         prompt_skipped_reason=summary.get("prompt_skipped_reason"),
         webhook_enabled=bool(summary.get("webhook_enabled")),
         audio_ok=bool(summary.get("audio_ok")),
+        verify=AgentHealthReport(**report),
     )
+
+
+# ─── 2.4: agent-health endpoints (per the shared B2 contract) ───────────────
+class AgentHealthBoardRow(BaseModel):
+    """One row of the cross-org agent-health board.
+
+    ``red_checks`` lists the names of the failed checks (empty when ok=true).
+    Orgs with no agent bound are reported with ok=false and a single
+    ``no_agent`` red marker rather than being dropped, so the board stays a
+    complete census of provisioned orgs.
+    """
+
+    org_id: str
+    name: str
+    ok: bool
+    red_checks: list[str]
+
+
+def _agent_health_board() -> list[dict]:
+    """Build the board summary across all orgs.
+
+    Reuses ``verify_agent_health`` per org. Orgs without an
+    ``elevenlabs_agent_id`` are reported red with a ``no_agent`` marker (no live
+    read attempted). Each org's verify is independently guarded so one
+    unreachable agent can't sink the whole board.
+    """
+    orgs = _list_orgs()
+    board: list[dict] = []
+    for org in orgs:
+        oid = org["id"]
+        name = org.get("name") or ""
+        agent_id = org.get("elevenlabs_agent_id")
+        if not agent_id:
+            board.append(
+                {"org_id": oid, "name": name, "ok": False, "red_checks": ["no_agent"]}
+            )
+            continue
+        try:
+            report = verify_agent_health(oid, agent_id)
+            red = [c["name"] for c in report.get("checks", []) if not c.get("ok")]
+            board.append(
+                {"org_id": oid, "name": name, "ok": bool(report.get("ok")), "red_checks": red}
+            )
+        except Exception:  # noqa: BLE001 — one bad org never sinks the board
+            board.append(
+                {"org_id": oid, "name": name, "ok": False, "red_checks": ["verify_failed"]}
+            )
+    return board
+
+
+@router.get("/agent-health", response_model=list[AgentHealthBoardRow])
+async def agent_health_board(
+    _user: CurrentUser = Depends(require_super_admin),
+) -> list[AgentHealthBoardRow]:
+    """Cross-org agent-health board summary (super-admin only).
+
+    Returns ``[{org_id, name, ok, red_checks}]`` for every org. Reuses
+    ``verify_agent_health`` per org; orgs with no agent or an unreachable agent
+    read red rather than erroring the whole board.
+    """
+    rows = await run_in_threadpool(_agent_health_board)
+    return [AgentHealthBoardRow(**r) for r in rows]
+
+
+@router.get("/orgs/{org_id}/agent-health", response_model=AgentHealthReport)
+async def org_agent_health(
+    org_id: str,
+    _user: CurrentUser = Depends(require_super_admin),
+) -> AgentHealthReport:
+    """Per-org agent-health report (super-admin only).
+
+    Returns the full ``verify_agent_health`` report: ``{ok, provisioned_at,
+    checks:[{name, ok, detail}]}``. Read-only — never writes to the agent.
+    An org with no agent bound reads red (every check failed) rather than 500.
+    """
+    org = await run_in_threadpool(_get_org, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation nicht gefunden.")
+    agent_id = org.get("elevenlabs_agent_id")
+    if not agent_id:
+        # No agent bound: report red with a single actionable check, not a 500.
+        return AgentHealthReport(
+            ok=False,
+            provisioned_at=org.get("agent_provisioned_at"),
+            checks=[
+                AgentHealthCheck(
+                    name="no_agent",
+                    ok=False,
+                    detail="Diese Organisation hat keine ElevenLabs Agent ID hinterlegt.",
+                )
+            ],
+        )
+    report = await run_in_threadpool(verify_agent_health, org_id, agent_id)
+    return AgentHealthReport(**report)
 
 
 @router.patch("/users/{user_id}/role")

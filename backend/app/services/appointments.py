@@ -328,6 +328,10 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
     business_hours = normalize_business_hours(rules["business_hours"])
     emp = _first_employee(client, org_id)
     slots: list[dict] = []
+    # The "Frühester Termin (Uhrzeit)" floor applies on the first day we actually
+    # offer slots — NOT on earliest_dt.date(), which can be a skipped weekend/holiday
+    # (that would silently bypass earliest_clock on the real first bookable day).
+    first_open_day = None
     for offset in range(days):
         day = start_date + timedelta(days=offset)
         bh = business_hours[WEEKDAY_KEYS[day.weekday()]]
@@ -335,6 +339,8 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
             continue
         if max_per_day and per_day.get(day, 0) >= max_per_day:
             continue  # day already at capacity
+        if first_open_day is None:
+            first_open_day = day
         open_hour = _hour(bh["start"], 8)
         close_hour = _hour(bh["end"], 17)
         brk_start = _hour(bh["break_start"], -1) if bh.get("break_start") else -1
@@ -345,7 +351,7 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
             dt = datetime(day.year, day.month, day.day, hour, 0, tzinfo=BERLIN)
             if dt <= now or dt < earliest_dt:
                 continue
-            if day == earliest_date and earliest_clock is not None and hour < earliest_clock:
+            if day == first_open_day and earliest_clock is not None and hour < earliest_clock:
                 continue  # "Frühester Termin (Uhrzeit)" on the first bookable day
             if _slot_conflicts(intervals, dt, dur, buffer_min) >= parallel:
                 continue  # at capacity incl. Pufferzeit

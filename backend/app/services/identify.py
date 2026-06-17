@@ -14,6 +14,15 @@ from app.services.common import format_address
 
 _SELECT = "id, full_name, phone, email, customer_number, address"
 
+# Cases use the project-style lifecycle (planning|active|completed|archived);
+# inquiries use open|in_progress|completed|deleted. "Open" = anything NOT in
+# these terminal/removed buckets. Kept in sync with cases.py's _CLOSED_INQ.
+_CLOSED_INQ_STATUS = ("completed", "closed", "done", "resolved", "deleted")
+_CLOSED_CASE_STATUS = ("completed", "archived", "closed", "deleted")
+# Bounded context: enough to disambiguate "which case?" without bloating the
+# tool response (the agent only needs a short list to read back).
+_OPEN_CONTEXT_LIMIT = 5
+
 
 def _norm_phone(value: str | None) -> str:
     """Strip non-digits. Used for forwarded-call detection where both sides
@@ -47,9 +56,57 @@ def _to_e164(value: str | None, default_country: str = "49") -> str | None:
     return "+" + digits
 
 
-def _existing(row: dict) -> dict:
+def _open_context(client, org_id: str, customer_id: str) -> list[dict]:
+    """Bounded, org-scoped list of the customer's OPEN matters so the agent can
+    ask "which case?". Prefers OPEN inquiries (the granular request the caller is
+    most likely referring to); falls back to OPEN cases (Vorgänge) when the
+    customer has none. Newest first, capped at ``_OPEN_CONTEXT_LIMIT``.
+
+    Each entry: {number, title, status}. Never raises — a context-lookup failure
+    must not break identification (the agent still works, just without the hint).
+    """
+    try:
+        inq = (
+            client.table("inquiries")
+            .select("number, title, status, created_at")
+            .eq("org_id", org_id)
+            .eq("customer_id", customer_id)
+            .not_.in_("status", list(_CLOSED_INQ_STATUS))
+            .order("created_at", desc=True)
+            .limit(_OPEN_CONTEXT_LIMIT)
+            .execute()
+            .data
+            or []
+        )
+        rows = inq
+        if not rows:
+            rows = (
+                client.table("cases")
+                .select("number, title, status, created_at")
+                .eq("org_id", org_id)
+                .eq("customer_id", customer_id)
+                .not_.in_("status", list(_CLOSED_CASE_STATUS))
+                .order("created_at", desc=True)
+                .limit(_OPEN_CONTEXT_LIMIT)
+                .execute()
+                .data
+                or []
+            )
+        return [
+            {
+                "number": r.get("number"),
+                "title": r.get("title"),
+                "status": r.get("status"),
+            }
+            for r in rows
+        ]
+    except Exception:  # noqa: BLE001 — context is a nice-to-have, never fatal
+        return []
+
+
+def _existing(row: dict, *, client=None, org_id: str | None = None) -> dict:
     name = row.get("full_name")
-    return {
+    result = {
         "status": "EXISTING_CUSTOMER",
         "customerId": row["id"],
         "customerNumber": row.get("customer_number"),
@@ -60,9 +117,25 @@ def _existing(row: dict) -> dict:
         "message": f"Willkommen zurück{', ' + name if name else ''}. "
         "Wie kann ich Ihnen helfen?",
     }
+    if client is not None and org_id:
+        open_items = _open_context(client, org_id, row["id"])
+        if open_items:
+            result["openCases"] = open_items
+            # A compact German one-liner the agent can read back verbatim so it
+            # never has to guess which matter the caller means.
+            listed = "; ".join(
+                f"{i['number'] or '—'}: {i['title']}" for i in open_items if i.get("title")
+            )
+            if listed:
+                result["message"] = (
+                    f"Willkommen zurück{', ' + name if name else ''}. Ich sehe "
+                    f"{len(open_items)} offene Vorgänge: {listed}. "
+                    "Worum geht es heute?"
+                )
+    return result
 
 
-def _resolve(rows: list[dict]) -> dict:
+def _resolve(rows: list[dict], *, client=None, org_id: str | None = None) -> dict:
     if not rows:
         return {
             "status": "NEW_CUSTOMER",
@@ -70,7 +143,7 @@ def _resolve(rows: list[dict]) -> dict:
             "message": "Kein bestehender Eintrag gefunden.",
         }
     if len(rows) == 1:
-        return _existing(rows[0])
+        return _existing(rows[0], client=client, org_id=org_id)
     return {
         "status": "MULTIPLE_CANDIDATES",
         "candidates": [
@@ -101,7 +174,7 @@ def identify_customer(org_id: str, payload: IdentifyCustomerRequest) -> dict:
             .data
             or []
         )
-        return _resolve(rows)
+        return _resolve(rows, client=client, org_id=org_id)
 
     # 2. Address / last-name confirmation flow.
     if payload.address or payload.last_name:
@@ -109,7 +182,7 @@ def identify_customer(org_id: str, payload: IdentifyCustomerRequest) -> dict:
         if payload.last_name:
             q = q.ilike("full_name", f"%{payload.last_name}%")
         rows = q.limit(10).execute().data or []
-        return _resolve(rows)
+        return _resolve(rows, client=client, org_id=org_id)
 
     # 3. Phone path (explicit phoneNumber, else Caller-ID).
     # Detect a forwarded call: Caller-ID equals the org's own number and the
@@ -143,15 +216,38 @@ def identify_customer(org_id: str, payload: IdentifyCustomerRequest) -> dict:
     # number match the canonical stored value. New customers (post-P0.8) have
     # phone stored in E.164 by get_or_create_customer; legacy rows may not match
     # until they're backfilled separately.
+    #
+    # CUST-014 — match BOTH phone columns. A known customer who calls from their
+    # secondary number (work phone / new SIM, stored in phone2 by
+    # get_or_create_customer) was previously treated as a NEW caller. Mirror
+    # find_existing_customer (services/customers.py): two plain .eq() lookups —
+    # one per column — rather than an or() filter, to avoid '+' encoding
+    # ambiguity inside PostgREST or-filters. Dedup any row matched by both.
     caller_norm = _to_e164(caller)
+    target = caller_norm or caller
     rows = (
         client.table("customers")
         .select(_SELECT)
         .eq("org_id", org_id)
-        .eq("phone", caller_norm or caller)
+        .eq("phone", target)
         .limit(10)
         .execute()
         .data
         or []
     )
-    return _resolve(rows)
+    rows2 = (
+        client.table("customers")
+        .select(_SELECT)
+        .eq("org_id", org_id)
+        .eq("phone2", target)
+        .limit(10)
+        .execute()
+        .data
+        or []
+    )
+    seen = {r["id"] for r in rows}
+    for r in rows2:
+        if r["id"] not in seen:
+            rows.append(r)
+            seen.add(r["id"])
+    return _resolve(rows, client=client, org_id=org_id)
