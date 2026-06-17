@@ -73,6 +73,8 @@ interface Tool {
 interface Employee {
   id: string
   display_name: string
+  is_technician?: boolean
+  is_active?: boolean
 }
 
 const WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
@@ -127,6 +129,10 @@ export function PlanningBoardPage() {
     queryKey: ['employees'],
     queryFn: () => apiFetch<Employee[]>('/api/employees'),
   })
+  const technicians = useMemo(
+    () => employees.filter((e) => e.is_technician && e.is_active !== false),
+    [employees],
+  )
   const { data: vehicles = [] } = useQuery({
     queryKey: ['vehicles'],
     queryFn: () => apiFetch<Vehicle[]>('/api/vehicles'),
@@ -310,9 +316,9 @@ export function PlanningBoardPage() {
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content align="end" sideOffset={6} className="z-50 min-w-56 rounded-lg border border-border bg-surface p-2 shadow-e2">
-                <div className="px-2 py-1 text-xs font-semibold uppercase text-muted">Mitarbeiter</div>
+                <div className="px-2 py-1 text-xs font-semibold uppercase text-muted">Techniker</div>
                 <FilterRow label="Alle" active={filter.employee === 'all'} onClick={() => setFilter((f) => ({ ...f, employee: 'all' }))} />
-                {employees.map((e) => (
+                {technicians.map((e) => (
                   <FilterRow key={e.id} label={e.display_name} active={filter.employee === e.id} onClick={() => setFilter((f) => ({ ...f, employee: e.id }))} />
                 ))}
                 <div className="my-1 border-t border-border" />
@@ -607,6 +613,7 @@ function ApptCardBody({ appt, dragging }: { appt: Appt; dragging?: boolean }) {
     <div className={cn('rounded-lg border border-border bg-surface p-3 shadow-e1', dragging && 'rotate-1 shadow-e3')}>
       <div className="flex items-center gap-1.5 text-xs text-muted"><Clock size={12} />{hm(appt.scheduled_at)} · {appt.duration_minutes ?? 60} min</div>
       <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-text"><User size={13} className="text-muted" />{appt.customer_name ?? appt.title ?? 'Termin'}</div>
+      {appt.employee_name && <div className="mt-1 flex items-center gap-1.5 text-xs text-muted"><UserPlus size={11} className="shrink-0" /><span className="truncate">{appt.employee_name}</span></div>}
       {loc && <div className="mt-1 flex items-center gap-1.5 text-xs text-muted"><MapPin size={12} /><span className="truncate">{loc}</span></div>}
     </div>
   )

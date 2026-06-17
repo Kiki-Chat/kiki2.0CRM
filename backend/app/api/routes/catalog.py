@@ -135,16 +135,19 @@ def _import_csv(org_id: str, content: bytes) -> dict:
                 return row[k]
         return None
 
-    rows: list[dict] = []
+    # Parse all valid rows from the file, skipping rows with no name.
     skipped = 0
+    parsed: list[dict] = []
     for row in reader:
         name = pick(row, "bezeichnung", "name", "designation")
         if not name or not name.strip():
             skipped += 1
             continue
-        rows.append({
+        an_raw = pick(row, "artikelnummer", "article_number", "artikel-nr.", "artikel nr")
+        an = an_raw.strip() if an_raw and an_raw.strip() else None
+        parsed.append({
             "org_id": org_id,
-            "article_number": pick(row, "artikelnummer", "article_number", "artikel-nr.", "artikel nr"),
+            "article_number": an,
             "name": name.strip(),
             "description": pick(row, "beschreibung", "description"),
             "category": pick(row, "kategorie", "category"),
@@ -155,10 +158,70 @@ def _import_csv(org_id: str, content: bytes) -> dict:
             "is_active": (pick(row, "aktiv", "active", "is_active") or "ja").strip().lower()
             in ("ja", "true", "1", "yes", "aktiv"),
         })
-    created = 0
-    if rows:
-        created = len(client.table("catalog_items").insert(rows).execute().data or [])
-    return {"created": created, "skipped": skipped, "total": created + skipped}
+
+    # (1) De-dup within the uploaded file by article_number (keep last occurrence).
+    #     Rows with no article_number are kept separately and de-duped by name.
+    deduped_by_an: dict[str, dict] = {}
+    no_an_rows_by_name: dict[str, dict] = {}
+    for row in parsed:
+        an = row["article_number"]
+        if an:
+            deduped_by_an[an] = row  # last occurrence wins
+        else:
+            no_an_rows_by_name[row["name"]] = row  # de-dup by name, last wins
+
+    # (2) Fetch existing article_numbers for this org.
+    existing_res = (
+        client.table("catalog_items")
+        .select("id, article_number")
+        .eq("org_id", org_id)
+        .execute()
+    )
+    existing_rows = existing_res.data or []
+    existing_an_to_id: dict[str, str] = {
+        r["article_number"]: r["id"]
+        for r in existing_rows
+        if r.get("article_number")
+    }
+
+    # Split numbered rows into updates vs inserts.
+    to_insert: list[dict] = []
+    to_update: list[tuple[str, dict]] = []  # (id, fields)
+    for an, row in deduped_by_an.items():
+        if an in existing_an_to_id:
+            to_update.append((existing_an_to_id[an], row))
+        else:
+            to_insert.append(row)
+
+    # Rows with no article_number: always insert (no natural key to match on).
+    to_insert.extend(no_an_rows_by_name.values())
+
+    # Execute inserts and updates.
+    hinzugefuegt = 0
+    aktualisiert = 0
+
+    if to_insert:
+        hinzugefuegt = len(
+            client.table("catalog_items").insert(to_insert).execute().data or []
+        )
+
+    for item_id, fields in to_update:
+        update_fields = {k: v for k, v in fields.items() if k not in ("org_id",)}
+        res = (
+            client.table("catalog_items")
+            .update(update_fields)
+            .eq("org_id", org_id)
+            .eq("id", item_id)
+            .execute()
+        )
+        if res.data:
+            aktualisiert += 1
+
+    return {
+        "hinzugefuegt": hinzugefuegt,
+        "aktualisiert": aktualisiert,
+        "uebersprungen": skipped,
+    }
 
 
 @router.post("/import")

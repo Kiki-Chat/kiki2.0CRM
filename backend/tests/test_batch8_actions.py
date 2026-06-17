@@ -1,0 +1,135 @@
+"""Batch 8 — Open-Action aggregation regressions.
+
+Bug 2 coverage: unmatched reschedule requests (FORWARDED_TO_TEAM) were invisible.
+`_record_unmatched_change_request` (services/appointments.py) inserts an inquiry
+of type='appointment_change', status='open', notes prefixed 'NICHT ZUGEORDNET …'
+with NO appointment row — so no appointment-derived Open Action ever surfaced.
+
+`_unmatched_reschedule` closes that gap by querying the inquiry directly. These
+tests pin two behaviours:
+ - it RETURNS the NICHT-ZUGEORDNET inquiry as kind 'reschedule_unmatched', and
+ - it does NOT return a *matched* (no-marker) appointment_change/open inquiry —
+   that path already surfaces via the customer_proposed_* appointment rows in
+   `_alt_time_proposal`, so double-listing must be avoided.
+"""
+from __future__ import annotations
+
+from unittest.mock import MagicMock
+
+from app.api.routes import actions as ax
+
+
+# ─── Fake supabase chain (mirrors test_actions_pending, + .ilike) ────────────
+class _FakeChain:
+    """Records every method call so tests can assert org-scoping / filters.
+    Returns the canned data passed in on instantiation when .execute() is called.
+    NOTE: the fake does not actually filter; tests assert on the recorded calls
+    and supply per-table data that already reflects the intended query result."""
+
+    def __init__(self, data: list[dict] | None = None, recorder: list | None = None, table: str = ""):
+        self._data = data or []
+        self._recorder = recorder if recorder is not None else []
+        self._table = table
+
+    def _rec(self, method: str, *args, **kwargs):
+        self._recorder.append({"table": self._table, "method": method, "args": args, "kwargs": kwargs})
+        return self
+
+    def select(self, *a, **k): return self._rec("select", *a, **k)
+    def eq(self, *a, **k): return self._rec("eq", *a, **k)
+    def neq(self, *a, **k): return self._rec("neq", *a, **k)
+    def in_(self, *a, **k): return self._rec("in_", *a, **k)
+    def is_(self, *a, **k): return self._rec("is_", *a, **k)
+    def gte(self, *a, **k): return self._rec("gte", *a, **k)
+    def lte(self, *a, **k): return self._rec("lte", *a, **k)
+    def ilike(self, *a, **k): return self._rec("ilike", *a, **k)
+    def order(self, *a, **k): return self._rec("order", *a, **k)
+
+    @property
+    def not_(self):  # postgrest exposes `.not_.is_(col, val)`
+        return self
+
+    def execute(self):
+        self._recorder.append({"table": self._table, "method": "execute"})
+        return MagicMock(data=self._data, count=len(self._data))
+
+
+class _FakeClient:
+    """Per-table canned data + a single recorder for all calls."""
+
+    def __init__(self, per_table: dict[str, list[dict]]):
+        self.per_table = per_table
+        self.recorder: list = []
+
+    def table(self, name: str):
+        return _FakeChain(self.per_table.get(name, []), self.recorder, table=name)
+
+
+ORG = "org-test-uuid"
+
+
+# ─── _unmatched_reschedule ──────────────────────────────────────────────────
+def test_unmatched_reschedule_surfaces_nicht_zugeordnet_inquiry():
+    """The NICHT-ZUGEORDNET inquiry must surface as kind 'reschedule_unmatched'
+    with the right shape (high priority, inquiry_id == id, no appointment/call)."""
+    inquiries = [
+        {
+            "id": "inq-unmatched",
+            "customer_id": "cust-1",
+            "created_at": "2026-06-17T08:00:00+00:00",
+            "notes": (
+                "NICHT ZUGEORDNET — Termin konnte nicht automatisch gefunden "
+                "werden, bitte manuell zuordnen.\nWunschtermin neu: morgen 10 Uhr"
+            ),
+            "status": "open",
+            "type": "appointment_change",
+        },
+    ]
+    customers = [{"id": "cust-1", "full_name": "Max Mustermann"}]
+    client = _FakeClient({"inquiries": inquiries, "customers": customers})
+
+    out = ax._unmatched_reschedule(client, ORG)
+
+    assert len(out) == 1
+    row = out[0]
+    assert row["kind"] == "reschedule_unmatched"
+    assert row["id"] == "inq-unmatched"
+    assert row["inquiry_id"] == "inq-unmatched"
+    assert row["customer_id"] == "cust-1"
+    assert row["customer_name"] == "Max Mustermann"
+    assert row["priority"] == "high"
+    assert row["call_id"] is None
+    assert row["due_at"] is None
+    assert "zugeordnet" in row["summary"].lower()
+    # Org-scoping + the discriminating filters were all applied.
+    rec = client.recorder
+    assert any(c["method"] == "eq" and c["args"] == ("org_id", ORG) for c in rec)
+    assert any(c["method"] == "eq" and c["args"] == ("type", "appointment_change") for c in rec)
+    assert any(c["method"] == "eq" and c["args"] == ("status", "open") for c in rec)
+    # The 'NICHT ZUGEORDNET%' marker is what excludes the matched path.
+    assert any(c["method"] == "ilike" and c["args"] == ("notes", "NICHT ZUGEORDNET%") for c in rec)
+
+
+def test_unmatched_reschedule_excludes_matched_appointment_change():
+    """A *matched* appointment_change/open inquiry (no NICHT-ZUGEORDNET marker)
+    must NOT be returned here — it surfaces via _alt_time_proposal's
+    customer_proposed_* appointment rows, so listing it here would double-count.
+
+    The DB-side `.ilike('notes', 'NICHT ZUGEORDNET%')` filter would exclude it; we
+    assert the aggregator emits nothing for a row whose notes lack the marker."""
+    # Simulate what postgrest returns AFTER the ilike filter: the matched inquiry
+    # (notes don't start with the marker) is already filtered out → empty result.
+    client = _FakeClient({"inquiries": [], "customers": []})
+
+    out = ax._unmatched_reschedule(client, ORG)
+
+    assert out == []
+    # And the marker filter is the thing doing the exclusion.
+    assert any(
+        c["method"] == "ilike" and c["args"] == ("notes", "NICHT ZUGEORDNET%")
+        for c in client.recorder
+    )
+
+
+def test_unmatched_reschedule_empty_when_no_rows():
+    assert ax._unmatched_reschedule(_FakeClient({"inquiries": []}), ORG) == []

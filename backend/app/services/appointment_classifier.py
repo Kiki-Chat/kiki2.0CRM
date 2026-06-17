@@ -141,6 +141,17 @@ def classify_and_apply(client, org_id: str, conversation_id: str | None, summary
         )
         if emp and emp[0].get("is_active"):
             patch["assigned_employee_id"] = emp_id
+    # EMP-030 (ADDITIVE): the matched category has no usable default employee
+    # (none configured, or the configured one is inactive) → fall back to an
+    # activity-area match among auto-assign employees. Best-effort, never raises.
+    if "assigned_employee_id" not in patch:
+        from app.services.dispatch import resolve_auto_assignee
+
+        auto = resolve_auto_assignee(
+            client, org_id, category_name=match.get("name"), summary=summary
+        )
+        if auto:
+            patch["assigned_employee_id"] = auto["id"]
     for a in appts:
         client.table("appointments").update(patch).eq("id", a["id"]).eq(
             "org_id", org_id

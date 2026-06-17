@@ -771,16 +771,24 @@ def _dispatch_technician(user: CurrentUser, appointment_id: str, employee_id: st
     from app.services.email_send import send_email
 
     client = get_service_client()
+    emp_rows = (
+        client.table("employees").select("id, display_name, email, is_technician")
+        .eq("org_id", user.org_id).eq("id", employee_id).limit(1).execute().data
+    )
+    emp = emp_rows[0] if emp_rows else None
+    # Dispatch is technician-only: the tokenized job link + Einsatzbericht flow is
+    # meant for the person doing the ground work. Guard BEFORE we assign so a
+    # non-technician is never even pinned to the appointment.
+    if not emp or not emp.get("is_technician"):
+        raise HTTPException(
+            status_code=422,
+            detail="Dieser Mitarbeiter ist nicht als Techniker hinterlegt.",
+        )
     # Assign via the normal patch path: FK hardening + self-assignment rules.
     appt = _patch(user, appointment_id, AppointmentPatch(assigned_employee_id=employee_id))
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
-    emp_rows = (
-        client.table("employees").select("id, display_name, email")
-        .eq("org_id", user.org_id).eq("id", employee_id).limit(1).execute().data
-    )
-    emp = emp_rows[0] if emp_rows else None
-    if not emp or not (emp.get("email") or "").strip():
+    if not (emp.get("email") or "").strip():
         raise HTTPException(
             status_code=422,
             detail="Dieser Mitarbeiter hat keine E-Mail-Adresse hinterlegt — bitte zuerst unter Mitarbeiter ergänzen.",
