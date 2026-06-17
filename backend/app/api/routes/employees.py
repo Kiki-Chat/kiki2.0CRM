@@ -498,6 +498,30 @@ async def resend_invite(
     return {"success": True}
 
 
+def _rotate_technician_token(org_id: str, employee_id: str) -> dict:
+    """Re-mint the technician's standing portal token (AUTH-029). Old
+    /techniker/<token> link dies immediately; the technician is e-mailed the new
+    one via the existing welcome-email path. JobLinkError → 404 in the route."""
+    return technician_jobs.rotate_portal_token(
+        org_id, employee_id, notify=_send_technician_welcome
+    )
+
+
+@router.post("/{employee_id}/rotate-technician-token")
+async def rotate_technician_token(
+    employee_id: str, user: CurrentUser = Depends(require_org_admin)
+) -> dict:
+    """Admin-only: invalidate a technician's portal link and issue a fresh one
+    (e.g. lost phone, shared link, departed technician). Returns the new portal
+    URL + whether the technician was e-mailed — never the raw token."""
+    try:
+        return await run_in_threadpool(
+            _rotate_technician_token, user.org_id, employee_id
+        )
+    except technician_jobs.JobLinkError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 def _set_password(org_id: str, employee_id: str, password: str) -> str:
     client = get_service_client()
     rows = (

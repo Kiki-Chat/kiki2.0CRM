@@ -445,6 +445,21 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
     emp = None
     if category:
         emp = _employee_by_id(client, org_id, category.get("default_employee_id"))
+    # EMP-030 (ADDITIVE): when no explicit category default applies, try to match
+    # an auto-assign employee by Tätigkeitsbereich before the generic first-employee
+    # fallback. Never raises and only fires when the category-default path came up
+    # empty, so the existing default_employee_id behaviour is unchanged.
+    if not emp:
+        from app.services.dispatch import resolve_auto_assignee
+
+        auto = resolve_auto_assignee(
+            client,
+            org_id,
+            category_name=category["name"] if category else payload.category,
+            summary=payload.description,
+        )
+        if auto:
+            emp = auto
     if not emp:
         emp = _first_employee(client, org_id)
 
