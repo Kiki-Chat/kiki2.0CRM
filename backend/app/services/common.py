@@ -7,7 +7,7 @@ language). All times are handled in Europe/Berlin.
 
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
@@ -168,6 +168,22 @@ _DAYPART_HOURS = {
 
 def now_berlin() -> datetime:
     return datetime.now(BERLIN)
+
+
+def month_start_utc_iso() -> str:
+    """Berlin-local first-of-month midnight expressed as a tz-aware UTC ISO string.
+
+    The NULL-fallback period start for usage metering. A bare date like
+    '2026-06-01' fed to Postgres (UTC session) coerces to UTC midnight, dropping
+    the first ~2 Berlin hours in summer DST. This function returns the correct
+    tz-aware instant, e.g. '2026-05-31T22:00:00+00:00' for June in CEST (UTC+2).
+    """
+    return (
+        now_berlin()
+        .replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        .astimezone(timezone.utc)
+        .isoformat()
+    )
 
 
 def format_address(addr) -> str | None:

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, require_super_admin
@@ -182,10 +182,40 @@ class ContextUpdate(BaseModel):
     knowledge_text: str | None = None
     model_config = {"extra": "ignore"}
 
+    @field_validator("trade", mode="before")
+    @classmethod
+    def _validate_trade(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 120:
+            raise ValueError("Das Gewerk/die Branche darf höchstens 120 Zeichen lang sein.")
+        return v
+
+    @field_validator("knowledge_text", mode="before")
+    @classmethod
+    def _validate_knowledge_text(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 2000:
+            raise ValueError("Der Kontext-/Wissenstext darf höchstens 2000 Zeichen lang sein.")
+        return v
+
 
 class ProblemDescriptionUpdate(BaseModel):
     problem_description: str | None = None
     model_config = {"extra": "ignore"}
+
+    @field_validator("problem_description", mode="before")
+    @classmethod
+    def _validate_problem_description(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 2000:
+            raise ValueError("Die Problembeschreibung darf höchstens 2000 Zeichen lang sein.")
+        return v
 
 
 class KnowledgeUrlCreate(BaseModel):
@@ -200,6 +230,24 @@ class CategoryCreate(BaseModel):
     default_employee_id: str | None = None
     model_config = {"extra": "ignore"}
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) > 80:
+            raise ValueError("Der Kategoriename darf höchstens 80 Zeichen lang sein.")
+        return v
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _validate_description(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 500:
+            raise ValueError("Die Kategoriebeschreibung darf höchstens 500 Zeichen lang sein.")
+        return v
+
 
 class CategoryUpdate(BaseModel):
     name: str | None = None
@@ -208,6 +256,26 @@ class CategoryUpdate(BaseModel):
     default_employee_id: str | None = None
     sort_order: int | None = None
     model_config = {"extra": "ignore"}
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _validate_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 80:
+            raise ValueError("Der Kategoriename darf höchstens 80 Zeichen lang sein.")
+        return v
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _validate_description(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 500:
+            raise ValueError("Die Kategoriebeschreibung darf höchstens 500 Zeichen lang sein.")
+        return v
 
 
 class ServiceCreate(BaseModel):

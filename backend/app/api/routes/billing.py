@@ -24,7 +24,7 @@ from app.schemas.billing import (
     PortalSessionResponse,
     UpcomingInvoice,
 )
-from app.services.common import now_berlin
+from app.services.common import month_start_utc_iso, now_berlin
 from app.services.stripe_billing import (
     StripeBillingError,
     get_stripe,
@@ -50,7 +50,7 @@ def _used_minutes(client, org_id: str, period_start_iso: str | None) -> int:
 
     Mirrors settings._usage exactly (round(sum(duration_seconds)/60)) so the
     'minutes used' shown in Abrechnung matches the rest of the app."""
-    start = period_start_iso or now_berlin().replace(day=1).date().isoformat()
+    start = period_start_iso or month_start_utc_iso()
     calls = (
         client.table("calls")
         .select("duration_seconds")
