@@ -22,6 +22,7 @@ does NOT expose tools / client_events.
 from __future__ import annotations
 
 import copy
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -30,6 +31,8 @@ import httpx
 
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
+
+logger = logging.getLogger(__name__)
 
 EL_BASE = "https://api.elevenlabs.io"
 _TIMEOUT = 30.0
@@ -408,6 +411,27 @@ def _verify(
         _get_path(post, OVERRIDES_WHITELIST_AGENT_PATH)
     ):
         return False, "override whitelist flags not all true after write"
+    # 1.1(c): advisory-only — when a write (re)applied platform_settings (e.g. a
+    # restore/rollback carrying the snapshot's webhook + override whitelist),
+    # cross-check that the intended webhook-enabled flag and override whitelist
+    # landed. NEVER fail on this (the webhook may legitimately differ across the
+    # snapshot lifetime); just log so a silent drift is diagnosable.
+    if any(p == "platform_settings" or p.startswith("platform_settings.") for p in changes):
+        intended_enabled = _get_path(intended, WEBHOOK_ENABLED_PATH)
+        if intended_enabled is not None:
+            actual_enabled = _get_path(post, WEBHOOK_ENABLED_PATH)
+            if bool(actual_enabled) != bool(intended_enabled):
+                logger.warning(
+                    "restore advisory: webhook-enabled mismatch after write "
+                    "(intended=%s actual=%s)", intended_enabled, actual_enabled,
+                )
+        intended_wl = _get_path(intended, OVERRIDES_WHITELIST_AGENT_PATH)
+        if intended_wl is not None and override_flags_ok(intended_wl):
+            if not override_flags_ok(_get_path(post, OVERRIDES_WHITELIST_AGENT_PATH)):
+                logger.warning(
+                    "restore advisory: override whitelist not fully enabled after "
+                    "restore (intended all-true)"
+                )
     return True, "ok"
 
 
@@ -444,11 +468,47 @@ def _dict_subset(expected, actual) -> bool:
     return expected == actual
 
 
+def _non_empty_dict(value: Any) -> dict | None:
+    """Return ``value`` iff it's a dict with at least one non-empty sub-value
+    (recursively); otherwise None.
+
+    Used by the restore path to decide whether to include platform_settings (and
+    its nested sub-objects) in a PATCH body. We must NEVER PATCH
+    platform_settings={} or workspace_overrides={} — ElevenLabs treats an empty
+    object as "clear it", which would blank the webhook the agent needs (1.1)."""
+    if not isinstance(value, dict) or not value:
+        return None
+    out: dict = {}
+    for k, v in value.items():
+        if isinstance(v, dict):
+            child = _non_empty_dict(v)
+            if child is not None:
+                out[k] = child
+        elif v is not None:
+            out[k] = v
+    return out or None
+
+
 def _restore_full(agent_id: str, full_config: dict) -> None:
-    """Direct restore PATCH of the writable sections from a snapshot."""
-    body: dict = {"conversation_config": full_config.get("conversation_config")}
-    if "name" in full_config:
-        body["name"] = full_config.get("name")
+    """Direct restore PATCH of the writable sections from a snapshot (1.1).
+
+    Re-applies conversation_config, name AND platform_settings (the snapshot
+    stores the full config; the old restore silently dropped platform_settings,
+    so a rollback/verify-fail left the webhook + override whitelist on whatever
+    the failed write produced). Keys whose value is None or an empty dict are
+    DROPPED — never blank platform_settings.workspace_overrides.*_webhook to {}."""
+    body: dict = {}
+    cc = full_config.get("conversation_config")
+    if isinstance(cc, dict) and cc:
+        body["conversation_config"] = cc
+    name = full_config.get("name")
+    if name is not None:
+        body["name"] = name
+    ps = _non_empty_dict(full_config.get("platform_settings"))
+    if ps is not None:
+        body["platform_settings"] = ps
+    if not body:
+        return
     _patch_agent(agent_id, body)
 
 
@@ -495,12 +555,19 @@ def rollback_to_snapshot(
         raise ElevenLabsWriteError(f"snapshot {snapshot_id} not found")
     snap = rows[0]
     full = snap["full_config"] or {}
+    field_patches: dict = {
+        "name": full.get("name"),
+        "conversation_config": full.get("conversation_config") or {},
+    }
+    # 1.1(b): also restore platform_settings (webhook + override whitelist). Only
+    # include it (and its nested sub-objects) when non-empty — an empty {} would
+    # clear the webhook ElevenLabs needs. merge_arrays stays [] (restore exactly).
+    ps = _non_empty_dict(full.get("platform_settings"))
+    if ps is not None:
+        field_patches["platform_settings"] = ps
     new_config = patch_agent_safely(
         agent_id=snap["agent_id"],
-        field_patches={
-            "name": full.get("name"),
-            "conversation_config": full.get("conversation_config") or {},
-        },
+        field_patches=field_patches,
         merge_arrays=[],  # restore exactly, not additively
         actor_id=actor_id,
         org_id=snap["org_id"],

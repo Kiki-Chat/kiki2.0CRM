@@ -75,6 +75,7 @@ from app.services.elevenlabs_agent import (
     WEBHOOK_ENABLED_PATH,
     WEBHOOK_URL_PATH,
     ElevenLabsWriteError,
+    VerificationFailedError,
     _get_path,
     get_agent_config,
     override_flags_ok,
@@ -1439,8 +1440,19 @@ def sync_system_tools_for_org(org_id: str | UUID) -> dict:
     """Push the org's system-tool configs (transfer_to_number, voicemail_detection,
     transfer_to_agent) to its agent in one safe write.
 
-    Called after Notdienst-/Telefon-saves (alongside the prompt repush). Same
-    best-effort contract as rerender_and_push_for_org — never raises."""
+    Called after Notdienst-/Telefon-saves (alongside the prompt repush). NEVER
+    raises (best-effort contract). Returns a CATEGORIZED reason on failure so the
+    caller can tell a real divergence from a benign no-op (1.4):
+
+        {"updated": True}
+        {"updated": False, "reason": "no_agent"}
+        {"updated": False, "reason": "verify_failed:<detail>"}   # auto-rolled-back
+        {"updated": False, "reason": "el_error:<detail>"}        # EL/transport error
+
+    A single bounded retry is attempted ONLY on a transient transport error
+    (httpx network/timeout) — NEVER on a VerificationFailedError, which already
+    auto-rolled-back inside patch_agent_safely (retrying would just snapshot +
+    fail again)."""
     db = get_service_client()
     org_rows = (
         db.table("organizations").select("elevenlabs_agent_id")
@@ -1450,7 +1462,8 @@ def sync_system_tools_for_org(org_id: str | UUID) -> dict:
     if not agent_id:
         return {"updated": False, "reason": "no_agent"}
     cfg = _fetch_kz_config(org_id)
-    try:
+
+    def _do_write() -> None:
         patch_agent_safely(
             agent_id=agent_id,
             field_patches={
@@ -1471,16 +1484,125 @@ def sync_system_tools_for_org(org_id: str | UUID) -> dict:
             org_id=org_id,
             endpoint_label="system_tools_sync",
         )
-    except Exception as exc:  # noqa: BLE001 — never break the triggering save
-        logger.warning(
-            "system tools sync failed (org %s): %s", org_id, str(exc)[:200]
-        )
-        return {"updated": False, "reason": str(exc)[:200]}
-    return {"updated": True}
+
+    attempted_retry = False
+    while True:
+        try:
+            _do_write()
+            return {"updated": True}
+        except VerificationFailedError as exc:
+            # Already auto-rolled-back — categorize, never retry.
+            logger.warning(
+                "system tools sync verify failed (org %s): %s", org_id, str(exc)[:200]
+            )
+            return {"updated": False, "reason": f"verify_failed:{str(exc)[:180]}"}
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            # Transient transport blip — one bounded retry, then give up.
+            if not attempted_retry:
+                attempted_retry = True
+                logger.warning(
+                    "system tools sync transient error (org %s), retrying once: %s",
+                    org_id, str(exc)[:200],
+                )
+                continue
+            logger.warning(
+                "system tools sync el_error after retry (org %s): %s",
+                org_id, str(exc)[:200],
+            )
+            return {"updated": False, "reason": f"el_error:{str(exc)[:180]}"}
+        except Exception as exc:  # noqa: BLE001 — never break the triggering save
+            logger.warning(
+                "system tools sync failed (org %s): %s", org_id, str(exc)[:200]
+            )
+            return {"updated": False, "reason": f"el_error:{str(exc)[:180]}"}
 
 
 # Backwards-compatible alias (Phase-6 call sites).
 sync_transfer_tool_for_org = sync_system_tools_for_org
+
+
+# ─── hk_ tool_ids reconcile (1.5 — HIGH RISK, super-admin only) ───────────────
+def reconcile_hk_tool_ids(
+    org_id: str | UUID, agent_id: str, actor_id: str | UUID | None = None
+) -> dict:
+    """Reconcile the agent's ``prompt.tool_ids`` to the exact desired hk_* set.
+
+    HIGH RISK — a bad write here could strip every tool off a live agent, so the
+    guards are deliberately strict:
+
+      1. Resolve ALL desired hk_* ids first. If ANY fails to resolve (a workspace
+         blip / a tool renamed mid-flight), ABORT with reason 'resolve_failed'
+         and write NOTHING — a transient lookup miss must never cause mass tool
+         removal.
+      2. GET the agent's current tool_ids.
+      3. Compute the desired set = (all current ids that are NOT one of our hk_*
+         ids) + (the 11 resolved desired ids). This PRESERVES every unknown /
+         custom tool_id the org may have added, and only ever removes a STALE
+         hk_* id (an old/duplicate hk_ binding no longer in the desired set).
+      4. Write the explicit set via patch_agent_safely with merge_arrays=[] (an
+         EXPLICIT replacement of tool_ids, NOT a union — that's the whole point of
+         a reconcile). The audio assertion + verify + auto-rollback still apply.
+
+    ``built_in_tools`` (transfer_to_number / voicemail / transfer_to_agent) live
+    under a DIFFERENT path (prompt.built_in_tools), so the patch body carries ONLY
+    tool_ids and cannot touch them.
+
+    Returns ``{"removed": [...], "kept": [...], "desired": [...]}`` (the SHARED
+    contract for POST /reconcile-tools). On a resolve abort returns
+    ``{"removed": [], "kept": [], "desired": [], "reason": "resolve_failed:..."}``
+    and writes nothing. NEVER auto-called on routine saves."""
+    # 1) Resolve ALL desired ids up front; abort hard if any are missing.
+    try:
+        tool_map = _resolve_hk_tool_ids(HK_TOOL_NAMES)
+    except HTTPException as exc:
+        logger.warning(
+            "reconcile_hk_tool_ids abort (org %s): resolve failed: %s",
+            org_id, str(exc.detail)[:200],
+        )
+        return {
+            "removed": [], "kept": [], "desired": [],
+            "reason": f"resolve_failed:{str(exc.detail)[:180]}",
+        }
+    desired_hk_ids = list(tool_map.values())
+    desired_hk_set = set(desired_hk_ids)
+    # Every hk_* id we KNOW about (the resolved set IS the desired set; there are
+    # no extra hk_ ids to recognise beyond what the workspace currently resolves).
+    known_hk_set = set(desired_hk_ids)
+
+    # 2) Current tool_ids on the agent.
+    current = get_agent_config(agent_id)
+    current_ids = list(_get_path(current, TOOL_IDS_PATH) or [])
+
+    # 3) Build the explicit desired set: preserve all non-hk_ (unknown/custom)
+    # ids, drop stale hk_ ids, ensure all 11 desired ids are present.
+    preserved = [tid for tid in current_ids if tid not in known_hk_set]
+    desired_set = preserved + [tid for tid in desired_hk_ids if tid not in preserved]
+    removed = [
+        tid for tid in current_ids
+        if tid in known_hk_set and tid not in desired_set
+    ]
+    # Defensive invariant: we must never drop a non-hk_ (custom) id.
+    assert all(tid in desired_set for tid in preserved), (
+        "reconcile would drop a non-hk_ tool_id — refusing"
+    )
+
+    if set(current_ids) == set(desired_set):
+        # Already reconciled — no write (patch_agent_safely would no-op anyway).
+        return {"removed": [], "kept": current_ids, "desired": desired_set}
+
+    # 4) Explicit replacement (merge_arrays=[] → NOT a union). Audio assertion +
+    # verify + auto-rollback inside patch_agent_safely are the safety net.
+    patch_agent_safely(
+        agent_id=agent_id,
+        field_patches={
+            "conversation_config": {"agent": {"prompt": {"tool_ids": desired_set}}}
+        },
+        merge_arrays=[],
+        actor_id=actor_id,
+        org_id=org_id,
+        endpoint_label="reconcile_tools",
+    )
+    return {"removed": removed, "kept": desired_set, "desired": desired_set}
 
 
 # ─── Agent-sync status (frontend loader banner) ──────────────────────────────
@@ -1559,23 +1681,85 @@ def _current_sync_seq(db, org_id: str | UUID) -> int:
         return 0
 
 
+def _stamp_config_dirty_since(db, org_id: str | UUID) -> None:
+    """1.3: stamp config_dirty_since=now() the FIRST time a re-render no-ops on the
+    manual-override gate (only when currently NULL, so the oldest un-pushed change
+    wins). Best-effort — a tracking write must never break the gate's no-op."""
+    try:
+        rows = (
+            db.table("agent_configs").select("config_dirty_since")
+            .eq("org_id", str(org_id)).limit(1).execute().data or []
+        )
+        if rows and rows[0].get("config_dirty_since"):
+            return  # already dirty — keep the oldest timestamp
+        db.table("agent_configs").update(
+            {"config_dirty_since": datetime.now(timezone.utc).isoformat()}
+        ).eq("org_id", str(org_id)).is_("config_dirty_since", "null").execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("stamp config_dirty_since(%s) failed: %s", org_id, str(exc)[:200])
+
+
+def _clear_config_dirty_since(db, org_id: str | UUID, seq: int | None = None) -> None:
+    """1.3: on a SUCCESSFUL push, clear config_dirty_since and record last_repush_at
+    (+ last_repush_seq when available). Best-effort."""
+    try:
+        patch: dict = {
+            "config_dirty_since": None,
+            "last_repush_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if seq:
+            patch["last_repush_seq"] = int(seq)
+        db.table("agent_configs").update(patch).eq("org_id", str(org_id)).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("clear config_dirty_since(%s) failed: %s", org_id, str(exc)[:200])
+
+
+def compute_drift(org_id: str | UUID) -> dict:
+    """1.3 detector. Returns the drift state for GET /drift:
+
+        {drift, dirty_since, manual_override, last_repush_at}
+
+    ``drift`` is True iff the agent prompt is known to be out of step with the
+    saved config — i.e. config_dirty_since is set (a config change couldn't be
+    pushed because the org sits behind a manual prompt override)."""
+    db = get_service_client()
+    rows = (
+        db.table("agent_configs")
+        .select("prompt_manual_override, config_dirty_since, last_repush_at")
+        .eq("org_id", str(org_id)).limit(1).execute().data or []
+    )
+    row = rows[0] if rows else {}
+    dirty_since = row.get("config_dirty_since")
+    return {
+        "drift": bool(dirty_since),
+        "dirty_since": dirty_since,
+        "manual_override": bool(row.get("prompt_manual_override")),
+        "last_repush_at": row.get("last_repush_at"),
+    }
+
+
 def rerender_and_push_for_org(
     *, org_id: str | UUID, actor_id: str | UUID | None = None, endpoint_label: str,
-    expected_seq: int | None = None,
+    expected_seq: int | None = None, force: bool = False,
 ) -> dict:
     """Re-render the org's prompt from the live template + config and push it to
     the agent. Best-effort: NEVER raises to the caller.
 
-    - If ``agent_configs.prompt_manual_override`` is True → no-op
-      ``{"updated": False, "reason": "manual_override"}`` (the tradesperson edited
-      the prompt by hand; auto-regeneration would clobber it).
+    - If ``agent_configs.prompt_manual_override`` is True (and ``force`` is False)
+      → no-op ``{"updated": False, "reason": "manual_override"}`` (the tradesperson
+      edited the prompt by hand; auto-regeneration would clobber it). The first
+      such no-op stamps ``config_dirty_since`` (drift detection, 1.3).
+    - If ``force`` is True → bypass the manual-override gate for THIS single call
+      (still snapshot/verify/audit via the normal patch_agent_safely path). Used
+      by POST /drift/force-resync.
     - If the org has no ``elevenlabs_agent_id`` →
       ``{"updated": False, "reason": "no_agent"}``.
     - If ``expected_seq`` is given and a NEWER save has since begun →
       ``{"updated": False, "reason": "superseded"}`` (the newer push owns the
       latest state; pushing our stale render would clobber it).
     - On an ElevenLabs write error → ``{"updated": False, "reason": str(e)}``.
-    - On success → ``{"updated": True}``.
+    - On success → ``{"updated": True}`` (and config_dirty_since is cleared,
+      last_repush_at stamped).
 
     The actual write routes through ``patch_agent_safely`` (snapshot → assert
     audio → PATCH → verify → auto-rollback → audit), so the per-call safety net is
@@ -1586,7 +1770,8 @@ def rerender_and_push_for_org(
     """
     db = get_service_client()
 
-    # Manual-override gate: read the flag straight off the config row.
+    # Manual-override gate: read the flag straight off the config row. ``force``
+    # bypasses the gate for this single call (1.3 force-resync).
     cfg_rows = (
         db.table("agent_configs")
         .select("prompt_manual_override")
@@ -1596,7 +1781,10 @@ def rerender_and_push_for_org(
         .data
         or []
     )
-    if cfg_rows and cfg_rows[0].get("prompt_manual_override"):
+    if not force and cfg_rows and cfg_rows[0].get("prompt_manual_override"):
+        # Drift: a config change just couldn't be pushed. Stamp the dirty marker
+        # (oldest-un-pushed-change-wins) so GET /drift can surface it.
+        _stamp_config_dirty_since(db, org_id)
         return {"updated": False, "reason": "manual_override"}
 
     # Resolve the agent id (do NOT use get_org_agent_id — it raises; we want a
@@ -1659,4 +1847,7 @@ def rerender_and_push_for_org(
     finally:
         if lock is not None:
             lock.release()
+    # Successful push: the agent now reflects the saved config — clear the drift
+    # marker and record the push time (1.3).
+    _clear_config_dirty_since(db, org_id, expected_seq)
     return {"updated": True}

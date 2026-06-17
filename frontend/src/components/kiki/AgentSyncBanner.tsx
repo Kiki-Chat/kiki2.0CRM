@@ -3,7 +3,8 @@ import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { apiFetch } from '../../lib/api'
-import { KZ } from '../../lib/kikiApi'
+import { fetchDrift, forceResync, KZ } from '../../lib/kikiApi'
+import { ConfirmDialog } from './shared'
 
 interface SyncStatus {
   status: 'idle' | 'pending' | 'applied' | 'failed'
@@ -91,4 +92,63 @@ export function AgentSyncBanner() {
   }
 
   return null
+}
+
+const DRIFT_POLL_MS = 60_000
+
+// Drift banner — the live prompt was edited manually (prompt_manual_override),
+// so the saved Kiki-Zentrale settings no longer reach the phone. Polls GET
+// /drift; when drift=true, offers a one-click force-resync that REPLACES the
+// manual edit. Gated behind a ConfirmDialog so the destructive overwrite is
+// conscious. Reuses the same banner styling + ['kiki-zentrale'] invalidation.
+export function AgentDriftBanner() {
+  const qc = useQueryClient()
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const { data } = useQuery({
+    queryKey: ['kiki-zentrale', 'drift'],
+    queryFn: fetchDrift,
+    refetchInterval: DRIFT_POLL_MS,
+    refetchIntervalInBackground: true,
+  })
+
+  const resync = useMutation({
+    mutationFn: forceResync,
+    onSuccess: () => {
+      setConfirmOpen(false)
+      // Refetch drift + the sync-status banner (which now flips to 'pending').
+      qc.invalidateQueries({ queryKey: ['kiki-zentrale'] })
+    },
+  })
+
+  if (!data?.drift) return null
+
+  return (
+    <>
+      <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-bg/60 px-4 py-2.5 text-sm font-medium text-warning">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <span className="flex-1">
+          Der Prompt wurde manuell bearbeitet und folgt nicht mehr Ihren Einstellungen. Zuletzt
+          geänderte Einstellungen sind am Telefon noch nicht aktiv.
+        </span>
+        <button
+          onClick={() => setConfirmOpen(true)}
+          disabled={resync.isPending}
+          className="shrink-0 rounded-md border border-warning/40 bg-surface px-3 py-1 text-xs font-semibold text-warning hover:bg-warning-bg disabled:opacity-50"
+        >
+          {resync.isPending ? 'Wird synchronisiert…' : 'Mit Einstellungen synchronisieren'}
+        </button>
+      </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={(v) => !v && setConfirmOpen(false)}
+        title="Mit Einstellungen synchronisieren?"
+        message="Die manuelle Bearbeitung des Prompts wird verworfen und durch den aus Ihren Einstellungen erzeugten Prompt ERSETZT. Dieser Schritt kann nicht rückgängig gemacht werden."
+        confirmLabel="Synchronisieren"
+        danger
+        busy={resync.isPending}
+        onConfirm={() => resync.mutate()}
+      />
+    </>
+  )
 }
