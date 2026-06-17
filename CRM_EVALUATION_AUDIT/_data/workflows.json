@@ -1,0 +1,917 @@
+{
+  "workflows": [
+    {
+      "name": "Inbound Call → Inquiry (ANF)",
+      "trigger": "ElevenLabs post-call webhook received by N8N, forwarded to POST /api/post-call (x-heykiki-secret auth)",
+      "inputs": [
+        "conversation_id",
+        "agent_id",
+        "transcript (array of turns)",
+        "metadata.phone_call.external_number (caller_number)",
+        "metadata.phone_call.direction",
+        "analysis.data_collection_results",
+        "analysis.transcript_summary",
+        "analysis.call_summary_title",
+        "metadata.start_time_unix_secs"
+      ],
+      "conditions": [
+        "agent_id must resolve to a known organization (organizations.elevenlabs_agent_id)",
+        "direction must be 'inbound' to spawn an inquiry (outbound skips ensure_call_inquiry)",
+        "conversation_id unique per org (upsert on conflict)",
+        "call not already_processed (status=completed AND summary/transcript present)",
+        "customer linked only if caller_number or dc_name is non-empty and non-anonymous"
+      ],
+      "businessRules": [
+        "Idempotent on conversation_id: upsert with on_conflict guard prevents duplicate rows",
+        "Customer get-or-create: caller_number first, then AI-extracted customer_phone/name",
+        "Emergency flag: BOTH outside_hours AND agent_urgent (or content_signals_emergency) must be true",
+        "Phantom-capture detection: agent claimed to capture/forward but no write tool was called → phantom_capture=true in data_collection",
+        "started_at cascade: start_time_unix_secs → start_time → phone_call.start_time_unix_secs → now()",
+        "Every inbound call becomes exactly one inquiry (ensure_call_inquiry is idempotent on call_id)",
+        "Auto-assign inquiry to a case via AI embedding similarity (≥0.70) or create a new case"
+      ],
+      "actions": [
+        "Upsert call row into calls table",
+        "get_or_create_customer (phone/name lookup or insert)",
+        "ensure_call_inquiry: get-or-create inquiry linked to call_id",
+        "stamp calls.inquiry_id",
+        "safe_auto_assign: attach inquiry to best matching open case or create new case (FL-)",
+        "safe_auto_log_call (PDS sync if enabled)",
+        "classify_and_apply (appointment auto-categorisation)",
+        "_fire_level3_confirmations (background thread, no-op unless level=3)",
+        "broadcast_new_call (Supabase Realtime)"
+      ],
+      "outputs": [
+        "calls row (status=completed, with transcript, summary, data_collection)",
+        "inquiries row (status=open, number=ANF-, emergency_flag, case_id)",
+        "cases row (FL-, status=active) — created or reused",
+        "broadcast event to Realtime channel"
+      ],
+      "exceptions": [
+        "unknown_agent: agent_id not in organizations → skipped, no row written",
+        "already_processed: idempotent skip (returns existing call_log_id)",
+        "unparseable_payload: data=None → skipped",
+        "Customer creation failure: inquiry created without customer_id (not blocked)",
+        "PDS sync failure: best-effort, logged, ingest continues",
+        "Appointment classifier failure: best-effort, logged, ingest continues"
+      ],
+      "failureModes": [
+        "N8N webhook delivery retry can re-trigger; dedup guards prevent double-processing",
+        "started_at falls back to webhook received time if EL payload lacks timestamps",
+        "Emergency flag never set if agent omits explicit field AND content has no emergency terms AND call is within business hours",
+        "phantom_capture stored in data_collection JSONB (no dedicated column) — badge relies on caller reading this key"
+      ],
+      "dependencies": [
+        "ElevenLabs (conversation payload source)",
+        "N8N (webhook relay)",
+        "Supabase: calls, organizations, inquiries, cases, customers tables",
+        "services/post_call.py",
+        "services/inquiries.py (ensure_call_inquiry, link_outbound_call_to_case)",
+        "services/customers.py (get_or_create_customer)",
+        "services/projects_auto.py (safe_auto_assign)",
+        "services/scheduling.py (is_emergency_by_hours)",
+        "db/realtime.py (broadcast_new_call)"
+      ],
+      "mermaid": "flowchart TD\n  A[ElevenLabs post-call webhook] --> B[N8N relay → POST /api/post-call]\n  B --> C{Payload parseable?}\n  C -- No --> Z1[Skip: unparseable_payload]\n  C -- Yes --> D{agent_id maps to org?}\n  D -- No --> Z2[Skip: unknown_agent]\n  D -- Yes --> E{Already processed?}\n  E -- Yes --> Z3[Skip: already_processed]\n  E -- No --> F[get_or_create_customer via caller_number or dc_name]\n  F --> G[Upsert calls row]\n  G --> H{direction == inbound?}\n  H -- No --> I[link_outbound_call_to_case via outbound_calls ledger]\n  H -- Yes --> J[ensure_call_inquiry: get-or-create ANF- inquiry]\n  J --> K[stamp calls.inquiry_id]\n  K --> L[safe_auto_assign: AI similarity → attach or create FL- case]\n  I --> M[PDS auto-sync best-effort]\n  L --> M\n  M --> N[classify_and_apply appointment category best-effort]\n  N --> O{autonomy level == 3?}\n  O -- Yes --> P[_fire_level3_confirmations in background thread]\n  O -- No --> Q[broadcast_new_call via Realtime]\n  P --> Q\n  Q --> R[Return processed result]",
+      "sourceReferences": [
+        "backend/app/services/post_call.py:241-485",
+        "backend/app/services/inquiries.py:91-158",
+        "backend/app/services/projects_auto.py:126-172",
+        "backend/app/api/routes/calls.py:1-50",
+        "supabase/migrations/0001_init_schema.sql",
+        "supabase/migrations/0024_inquiry_emergency_flag.sql"
+      ],
+      "confidence": 95
+    },
+    {
+      "name": "Inquiry → Case (FL) Linkage / Grouping",
+      "trigger": "New inquiry created (via ensure_call_inquiry or create_inquiry agent tool); also manual grouping UI or AI grouping sweep",
+      "inputs": [
+        "inquiry: id, customer_id, subject, title, notes",
+        "call content: summary, summary_title, transcript (customer turns)",
+        "org_id",
+        "open cases for the same customer (up to 8 newest)",
+        "embedding model: text-embedding-3-small"
+      ],
+      "conditions": [
+        "inquiry.case_id must be NULL (already-filed inquiries are no-ops)",
+        "customer_id must be present to search for candidate cases",
+        "AI cap must not be exceeded (ai_usage.within_cap) for embedding path",
+        "Cosine similarity >= 0.70 (_ATTACH_SIM) to attach to existing case"
+      ],
+      "businessRules": [
+        "Attach-or-create: matching open case → attach; no match → new FL- case",
+        "Only 'planning' or 'active' cases are candidates for attachment",
+        "Up to _MAX_OPEN_CASES=8 newest open cases considered",
+        "Similarity computed over actual call content (transcript + summary), not just headline subject",
+        "New case from inquiry: status='active', title from inquiry subject/title",
+        "Audit trail written to inquiries.case_source / case_confidence / case_reason",
+        "Failure falls back to CREATE (conservative — wrong attachment is worse than extra cases)",
+        "Manual moves and the grouping page can override AI assignment at any time"
+      ],
+      "actions": [
+        "Fetch up to 8 open cases for customer",
+        "Build text signals for inquiry and each candidate case",
+        "Call OpenAI text-embedding-3-small for all texts in one batch",
+        "Compute cosine similarity of inquiry vs each case",
+        "If best_sim >= 0.70: update inquiries SET case_id, case_source='ai', case_confidence, case_reason",
+        "Else: INSERT new case (FL- number via gen_case_number) + update inquiry"
+      ],
+      "outputs": [
+        "inquiries.case_id set (FK to cases)",
+        "inquiries.case_source, case_confidence, case_reason stamped",
+        "Possibly a new cases row (FL-{TOKEN}-NNNN)"
+      ],
+      "exceptions": [
+        "AI cap exceeded → skip embedding, go straight to CREATE",
+        "OpenAI API error → log warning, fallback to CREATE",
+        "No customer_id → skip similarity scan, go straight to CREATE",
+        "Any unhandled exception → safe_auto_assign catches it, returns None (inquiry stays unassigned until grouping page picks it up)"
+      ],
+      "failureModes": [
+        "Embedding model unavailable → all new inquiries create their own cases",
+        "Stale case content (old calls not indexed) → lower similarity → creates new case instead of attaching",
+        "Race condition: two simultaneous inbound calls for same customer could each create separate cases"
+      ],
+      "dependencies": [
+        "services/projects_auto.py (auto_assign_inquiry_to_case, safe_auto_assign)",
+        "services/ai.py (embed, usage cap)",
+        "services/common.py (gen_case_number, get_org_token)",
+        "Supabase: inquiries, cases, calls tables",
+        "OpenAI text-embedding-3-small"
+      ],
+      "mermaid": "flowchart TD\n  A[New inquiry created] --> B{inquiry.case_id already set?}\n  B -- Yes --> Z[No-op: return None]\n  B -- No --> C{customer_id present?}\n  C -- No --> D[CREATE new FL- case for inquiry]\n  C -- Yes --> E[Fetch up to 8 open cases for customer]\n  E --> F{Any open cases found?}\n  F -- No --> D\n  F -- Yes --> G{AI cap within limit?}\n  G -- No --> D\n  G -- Yes --> H[Build text signals: inquiry + call content + each case's member content]\n  H --> I[OpenAI text-embedding-3-small batch embed]\n  I --> J[Compute cosine similarity inquiry vs each case]\n  J --> K{best_sim >= 0.70?}\n  K -- Yes --> L[ATTACH: update inquiry.case_id to best case]\n  K -- No --> D\n  D --> M[INSERT cases row FL-TOKEN-NNNN, status=active]\n  M --> N[UPDATE inquiry: case_id, case_source=ai, confidence=1.0]\n  L --> O[UPDATE inquiry: case_id, case_source=ai, confidence=sim]\n  N --> P[Return case]\n  O --> P",
+      "sourceReferences": [
+        "backend/app/services/projects_auto.py:1-172",
+        "backend/app/services/inquiries.py:91-158",
+        "backend/app/services/common.py (gen_case_number)",
+        "supabase/migrations/0056_cases.sql",
+        "supabase/migrations/0057_case_number.sql",
+        "supabase/migrations/0073_case_project_split.sql"
+      ],
+      "confidence": 92
+    },
+    {
+      "name": "Case (FL) → Project (PR)",
+      "trigger": "Manual: staff clicks 'Add to Project' in Cases UI; OR appointment confirmed at autonomy level >= 2 triggers maybe_create_case_for_appointment which creates a case (but NOT a project — projects are joined manually)",
+      "inputs": [
+        "case_id (FL-)",
+        "project_id (optional, for linking an existing project)",
+        "appointment: id, customer_id, title, case_id (for auto-case path)",
+        "agent_configs.projects_enabled, projects_level"
+      ],
+      "conditions": [
+        "projects_enabled must be true for auto-case-from-appointment path",
+        "projects_level >= 2 for auto-case (level 1 = no-op, level 3 = status active vs planning)",
+        "appointment must not already have a case_id set",
+        "Manual project linking: the cases.project_id FK must point to a same-org project"
+      ],
+      "businessRules": [
+        "Top-layer Project (PR-) is restored as a separate entity above Case (FL-) after migration 0073",
+        "Projects are NEVER auto-created — only cases are auto-created; project is joined manually",
+        "Auto-case from appointment: level 2 → status='planning', level 3 → status='active'",
+        "Auto-case is best-effort: failure must not roll back appointment confirmation",
+        "Project numbering: PR-{ORG_TOKEN}-NNNN (independent sequence from FL-)",
+        "Case inherits customer_id from the appointment or inquiry"
+      ],
+      "actions": [
+        "Check agent_configs.projects_enabled and projects_level",
+        "Check appointment.case_id is null",
+        "gen_case_number to get FL- number",
+        "INSERT cases row (org_id, customer_id, number, title, description, status)",
+        "UPDATE appointments SET case_id = new case id",
+        "Manual: PATCH cases SET project_id = project_id (via cases route)"
+      ],
+      "outputs": [
+        "cases row (FL-) linked to appointment",
+        "appointments.case_id stamped",
+        "Optionally: cases.project_id set when staff manually links to a PR-"
+      ],
+      "exceptions": [
+        "Any exception in maybe_create_case_for_appointment is swallowed (best-effort, logged)",
+        "level <= 1: no case created",
+        "appointment already has case_id: no-op"
+      ],
+      "failureModes": [
+        "Two simultaneous confirmations for same appointment could each attempt case creation (race); second will update appointment.case_id to a duplicate case",
+        "projects_enabled=False prevents auto-case creation even at L3"
+      ],
+      "dependencies": [
+        "services/projects.py (maybe_create_case_for_appointment, gen_project_number)",
+        "services/common.py (gen_case_number)",
+        "Supabase: cases, appointments, agent_configs, projects tables",
+        "supabase/migrations/0073_case_project_split.sql",
+        "supabase/migrations/0013_projects.sql"
+      ],
+      "mermaid": "flowchart TD\n  A[Appointment confirmed] --> B[maybe_create_case_for_appointment]\n  B --> C{appointment.case_id already set?}\n  C -- Yes --> Z[No-op]\n  C -- No --> D{agent_configs.projects_enabled?}\n  D -- No --> Z\n  D -- Yes --> E{projects_level}\n  E -- 1 --> Z\n  E -- 2 --> F[status = planning]\n  E -- 3 --> G[status = active]\n  F --> H[gen_case_number → FL-TOKEN-NNNN]\n  G --> H\n  H --> I[INSERT cases row]\n  I --> J[UPDATE appointments.case_id]\n  J --> K[Return case row]\n  K --> L{Staff manually links to a Project?}\n  L -- Yes --> M[PATCH cases SET project_id = PR-TOKEN-NNNN]\n  L -- No --> N[Case stands alone]",
+      "sourceReferences": [
+        "backend/app/services/projects.py:26-84",
+        "backend/app/api/routes/cases.py",
+        "backend/app/services/common.py (gen_case_number)",
+        "supabase/migrations/0073_case_project_split.sql"
+      ],
+      "confidence": 88
+    },
+    {
+      "name": "Project → Invoice → Payment",
+      "trigger": "Staff (org_admin) creates invoice manually via POST /api/invoices; OR by converting an accepted KVA (cost_estimate_id provided)",
+      "inputs": [
+        "customer_id",
+        "kva_id (optional: cost_estimate_id to convert)",
+        "case_id (optional: grouping pointer to cases / FL-)",
+        "positions (line items with quantity, unit_price, vat_rate)",
+        "invoice_date, payment_terms_days, due_date",
+        "subject, intro_text, closing_text, payment_terms_text",
+        "surcharge, total_discount_pct"
+      ],
+      "conditions": [
+        "Requires org_admin role (require_org_admin)",
+        "customer_id, kva_id, case_id must all belong to same org (validate_fk_in_org)",
+        "KVA must be in draft/sent/accepted status (not already invoiced) for conversion",
+        "Delete allowed only for draft invoices",
+        "Status transitions: draft → sent → paid | cancelled"
+      ],
+      "businessRules": [
+        "Invoice number generated: RE-{ORG_TOKEN}-NNNN sequence",
+        "Totals computed: net (sum of qty*unit_price), vat (per line vat_rate), gross = net+vat; surcharge and discount applied",
+        "VAT exclusive on all prices (confirmed Luca meeting ruling)",
+        "case_id inherited from KVA's inquiry.case_id when not explicitly set",
+        "KVA conversion: cost_estimates.status → 'invoiced', cost_estimates.invoice_id backlinked; rollback on failure",
+        "overdue derived at read time: status=sent AND due_date < today → display as 'overdue' (not stored)",
+        "Payment: manual PATCH /status {status: paid} stamps paid_at",
+        "Send: renders PDF, emails to customer.email, stamps sent_at only after successful send"
+      ],
+      "actions": [
+        "Validate FKs (customer, KVA, case all in-org)",
+        "compute_totals (net/vat/gross)",
+        "gen_invoice_number",
+        "INSERT invoices row (status=draft)",
+        "If kva_id: UPDATE cost_estimates SET status=invoiced, invoice_id (compensate with DELETE invoice on failure)",
+        "POST /{inv_id}/send: render PDF via build_pdf, send_email with PDF attachment, UPDATE invoices SET status=sent, sent_at",
+        "PATCH /{inv_id}/status: set paid/cancelled + stamp paid_at/cancelled_at"
+      ],
+      "outputs": [
+        "invoices row (RE-number, status=draft/sent/paid/cancelled)",
+        "PDF generated on demand (no storage, regenerated each /pdf request)",
+        "Email sent to customer with PDF attachment",
+        "cost_estimates.status=invoiced, invoice_id backlinked (when converting KVA)"
+      ],
+      "exceptions": [
+        "cross-org FK → 422 Validation error",
+        "send with no customer email → 400",
+        "email provider failure → 502 (invoice remains draft, not stamped sent)",
+        "KVA back-link update fails after invoice INSERT: compensating DELETE invoice (best-effort; orphan logged if both fail)",
+        "Delete non-draft invoice → 400"
+      ],
+      "failureModes": [
+        "PDF generation uses in-memory WeasyPrint/HTML; large invoices may be slow",
+        "send_email fallback chain (Brevo SMTP primary): if all providers fail, invoice stays draft",
+        "Rollback on KVA back-link failure may leave invoice deleted but KVA still in prior status"
+      ],
+      "dependencies": [
+        "backend/app/api/routes/invoices.py",
+        "backend/app/services/invoices.py (gen_invoice_number, add_days)",
+        "backend/app/services/cost_estimates.py (build_pdf, compute_totals)",
+        "backend/app/services/email_send.py (send_email, Attachment)",
+        "backend/app/services/email_templates.py",
+        "Supabase: invoices, cost_estimates, customers, cases, email_configs tables"
+      ],
+      "mermaid": "flowchart TD\n  A[Staff: POST /api/invoices] --> B{kva_id provided?}\n  B -- Yes --> C[Inherit case_id from KVA → inquiry → case]\n  B -- No --> D[Use explicit case_id or null]\n  C --> E[validate_fk_in_org: customer, KVA, case]\n  D --> E\n  E --> F[compute_totals: net/vat/gross]\n  F --> G[gen_invoice_number RE-TOKEN-NNNN]\n  G --> H[INSERT invoices status=draft]\n  H --> I{kva_id provided?}\n  I -- Yes --> J[UPDATE cost_estimates status=invoiced, invoice_id]\n  J --> K{Back-link succeeded?}\n  K -- No --> L[Compensate: DELETE invoice]\n  K -- Yes --> M[Invoice created]\n  I -- No --> M\n  M --> N{Staff sends?}\n  N -- Yes --> O[Render PDF via build_pdf]\n  O --> P[send_email with PDF]\n  P --> Q{Email sent OK?}\n  Q -- Yes --> R[UPDATE invoices status=sent, sent_at]\n  Q -- No --> S[502 error: invoice stays draft]\n  R --> T{Staff marks paid?}\n  T -- Yes --> U[PATCH status=paid, paid_at]",
+      "sourceReferences": [
+        "backend/app/api/routes/invoices.py:120-172",
+        "backend/app/api/routes/invoices.py:377-460",
+        "backend/app/api/routes/invoices.py:489-511",
+        "backend/app/services/invoices.py",
+        "supabase/migrations/0012_invoices.sql"
+      ],
+      "confidence": 93
+    },
+    {
+      "name": "Cost Estimate (KVA) → Invoice",
+      "trigger": "Staff (org_admin) creates KVA via POST /api/cost-estimates; OR agent uses hk_draftCostEstimate tool during inbound call. Staff sends KVA → customer accepts → staff converts to invoice",
+      "inputs": [
+        "type: kva | offer | order_confirmation",
+        "customer_id",
+        "inquiry_id (links KVA to a Vorgang/case)",
+        "case_id (optional, inherited from inquiry.case_id)",
+        "positions (line items)",
+        "is_binding, tolerance_pct, validity_days",
+        "subject, intro_text, closing_text, payment_terms",
+        "surcharge, total_discount_pct"
+      ],
+      "conditions": [
+        "org_admin role required for create/send/status changes",
+        "customer_id, inquiry_id, case_id must all be in-org",
+        "Send requires customer.email or explicit payload.to",
+        "Status transitions: draft → sent → accepted | rejected → invoiced",
+        "accepted/rejected/sent stamps via PATCH /status or POST /send"
+      ],
+      "businessRules": [
+        "Number generated: KVA-{ORG_TOKEN}-NNNN or offer/order_confirmation prefix",
+        "case_id inherited from inquiry.case_id when not set explicitly",
+        "Totals computed identical to invoice (net/vat/gross, surcharge, total_discount_pct)",
+        "VAT exclusive on all prices",
+        "valid_until = created_at + validity_days",
+        "Stamping: sent_at on send, accepted_at/rejected_at on PATCH /status",
+        "Converting: POST /api/invoices with kva_id → cost_estimate status=invoiced",
+        "AI Insights gate: dashboard queries kva_followup based on non-NULL sent_at",
+        "Duplicate: creates new draft copy without timestamps or invoice_id"
+      ],
+      "actions": [
+        "validate_fk_in_org (customer, inquiry, case)",
+        "compute_totals",
+        "gen_number (type-prefixed)",
+        "INSERT cost_estimates row (status=draft)",
+        "POST /{ce_id}/send: build PDF, send_email, stamp status=sent, sent_at",
+        "PATCH /{ce_id}/status: accepted/rejected + timestamp",
+        "POST /api/invoices with cost_estimate_id: triggers KVA→Invoice conversion"
+      ],
+      "outputs": [
+        "cost_estimates row (KVA-/offer-/AB- number, status progresses draft→sent→accepted/rejected→invoiced)",
+        "PDF on demand",
+        "Email to customer with PDF",
+        "Invoice row when converted (cost_estimates.status=invoiced, invoice_id backlinked)"
+      ],
+      "exceptions": [
+        "No customer email → 400 on send",
+        "Email failure → 502, status stays draft",
+        "Delete: only allowed when status=draft (hard-delete, not soft)"
+      ],
+      "failureModes": [
+        "KVA sent but customer acceptance never recorded → remains 'sent' forever (no auto-expiry beyond valid_until display)",
+        "Concurrent conversion attempts could create duplicate invoices (no lock; validate_fk_in_org does not block concurrent INSERT)"
+      ],
+      "dependencies": [
+        "backend/app/api/routes/cost_estimates.py",
+        "backend/app/services/cost_estimates.py (build_pdf, compute_totals, gen_number, valid_until_for)",
+        "backend/app/services/email_send.py",
+        "backend/app/services/email_templates.py",
+        "Supabase: cost_estimates, inquiries, cases, customers, email_configs tables",
+        "supabase/migrations/0010_cost_estimates.sql"
+      ],
+      "mermaid": "flowchart TD\n  A[Staff: POST /api/cost-estimates] --> B[validate_fk_in_org]\n  B --> C[Inherit case_id from inquiry.case_id if not set]\n  C --> D[compute_totals + gen_number]\n  D --> E[INSERT cost_estimates status=draft]\n  E --> F{Staff sends?}\n  F -- Yes --> G[build_pdf]\n  G --> H[send_email with PDF]\n  H --> I{Sent OK?}\n  I -- Yes --> J[Stamp status=sent, sent_at]\n  I -- No --> K[502: stays draft]\n  J --> L{Customer responds?}\n  L -- Accepts --> M[PATCH status=accepted, accepted_at]\n  L -- Rejects --> N[PATCH status=rejected, rejected_at]\n  M --> O{Staff converts to invoice?}\n  O -- Yes --> P[POST /api/invoices with kva_id]\n  P --> Q[invoices created, cost_estimates.status=invoiced]\n  N --> R[End]",
+      "sourceReferences": [
+        "backend/app/api/routes/cost_estimates.py:148-163",
+        "backend/app/api/routes/cost_estimates.py:361-448",
+        "backend/app/api/routes/cost_estimates.py:475-495",
+        "backend/app/api/routes/invoices.py:120-172",
+        "supabase/migrations/0010_cost_estimates.sql",
+        "supabase/migrations/0012_invoices.sql"
+      ],
+      "confidence": 92
+    },
+    {
+      "name": "Appointment Lifecycle: Create → Assign → Confirm → Reschedule → Cancel",
+      "trigger": "Agent tool hk_bookAppointment during inbound call (creates pending); OR staff POST /api/appointments (creates confirmed directly); OR staff action on pending card (confirm/reject/alternative); OR customer counter-proposal; OR Google Calendar sync (ICS import)",
+      "inputs": [
+        "customer_id, inquiry_id, case_id",
+        "title, scheduled_at, duration_minutes",
+        "category (maps to appointment_categories for duration/employee defaults)",
+        "assigned_employee_id",
+        "agent_configs: appointments_enabled, appointments_level (1/2/3)",
+        "agent_configs: lead_time_hours, buffer_minutes, max_appointments_per_day, parallel_slots, lead_time_only_weekdays, lead_time_earliest_clock",
+        "business_hours (from scheduling jsonb)"
+      ],
+      "conditions": [
+        "Level 1: no appointment row created (inquiry only)",
+        "Level 2: appointment created as status=pending (staff must confirm)",
+        "Level 3: appointment created as pending, auto-confirmed in post_call background thread",
+        "Confirm requires: status=pending, assigned_employee_id set, scheduled_at set",
+        "Reject/Alternative/Cancel require: status=pending (409 otherwise)",
+        "Staff direct create: status=confirmed immediately",
+        "Reschedule of confirmed appointment clears customer_proposed_* fields, sets rescheduled_at"
+      ],
+      "businessRules": [
+        "Slot availability: lead_time_hours enforced; weekday-only lead time option; earliest_clock on first bookable day",
+        "Buffer: existing appointments padded by buffer_minutes before/after when counting conflicts",
+        "parallel_slots: how many bookings may overlap at the same time",
+        "max_per_day: daily cap checked before returning available slots",
+        "Category resolution: case-insensitive match → drives duration_minutes and default_employee_id",
+        "Confirm fires notify_appointment_outcome('confirm') → outbound call+email (if outbound enabled)",
+        "Reschedule of confirmed appointment fires notify_appointment_outcome('reschedule')",
+        "Cancel: status=cancelled, cancelled_at stamped (if already pending and rejected_at IS NULL → rejected path)",
+        "Case auto-create: maybe_create_case_for_appointment on confirmation (gated by projects_enabled/level)",
+        "Employee self-assignment: plain employees may only assign to themselves (enforce_self_assignment)"
+      ],
+      "actions": [
+        "get_available_slots: compute slot candidates from business_hours, lead_time, conflicts",
+        "book_appointment (agent): INSERT appointments status=pending, source_conversation_id",
+        "create_appointment (staff): INSERT appointments status=confirmed",
+        "POST /confirm: UPDATE status=confirmed, confirmed_at; clear alternative_proposed_at; fire notify; maybe_create_case",
+        "POST /reject: UPDATE status=cancelled, rejected_at, rejection_reason",
+        "POST /propose-alternative: UPDATE alternative_start/end/note/proposed_at (status stays pending)",
+        "PATCH (reschedule): UPDATE scheduled_at, rescheduled_at; clear customer_proposed_*; fire notify if already confirmed",
+        "POST /cancel: UPDATE status=cancelled, cancelled_at"
+      ],
+      "outputs": [
+        "appointments row progressing through: pending → confirmed | cancelled",
+        "Timeline events: appointment_created, appointment_confirmed, appointment_rescheduled, appointment_rejected, appointment_cancelled, alternative_proposed",
+        "Outbound call+email to customer (if enabled and scoped)",
+        "FL- case created (if projects_enabled and level >= 2)"
+      ],
+      "exceptions": [
+        "Confirm of non-pending appointment → 409",
+        "Confirm without employee → 409",
+        "Confirm without scheduled_at → 409",
+        "Reject non-pending → 409",
+        "Alternative proposal on non-pending → 409",
+        "Employee FK not in org or inactive → 422",
+        "Self-assignment violation (plain employee reassigning to colleague) → 403"
+      ],
+      "failureModes": [
+        "L3 auto-confirm fires post-call in background; a crash there leaves appointment in pending (never confirmed) — idempotent dedup prevents double-confirm on retry",
+        "Slot availability window is a point-in-time snapshot; race condition can double-book when two callers hit the same slot",
+        "notify_appointment_outcome best-effort: call/email failure does not roll back confirmation"
+      ],
+      "dependencies": [
+        "backend/app/services/appointments.py (get_available_slots, book_appointment)",
+        "backend/app/api/routes/appointments.py",
+        "backend/app/services/appointment_notify.py (notify_appointment_outcome)",
+        "backend/app/services/projects.py (maybe_create_case_for_appointment)",
+        "backend/app/services/calendar_sync.py",
+        "Supabase: appointments, appointment_categories, agent_configs, employees, cases tables",
+        "supabase/migrations/0026_appointment_alternative.sql",
+        "supabase/migrations/0053_appointment_lifecycle_timestamps.sql"
+      ],
+      "mermaid": "flowchart TD\n  A[Agent hk_bookAppointment OR Staff POST /api/appointments] --> B{Source?}\n  B -- Agent --> C{appointments_level?}\n  C -- 1 --> D[Inquiry only: no appointment row]\n  C -- 2 --> E[INSERT status=pending]\n  C -- 3 --> E\n  B -- Staff --> F[INSERT status=confirmed directly]\n  E --> G[Post-call: L3 auto-confirm in background thread]\n  G --> H{L3?}\n  H -- Yes --> I[Confirm all pending appts for this conv]\n  H -- No --> J[Staff sees pending card]\n  J --> K{Staff action?}\n  K -- Confirm --> L{Has employee and scheduled_at?}\n  L -- No --> M[409 error]\n  L -- Yes --> N[UPDATE status=confirmed, confirmed_at]\n  N --> O[notify_appointment_outcome confirm]\n  O --> P[maybe_create_case_for_appointment]\n  K -- Alternative --> Q[UPDATE alternative_*, status stays pending]\n  K -- Reject --> R[UPDATE status=cancelled, rejected_at]\n  I --> O\n  F --> S[Confirmed appointment active]\n  N --> S\n  S --> T{Rescheduled?}\n  T -- Yes --> U[PATCH scheduled_at, rescheduled_at; clear customer_proposed_*]\n  U --> V[notify_appointment_outcome reschedule]\n  T -- No --> W{Cancelled?}\n  W -- Yes --> X[UPDATE status=cancelled, cancelled_at]",
+      "sourceReferences": [
+        "backend/app/services/appointments.py:155-500",
+        "backend/app/api/routes/appointments.py:116-450",
+        "backend/app/services/post_call.py:25-121",
+        "backend/app/services/appointment_notify.py:1-100",
+        "supabase/migrations/0053_appointment_lifecycle_timestamps.sql"
+      ],
+      "confidence": 91
+    },
+    {
+      "name": "Technician Dispatch (Case Jobs → Technician Portal)",
+      "trigger": "Staff (org_admin) dispatches a technician from confirmed appointment in Cases split-view: POST /api/cases/{id}/jobs or equivalent; technician accesses /job/<token> or /techniker/<token>",
+      "inputs": [
+        "org_id, appointment_id",
+        "employee_id (technician employee, must have is_technician=true)",
+        "token (32-byte URL-safe secret generated at dispatch)",
+        "Report: description, experience_good, job_finished, extra_demands, needs, photos"
+      ],
+      "conditions": [
+        "Appointment must not be cancelled (JobLinkError if cancelled)",
+        "Token must not be revoked (revoked_at IS NULL for active link)",
+        "inquiry.status must not be 'completed' for non-submitted links (link expires when case closed)",
+        "submit_job requires: description non-empty, at least 1 photo",
+        "Photo: must be image/* MIME, max 10MB, max 30 photos per job",
+        "Technician portal token (per-employee, permanent) is separate from per-job link token"
+      ],
+      "businessRules": [
+        "Exactly one live link per appointment: prior un-submitted links of same appointment are revoked on new dispatch",
+        "Link is the capability (no auth login required): URL = /job/<token>",
+        "Submitted reports are permanent: one submit per job (idempotent guard)",
+        "Photos mirrored to documents table with category='Einsatzbericht' and uploaded_by_name='Techniker: <name>'",
+        "Photos stored in customer-files Supabase Storage bucket at {org_id}/jobs/{link_id}/{uuid}_{filename}",
+        "Technician portal (/techniker/<token>) shows all jobs for that employee (permanent per-technician token on employees.technician_portal_token)",
+        "Timeline events: technician_dispatched, technician_job_started, technician_report_submitted thread into case Verlauf via job_events_for_inquiry"
+      ],
+      "actions": [
+        "create_job_link: revoke prior un-submitted links, INSERT technician_job_links with token",
+        "Email token URL to technician (via appointment_notify or direct send)",
+        "Technician GETs /job/<token>: _load_link + _load_context → return job details",
+        "start_job: UPDATE technician_job_links.started_at",
+        "add_photo: upload to Supabase Storage, UPDATE photo_paths array, INSERT documents row",
+        "submit_job: validate description+photo, UPDATE report, submitted_at, finished_at",
+        "job_events_for_inquiry: read timeline events for case thread view"
+      ],
+      "outputs": [
+        "technician_job_links row (token, started_at, finished_at, submitted_at, report JSONB, photo_paths)",
+        "documents rows (photos mirrored for CRM view)",
+        "Timeline events in case Verlauf: dispatched, started, submitted",
+        "Report accessible in Cases split-view under the appointment"
+      ],
+      "exceptions": [
+        "Cancelled appointment → JobLinkError 'storniert'",
+        "Revoked token → JobLinkError (superseded link)",
+        "Completed case + non-submitted link → JobLinkError (link expired)",
+        "Already submitted → JobLinkError (one submit only)",
+        "Photo document mirror failure: swallowed (photo stays in report either way)",
+        "Technician portal invalid/deleted employee → JobLinkError"
+      ],
+      "failureModes": [
+        "Token in email is the only access credential — lost or expired email means technician cannot access job without re-dispatch",
+        "No auth check on public /job/ route beyond token validity: token leakage = full job access",
+        "photos stored in array JSONB, not a normalized table — concurrent photo uploads could race"
+      ],
+      "dependencies": [
+        "backend/app/services/technician_jobs.py",
+        "backend/app/api/routes/public_jobs.py",
+        "backend/app/api/routes/public_technician.py",
+        "Supabase: technician_job_links, appointments, inquiries, employees, documents, organizations tables",
+        "Supabase Storage: customer-files bucket",
+        "supabase/migrations/0064_technician_job_links.sql",
+        "supabase/migrations/0066_technician_phone_portal.sql"
+      ],
+      "mermaid": "flowchart TD\n  A[Staff dispatches technician from Case UI] --> B[create_job_link]\n  B --> C[Revoke prior un-submitted links for this appointment]\n  C --> D[INSERT technician_job_links with 32-byte token]\n  D --> E[Email job URL /job/TOKEN to technician]\n  E --> F[Technician opens /job/TOKEN]\n  F --> G[_load_link: validate token not revoked]\n  G --> H[_load_context: validate appt not cancelled, case not completed]\n  H --> I[Show job details: customer, appointment, case]\n  I --> J{Technician action}\n  J -- Start --> K[POST /start: stamp started_at]\n  J -- Upload Photo --> L[POST /photos: upload to Storage, mirror to documents]\n  J -- Submit Report --> M{description and photo present?}\n  M -- No --> N[Error: missing fields]\n  M -- Yes --> O[POST /submit: stamp submitted_at, report JSONB, finished_at]\n  O --> P[Report available in Cases Verlauf timeline]\n  K --> J\n  L --> J",
+      "sourceReferences": [
+        "backend/app/services/technician_jobs.py:36-391",
+        "backend/app/api/routes/public_jobs.py",
+        "supabase/migrations/0064_technician_job_links.sql",
+        "supabase/migrations/0066_technician_phone_portal.sql",
+        "supabase/migrations/0059_employee_technician.sql"
+      ],
+      "confidence": 90
+    },
+    {
+      "name": "Outbound Occasion Call Dispatch + Scope Gate",
+      "trigger": "Scheduled sweep run_due_outbound (cron/N8N); OR manual send_single_outbound (staff UAT / to_number_override); OR human appointment action (confirm/cancel/reschedule) fires notify_appointment_outcome",
+      "inputs": [
+        "occasion_key (appointment_reminder, appointment_confirmation, appointment_cancellation, appointment_reschedule, payment_reminder, review_request, etc.)",
+        "org_id, record (appointment/KVA/invoice/etc.), customer",
+        "agent_configs: outbound_enabled, outbound_occasions JSONB, outbound_weekdays, outbound_time_from, outbound_time_to",
+        "OUTBOUND_TEST_SCOPE_ONLY env flag",
+        "OUTBOUND_TEST_NUMBER / OUTBOUND_TEST_EMAIL env vars",
+        "outbound_test_org_id_set (allowed org IDs when scope-only is ON)"
+      ],
+      "conditions": [
+        "outbound_enabled must be true",
+        "outbound_occasions[key] must be truthy (absent key = disabled = never fires)",
+        "Weekday must be in outbound_weekdays (if non-empty)",
+        "Time must be within outbound_time_from..outbound_time_to (Berlin timezone)",
+        "Appointment-action path: human click bypasses time-window/weekday gate",
+        "case_gate='must_be_open': inquiry must not be completed/deleted",
+        "case_gate='must_be_completed': inquiry must be completed (post-completion occasions)",
+        "One-shot occasions: already dispatched (non-failed ledger row exists) → skip",
+        "Recurring occasions: cooldown not yet elapsed, or max_cycles reached → skip",
+        "Scope guard ON: org must be in outbound_test_org_id_set; number/email forced to test targets"
+      ],
+      "businessRules": [
+        "Uniform gate (_passes_gate) for every occasion in one code path",
+        "Atomic dispatch guard: INSERT outbound_calls with partial-unique index (org_id, occasion, referenz_id, cycle_no) WHERE status != failed",
+        "scope guard OFF (OUTBOUND_TEST_SCOPE_ONLY=0): real customer dialed (LIVE since 2026-06-07)",
+        "scope guard ON: all calls forced to OUTBOUND_TEST_NUMBER, all emails to OUTBOUND_TEST_EMAIL; out-of-scope orgs refused",
+        "to_number_override (manual UAT): dials test number, skips ledger claim (repeatable)",
+        "short-hangup retry: if outbound call duration < threshold and org has recall enabled, schedules a retry (schedule_short_hangup_retry)",
+        "Email accompanies call for configured occasions (email_always or OUTBOUND_OCCASION_EMAILS_ENABLED), scope-guarded, best-effort (5s timeout)",
+        "Conversation config override: first_message, dynamic_variables, language injected into ElevenLabs per-call"
+      ],
+      "actions": [
+        "_passes_gate: check outbound_enabled, occasion enabled, weekday, time window",
+        "_resolve_inquiry_statuses: check case open/closed gate",
+        "_cycle_decision: one-shot vs recurring cycle eligibility",
+        "_claim: INSERT pending row into outbound_calls (atomic guard)",
+        "place_outbound_call: ElevenLabs Conversational AI API call with agent_id, phone_number_id, to_number, dynamic_variables, config_override",
+        "UPDATE outbound_calls.status: pending → placed/failed",
+        "_maybe_send_occasion_email: send_email with occasion-specific template (5s timeout, best-effort)",
+        "schedule_short_hangup_retry if enabled"
+      ],
+      "outputs": [
+        "outbound_calls row (occasion, referenz_id, inquiry_id, to_number, status=placed/failed, conversation_id)",
+        "ElevenLabs outbound call placed",
+        "Optional occasion email sent to customer",
+        "Post-call: conversation_id received and linked back via link_outbound_call_to_case"
+      ],
+      "exceptions": [
+        "OutOfScopeError: org not in test allow-list while scope_only=ON → call refused (no ledger row written when using override, ledger already inserted otherwise → update to failed)",
+        "OutboundCallError: ElevenLabs API failure → UPDATE outbound_calls.status=failed",
+        "no_phone: customer has no phone number → skip",
+        "already_dispatched: concurrent sweep → skip (unique index blocks)",
+        "record_inactive: appointment cancelled after selection → skip (liveness re-check)"
+      ],
+      "failureModes": [
+        "ElevenLabs down: all outbound calls fail, ledger rows stuck at failed; manual retry needed",
+        "Scope guard misconfiguration: OUTBOUND_TEST_SCOPE_ONLY=0 on test env could dial real customers",
+        "Email provider timeout: email silently dropped after 5s (best-effort, call is already placed)",
+        "short-hangup recall loop if threshold misconfigured"
+      ],
+      "dependencies": [
+        "backend/app/services/outbound_dispatch.py",
+        "backend/app/services/outbound_scope.py",
+        "backend/app/services/outbound_call.py (place_outbound_call)",
+        "backend/app/services/outbound_occasions.py (OCCASIONS, build_call_content)",
+        "backend/app/services/appointment_notify.py",
+        "backend/app/services/email_send.py",
+        "Supabase: outbound_calls, agent_configs, appointments, inquiries, organizations tables",
+        "ElevenLabs Conversational AI API",
+        "supabase/migrations/0027_outbound_call_tracking.sql",
+        "supabase/migrations/0029_outbound_calls.sql"
+      ],
+      "mermaid": "flowchart TD\n  A[Trigger: cron sweep OR human click OR manual override] --> B[Resolve org config from agent_configs]\n  B --> C{Scope guard ON?}\n  C -- Yes --> D{Org in test allow-list?}\n  D -- No --> Z1[OutOfScopeError: refused]\n  D -- Yes --> E[Force number/email to test targets]\n  C -- No --> F[Use real customer number/email]\n  E --> G[_passes_gate: outbound_enabled + occasion + weekday + window]\n  F --> G\n  G -- Skip reason --> Z2[Log skip, no call]\n  G -- Pass --> H{case_gate check}\n  H -- Case closed --> Z2\n  H -- Pass --> I[_cycle_decision: one-shot or recurring cycle]\n  I -- Already done --> Z2\n  I -- Eligible --> J[_claim: INSERT outbound_calls pending]\n  J --> K{Claim OK?}\n  K -- No → Z2\n  K -- Yes --> L[build_call_content: dynamic_variables + first_message]\n  L --> M[place_outbound_call via ElevenLabs API]\n  M --> N{Call placed OK?}\n  N -- No --> O[UPDATE status=failed]\n  N -- Yes --> P[UPDATE status=placed + conversation_id]\n  P --> Q[_maybe_send_occasion_email best-effort 5s]\n  Q --> R[schedule_short_hangup_retry if enabled]\n  R --> S[Post-call: link conversation_id back to case]",
+      "sourceReferences": [
+        "backend/app/services/outbound_dispatch.py:1-450",
+        "backend/app/services/outbound_scope.py:1-82",
+        "backend/app/services/appointment_notify.py:30-120",
+        "supabase/migrations/0029_outbound_calls.sql",
+        "supabase/migrations/0044_autonomy_per_capability.sql",
+        "supabase/migrations/0045_outbound_options_welcome_variants.sql"
+      ],
+      "confidence": 90
+    },
+    {
+      "name": "Email / Notification Triggers",
+      "trigger": "Multiple triggers: appointment confirm/cancel/reschedule (notify_appointment_outcome); KVA/invoice send (POST /{id}/send); billing threshold (billing_usage.report_call_usage → billing_notifications); occasion email (outbound_dispatch._maybe_send_occasion_email)",
+      "inputs": [
+        "org_id, customer email, org email (Reply-To)",
+        "email_configs: kva_email_subject/body templates, invoice_email_subject/body templates",
+        "appointment: title, scheduled_at, customer name",
+        "KVA/invoice: number, totals, PDF bytes",
+        "billing: threshold type (80%/100%), minutes, plan name",
+        "Brevo SMTP credentials (primary), fallback chain"
+      ],
+      "conditions": [
+        "KVA/Invoice send: customer.email must exist or payload.to override provided",
+        "Appointment notify: outbound_enabled AND outbound_occasions['appointment_reminder'] AND per-action toggle",
+        "Billing notifications: record_notification uses dedup_key UNIQUE to prevent duplicate alerts",
+        "Occasion emails: scope guard applies (OUTBOUND_TEST_SCOPE_ONLY forces test inbox)",
+        "Occasion emails gated: email_always occasions (appointment) fire always; others only if OUTBOUND_OCCASION_EMAILS_ENABLED"
+      ],
+      "businessRules": [
+        "Template precedence: email_configs stored template > payload override > German default",
+        "Variables substituted: {number}, {customer_name}, {org_name}, {firmenname}, {kundename}",
+        "KVA/Invoice emails: Reply-To set to org.email; copy_to_me sends CC to org.email",
+        "Billing emails: from HeyKiki (info@kikichat.de), not white-labeled org",
+        "Billing notifications always recorded in billing_notifications (in-app feed); email is additional",
+        "Occasion emails: 5s send timeout to avoid delaying placed outbound calls",
+        "Employee invite/activation email: separate track owned by Amber (send_email chain scaffolded, not modified here)"
+      ],
+      "actions": [
+        "Appointment notify: place outbound call (appointment_notify.py) AND/OR send email (occasion email in dispatch)",
+        "KVA send: build_pdf, send_email with PDF attachment, stamp sent_at on success",
+        "Invoice send: build_pdf, send_email with PDF attachment, stamp sent_at on success",
+        "billing_notifications.record_notification: INSERT row, _maybe_dispatch_email to org.email",
+        "_maybe_send_occasion_email: send_email in 5s-timeout daemon thread"
+      ],
+      "outputs": [
+        "Email delivered via Brevo SMTP (primary) or fallback chain",
+        "billing_notifications row (in-app feed)",
+        "sent_at stamp on cost_estimates/invoices",
+        "Outbound call placed for appointment action events"
+      ],
+      "exceptions": [
+        "No recipient email → 400 (KVA/invoice) or OutOfScopeError/skip (occasion)",
+        "Email provider failure → 502 for KVA/invoice; swallowed for occasion/billing (best-effort)",
+        "Occasion email timeout (5s) → abandoned, call already placed",
+        "Billing notification dedup: second alert for same dedup_key is silently dropped"
+      ],
+      "failureModes": [
+        "Brevo SMTP credentials expire → all emails fail silently (best-effort paths) or 502 (KVA/invoice paths)",
+        "Reply-To set to org.email: if org has no email configured, reply-to is null",
+        "Billing email to wrong address if org.email stale"
+      ],
+      "dependencies": [
+        "backend/app/services/email_send.py (send_email, Attachment, fallback chain)",
+        "backend/app/services/email_templates.py (render_message_email, substitute, addr_line)",
+        "backend/app/services/billing_notifications.py (record_notification)",
+        "backend/app/services/appointment_notify.py",
+        "backend/app/services/outbound_dispatch.py (_maybe_send_occasion_email)",
+        "Supabase: email_configs, organizations, billing_notifications tables",
+        "Brevo SMTP (primary email provider)"
+      ],
+      "mermaid": "flowchart TD\n  A[Email trigger event] --> B{Trigger type?}\n  B -- KVA/Invoice send --> C[Build PDF]\n  C --> D[Resolve recipient: customer.email or payload.to]\n  D --> E{Recipient found?}\n  E -- No --> F[400 error]\n  E -- Yes --> G[send_email: Brevo SMTP + fallback chain]\n  G --> H{Sent OK?}\n  H -- Yes --> I[Stamp sent_at on KVA/invoice]\n  H -- No --> J[502 error: stays draft]\n  B -- Appointment action --> K[notify_appointment_outcome]\n  K --> L{outbound_enabled + occasion + per-action toggle?}\n  L -- No --> M[Skip: no call/email]\n  L -- Yes --> N[place_outbound_call]\n  N --> O[_maybe_send_occasion_email 5s timeout]\n  B -- Billing threshold --> P[billing_notifications.record_notification]\n  P --> Q[INSERT billing_notifications with dedup_key]\n  Q --> R[_maybe_dispatch_email to org.email]\n  B -- Occasion sweep --> S[_maybe_send_occasion_email]\n  S --> T[enforce_email_scope]\n  T --> U[send_email 5s timeout]",
+      "sourceReferences": [
+        "backend/app/services/email_send.py",
+        "backend/app/services/email_templates.py",
+        "backend/app/services/billing_notifications.py",
+        "backend/app/api/routes/cost_estimates.py:361-448",
+        "backend/app/api/routes/invoices.py:377-460",
+        "backend/app/services/appointment_notify.py"
+      ],
+      "confidence": 88
+    },
+    {
+      "name": "Org Onboarding / Agent Provisioning (Super-Admin → configure_agent → ElevenLabs)",
+      "trigger": "POST /api/super-admin/orgs (super_admin role) OR POST /api/heykiki/provision (master secret); triggers provision_org then configure_agent",
+      "inputs": [
+        "heykiki_org_id (unique org slug)",
+        "org_name, login_email, login_password, admin_name",
+        "elevenlabs_agent_id (pre-existing ElevenLabs agent to wire)",
+        "ElevenLabs API key (settings.elevenlabs_api_key)"
+      ],
+      "conditions": [
+        "heykiki_org_id must not already exist in organizations table",
+        "login_email must not already exist in users table",
+        "ElevenLabs agent must have at least one phone number bound",
+        "configure_agent skips prompt overwrite if agent_provisioned_at IS NOT NULL (idempotent re-sync)",
+        "hk_* workspace tool names must be findable by name in ElevenLabs workspace"
+      ],
+      "businessRules": [
+        "Auth user created first (Supabase auth.admin.create_user), then organizations row, then users row, then agent_configs row",
+        "Compensating rollback of all 4 rows + auth user if configure_agent fails (clean retry)",
+        "B.1: Fetch phone numbers from ElevenLabs, persist phone_number on organizations; hard-fail if zero phones",
+        "B.2: Additively merge hk_* tool IDs onto agent.prompt.tool_ids via patch_agent_safely",
+        "B.3: Apply master German prompt (agent_prompt_template.txt) with org name substituted; skipped on re-sync if agent_provisioned_at set",
+        "B.4: Enable conversation_initiation_client_data webhook pointing to backend",
+        "B.5: Assert audio is in client_events (Kiki-Zentrale strict-additive write rule)",
+        "B.6: Enable Path A override whitelist (prompt, first_message, language) on agent",
+        "Default agent_config seeded: autonomy_level=1, proactive_ai_enabled=True, kva_automation_enabled=False",
+        "Default required fields seeded: name, phone, address, problem_description (locked), email/offer fields",
+        "History import background task scheduled after provision returns"
+      ],
+      "actions": [
+        "Check duplicate org/user",
+        "auth.admin.create_user (Supabase)",
+        "INSERT organizations row (heykiki_org_id, name, elevenlabs_agent_id)",
+        "INSERT users row (org_id, auth_user_id, email, role=org_admin)",
+        "INSERT agent_configs row (default config)",
+        "configure_agent(org_id, elevenlabs_agent_id): B.1-B.6 ElevenLabs writes via patch_agent_safely",
+        "_seed_required_fields (idempotent default fields insert)",
+        "import_agent_history (background task: backfill EL conversation history)"
+      ],
+      "outputs": [
+        "organizations row (id, heykiki_org_id, phone_number, elevenlabs_agent_id, elevenlabs_phone_number_id)",
+        "users row (role=org_admin)",
+        "agent_configs row (default autonomy, scheduling, etc.)",
+        "agent_required_fields rows (4 default + offer fields)",
+        "ElevenLabs agent: hk_* tools added, prompt set, webhook enabled, audio asserted, override whitelist enabled",
+        "Provisioned org ready to receive inbound calls"
+      ],
+      "exceptions": [
+        "Duplicate heykiki_org_id or email → 409",
+        "ElevenLabs agent has no phone → 400, rollback all DB rows",
+        "Missing hk_* workspace tool → configure_agent fails, rollback",
+        "ElevenLabs API error during patch → rollback + raise",
+        "Auth user creation failure → 500 (no DB rows written)"
+      ],
+      "failureModes": [
+        "Compensating rollback is best-effort: if rollback itself fails, orphan rows may remain; heykiki_org_id UNIQUE prevents duplicate org but orphan auth user requires manual cleanup",
+        "Re-sync (sync-agent-config route) runs configure_agent again: prompt skipped if agent_provisioned_at set, but tool IDs re-merged (idempotent additive)",
+        "hk_* tool cache is module-level: missing tool found on next call after workspace fix (no restart needed)"
+      ],
+      "dependencies": [
+        "backend/app/services/provisioning.py",
+        "backend/app/services/agent_config.py (configure_agent)",
+        "backend/app/services/elevenlabs_agent.py (patch_agent_safely, get_agent_config)",
+        "backend/app/api/routes/super_admin.py",
+        "backend/app/api/routes/provision.py",
+        "Supabase: organizations, users, agent_configs, agent_required_fields tables",
+        "Supabase Auth (admin.create_user)",
+        "ElevenLabs API (agent config, workspace tools, phone numbers)"
+      ],
+      "mermaid": "flowchart TD\n  A[POST /api/super-admin/orgs or /api/heykiki/provision] --> B{Duplicate org or user?}\n  B -- Yes --> Z1[409 Conflict]\n  B -- No --> C[auth.admin.create_user Supabase]\n  C --> D[INSERT organizations row]\n  D --> E[INSERT users row org_admin]\n  E --> F[INSERT agent_configs default]\n  F --> G[configure_agent: B.1-B.6]\n  G --> H{ElevenLabs phone bound?}\n  H -- No --> I[Rollback: delete org, user, auth user]\n  I --> Z2[400 error]\n  H -- Yes --> J[B.1 Persist phone_number]\n  J --> K[B.2 Merge hk_* tool IDs additive]\n  K --> L{agent_provisioned_at set?}\n  L -- Yes --> M[Skip B.3 prompt]\n  L -- No --> N[B.3 Apply master German prompt]\n  M --> O[B.4 Enable webhook]\n  N --> O\n  O --> P[B.5 Assert audio in client_events]\n  P --> Q[B.6 Enable override whitelist]\n  Q --> R[_seed_required_fields idempotent]\n  R --> S[Background: import_agent_history]\n  S --> T[Org provisioned and ready]",
+      "sourceReferences": [
+        "backend/app/services/provisioning.py:83-300",
+        "backend/app/services/agent_config.py:1-200",
+        "backend/app/services/elevenlabs_agent.py",
+        "backend/app/api/routes/super_admin.py:1-100",
+        "supabase/migrations/0022_org_agent_provisioned_at.sql"
+      ],
+      "confidence": 87
+    },
+    {
+      "name": "Copilot Action → Confirm → Apply",
+      "trigger": "Staff sends a message to POST /api/copilot/chat (copilot_enabled feature flag must be ON); confirmed write actions executed via POST /api/copilot/confirm",
+      "inputs": [
+        "message (user natural-language request)",
+        "history (prior conversation turns, max 20)",
+        "conversation_id (optional, for persistence)",
+        "user: org_id, role (determines tool schemas available)",
+        "AI model: settings.openai_copilot_model"
+      ],
+      "conditions": [
+        "settings.copilot_enabled must be True (router only mounted if flag ON)",
+        "OpenAI API key must be configured (ai_client.is_configured())",
+        "AI usage cap must not be exceeded (usage.within_cap)",
+        "Max 5 agentic steps per turn (max_steps=5)",
+        "Role gates: org_admin can use all tools; plain employee restricted schema",
+        "READ tools execute immediately; WRITE tools are proposed (not executed in chat)",
+        "confirm endpoint: tool name must exist in tool registry, args must be valid"
+      ],
+      "businessRules": [
+        "History sanitisation: only user/assistant roles accepted from client (no forged tool results)",
+        "Write tool proposal: orchestrator returns {content, actions: [{tool, args}]} — UI must display and user must click confirm",
+        "One confirm per action: POST /api/copilot/confirm executes exactly one write tool",
+        "Audit: every confirmed write is recorded in copilot_action_audit with user_id, tool_name, args, result_status, conversation_id",
+        "Conversation persistence: turns stored in copilot_conversations + copilot_messages (best-effort); compensation on failure",
+        "Rate limit: enforce_rate_limit applied (per-org per-minute cap)",
+        "AI usage logged: prompt_tokens, completion_tokens, feature='copilot'"
+      ],
+      "actions": [
+        "POST /chat: build system prompt (CRM guardrail) + history + message",
+        "ai_client.chat with tool_schemas for role",
+        "Loop up to max_steps: execute READ tools immediately, collect WRITE tool proposals",
+        "Return {content, actions (proposed writes), client_actions}",
+        "POST /confirm: get_tool(tool_name), execute write tool with args and user context",
+        "_audit: INSERT copilot_action_audit row",
+        "_persist_turn: upsert copilot_conversations + INSERT copilot_messages (user + assistant)"
+      ],
+      "outputs": [
+        "chat response: {content (text), actions (proposed writes list), client_actions}",
+        "confirm response: result of executed write tool",
+        "copilot_action_audit row (confirmed write audit trail)",
+        "copilot_conversations + copilot_messages rows (chat history)"
+      ],
+      "exceptions": [
+        "copilot not configured (no OpenAI key) → 503",
+        "rate limit exceeded → 429",
+        "tool not found in registry → 404 on confirm",
+        "write tool execution error → returned as {error} in result, audit records status=error",
+        "AI response has no tool_calls and no content → returns last_text"
+      ],
+      "failureModes": [
+        "Max steps reached without final text answer → returns last_text seen (may be empty)",
+        "Conversation persistence failure: best-effort, compensation deletes empty conversation row",
+        "Audit failure: fail-open (no-op), write still executed",
+        "User can confirm the same proposed action multiple times if they copy the payload — no dedup at confirm level"
+      ],
+      "dependencies": [
+        "backend/app/api/routes/copilot.py",
+        "backend/app/services/copilot/orchestrator.py (run_turn)",
+        "backend/app/services/copilot/tools.py (get_tool, schemas_for_role)",
+        "backend/app/services/copilot/prompt.py (system_prompt)",
+        "backend/app/services/ai.py (chat, usage)",
+        "backend/app/services/ratelimit.py",
+        "Supabase: copilot_conversations, copilot_messages, copilot_action_audit tables",
+        "OpenAI API",
+        "supabase/migrations/0042_ai_copilot.sql",
+        "supabase/migrations/0062_copilot_conversations.sql"
+      ],
+      "mermaid": "flowchart TD\n  A[Staff: POST /api/copilot/chat] --> B{copilot_enabled AND AI configured?}\n  B -- No --> Z1[503 Unavailable]\n  B -- Yes --> C[enforce_rate_limit]\n  C --> D{Rate limit OK?}\n  D -- No --> Z2[429 Too Many Requests]\n  D -- Yes --> E[Build system prompt + clean history + user message]\n  E --> F[ai_client.chat with role-scoped tool schemas]\n  F --> G{Tool calls in response?}\n  G -- No --> H[Return text answer]\n  G -- Yes --> I{Tool is READ or WRITE?}\n  I -- READ --> J[Execute immediately, add result to convo]\n  I -- WRITE --> K[Propose action: add to actions list]\n  J --> L{More steps < max_steps?}\n  L -- Yes --> F\n  L -- No --> M[Return last_text + proposed actions]\n  K --> M\n  H --> N[_persist_turn: save conversation + messages]\n  M --> N\n  N --> O[Return {content, actions}]\n  O --> P[Staff sees proposed writes in UI]\n  P --> Q[Staff clicks Confirm]\n  Q --> R[POST /api/copilot/confirm {tool, args}]\n  R --> S[get_tool + execute write]\n  S --> T[_audit: INSERT copilot_action_audit]\n  T --> U[Return write result]",
+      "sourceReferences": [
+        "backend/app/api/routes/copilot.py:1-200",
+        "backend/app/services/copilot/orchestrator.py:55-150",
+        "backend/app/services/copilot/tools.py",
+        "backend/app/services/copilot/prompt.py",
+        "supabase/migrations/0042_ai_copilot.sql",
+        "supabase/migrations/0054_action_tasks.sql"
+      ],
+      "confidence": 85
+    },
+    {
+      "name": "Stripe Billing / Usage → Warning / Overage",
+      "trigger": "Post-call route (inbound or outbound) processes a call → billing_usage.report_call_usage called for newly-processed calls; billing sweep checks thresholds → billing_notifications; Stripe webhook receives subscription events",
+      "inputs": [
+        "call_id, org_id (from post-call result)",
+        "calls.duration_seconds (raw call duration)",
+        "organizations.stripe_customer_id",
+        "Stripe subscription: active, metered usage item, price.recurring.usage_type=metered",
+        "STRIPE_SECRET_KEY env var",
+        "billing plan: Solo €99/Team €179/Premium €499 + per-minute overage",
+        "billing_usage_reports (dedup table: call_id UNIQUE)"
+      ],
+      "conditions": [
+        "Stripe billing configured: STRIPE_SECRET_KEY set",
+        "Org has stripe_customer_id on organizations row",
+        "Org has active metered subscription item (not a legacy Connect-attributed sub)",
+        "Idempotent: billing_usage_reports.call_id UNIQUE prevents double-reporting",
+        "Legacy Connect sub → skip (ConnectAttributionError: forbidden to write)",
+        "Duration rounds to minutes via round() (Amber's go-live decision; not ceil)"
+      ],
+      "businessRules": [
+        "One call = one usage record: idempotent on call_id",
+        "minutes = round(duration_seconds / 60)",
+        "Audit row written BEFORE Stripe call (status=pending), updated after (succeeded/failed)",
+        "Connect attribution block: any subscription with application field set = legacy ChatDash = read-only",
+        "Cross-org guard: Stripe subscription's customer must match org's stripe_customer_id",
+        "Idempotency key: {op}:{org_id}:{sha256(payload)[:16]} → Stripe deduplicates retries for 24h",
+        "billing_notifications: 80% threshold and 100% overage alerts sent as in-app + email",
+        "Notifications deduped via dedup_key UNIQUE (one alert per period per threshold)",
+        "Stripe webhook: handled by POST /api/stripe-webhook (Stripe signature verified); updates org billing state",
+        "No self-serve cancel: Stripe cancel is admin-only action"
+      ],
+      "actions": [
+        "select_billable: filter post-call results to newly-processed (status=processed, both ids present)",
+        "resolve_metered_subscription_item: find writable metered item for org",
+        "stripe_call_safely: INSERT billing_events pending, call stripe.UsageRecord.create, UPDATE billing_events succeeded/failed",
+        "billing_notifications.record_notification: INSERT with dedup_key for threshold alerts",
+        "_maybe_dispatch_email: send billing alert email to org.email",
+        "Stripe webhook: verify signature, update org stripe_customer_id / subscription state"
+      ],
+      "outputs": [
+        "billing_usage_reports row (call_id, org_id, minutes_reported, subscription_item_id, stripe_usage_record_id)",
+        "billing_events audit row (op, status, stripe_response)",
+        "Stripe usage record created (meters outbound minutes on subscription)",
+        "billing_notifications row (in-app threshold alert)",
+        "Email to org.email on threshold breach"
+      ],
+      "exceptions": [
+        "no_customer: org has no stripe_customer_id → skip (logged)",
+        "no_metered_sub: no active metered subscription → skip",
+        "legacy_connect_sub: ConnectAttributionError → skip (forbidden write)",
+        "Stripe API error → billing_events.status=failed, call still processed",
+        "Duplicate call_id (retry) → unique violation caught, skip (no double-billing)",
+        "Stripe signature mismatch on webhook → 400, event ignored"
+      ],
+      "failureModes": [
+        "Stripe test key in prod → no real billing (not deployed live yet as of 2026-06-17)",
+        "round() rounding: a 29-second call = 0 minutes billed (not 1); customer calling from noisy line may inflate billed minutes vs actual",
+        "billing_events.status stuck at pending if process crashes mid-call to Stripe: manual reconciliation needed",
+        "No self-serve cancel means churned customers accrue unused subscription until Amber manually cancels"
+      ],
+      "dependencies": [
+        "backend/app/services/billing_usage.py",
+        "backend/app/services/stripe_billing.py (stripe_call_safely, get_stripe, is_configured)",
+        "backend/app/services/billing_notifications.py",
+        "backend/app/api/routes/billing.py",
+        "backend/app/api/routes/stripe_webhook.py",
+        "Supabase: billing_usage_reports, billing_events, billing_notifications, organizations tables",
+        "Stripe API (UsageRecord, Subscription, Customer)",
+        "supabase/migrations/0048_billing.sql",
+        "supabase/migrations/0049_billing_phase2.sql"
+      ],
+      "mermaid": "flowchart TD\n  A[Post-call: newly processed call] --> B[select_billable: filter status=processed]\n  B --> C[report_call_usage for each billable call]\n  C --> D{STRIPE_SECRET_KEY configured?}\n  D -- No --> Z1[Skip: billing disabled]\n  D -- Yes --> E[Check billing_usage_reports for call_id unique]\n  E --> F{Already reported?}\n  F -- Yes --> Z2[Skip: idempotent dedup]\n  F -- No --> G[resolve_metered_subscription_item]\n  G --> H{Org has stripe_customer_id?}\n  H -- No --> Z3[Skip: no_customer]\n  H -- Yes --> I{Metered non-Connect sub found?}\n  I -- No --> Z4[Skip: no_metered_sub or legacy_connect_sub]\n  I -- Yes --> J[stripe_call_safely: INSERT billing_events pending]\n  J --> K[stripe.UsageRecord.create quantity=round seconds/60]\n  K --> L{Stripe call OK?}\n  L -- No --> M[UPDATE billing_events failed]\n  L -- Yes --> N[UPDATE billing_events succeeded]\n  N --> O[INSERT billing_usage_reports]\n  O --> P[Check usage thresholds]\n  P --> Q{Threshold breached?}\n  Q -- 80% --> R[billing_notifications: 80% warning + email]\n  Q -- 100% --> S[billing_notifications: overage alert + email]\n  Q -- No --> T[Done]\n  R --> T\n  S --> T",
+      "sourceReferences": [
+        "backend/app/services/billing_usage.py:1-200",
+        "backend/app/services/stripe_billing.py:1-200",
+        "backend/app/services/billing_notifications.py:1-100",
+        "backend/app/api/routes/stripe_webhook.py",
+        "supabase/migrations/0048_billing.sql",
+        "supabase/migrations/0049_billing_phase2.sql"
+      ],
+      "confidence": 85
+    }
+  ]
+}

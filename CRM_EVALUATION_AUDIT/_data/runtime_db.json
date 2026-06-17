@@ -1,0 +1,64 @@
+{
+  "validatedAt": "2026-06-17 (this session)",
+  "environment": {
+    "supabaseProject": "ifbluvdcbcesuhvkxsfn (kikiJarvis, ACTIVE_HEALTHY, ap-northeast-1, pg17)",
+    "testOrg": { "heykiki_org_id": "kiki-test-007", "id": "c4dbf596-86fd-4484-88d9-095b2c082afb", "name": "Kiki Chat GmbH", "phone": "+4925197593899", "agent_id": "agent_5001ksahz3w7fhx90j71xr800py4", "agent_provisioned_at": "2026-06-03" },
+    "deployedBackend": "https://backend-production-3f88a.up.railway.app",
+    "deployedFrontend": "https://frontend-production-4bdf.up.railway.app"
+  },
+  "deployedHealth": { "backendHealth": "{\"status\":\"ok\"}", "openapiPathCount": 221, "frontendRoot": "HTTP 200" },
+  "globalRowCounts": { "organizations": 7, "customers": 28, "calls": 195, "inquiries": 240, "appointments": 47, "cases": 44, "projects": 1, "cost_estimates": 10, "invoices": 7, "employees": 19, "agent_config_snapshots": 565, "agent_writes_audit": 564, "copilot_messages": 28, "copilot_action_audit": 28, "billing_events": 19, "outbound_calls": 5, "missed_calls": 1 },
+  "testOrgValidation": {
+    "inquiries": { "total": 76, "numbered": 76, "with_case": 50, "with_call": 51, "emergency_flag_true": 6 },
+    "cases": { "total": 32, "numbered": 32, "with_project": 0 },
+    "projects": { "total": 1 },
+    "customers": { "total": 17 },
+    "calls": { "total": 52, "soft_deleted": 4, "spam": 1, "with_inquiry": 48 },
+    "appointments": { "total": 33, "confirmed": 27, "cancelled": 6 }
+  },
+  "numberingConfirmed": {
+    "inquiry": "ANF-KC007-0001 .. ANF-KC007-0076 (org-code KC007, sequential)",
+    "case": "FL-KC007-0001 .. FL-KC007-0032",
+    "project": "PR-KC007-0001",
+    "customer": "MIXED: KD-##### (8), KI-###### (4), bare numeric 101001/105156 (4) — inconsistent across import vs generated"
+  },
+  "statusMachinesObserved": {
+    "cases": { "active": 27, "planning": 4, "completed": 1 },
+    "inquiries": { "open": 46, "in_progress": 22, "completed": 5, "deleted": 3 },
+    "appointments": { "confirmed": 27, "cancelled": 6 },
+    "calls": { "completed": 52 },
+    "projects": { "planning": 1 }
+  },
+  "caseGroupingProvenance": { "ai_confirmed": { "count": 37, "avg_confidence": 0.87 }, "ai": { "count": 10, "avg_confidence": 0.97 }, "human": { "count": 3, "avg_confidence": 1.0 }, "ungrouped_null": { "count": 26 } },
+  "outboundConfirmed": [
+    { "occasion": "appointment_reschedule", "anlass_typ": "TERMIN_VERSCHIEBUNG", "status": "placed", "to": "+917879997839" },
+    { "occasion": "kva_followup", "anlass_typ": "KVA_NACHFASSEN", "status": "placed", "to": "+917879997839" },
+    { "occasion": "appointment_reminder", "anlass_typ": "TERMIN_ERINNERUNG", "status": "placed", "to": "+917879997839" },
+    { "occasion": "appointment_cancellation", "anlass_typ": "TERMIN_ABSAGE", "status": "placed", "to": "+917879997839" },
+    { "occasion": "appointment_confirmation", "anlass_typ": "TERMIN_BESTAETIGUNG", "status": "placed", "to": "+917879997839" }
+  ],
+  "writeRoundTrip": {
+    "table": "customers", "id": "6798d6d8-2338-473c-91f2-cbc9a63198f3", "field": "notes",
+    "steps": ["UPDATE notes='AUDIT_ROUNDTRIP_2026-06-17' (RETURNING confirmed write)", "independent SELECT confirmed durable persistence", "UPDATE notes=NULL reverted to original"],
+    "result": "PASS — write persisted and was reverted cleanly",
+    "incidentalFinding": "customers.updated_at did NOT change on raw UPDATE (stayed 2026-06-14) => updated_at is app-maintained, not DB-trigger-maintained"
+  },
+  "securityAdvisors": {
+    "rls_enabled_no_policy_INFO": ["action_tasks","billing_checkout_sessions","billing_events","billing_migration_log","billing_notifications","billing_security_events","billing_usage_reports","billing_webhook_events","case_links","employee_absences","maintenance_plans","missed_calls","oauth_connections","oauth_purpose_links","org_secrets","outbound_calls","technician_job_links","text_modules","tools","vehicles"],
+    "interpretation": "RLS ON + no policy = deny-all to PostgREST anon/authenticated roles (secure-by-default). Backend uses service_role (bypasses RLS), so tenant isolation for these tables relies on APP-LAYER org_id filters, not DB policy. No policy backstop if a query is ever under-scoped or the anon key is exposed.",
+    "warn": ["auth_org_id() SECURITY DEFINER executable by authenticated via /rest/v1/rpc/auth_org_id","rls_auto_enable() SECURITY DEFINER executable by anon+authenticated","kz_begin_agent_sync has mutable search_path","Supabase Auth leaked-password protection DISABLED"]
+  },
+  "elevenLabsSync": {
+    "promptLength": 66209,
+    "renderedFromTemplate": true,
+    "placeholdersSubstituted": "all {{COMPANY_*}}/{{KZ_*}} substituted to 'Kiki Chat GmbH'; {{system__*}} runtime vars correctly left",
+    "firstMessage": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+    "mcpLimitation": "ElevenLabs MCP get_agent_config returns a SIMPLIFIED 9-key view (no client_events/tools[]/webhook) => audio-event presence, tool registration, and webhook URL NOT verifiable via MCP; require full EL REST API or dashboard. (Prior UAT in SESSION_HANDOVER confirmed audio + 10-11 hk_ tools + prod webhook.)",
+    "dataQualityFlags": ["appointment_categories contain test garbage: 'ruskin', 'Pipe isssue' (typo)","KZ_CONVERSATION_LOGIC block has English test text mixed into German prompt","org contact email = dixitrahul825@gmail.com (the designated mail test account)"]
+  },
+  "notExecutableFromThisWorktree": {
+    "reason": "no backend .env (Supabase/ElevenLabs secrets) in this worktree => cannot run scripts/fire_test_call.py or boot local backend; cannot read the dixitrahul825 inbox",
+    "liveCallProcedure": "from backend/ with prod env: PYTHONPATH=. ./.venv/bin/python ../scripts/fire_test_call.py (fires appointment_reminder to +917879997839; space >=2 min apart; log timestamps)",
+    "liveAgentResync": "from backend/: ./.venv/bin/python ../scripts/force_sync_test_agent.py (re-renders prompt + attaches hk_ tools + points webhook at prod backend, for agent_5001)"
+  }
+}

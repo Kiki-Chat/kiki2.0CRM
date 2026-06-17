@@ -1,0 +1,1317 @@
+{
+  "domain": "Kiki-Zentrale: Voice-Agent Configuration & ElevenLabs Sync",
+  "rulePrefix": "KIKI",
+  "features": [
+    {
+      "name": "Agent Provisioning (configure_agent)",
+      "category": "ElevenLabs Sync",
+      "description": "Six-step pipeline that wires a fresh ElevenLabs agent for HeyKiki use: phone fetch (B.1), hk_* tool merge (B.2), master-prompt write (B.3, first run only), conversation-initiation webhook enable (B.4), audio-event assertion (B.5), per-call override whitelist enable (B.6).",
+      "modules": [
+        "backend/app/services/agent_config.py",
+        "backend/app/services/elevenlabs_agent.py",
+        "backend/app/api/routes/super_admin.py"
+      ],
+      "apis": [
+        "POST /api/super-admin/orgs/{org_id}/sync-agent-config"
+      ],
+      "tables": ["organizations", "agent_config_snapshots", "agent_writes_audit"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": [
+        "Prompt step is idempotent (skipped on re-run) but relies on organizations.agent_provisioned_at being set; NULL means the prompt WILL be (re-)applied even on existing orgs",
+        "force=True on sync-agent-config clears agent_provisioned_at and re-applies the master prompt, overwriting any customer hand-edits"
+      ]
+    },
+    {
+      "name": "Safe ElevenLabs Write (patch_agent_safely)",
+      "category": "ElevenLabs Sync",
+      "description": "The single permitted path for any agent PATCH: cross-org guard, pre-write snapshot, additive array merge, audio assertion before PATCH, surgical diff, post-write verify with auto-rollback, audit record.",
+      "modules": [
+        "backend/app/services/elevenlabs_agent.py"
+      ],
+      "apis": ["ElevenLabs PATCH /v1/convai/agents/{agent_id}"],
+      "tables": ["organizations", "agent_config_snapshots", "agent_writes_audit"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": [
+        "Process-local per-org lock (_REPUSH_LOCKS) serializes overlapping prompt re-pushes but a process restart drops the lock without rollback",
+        "Auto-rollback restores conversation_config + name but not platform_settings sub-fields"
+      ]
+    },
+    {
+      "name": "Per-Org Prompt Template Rendering",
+      "category": "Agent Configuration",
+      "description": "render_prompt_for_org fills 14 PLACEHOLDER TOKEN slots in agent_prompt_template.txt from org identity + Kiki-Zentrale config tables; post-render guards reject unfilled {{...}} tokens, company-identity residue, and legacy wkp_shared_ references.",
+      "modules": [
+        "backend/app/services/agent_config.py",
+        "backend/app/services/agent_prompt_template.txt"
+      ],
+      "apis": [],
+      "tables": ["organizations", "agent_configs", "agent_required_fields", "appointment_categories", "employees"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": [
+        "KZ_PROBLEM_DESCRIPTION token is suppressed if a 'problem_description' required-field row exists (migration 0052 path); orgs not yet migrated fall back to the standalone config block",
+        "trade defaults to 'Handwerk' when neither agent_configs.trade nor organizations.trade is set"
+      ]
+    },
+    {
+      "name": "Knowledge Base Push/Remove/Reindex",
+      "category": "ElevenLabs Sync",
+      "description": "PDF and URL knowledge resources are uploaded to Supabase Storage / the ElevenLabs KB, attached to the agent additively via patch_agent_safely. Remove detaches the doc and deletes from EL. Reindex = remove + fresh push.",
+      "modules": [
+        "backend/app/services/elevenlabs_agent.py",
+        "backend/app/api/routes/kiki_zentrale.py"
+      ],
+      "apis": [
+        "POST /api/kiki-zentrale/knowledge-resources/url",
+        "POST /api/kiki-zentrale/knowledge-resources/pdf",
+        "DELETE /api/kiki-zentrale/knowledge-resources/{resource_id}",
+        "POST /api/kiki-zentrale/knowledge-resources/{resource_id}/reindex"
+      ],
+      "tables": ["knowledge_resources", "agent_config_snapshots", "agent_writes_audit"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 90,
+      "risks": [
+        "PDF is uploaded to Supabase Storage, then a signed URL is fetched and sent to ElevenLabs; a 600-second signed URL window is the only time budget for the EL upload",
+        "PDF storage path uses org_id/uuid4.pdf — org-scoped but no explicit collision check beyond uuid4 uniqueness"
+      ]
+    },
+    {
+      "name": "Price-List Knowledge-Base Sync",
+      "category": "ElevenLabs Sync",
+      "description": "When Preisauskunft is toggled ON, a text document ('Preisliste (Richtpreise)') is generated from active catalog_items with unit_price > 0 and attached to the agent KB. Toggling OFF removes the document. Reconcile-by-name heals orphaned docs.",
+      "modules": [
+        "backend/app/services/price_knowledge.py",
+        "backend/app/api/routes/kiki_zentrale.py"
+      ],
+      "apis": [
+        "PATCH /api/kiki-zentrale/price-info"
+      ],
+      "tables": ["agent_configs", "catalog_items", "organizations"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 88,
+      "risks": [
+        "GET→PATCH window for KB array is not serialized; concurrent syncs for the same org can race (documented as out-of-scope)",
+        "price_list_doc_id in agent_configs may be stale if a previous PATCH failed after EL doc creation"
+      ]
+    },
+    {
+      "name": "Agent-Sync Status Banner",
+      "category": "Agent Configuration",
+      "description": "Every config-mutating Kiki-Zentrale save calls kz_begin_agent_sync (DB RPC) synchronously, then schedules a BackgroundTask for the EL re-push. Banner polls GET /sync-status; a pending sync older than 300 s is coerced to 'failed' on the read side without a DB write.",
+      "modules": [
+        "backend/app/services/agent_config.py",
+        "backend/app/api/routes/kiki_zentrale.py"
+      ],
+      "apis": [
+        "GET /api/kiki-zentrale/sync-status",
+        "POST /api/kiki-zentrale/sync-status/retry"
+      ],
+      "tables": ["agent_configs"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 93,
+      "risks": [
+        "Stale coercion (pending → failed after 300 s) is read-only; the DB row stays 'pending'; a backend restart that fixes the stuck process would find the row already coerced on next poll",
+        "seq=0 from begin_sync failure silently skips finish_sync (never marks applied/failed)"
+      ]
+    },
+    {
+      "name": "Agent-Facing Tool Webhooks (hk_* tools)",
+      "category": "Agent Tools",
+      "description": "Twelve ElevenLabs tool callbacks routed to /api/elevenlabs/tools/*. Each resolves org via X-HeyKiki-Secret header or _agentId body field (resolve_tool_org). All use run_in_threadpool for the synchronous Supabase calls.",
+      "modules": [
+        "backend/app/api/routes/tools/",
+        "backend/app/api/deps.py",
+        "backend/app/schemas/tools.py"
+      ],
+      "apis": [
+        "POST /api/elevenlabs/tools/identify-customer",
+        "POST /api/elevenlabs/tools/update-customer",
+        "POST /api/elevenlabs/tools/create-inquiry",
+        "POST /api/elevenlabs/tools/get-available-slots",
+        "POST /api/elevenlabs/tools/create-appointment",
+        "POST /api/elevenlabs/tools/cancel-appointment",
+        "POST /api/elevenlabs/tools/change-appointment",
+        "POST /api/elevenlabs/tools/search-inquiries",
+        "POST /api/elevenlabs/tools/query-knowledge-base",
+        "POST /api/elevenlabs/tools/transfer-call",
+        "POST /api/elevenlabs/tools/draft-cost-estimate"
+      ],
+      "tables": ["org_secrets", "organizations"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 92,
+      "risks": [
+        "resolve_tool_org falls back to agent_id body lookup when no X-HeyKiki-Secret header is present — a spoofed _agentId with no matching org returns 401, but there is no rate limit on this lookup path",
+        "queryKnowledgeBase service always returns a static 'no answer' response regardless of the native EL KB — the KB is used natively by the agent, not queried via this tool"
+      ]
+    },
+    {
+      "name": "Conversation Initiation Webhook",
+      "category": "Agent Runtime",
+      "description": "Fires when a Twilio/SIP call connects. Looks up the caller by phone in customers table and returns customer data as dynamic variables. Also returns a time-based welcome-message override (Berlin time) if configured. Provides a voicemailMessage variable with a company-aware default.",
+      "modules": [
+        "backend/app/services/conversation_init.py",
+        "backend/app/api/routes/conversation_init.py"
+      ],
+      "apis": [
+        "POST /api/elevenlabs/conversation-init"
+      ],
+      "tables": ["customers", "agent_configs", "organizations"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 90,
+      "risks": [
+        "Phone lookup is exact-match on customers.phone — formatting differences (spaces, dashes) cause misses",
+        "welcome_messages time-window logic silently skips malformed variant dicts"
+      ]
+    },
+    {
+      "name": "Leitfaden (Required Fields + Linked Offer Steps)",
+      "category": "Agent Configuration",
+      "description": "Ordered list of fields the agent must ask plus offer-steps (Termin/KVA/Preisauskunft) at drag-and-drop positions. Linked rows derive active state from the live agent_configs boolean; is_active on the row itself is position-only for linked rows. A batch PATCH saves the complete reordered list in one operation.",
+      "modules": [
+        "backend/app/api/routes/kiki_zentrale.py",
+        "backend/app/services/agent_config.py"
+      ],
+      "apis": [
+        "GET /api/kiki-zentrale/required-fields",
+        "PATCH /api/kiki-zentrale/leitfaden",
+        "POST /api/kiki-zentrale/required-fields",
+        "PATCH /api/kiki-zentrale/required-fields/{field_id}",
+        "DELETE /api/kiki-zentrale/required-fields/{field_id}",
+        "POST /api/kiki-zentrale/required-fields/reorder"
+      ],
+      "tables": ["agent_required_fields", "agent_configs"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 88,
+      "risks": [
+        "Leitfaden batch-save checks price_info_enabled activation guard BEFORE per-row updates (audit 2026-06-11 fix), but if any per-row DB write fails mid-loop the remainder are not rolled back"
+      ]
+    },
+    {
+      "name": "Conversation Logic (Wenn/Dann Rule Builder)",
+      "category": "Agent Configuration",
+      "description": "Structured if/then rule tree stored in agent_configs.conversation_logic (JSON). Validated and compiled to German prose at save time. The compiled block renders inside the agent prompt as '## Schritt 1a'. An AI-generation endpoint converts free-text descriptions to the rule tree (rate-limited: 6/min per org).",
+      "modules": [
+        "backend/app/api/routes/kiki_zentrale.py",
+        "backend/app/schemas/conversation_logic.py",
+        "backend/app/services/conversation_logic_ai.py"
+      ],
+      "apis": [
+        "GET /api/kiki-zentrale/conversation-logic",
+        "PATCH /api/kiki-zentrale/conversation-logic",
+        "POST /api/kiki-zentrale/conversation-logic/preview",
+        "POST /api/kiki-zentrale/gespraechsablauf/preview",
+        "POST /api/kiki-zentrale/conversation-logic/generate"
+      ],
+      "tables": ["agent_configs"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 85,
+      "risks": [
+        "A compile failure during render_prompt_for_org logs a warning and returns '' — the Schritt 1a block silently vanishes from the live prompt",
+        "MAX_COMPILED_CHARS=4000 caps the compiled output but is checked only at save time, not at render time"
+      ]
+    },
+    {
+      "name": "Prompt Manual Override Gate",
+      "category": "Agent Configuration",
+      "description": "When agent_configs.prompt_manual_override=True, the auto-render pipeline (rerender_and_push_for_org) skips the ElevenLabs PATCH and returns {updated:false, reason:'manual_override'}. The flag is set by the prompt-editor endpoint when a super-admin submits a hand-written prompt.",
+      "modules": [
+        "backend/app/services/agent_config.py",
+        "backend/app/api/routes/kiki_zentrale.py"
+      ],
+      "apis": [
+        "GET /api/kiki-zentrale/prompt",
+        "PATCH /api/kiki-zentrale/prompt",
+        "POST /api/kiki-zentrale/prompt/diff"
+      ],
+      "tables": ["agent_configs", "agent_config_snapshots"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 92,
+      "risks": [
+        "No mechanism to clear prompt_manual_override from the customer-facing UI; only a super-admin or DB edit resets it",
+        "prompt-editor GET/PATCH are gated by require_super_admin, not require_org — a super-admin can read/write any org's prompt if they know the org_id"
+      ]
+    },
+    {
+      "name": "System Tool Sync (transfer_to_number, voicemail_detection, transfer_to_agent)",
+      "category": "ElevenLabs Sync",
+      "description": "After any Notdienst or Telefon config save, sync_system_tools_for_org pushes the built_in_tools block to the agent. transfer_to_number carries the emergency and staff transfer conditions; voicemail_detection has a hardened description to prevent false fires on live humans; transfer_to_agent handles outbound off-topic handoffs.",
+      "modules": [
+        "backend/app/services/agent_config.py"
+      ],
+      "apis": [
+        "PATCH /api/kiki-zentrale/emergency",
+        "PATCH /api/kiki-zentrale/phone"
+      ],
+      "tables": ["agent_configs", "organizations"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 88,
+      "risks": [
+        "sync_system_tools_for_org is best-effort: a failure logs a warning but does not fail the triggering save, leaving DB and EL in diverged state",
+        "Deduplication of staff vs emergency number: old code dropped the staff entry when staff==emergency and Notdienst was DISABLED (audit 2026-06-11 fix present)"
+      ]
+    },
+    {
+      "name": "HK_* Tool ID Cache",
+      "category": "ElevenLabs Sync",
+      "description": "Module-level dict _HK_TOOL_ID_CACHE caches hk_* tool_ids from the ElevenLabs workspace. TTL=3600s. On a cache miss OR stale cache, _refresh_tool_cache does a full clear+update (not merge) to evict renamed/deleted tools. Missing required tools fail with HTTP 400.",
+      "modules": [
+        "backend/app/services/agent_config.py"
+      ],
+      "apis": ["ElevenLabs GET /v1/convai/tools"],
+      "tables": [],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 90,
+      "risks": [
+        "Cache is process-local; a multi-process deployment would have one cache per process",
+        "A tool renamed in the ElevenLabs workspace can survive in cache for up to 3600 s before the stale eviction triggers on the next required-name miss"
+      ]
+    },
+    {
+      "name": "Agent Health Check",
+      "category": "Agent Configuration",
+      "description": "Read-only probe used by the Agent-Gesundheit badge: checks reachability, audio_event_present, prompt_non_empty, first_message_non_empty, voice_set, language. Errors are returned as {reachable:false, error:'...'}, never raised.",
+      "modules": [
+        "backend/app/services/elevenlabs_agent.py",
+        "backend/app/api/routes/kiki_zentrale.py"
+      ],
+      "apis": ["GET /api/kiki-zentrale/agent-health"],
+      "tables": [],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 93,
+      "risks": [
+        "Health check makes a live ElevenLabs API call on every request; EL outage causes all badge requests to 401/timeout"
+      ]
+    },
+    {
+      "name": "Snapshot Rollback",
+      "category": "ElevenLabs Sync",
+      "description": "rollback_to_snapshot retrieves an agent_config_snapshots row scoped to the calling org, then calls patch_agent_safely with merge_arrays=[] (exact restore). On success, marks all non-rollback audit rows for that snapshot as rolled_back=True.",
+      "modules": [
+        "backend/app/services/elevenlabs_agent.py",
+        "backend/app/api/routes/kiki_zentrale.py"
+      ],
+      "apis": [
+        "POST /api/kiki-zentrale/rollback/{snapshot_id}"
+      ],
+      "tables": ["agent_config_snapshots", "agent_writes_audit"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 90,
+      "risks": [
+        "Snapshot only captures conversation_config + name; platform_settings changes (webhook URL, override flags) are not captured and therefore not restored on rollback"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "KIKI-001",
+      "name": "Cross-Org Agent Write Guard",
+      "description": "Before any ElevenLabs PATCH, patch_agent_safely verifies that the supplied agent_id equals the calling org's stored organizations.elevenlabs_agent_id. The check is DB-only (no ElevenLabs API call at this step). If the ids do not match, CrossOrgAgentWriteError is raised and NO snapshot, PATCH, or audit record is created.",
+      "purpose": "Prevent one org's configuration code path from writing to another org's ElevenLabs agent.",
+      "trigger": "Any call to patch_agent_safely() in elevenlabs_agent.py",
+      "preconditions": ["org_id is provided and resolvable in organizations table"],
+      "inputs": ["agent_id (parameter)", "org_id (parameter)"],
+      "validations": ["organizations.elevenlabs_agent_id WHERE id=org_id must equal the supplied agent_id"],
+      "actions": ["DB SELECT on organizations to fetch stored agent id"],
+      "systemEffects": [],
+      "outputs": ["Proceeds to snapshot step on match", "Raises CrossOrgAgentWriteError on mismatch"],
+      "failureConditions": ["org_id not in organizations", "stored elevenlabs_agent_id is NULL or differs from agent_id"],
+      "dependencies": ["organizations table"],
+      "relatedRules": ["KIKI-002", "KIKI-003"],
+      "affectedModules": ["backend/app/services/elevenlabs_agent.py"],
+      "affectedAPIs": ["All PATCH /api/kiki-zentrale/* endpoints that trigger EL writes"],
+      "affectedTables": ["organizations"],
+      "sourceReferences": ["backend/app/services/elevenlabs_agent.py:276-289"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "Lines 276-289: 'if not stored or stored != agent_id: raise CrossOrgAgentWriteError(...)'"
+    },
+    {
+      "id": "KIKI-002",
+      "name": "Pre-Write Snapshot",
+      "description": "Before any ElevenLabs PATCH, the full current agent config (GET /v1/convai/agents/{id}) is saved as a row in agent_config_snapshots. The snapshot id is carried through to the audit row. No snapshot is written if the diff check shows no changes (no-op short-circuit).",
+      "purpose": "Provides a restore point for auto-rollback and manual rollback via the Kiki-Zentrale UI.",
+      "trigger": "Changes detected in diff step inside patch_agent_safely()",
+      "preconditions": ["Cross-org guard passed", "Audio assertion passed", "Diff shows at least one changed leaf"],
+      "inputs": ["Current agent config (from GET)", "org_id, agent_id, actor_id, endpoint_label"],
+      "validations": [],
+      "actions": ["INSERT into agent_config_snapshots with full_config = current EL response"],
+      "systemEffects": ["agent_config_snapshots row created"],
+      "outputs": ["snapshot_id for use in audit record and rollback"],
+      "failureConditions": ["Supabase INSERT error"],
+      "dependencies": ["ElevenLabs GET /v1/convai/agents/{id}", "agent_config_snapshots table"],
+      "relatedRules": ["KIKI-003", "KIKI-015"],
+      "affectedModules": ["backend/app/services/elevenlabs_agent.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["agent_config_snapshots"],
+      "sourceReferences": ["backend/app/services/elevenlabs_agent.py:320-333"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "Lines 320-333: db.table('agent_config_snapshots').insert({..., 'full_config': current}).execute()"
+    },
+    {
+      "id": "KIKI-003",
+      "name": "Audio Event Assertion (Silent Agent Guard)",
+      "description": "Two-stage audio assertion: (1) early guard before any ElevenLabs call when the caller provides an explicit non-merge client_events replacement, (2) final check on the merged client_events BEFORE the PATCH is sent. If 'audio' is missing, SilentAgentRiskError is raised and no PATCH or snapshot is written. Additionally, post-write verification confirms 'audio' is still present after the PATCH.",
+      "purpose": "Prevent a config write from removing the 'audio' client_event, which would make the agent's TTS silent on all calls.",
+      "trigger": "patch_agent_safely() — checked twice per call",
+      "preconditions": [],
+      "inputs": ["field_patches (may include client_events)", "merge_arrays (determines merge vs. replace)"],
+      "validations": ["'audio' must be in final merged client_events"],
+      "actions": ["assert_audio_event() raises SilentAgentRiskError if 'audio' absent"],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": ["Caller drops 'audio' from an explicit client_events list (non-merge path)"],
+      "dependencies": ["KIKI-002"],
+      "relatedRules": ["KIKI-004"],
+      "affectedModules": ["backend/app/services/elevenlabs_agent.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/elevenlabs_agent.py:111-117",
+        "backend/app/services/elevenlabs_agent.py:293-308"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "Lines 111-117: assert_audio_event raises SilentAgentRiskError. Lines 293-308: early guard + final guard before PATCH."
+    },
+    {
+      "id": "KIKI-004",
+      "name": "Post-Write Verification and Auto-Rollback",
+      "description": "After every ElevenLabs PATCH, a re-GET of the agent config confirms: agent is reachable (has agent_id), 'audio' is still in client_events, all changed paths match their intended values (arrays: all new items present; dicts: subset check; scalars: equality), and the pre-existing tools array has not shrunk. On any verification failure, _restore_full() issues a full-config PATCH from the snapshot, and the audit row is stamped rolled_back=True.",
+      "purpose": "Detect silent clobbers (e.g. ElevenLabs deep-merging incorrectly) and auto-restore.",
+      "trigger": "Every successful ElevenLabs PATCH inside patch_agent_safely()",
+      "preconditions": ["ElevenLabs PATCH returned 2xx"],
+      "inputs": ["post-PATCH GET response", "intended merged config", "pre-PATCH config"],
+      "validations": [
+        "post.agent_id is present",
+        "audio in client_events",
+        "all changed paths match intended values",
+        "tools array not shorter than pre-PATCH"
+      ],
+      "actions": ["_restore_full() on verification failure"],
+      "systemEffects": ["Auto-rollback PATCH to ElevenLabs on failure", "audit row updated with rolled_back=True"],
+      "outputs": ["Returns post-PATCH config on success", "Raises VerificationFailedError on failure (after rollback)"],
+      "failureConditions": ["Agent unreachable after PATCH", "audio missing", "any changed leaf not applied", "tools array shrank"],
+      "dependencies": ["KIKI-002", "KIKI-003"],
+      "relatedRules": ["KIKI-005"],
+      "affectedModules": ["backend/app/services/elevenlabs_agent.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["agent_config_snapshots", "agent_writes_audit"],
+      "sourceReferences": [
+        "backend/app/services/elevenlabs_agent.py:349-369",
+        "backend/app/services/elevenlabs_agent.py:373-411"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "Lines 349-369: post-write verify loop; auto-rollback on failure. Lines 373-411: _verify() function."
+    },
+    {
+      "id": "KIKI-005",
+      "name": "Agent Write Audit",
+      "description": "Every patch_agent_safely call (whether successful, failed, or rolled back) writes a row to agent_writes_audit with: org_id, agent_id, actor_id, endpoint_label, snapshot_id, fields_changed (diff), elevenlabs_response_status, elevenlabs_response_excerpt, rolled_back. Rolled-back rows also carry rolled_back_at and rolled_back_by.",
+      "purpose": "Full audit trail of every ElevenLabs agent write for compliance, debugging, and manual recovery.",
+      "trigger": "Every ElevenLabs PATCH attempt via patch_agent_safely()",
+      "preconditions": ["PATCH was attempted (got past audio assertion)"],
+      "inputs": ["diff (changed paths)", "EL HTTP status + excerpt", "snapshot_id", "actor_id"],
+      "validations": [],
+      "actions": ["INSERT into agent_writes_audit"],
+      "systemEffects": ["agent_writes_audit row created"],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": ["KIKI-002"],
+      "relatedRules": ["KIKI-004"],
+      "affectedModules": ["backend/app/services/elevenlabs_agent.py"],
+      "affectedAPIs": [
+        "GET /api/kiki-zentrale/audit",
+        "GET /api/kiki-zentrale/audit/{audit_id}"
+      ],
+      "affectedTables": ["agent_writes_audit"],
+      "sourceReferences": [
+        "backend/app/services/elevenlabs_agent.py:455-473"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "Lines 455-473: _audit() function inserts to agent_writes_audit on every PATCH path."
+    },
+    {
+      "id": "KIKI-006",
+      "name": "Additive Array Merge for tool_ids and client_events",
+      "description": "When a path is listed in merge_arrays, the incoming list is unioned with the current list (order-preserving, deduped by id/name for dicts or by value for scalars) rather than replaced. This is the primary mechanism used for attaching new hk_* tool_ids and adding client_events without clobbering existing entries. Explicit non-merge list replacements are also supported but require the audio assertion to pass manually.",
+      "purpose": "Ensure tool IDs and client events are never accidentally removed when adding new entries.",
+      "trigger": "merge_arrays parameter of patch_agent_safely()",
+      "preconditions": [],
+      "inputs": ["current config list at path", "incoming list from field_patches"],
+      "validations": [],
+      "actions": ["_union_list() merges lists preserving order and deduplicating"],
+      "systemEffects": [],
+      "outputs": ["Merged list written to merged config before PATCH"],
+      "failureConditions": [],
+      "dependencies": ["KIKI-003"],
+      "relatedRules": ["KIKI-007"],
+      "affectedModules": ["backend/app/services/elevenlabs_agent.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/elevenlabs_agent.py:158-177",
+        "backend/app/services/elevenlabs_agent.py:180-197"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "Lines 158-177: _union_list(). Lines 180-197: _deep_merge() with merge_paths set."
+    },
+    {
+      "id": "KIKI-007",
+      "name": "Prompt Write Gated by agent_provisioned_at",
+      "description": "In configure_agent (B.3), the master prompt is written to ElevenLabs ONLY when organizations.agent_provisioned_at IS NULL (first run). If the field is already set (org was previously provisioned), the prompt write is skipped with reason='already_provisioned'. On a successful first-run prompt write, _stamp_agent_provisioned() sets agent_provisioned_at=NOW().",
+      "purpose": "Prevent automated prompt re-generation from overwriting hand-edited customer prompts on re-provisioning runs.",
+      "trigger": "configure_agent() called from provision_org or POST /api/super-admin/orgs/{id}/sync-agent-config",
+      "preconditions": [],
+      "inputs": ["organizations.agent_provisioned_at for org_id"],
+      "validations": ["IS NULL check on agent_provisioned_at"],
+      "actions": [
+        "On first run: patch_agent_safely() with rendered prompt",
+        "On re-run: skip, return prompt_applied=False"
+      ],
+      "systemEffects": [
+        "On first run: ElevenLabs prompt updated, organizations.agent_provisioned_at stamped"
+      ],
+      "outputs": ["summary.prompt_applied, summary.prompt_skipped_reason"],
+      "failureConditions": [],
+      "dependencies": ["KIKI-008", "organizations table"],
+      "relatedRules": ["KIKI-008", "KIKI-013"],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": [
+        "POST /api/super-admin/orgs/{org_id}/sync-agent-config"
+      ],
+      "affectedTables": ["organizations"],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:1077-1098",
+        "backend/app/services/agent_config.py:1177-1201"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "Lines 1077-1098: _is_agent_already_provisioned() + _stamp_agent_provisioned(). Lines 1177-1201: B.3 step in configure_agent()."
+    },
+    {
+      "id": "KIKI-008",
+      "name": "Prompt Template Token Contract Enforcement",
+      "description": "After render_prompt_for_org fills all 14 tokens, three guards run: (1) any remaining {{...}} that does not start with '{{system__' causes RuntimeError 'unfilled prompt token(s)'; (2) 'wkp_shared_' anywhere in the rendered text causes RuntimeError (legacy tool name regression check); (3) company-identity residue words (Husmann, Dreier, Buxtehude, Stader, 04161, husmann-dreier) appearing outside the substituted identity blocks cause RuntimeError.",
+      "purpose": "Detect incomplete substitutions and demo-identity leakage before the prompt reaches any customer's agent.",
+      "trigger": "render_prompt_for_org() called from configure_agent or rerender_and_push_for_org",
+      "preconditions": ["Template loaded from agent_prompt_template.txt"],
+      "inputs": ["Rendered text after all token substitutions"],
+      "validations": [
+        "No {{...}} except {{system__*}} survives",
+        "No 'wkp_shared_' in rendered text",
+        "No residue literals in non-identity portions"
+      ],
+      "actions": ["Raises RuntimeError on any guard failure"],
+      "systemEffects": [],
+      "outputs": ["Rendered prompt string if all guards pass"],
+      "failureConditions": ["Template regression introducing new tokens", "Demo company name hardcoded in template", "org name coincidentally matches a residue word"],
+      "dependencies": ["backend/app/services/agent_prompt_template.txt"],
+      "relatedRules": ["KIKI-007"],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:1041-1072",
+        "backend/app/services/agent_config.py:128-134"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "Lines 1041-1072: leftover check, wkp_shared_ check, residue check after masking substituted identity values."
+    },
+    {
+      "id": "KIKI-009",
+      "name": "Emergency-Number E.164 Validation at Save Time",
+      "description": "PATCH /api/kiki-zentrale/emergency validates emergency_number and PATCH /api/kiki-zentrale/phone validates forwarding_number and incoming_forwarding_number via _validate_dialable() before any DB write. Accepted formats: +E.164 (8-15 digits after country code) or 0-prefixed German local (8-15 digits). Non-conforming values return HTTP 422 without any DB write.",
+      "purpose": "Prevent non-E.164 numbers reaching the ElevenLabs transfer_to_number built-in tool, which would cause audible Twilio errors mid-call.",
+      "trigger": "PATCH /api/kiki-zentrale/emergency or PATCH /api/kiki-zentrale/phone",
+      "preconditions": [],
+      "inputs": ["emergency_number", "forwarding_number", "incoming_forwarding_number"],
+      "validations": [
+        "If non-empty: must start with + or 0",
+        "Digit count 8-15 after country code/leading zero"
+      ],
+      "actions": ["HTTPException(422) if invalid"],
+      "systemEffects": [],
+      "outputs": ["422 with German error message"],
+      "failureConditions": ["Non-dialable string provided"],
+      "dependencies": [],
+      "relatedRules": ["KIKI-011"],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": [
+        "PATCH /api/kiki-zentrale/emergency",
+        "PATCH /api/kiki-zentrale/phone"
+      ],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:233-254",
+        "backend/app/api/routes/kiki_zentrale.py:1356-1363",
+        "backend/app/api/routes/kiki_zentrale.py:1382-1384"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": "Lines 233-254: _validate_dialable(). Lines 1356-1363: applied to emergency_number. Lines 1382-1384: applied to forwarding pair."
+    },
+    {
+      "id": "KIKI-010",
+      "name": "Emergency Transfer vs. No-Emergency-Number Fallback",
+      "description": "render_emergency_block(): if emergency_enabled=True and emergency_number (or legacy forwarding_number) is non-empty, the prompt instructs the agent to announce and call transfer_to_number. If no number is configured, the prompt instructs the agent NOT to transfer but to create an urgent hk_createInquiry (dringend=true, rueckrufGewuenscht=true) with a guaranteed callback. The 'no number' branch was added after audit 2026-06-11 found affected orgs getting a silent 'no transfer' instruction.",
+      "purpose": "Ensure the agent has an actionable path for emergencies regardless of whether a transfer number is configured.",
+      "trigger": "render_prompt_for_org() when emergency_enabled=True",
+      "preconditions": ["emergency_enabled=True in agent_configs"],
+      "inputs": ["emergency_number", "forwarding_number (legacy fallback)", "emergency_only_outside_business_hours", "emergency_extra_windows", "emergency_surcharge_notice_enabled", "emergency_surcharge_text"],
+      "validations": [],
+      "actions": ["Renders different prompt block based on number presence"],
+      "systemEffects": [],
+      "outputs": ["KZ_EMERGENCY token value in the rendered prompt"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["KIKI-009", "KIKI-011"],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:737-816",
+        "backend/app/services/agent_config.py:800-815"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "Lines 800-815: branching on 'if (cfg.get(\"emergency_number\") or cfg.get(\"forwarding_number\") or \"\").strip()'"
+    },
+    {
+      "id": "KIKI-011",
+      "name": "Transfer Tool Deduplication (Staff vs Emergency Number)",
+      "description": "build_transfer_tool() builds the transfer_to_number built_in_tools entry. The staff-transfer entry is added only if staff_number is set AND (Notdienst is disabled OR staff != emergency). The old logic used 'staff != emergency' without the 'not emergency_added' guard — when Notdienst was disabled but both numbers were the same, the staff entry was dropped and the transfer tool had NO entries. Fixed 2026-06-11.",
+      "purpose": "Ensure the staff transfer destination is not silently dropped when the same number is used for both emergency and staff transfer but emergency is disabled.",
+      "trigger": "sync_system_tools_for_org() after Notdienst or Telefon save",
+      "preconditions": [],
+      "inputs": ["emergency_number or forwarding_number", "incoming_forwarding_number", "emergency_enabled"],
+      "validations": [],
+      "actions": ["Conditionally builds transfers list with conference-type entries"],
+      "systemEffects": [],
+      "outputs": ["transfer_to_number built_in_tools object or None"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["KIKI-010"],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:1318-1375",
+        "backend/app/services/agent_config.py:1347-1348"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "Lines 1347-1348: 'if staff and (not emergency_added or staff != emergency)' — the 'not emergency_added' condition prevents the old false-drop."
+    },
+    {
+      "id": "KIKI-012",
+      "name": "Conversation Initiation Webhook — Caller Lookup and Dynamic Variables",
+      "description": "When a call connects, POST /api/elevenlabs/conversation-init fires. The service looks up the caller_id (phone number) in customers table scoped to the org. If found, six customer fields are returned as dynamic variables; if not found, empty strings are returned. Additionally, a voicemailMessage variable is always returned with a company-name-aware default. A time-based welcome message override (Berlin time) is returned as conversation_config_override.agent.first_message if a matching welcome_messages variant is configured.",
+      "purpose": "Pre-populate the agent's conversational context at call start so it knows if the caller is a returning customer.",
+      "trigger": "ElevenLabs fires POST /api/elevenlabs/conversation-init when a call connects",
+      "preconditions": ["Agent has conversation_initiation_client_data webhook enabled and pointing to backend"],
+      "inputs": ["caller_id from ElevenLabs payload", "org_id from X-HeyKiki-Secret or agent_id lookup"],
+      "validations": [],
+      "actions": [
+        "SELECT customers by phone and org_id",
+        "SELECT agent_configs.welcome_messages for time-variant greeting"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "dynamic_variables with customer_found, customer_id, customer_name, customer_number, customer_address, customer_email, voicemailMessage",
+        "Optional conversation_config_override.agent.first_message"
+      ],
+      "failureConditions": ["welcome-variant lookup exception is swallowed (best-effort)"],
+      "dependencies": ["organizations table", "customers table", "agent_configs table"],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/services/conversation_init.py",
+        "backend/app/api/routes/conversation_init.py"
+      ],
+      "affectedAPIs": ["POST /api/elevenlabs/conversation-init"],
+      "affectedTables": ["customers", "agent_configs", "organizations"],
+      "sourceReferences": [
+        "backend/app/services/conversation_init.py:79-129"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "Lines 79-129: conversation_init() function — lookup, variable assembly, welcome variant, voicemailMessage default."
+    },
+    {
+      "id": "KIKI-013",
+      "name": "Prompt Manual Override Flag — Auto-Render Suppression",
+      "description": "rerender_and_push_for_org() checks agent_configs.prompt_manual_override before anything else. If True, returns {updated:False, reason:'manual_override'} and finish_sync marks the sync as 'applied' (not 'failed') because it is a legitimate intentional skip. The flag is set by PATCH /api/kiki-zentrale/prompt and can only be cleared via DB or a super-admin action.",
+      "purpose": "Protect hand-crafted prompts from being overwritten by config-driven re-renders.",
+      "trigger": "Any config-mutating Kiki-Zentrale save that triggers rerender_and_push_for_org",
+      "preconditions": [],
+      "inputs": ["agent_configs.prompt_manual_override for org"],
+      "validations": [],
+      "actions": ["Returns early with manual_override reason"],
+      "systemEffects": [],
+      "outputs": ["{updated:False, reason:'manual_override'}"],
+      "failureConditions": [],
+      "dependencies": ["agent_configs table"],
+      "relatedRules": ["KIKI-007"],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:1595-1600",
+        "backend/app/api/routes/kiki_zentrale.py:601-607"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 92,
+      "evidence": "Lines 1595-1600: 'if cfg_rows and cfg_rows[0].get(\"prompt_manual_override\"): return {updated:False}'. Lines 601-607: PATCH /prompt sets the flag."
+    },
+    {
+      "id": "KIKI-014",
+      "name": "Concurrent Save Serialization via agent_sync_seq",
+      "description": "Every config save calls kz_begin_agent_sync (DB atomic increment of agent_sync_seq + flip to 'pending'). The background repush receives the expected_seq. Under a per-org threading.Lock, it re-checks the current seq before rendering; if current_seq > expected_seq, it returns {updated:False, reason:'superseded'} without pushing (the newer save owns the latest state). This prevents a slow stale push from landing its OLD rendered prompt after a newer one.",
+      "purpose": "Last-write-wins for concurrent config saves — prevents a slow background task from overwriting a newer prompt.",
+      "trigger": "Overlapping Kiki-Zentrale config saves by the same or different users",
+      "preconditions": ["expected_seq provided to rerender_and_push_for_org"],
+      "inputs": ["expected_seq (from begin_sync)", "current agent_sync_seq from DB (under lock)"],
+      "validations": ["current_sync_seq > expected_seq → superseded"],
+      "actions": ["Return early with 'superseded' reason; finish_sync of the superseded task marks it 'applied' (benign no-op)"],
+      "systemEffects": [],
+      "outputs": ["{updated:False, reason:'superseded'}"],
+      "failureConditions": ["Lock is process-local — across processes there is no serialization"],
+      "dependencies": ["agent_configs.agent_sync_seq", "supabase function kz_begin_agent_sync"],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:1546",
+        "backend/app/services/agent_config.py:1618-1626"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "Lines 1546: _REPUSH_LOCKS = defaultdict(threading.Lock). Lines 1618-1626: supersede check inside lock."
+    },
+    {
+      "id": "KIKI-015",
+      "name": "Snapshot-Scoped Rollback (org tenancy guard)",
+      "description": "rollback_to_snapshot() looks up the snapshot by both id AND org_id. A snapshot from another tenant resolves to nothing, so the rollback is a safe no-op. Rollback uses patch_agent_safely with merge_arrays=[] (exact restore, not additive). On success, all non-rollback audit rows for the snapshot are marked rolled_back=True.",
+      "purpose": "Allow org admins to restore a previous ElevenLabs config from audit history without being able to access or restore other orgs' configs.",
+      "trigger": "POST /api/kiki-zentrale/rollback/{snapshot_id}",
+      "preconditions": ["User is org_admin", "Snapshot exists and belongs to the calling org"],
+      "inputs": ["snapshot_id", "org_id from JWT"],
+      "validations": ["agent_config_snapshots.org_id = caller's org_id"],
+      "actions": [
+        "SELECT snapshot scoped to org",
+        "patch_agent_safely() with full_config from snapshot"
+      ],
+      "systemEffects": ["ElevenLabs agent config replaced with snapshot state", "agent_writes_audit rows updated"],
+      "outputs": ["{success:True}"],
+      "failureConditions": ["Snapshot not found or belongs to different org → ElevenLabsWriteError"],
+      "dependencies": ["KIKI-001", "KIKI-002", "KIKI-004"],
+      "relatedRules": ["KIKI-002", "KIKI-005"],
+      "affectedModules": ["backend/app/services/elevenlabs_agent.py"],
+      "affectedAPIs": ["POST /api/kiki-zentrale/rollback/{snapshot_id}"],
+      "affectedTables": ["agent_config_snapshots", "agent_writes_audit"],
+      "sourceReferences": [
+        "backend/app/services/elevenlabs_agent.py:476-518"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": "Lines 476-518: rollback_to_snapshot() with double-key lookup (.eq('id',...).eq('org_id',...))."
+    },
+    {
+      "id": "KIKI-016",
+      "name": "Tool Resolution Auth (X-HeyKiki-Secret or _agentId Fallback)",
+      "description": "resolve_tool_org() in api/deps.py resolves the calling org for all hk_* tool webhooks and the conversation-init webhook. It first checks X-HeyKiki-Secret header against org_secrets.secret; on miss, it falls back to the _agentId (or agent_id for conv-init) body field against organizations.elevenlabs_agent_id. If neither resolves, HTTP 401 is returned.",
+      "purpose": "Identify which org owns the inbound ElevenLabs webhook call without requiring JWT auth (ElevenLabs does not send JWTs).",
+      "trigger": "Any POST /api/elevenlabs/tools/* or POST /api/elevenlabs/conversation-init",
+      "preconditions": [],
+      "inputs": ["X-HeyKiki-Secret header", "_agentId or agent_id in JSON body"],
+      "validations": ["org_secrets.secret match or organizations.elevenlabs_agent_id match"],
+      "actions": ["SELECT org_id from org_secrets or organizations"],
+      "systemEffects": [],
+      "outputs": ["ToolOrg(org_id) on success", "HTTP 401 on failure"],
+      "failureConditions": ["Neither secret nor agent_id matches any record"],
+      "dependencies": ["org_secrets table", "organizations table"],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/deps.py"],
+      "affectedAPIs": ["POST /api/elevenlabs/tools/*", "POST /api/elevenlabs/conversation-init"],
+      "affectedTables": ["org_secrets", "organizations"],
+      "sourceReferences": [
+        "backend/app/api/deps.py:154-206"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 92,
+      "evidence": "Lines 154-206: _lookup_org_id() tries org_secrets first, then organizations by elevenlabs_agent_id."
+    },
+    {
+      "id": "KIKI-017",
+      "name": "Autonomy-Level Prompt Rendering (Termine and KVA)",
+      "description": "render_autonomy_block() emits per-capability instructions gated by appointments_enabled + appointments_level (1/2/3) and kva_enabled + kva_level (1/2/3). Level 1 = intake only (hk_createInquiry). Level 2 = provisional booking (hk_bookAppointment, confirmation by team). Level 3 = confirmed booking (hk_bookAppointment, direct confirmation to caller). Falls back to legacy kiki_level when per-capability level is NULL.",
+      "purpose": "Allow per-org configuration of how autonomously the agent books appointments and drafts cost estimates.",
+      "trigger": "render_prompt_for_org() → render_autonomy_block()",
+      "preconditions": [],
+      "inputs": ["agent_configs.appointments_enabled", "agent_configs.appointments_level", "agent_configs.kva_enabled", "agent_configs.kva_level", "agent_configs.kiki_level (legacy fallback)"],
+      "validations": [],
+      "actions": ["Renders KZ_AUTONOMY token value"],
+      "systemEffects": [],
+      "outputs": ["German prompt block for KZ_AUTONOMY token"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["KIKI-018"],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": ["PATCH /api/kiki-zentrale/verhalten"],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:845-907"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "Lines 845-907: render_autonomy_block() with level 1/2/3 branching per capability."
+    },
+    {
+      "id": "KIKI-018",
+      "name": "Scheduling Rules Rendering — appointments_enabled Gate",
+      "description": "render_scheduling_rules_block() first checks appointments_enabled (or legacy scheduling_enabled). If either is False, the block instructs the agent to NEVER call hk_getAvailableAppointments or hk_bookAppointment and to capture only via hk_createInquiry with rueckrufGewuenscht=true. If enabled, the block emits lead_time_hours (converted from lead_time_days for legacy orgs), lead_time_only_weekdays, lead_time_earliest_clock, parallel_slots, max_appointments_per_day.",
+      "purpose": "Map the Kiki-Zentrale scheduling configuration into the agent's runtime booking constraints.",
+      "trigger": "render_prompt_for_org() → render_scheduling_rules_block()",
+      "preconditions": [],
+      "inputs": ["agent_configs.appointments_enabled", "agent_configs.scheduling_enabled (legacy)", "agent_configs.lead_time_hours", "agent_configs.lead_time_days", "agent_configs.lead_time_only_weekdays", "agent_configs.lead_time_earliest_clock", "agent_configs.parallel_slots", "agent_configs.max_appointments_per_day"],
+      "validations": [],
+      "actions": ["Renders KZ_SCHEDULING_RULES token value"],
+      "systemEffects": [],
+      "outputs": ["German prompt block for KZ_SCHEDULING_RULES token"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["KIKI-017"],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": ["PATCH /api/kiki-zentrale/scheduling-rules"],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:679-734"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "Lines 679-734: render_scheduling_rules_block() with gate on appointments_enabled/scheduling_enabled."
+    },
+    {
+      "id": "KIKI-019",
+      "name": "Price-Info Toggle — Priced Artikel Guard",
+      "description": "PATCH /api/kiki-zentrale/price-info: enabling price_info_enabled is blocked unless there is at least one active catalog_item with unit_price > 0. Returns HTTP 422 if no priced items exist. The same guard applies when activating Preisauskunft via the Leitfaden batch-save. On toggle, sync_price_list_kb runs as a BackgroundTask.",
+      "purpose": "Prevent the agent from being instructed to quote prices from a knowledge base when no real prices are stored, which would invite hallucination.",
+      "trigger": "PATCH /api/kiki-zentrale/price-info with enabled=True, or PATCH /api/kiki-zentrale/leitfaden enabling price_info_enabled",
+      "preconditions": [],
+      "inputs": ["agent_configs.price_info_enabled", "catalog_items for org (active + unit_price > 0)"],
+      "validations": ["At least 1 priced active catalog_item must exist"],
+      "actions": [
+        "HTTP 422 if no priced items",
+        "Upsert agent_configs.price_info_enabled",
+        "Schedule sync_price_list_kb as background task"
+      ],
+      "systemEffects": ["ElevenLabs KB document created or removed via sync_price_list_kb"],
+      "outputs": ["Updated config row on success", "HTTP 422 on guard failure"],
+      "failureConditions": ["No active catalog_items with unit_price > 0"],
+      "dependencies": ["catalog_items table", "KIKI-020"],
+      "relatedRules": ["KIKI-020"],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": [
+        "PATCH /api/kiki-zentrale/price-info",
+        "PATCH /api/kiki-zentrale/leitfaden"
+      ],
+      "affectedTables": ["agent_configs", "catalog_items"],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:1257-1292",
+        "backend/app/api/routes/kiki_zentrale.py:706-734"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 92,
+      "evidence": "Lines 1257-1292: guard query on catalog_items, 422 if empty. Lines 706-734: same guard in leitfaden batch-save path."
+    },
+    {
+      "id": "KIKI-020",
+      "name": "Price List KB Reconcile-by-Name",
+      "description": "sync_price_list_kb() operates on the agent's KB array by name, not by stored ID, to handle orphaned docs. Every run removes ALL KB entries named 'Preisliste (Richtpreise)' from the array (including IDs not recorded in price_list_doc_id). If Preisauskunft ON + priced items exist, a fresh text doc is created first, added to the desired set, then the PATCH is applied. Only after a confirmed PATCH are old EL docs deleted and price_list_doc_id advanced in the DB.",
+      "purpose": "Self-healing reconciliation: prevent the agent from quoting prices when Preisauskunft is OFF, and prevent orphaned docs from persisting after failed syncs.",
+      "trigger": "sync_price_list_kb(org_id) called as BackgroundTask from PATCH /price-info",
+      "preconditions": [],
+      "inputs": ["agent_configs.price_info_enabled", "catalog_items (active, unit_price>0)", "current EL KB array"],
+      "validations": [],
+      "actions": [
+        "EL: CREATE text KB doc if want_doc",
+        "patch_agent_safely with KB array full-replace (merge_arrays=[])",
+        "EL: DELETE stale docs after confirmed PATCH",
+        "Update agent_configs.price_list_doc_id"
+      ],
+      "systemEffects": [
+        "ElevenLabs KB doc created/deleted",
+        "Agent KB array replaced",
+        "agent_configs.price_list_doc_id updated"
+      ],
+      "outputs": ["{synced:True, doc_id, items, removed}"],
+      "failureConditions": ["EL create fails: new doc deleted, price_list_doc_id unchanged (retry on next sync)", "patch_agent_safely fails: doc deleted, doc_id not advanced"],
+      "dependencies": ["KIKI-003", "KIKI-004"],
+      "relatedRules": ["KIKI-019"],
+      "affectedModules": ["backend/app/services/price_knowledge.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": [
+        "backend/app/services/price_knowledge.py:58-186"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "Lines 58-186: reconcile-by-name pattern: stale_ids found by name match, desired = non-Preisliste + optionally new doc, full-replace PATCH, then delete stale."
+    },
+    {
+      "id": "KIKI-021",
+      "name": "Knowledge Resource Org Scoping",
+      "description": "push_knowledge_resource_to_elevenlabs() and remove_knowledge_resource_from_elevenlabs() both scope the knowledge_resources lookup by BOTH resource_id AND org_id. A resource_id from another tenant resolves to nothing, making the call a safe no-op. The agent_id is then resolved from the org's organizations row.",
+      "purpose": "Multi-tenancy isolation: prevent one org from adding/removing knowledge docs from another org's ElevenLabs agent.",
+      "trigger": "POST /api/kiki-zentrale/knowledge-resources/{url|pdf} or DELETE /api/kiki-zentrale/knowledge-resources/{id}",
+      "preconditions": [],
+      "inputs": ["resource_id", "org_id from JWT"],
+      "validations": ["knowledge_resources.org_id = caller's org_id"],
+      "actions": ["SELECT knowledge_resources scoped by resource_id AND org_id"],
+      "systemEffects": [],
+      "outputs": ["Proceeds to EL push/remove on match", "No-op on mismatch (no error raised)"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["KIKI-001"],
+      "affectedModules": ["backend/app/services/elevenlabs_agent.py"],
+      "affectedAPIs": [
+        "POST /api/kiki-zentrale/knowledge-resources/url",
+        "POST /api/kiki-zentrale/knowledge-resources/pdf",
+        "DELETE /api/kiki-zentrale/knowledge-resources/{resource_id}"
+      ],
+      "affectedTables": ["knowledge_resources"],
+      "sourceReferences": [
+        "backend/app/services/elevenlabs_agent.py:618-626",
+        "backend/app/services/elevenlabs_agent.py:702-710"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": "Lines 618-626: '.eq(\"id\", str(resource_id)).eq(\"org_id\", str(org_id))' before any EL call. Lines 702-710: same in remove_knowledge_resource_from_elevenlabs."
+    },
+    {
+      "id": "KIKI-022",
+      "name": "Admin-Only Gate for Kiki-Zentrale Mutations",
+      "description": "All Kiki-Zentrale mutation endpoints call _require_admin(user) which checks user.role == 'org_admin'. Employees (role='employee') receive HTTP 403. Read-only GET endpoints do not apply this gate (require_org is sufficient).",
+      "purpose": "Prevent regular employees from changing the AI agent's configuration.",
+      "trigger": "Any PATCH/POST/DELETE on /api/kiki-zentrale/* (except read endpoints)",
+      "preconditions": ["User is authenticated and attached to an org"],
+      "inputs": ["user.role from JWT + users table"],
+      "validations": ["user.role must be 'org_admin'"],
+      "actions": ["HTTPException(403) if not org_admin"],
+      "systemEffects": [],
+      "outputs": ["HTTP 403 with German message"],
+      "failureConditions": ["Non-admin user attempts mutation"],
+      "dependencies": ["require_org dependency"],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": ["All PATCH/POST/DELETE /api/kiki-zentrale/*"],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:55-59"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 94,
+      "evidence": "Lines 55-59: 'if user.role != \"org_admin\": raise HTTPException(status_code=403, ...)'"
+    },
+    {
+      "id": "KIKI-023",
+      "name": "Locked Required Field Protection",
+      "description": "DELETE /api/kiki-zentrale/required-fields/{field_id} checks agent_required_fields.is_locked. If True, HTTP 400 is returned with 'Pflichtfeld ist gesperrt und kann nicht gelöscht werden.' The locked flag prevents deletion of system-injected fields the agent depends on.",
+      "purpose": "Protect system-level required fields (e.g. caller-ID identification) from accidental deletion.",
+      "trigger": "DELETE /api/kiki-zentrale/required-fields/{field_id}",
+      "preconditions": ["field exists and belongs to org"],
+      "inputs": ["agent_required_fields.is_locked for the given field"],
+      "validations": ["is_locked must be False for deletion"],
+      "actions": ["HTTP 400 if is_locked=True"],
+      "systemEffects": [],
+      "outputs": ["HTTP 400 or HTTP 404 on guard failure", "{success:True} on success"],
+      "failureConditions": ["is_locked=True"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": ["DELETE /api/kiki-zentrale/required-fields/{field_id}"],
+      "affectedTables": ["agent_required_fields"],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:789-808"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "Lines 789-808: is_locked check before delete."
+    },
+    {
+      "id": "KIKI-024",
+      "name": "Leitfaden Stale-Set Guard (Concurrent Save Conflict)",
+      "description": "PATCH /api/kiki-zentrale/leitfaden batch-save first fetches all agent_required_fields ids for the org, then compares them with the set of ids sent in the payload. If the sets differ (a field was added or deleted by another request between the UI load and the save), HTTP 409 is returned: 'Die Liste ist veraltet — bitte Seite neu laden.' No partial write occurs.",
+      "purpose": "Prevent the Leitfaden batch-save from silently dropping fields added by concurrent saves or from re-adding deleted fields.",
+      "trigger": "PATCH /api/kiki-zentrale/leitfaden",
+      "preconditions": [],
+      "inputs": ["payload.items[].id (set of field IDs from UI)", "current agent_required_fields ids from DB"],
+      "validations": ["Sets must match exactly"],
+      "actions": ["Return 'stale' if mismatch → HTTP 409"],
+      "systemEffects": [],
+      "outputs": ["HTTP 409 on stale set"],
+      "failureConditions": ["Fields added or deleted between UI load and batch save"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": ["PATCH /api/kiki-zentrale/leitfaden"],
+      "affectedTables": ["agent_required_fields"],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:685-690"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "Lines 685-690: 'if current_ids != sent_ids: return \"stale\"' → HTTP 409."
+    },
+    {
+      "id": "KIKI-025",
+      "name": "EL-First Write Order for Verhalten (Persona/Voice/Language)",
+      "description": "PATCH /api/kiki-zentrale/verhalten applies the ElevenLabs patch (persona_name, first_message, language, voice_id) BEFORE the Supabase agent_configs upsert. If EL fails, the DB write never happens, leaving no divergence. If DB fails after EL success, only EL-only fields (persona/voice) are applied — these have no DB twin that could drift. This ordering was reversed historically and caused DB writes to succeed while the EL PATCH was never attempted.",
+      "purpose": "Ensure EL-only fields (persona/voice) cannot cause a DB-committed state that the agent never reflects.",
+      "trigger": "PATCH /api/kiki-zentrale/verhalten",
+      "preconditions": ["org_admin role"],
+      "inputs": ["VerhaltenUpdate payload"],
+      "validations": [],
+      "actions": [
+        "EL patch first via patch_agent_safely",
+        "Supabase agent_configs upsert after EL success"
+      ],
+      "systemEffects": ["ElevenLabs agent updated", "agent_configs row updated"],
+      "outputs": ["{success:True, config, agent}"],
+      "failureConditions": ["EL patch failure → no DB write, caller gets 500"],
+      "dependencies": ["KIKI-001", "KIKI-003"],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": ["PATCH /api/kiki-zentrale/verhalten"],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:519-546"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "Lines 519-546: comment documents audit 2026-06-11 fix; EL patch block runs before _upsert_config."
+    },
+    {
+      "id": "KIKI-026",
+      "name": "Sync-Stale Coercion (pending → failed after 300 s)",
+      "description": "GET /api/kiki-zentrale/sync-status reads the agent_sync_status and agent_sync_requested_at. If status='pending' and requested_at is older than 300 seconds (5 minutes), the response returns status='failed' with error='timeout'. This coercion is READ-ONLY (no DB update), intended to prevent the loader banner from spinning forever after a backend crash mid-push.",
+      "purpose": "Resolve stuck 'pending' banners caused by backend restarts during background EL pushes.",
+      "trigger": "GET /api/kiki-zentrale/sync-status",
+      "preconditions": ["agent_sync_status='pending'", "agent_sync_requested_at > 300 s ago"],
+      "inputs": ["agent_configs.agent_sync_status", "agent_configs.agent_sync_requested_at"],
+      "validations": [],
+      "actions": ["Read-side override: return status='failed', error='timeout'"],
+      "systemEffects": ["No DB write"],
+      "outputs": ["Coerced status in response"],
+      "failureConditions": ["Invalid timestamp format in agent_sync_requested_at (silently skipped)"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": ["GET /api/kiki-zentrale/sync-status"],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:410-435",
+        "backend/app/api/routes/kiki_zentrale.py:411"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "Lines 410-435: stale coercion logic with _SYNC_STALE_SECONDS=300."
+    },
+    {
+      "id": "KIKI-027",
+      "name": "Conversation Logic Compiled Output Cap",
+      "description": "When validating or saving a conversation_logic rule tree, the compiled German prose output is checked against MAX_COMPILED_CHARS=4000. If exceeded, HTTP 422 is returned: 'Die Gesprächslogik ist zu lang'. The cap prevents the compiled block from consuming too much of the agent's prompt budget. The check runs at save time; the cap is NOT re-checked at render time when the rule tree is pulled from the DB.",
+      "purpose": "Prevent over-long conversation logic from bloating the agent prompt beyond the template's intended token budget.",
+      "trigger": "PATCH /api/kiki-zentrale/conversation-logic, POST /conversation-logic/preview, POST /gespraechsablauf/preview",
+      "preconditions": [],
+      "inputs": ["Compiled conversation_logic text (after compile_conversation_logic())"],
+      "validations": ["len(compiled) <= MAX_COMPILED_CHARS (4000)"],
+      "actions": ["HTTPException(422) if cap exceeded"],
+      "systemEffects": [],
+      "outputs": ["HTTP 422 with char count and limit"],
+      "failureConditions": ["Generated text from too many/large branches"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/api/routes/kiki_zentrale.py",
+        "backend/app/schemas/conversation_logic.py"
+      ],
+      "affectedAPIs": ["PATCH /api/kiki-zentrale/conversation-logic"],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:857-863",
+        "backend/app/schemas/conversation_logic.py:27"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 85,
+      "evidence": "Lines 857-863: 'if len(compiled) > MAX_COMPILED_CHARS: raise HTTPException(422, ...)'. Line 27: MAX_COMPILED_CHARS=4000."
+    },
+    {
+      "id": "KIKI-028",
+      "name": "AI Conversation Logic Generation Rate Limit",
+      "description": "POST /api/kiki-zentrale/conversation-logic/generate is protected by a sliding-window rate limit: 6 calls per 60 seconds per org_id. Exceeding the limit raises HTTP 429. The description must be 10-4000 characters; shorter/longer inputs return HTTP 422. Nothing is saved to the DB — the endpoint only returns a validated rule tree + compiled preview for the UI.",
+      "purpose": "Bound LLM spend for the AI rule generation feature; prevent a single org from exhausting the AI quota.",
+      "trigger": "POST /api/kiki-zentrale/conversation-logic/generate",
+      "preconditions": ["org_admin role"],
+      "inputs": ["payload.description (10-4000 chars)", "payload.existing (optional current rules)"],
+      "validations": ["len(description) >= 10", "len(description) <= 4000", "rate limit: max 6 calls/60s per org"],
+      "actions": ["enforce_rate_limit() → 429 on breach", "generate_logic_from_text() → AI call"],
+      "systemEffects": [],
+      "outputs": ["Validated rule tree + compiled preview (not saved)"],
+      "failureConditions": ["Rate limit exceeded", "Description too short/long", "AI service disabled (503)", "Generation failed (422)"],
+      "dependencies": ["services/ratelimit.py", "services/conversation_logic_ai.py"],
+      "relatedRules": ["KIKI-027"],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": ["POST /api/kiki-zentrale/conversation-logic/generate"],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:959-965",
+        "backend/app/api/routes/kiki_zentrale.py:964-965"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 85,
+      "evidence": "Lines 959-965: enforce_rate_limit('rule_generate', user.org_id, max_calls=6, per_seconds=60) + description length checks."
+    },
+    {
+      "id": "KIKI-029",
+      "name": "Linked Row Active State Derives from agent_configs Boolean",
+      "description": "In agent_required_fields, rows with a linked_setting value (e.g. 'appointments_enabled', 'kva_enabled', 'price_info_enabled') do NOT use their own is_active column for active state. Instead, is_active is computed from the live agent_configs value at read time (GET /required-fields) and at render time (_field_effective_active()). Toggling the linked agent_configs setting instantly affects the Leitfaden without a field row update.",
+      "purpose": "Keep the Leitfaden offer-steps (Termin/KVA/Preisauskunft) in sync with the Autonomie toggles without duplicating state.",
+      "trigger": "GET /api/kiki-zentrale/required-fields and render_required_fields_block()",
+      "preconditions": [],
+      "inputs": ["agent_required_fields.linked_setting", "agent_configs[linked_setting] value"],
+      "validations": [],
+      "actions": ["Overwrite is_active in the returned row dict with the live agent_configs boolean"],
+      "systemEffects": [],
+      "outputs": ["is_active reflects the live agent_configs setting for linked rows"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["KIKI-017", "KIKI-019"],
+      "affectedModules": [
+        "backend/app/api/routes/kiki_zentrale.py",
+        "backend/app/services/agent_config.py"
+      ],
+      "affectedAPIs": ["GET /api/kiki-zentrale/required-fields"],
+      "affectedTables": ["agent_required_fields", "agent_configs"],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:640-658",
+        "backend/app/services/agent_config.py:525-534"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 87,
+      "evidence": "Lines 640-658: linked row is_active overridden with live agent_configs value. Lines 525-534: _field_effective_active() consults cfg.get(linked) at render time."
+    },
+    {
+      "id": "KIKI-030",
+      "name": "PDF Knowledge Resource 20 MB Upload Limit",
+      "description": "POST /api/kiki-zentrale/knowledge-resources/pdf reads the full file content before any write and checks len(content) > MAX_PDF_BYTES (20 * 1024 * 1024 = 20 MB). If exceeded, HTTP 413 is returned immediately without any Supabase Storage upload or ElevenLabs KB creation.",
+      "purpose": "Prevent oversized PDFs from consuming Supabase Storage quota and causing ElevenLabs KB ingestion failures.",
+      "trigger": "POST /api/kiki-zentrale/knowledge-resources/pdf",
+      "preconditions": [],
+      "inputs": ["UploadFile content bytes"],
+      "validations": ["len(content) <= 20 * 1024 * 1024"],
+      "actions": ["HTTPException(413) if exceeded"],
+      "systemEffects": [],
+      "outputs": ["HTTP 413 with 'PDF zu groß (max. 20 MB).'"],
+      "failureConditions": ["File larger than 20 MB"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": ["POST /api/kiki-zentrale/knowledge-resources/pdf"],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:29",
+        "backend/app/api/routes/kiki_zentrale.py:1072-1078"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 92,
+      "evidence": "Line 29: MAX_PDF_BYTES = 20 * 1024 * 1024. Lines 1072-1078: guard before _do() call."
+    },
+    {
+      "id": "KIKI-031",
+      "name": "Knowledge URL Duplicate Guard",
+      "description": "POST /api/kiki-zentrale/knowledge-resources/url checks for an existing knowledge_resources row with the same source (URL) for the same org_id before inserting. If a duplicate is found, HTTP 409 'Diese URL ist bereits vorhanden.' is returned.",
+      "purpose": "Prevent the same URL being attached multiple times to the agent's KB.",
+      "trigger": "POST /api/kiki-zentrale/knowledge-resources/url",
+      "preconditions": [],
+      "inputs": ["payload.url", "org_id from JWT"],
+      "validations": ["No existing knowledge_resources row with same source AND org_id"],
+      "actions": ["HTTPException(409) if duplicate"],
+      "systemEffects": [],
+      "outputs": ["HTTP 409 on duplicate"],
+      "failureConditions": ["Same URL submitted twice"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": ["POST /api/kiki-zentrale/knowledge-resources/url"],
+      "affectedTables": ["knowledge_resources"],
+      "sourceReferences": [
+        "backend/app/api/routes/kiki_zentrale.py:1051-1056"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "Lines 1051-1056: dup check by org_id + source before INSERT."
+    },
+    {
+      "id": "KIKI-032",
+      "name": "queryKnowledgeBase Tool — Native EL KB, Not Backend Lookup",
+      "description": "The hk_queryKnowledgeBase ElevenLabs tool routes to POST /api/elevenlabs/tools/query-knowledge-base, which delegates to services/knowledge.py::query_knowledge_base(). That service ALWAYS returns {success:True, answer:None, message:'...'} — a static graceful fallback. The actual knowledge retrieval is performed natively by ElevenLabs using the agent's attached knowledge-base documents (the prompt instructs the agent to call hk_queryKnowledgeBase first). The backend tool endpoint is effectively a stub.",
+      "purpose": "The backend tool is a graceful-degradation stub; real KB queries are native ElevenLabs RAG.",
+      "trigger": "Agent calls hk_queryKnowledgeBase during a conversation",
+      "preconditions": [],
+      "inputs": ["QueryKnowledgeBaseRequest"],
+      "validations": [],
+      "actions": ["Returns static fallback message"],
+      "systemEffects": [],
+      "outputs": ["{success:True, answer:None, message:'Dazu liegen mir keine Informationen vor...'}"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/services/knowledge.py",
+        "backend/app/api/routes/tools/query_knowledge_base.py"
+      ],
+      "affectedAPIs": ["POST /api/elevenlabs/tools/query-knowledge-base"],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/knowledge.py:1-17"
+      ],
+      "classification": "PARTIALLY_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "Lines 1-17: 'No knowledge-base store exists yet... returns the documented graceful \"no answer\" response'. The EL native KB is the real retrieval path."
+    },
+    {
+      "id": "KIKI-033",
+      "name": "Voicemail Detection Tool — Hardened Description to Prevent False Fires",
+      "description": "build_voicemail_tool() sets a very specific description for the voicemail_detection built-in tool: it must ONLY trigger when a recorded greeting explicitly states unavailability with a beep, NEVER on silence, background noise, or a live human saying anything. This description was hardened after the reported outbound bug where the agent fired voicemail detection on live humans and hung up.",
+      "purpose": "Prevent the voicemail detection tool from misidentifying a live human as a voicemail and ending the call prematurely.",
+      "trigger": "sync_system_tools_for_org() → build_voicemail_tool()",
+      "preconditions": [],
+      "inputs": [],
+      "validations": [],
+      "actions": ["Returns hardened voicemail_detection built_in_tools config"],
+      "systemEffects": [],
+      "outputs": ["voicemail_detection tool object with strict description"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["KIKI-011"],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:1378-1402"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "Lines 1378-1402: build_voicemail_tool() with 'NEVER trigger in the first seconds...' constraint."
+    },
+    {
+      "id": "KIKI-034",
+      "name": "Org-Disabled Gate on require_org",
+      "description": "require_org() dependency (used by all Kiki-Zentrale endpoints) checks organizations.disabled_at for non-super-admin users. If disabled_at is set, HTTP 403 'Diese Organisation ist deaktiviert.' is returned. Super-admins bypass this check.",
+      "purpose": "Block all access to a disabled org's Kiki-Zentrale endpoints without affecting super-admin operations.",
+      "trigger": "Any authenticated request to /api/kiki-zentrale/*",
+      "preconditions": ["User is authenticated"],
+      "inputs": ["organizations.disabled_at for user's org_id"],
+      "validations": ["disabled_at must be NULL for non-super-admin users"],
+      "actions": ["HTTPException(403) if disabled_at is set"],
+      "systemEffects": [],
+      "outputs": ["HTTP 403"],
+      "failureConditions": ["Org has been soft-disabled by super-admin"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/deps.py"],
+      "affectedAPIs": ["All /api/kiki-zentrale/* endpoints"],
+      "affectedTables": ["organizations"],
+      "sourceReferences": [
+        "backend/app/api/deps.py:66-90"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": "Lines 66-90: require_org() checks org_rows[0].get('disabled_at') for non-super-admin."
+    },
+    {
+      "id": "KIKI-035",
+      "name": "Welcoming Message Time-Based Override",
+      "description": "_pick_welcome_message() reads agent_configs.welcome_messages (list of {from, to, message} dicts) and returns the first variant whose time window contains the current Berlin time. If no variant matches, None is returned and no conversation_config_override is added to the init payload. Midnight-spanning windows (e.g. 21:00-05:00) are handled by the _in_window() function.",
+      "purpose": "Allow orgs to customize the agent's greeting based on time of day without changing the stored first_message in ElevenLabs.",
+      "trigger": "POST /api/elevenlabs/conversation-init",
+      "preconditions": [],
+      "inputs": ["agent_configs.welcome_messages", "Current Berlin time"],
+      "validations": [],
+      "actions": ["Iterates variants, checks time window"],
+      "systemEffects": [],
+      "outputs": ["conversation_config_override.agent.first_message if a match is found"],
+      "failureConditions": ["Any exception in lookup is swallowed (best-effort)"],
+      "dependencies": [],
+      "relatedRules": ["KIKI-012"],
+      "affectedModules": ["backend/app/services/conversation_init.py"],
+      "affectedAPIs": ["POST /api/elevenlabs/conversation-init"],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": [
+        "backend/app/services/conversation_init.py:50-76",
+        "backend/app/services/conversation_init.py:43-47"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 87,
+      "evidence": "Lines 43-47: _in_window() with midnight-wrap support. Lines 50-76: _pick_welcome_message() with best-effort exception handling."
+    },
+    {
+      "id": "KIKI-036",
+      "name": "B.4 Webhook Provisioning — Preserves Existing request_headers",
+      "description": "In configure_agent B.4, when the webhook URL must be updated in ElevenLabs, the patch body always carries the EXISTING request_headers (read from the current config before the PATCH) alongside the new URL. This prevents ElevenLabs from returning 'Field required: request_headers' and resetting the X-HeyKiki-Secret value already wired on the agent.",
+      "purpose": "Preserve the per-agent webhook secret when updating the webhook URL.",
+      "trigger": "configure_agent() B.4 step when webhook URL or toggle needs to change",
+      "preconditions": [],
+      "inputs": ["current EL agent config webhook.request_headers"],
+      "validations": [],
+      "actions": ["Include cur_headers in PATCH body for workspace_overrides.conversation_initiation_client_data_webhook"],
+      "systemEffects": ["Webhook URL updated; existing secret preserved"],
+      "outputs": ["summary.webhook_enabled = True"],
+      "failureConditions": [],
+      "dependencies": ["KIKI-001", "KIKI-003"],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:1205-1242"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "Lines 1205-1242: B.4 — 'Carry existing request_headers so EL doesn't reject the PATCH for \"Field required: request_headers\"'."
+    },
+    {
+      "id": "KIKI-037",
+      "name": "B.6 Path A Conversation Config Override Whitelist",
+      "description": "configure_agent B.6 enables the three Path A override flags on the agent: platform_settings.overrides.conversation_config_override.agent.{first_message:true, language:true, prompt:{prompt:true}}. These allow N8N-created agents to receive per-call outbound conversation_config_overrides without manual toggling. The step is skipped when all three flags are already true (idempotent). The write uses required_override_flags=True so patch_agent_safely's post-verify confirms all flags took effect.",
+      "purpose": "Enable per-call prompt/language/first-message overrides for outbound calls on any newly provisioned agent.",
+      "trigger": "configure_agent() B.6 step",
+      "preconditions": ["B.5 passed (audio present)"],
+      "inputs": ["current OVERRIDES_WHITELIST_AGENT_PATH from EL config", "override_flags_ok() check"],
+      "validations": ["All three override flags must be True after write (post-verify)"],
+      "actions": ["patch_agent_safely() with the three boolean flags"],
+      "systemEffects": ["ElevenLabs agent updated with override whitelist"],
+      "outputs": ["summary.overrides_whitelist_enabled = True"],
+      "failureConditions": ["Post-verify fails → VerificationFailedError"],
+      "dependencies": ["KIKI-004"],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/services/agent_config.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/agent_config.py:1263-1294"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "Lines 1263-1294: B.6 — required_override_flags=True ensures post-verify checks all three Path A flags."
+    }
+  ]
+}

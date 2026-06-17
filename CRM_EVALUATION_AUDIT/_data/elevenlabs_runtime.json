@@ -1,0 +1,55 @@
+{
+  "agentId": "agent_5001ksahz3w7fhx90j71xr800py4",
+  "fetchedAt": "live (this session)",
+  "prompt": {
+    "length": 66209,
+    "firstChars": "# KRITISCHE ERSTE AKTION\n\nSobald der Anrufer seine erste Aussage gemacht hat (egal welche), MUSST du\nals ALLERERSTE Aktion das Tool `hk_identifyCustomer` aufrufen\n— OHNE Parameter, es nutzt automatisch die Caller-ID. Erst danach antwortest\ndu dem Anrufer.\n\nDiese Regel gilt UNABHÄNGIG vom Inhalt des ersten",
+    "lastChars": "ortige Verbindung gewünscht ist (reine Rückrufbitte): nimm stattdessen eine Notiz mit `hk_createInquiry` (`rueckrufGewuenscht=true`) auf — nicht weiterleiten.\n  - Schlägt die Weiterleitung fehl: entschuldige dich kurz und nimm eine Rückrufnotiz mit `hk_createInquiry` (`rueckrufGewuenscht=true`) auf.",
+    "looksRenderedFromTemplate": true,
+    "unsubstitutedPlaceholders": []
+  },
+  "firstMessage": "Hallo, hier ist Kiki. Wie kann ich helfen?",
+  "voice": {
+    "voiceId": "v3V1d2rk6528UrLKRuy8",
+    "modelId": null,
+    "settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.8,
+      "temperature": 0.3
+    }
+  },
+  "clientEvents": null,
+  "audioEventPresent": false,
+  "tools": {
+    "count": 0,
+    "names": []
+  },
+  "webhookUrl": null,
+  "webhookPointsAtProd": null,
+  "companyNamesFound": [
+    {
+      "name": "Kiki Chat GmbH",
+      "approxCount": 8,
+      "looksStale": false
+    },
+    {
+      "name": "Kiki",
+      "approxCount": 10,
+      "looksStale": false
+    }
+  ],
+  "syncObservations": [
+    "CRITICAL: The ElevenLabs MCP get_agent_config response is a FLAT structure (only 9 top-level keys: agent_id, name, language, first_message, prompt, temperature, voice_id, stability, similarity_boost). This differs from the ElevenLabs full agent config schema which would normally include nested tools[], client_events[], conversation_config, webhook config etc. The response appears to be a simplified/partial representation — tools, client_events, and webhook URL are NOT present in the retrieved payload.",
+    "All 15 {{COMPANY_*}} and {{KZ_*}} template placeholders are FULLY SUBSTITUTED in the live prompt. No unrendered {{...}} tokens remain (apart from the 5 expected ElevenLabs runtime system vars: {{system__time}}, {{system__conversation_id}}, {{system__caller_id}}, {{system__called_number}}, {{system__timezone}}).",
+    "Company identity is consistently 'Kiki Chat GmbH' (Heizung & Sanitär, Hafenweg 22, 48155 Münster). No stale placeholder names like 'Muster Heizungsbau', 'Husmann & Dreier', or 'Wilhelm Selting' appear.",
+    "STALE TEST DATA in appointment categories: Two categories appear to be test/sandbox data entered by kiki-test-007 users rather than real org config — 'ruskin' (33 Min, Oleksandra Yavorska: 'rusk to the bond') and 'Pipe isssue' [sic, triple s] (60 Min, Justin Radigk: 'so this category belongs to all the isssues which are realted to pipe burst'). These look like manual test entries with typos and English notes in an otherwise German prompt.",
+    "STALE TEST DATA in KZ_CONVERSATION_LOGIC: The rendered conversation logic block (Schritt 1a) contains English-language branching instructions ('Wenn a supplier is calling', 'Wenn a client is calling', 'What is your client number') — inconsistent with the otherwise German-only prompt. This appears to be test user input that was never cleaned up.",
+    "Contact email in Firmeninformationen is dixitrahul825@gmail.com — this appears to be a test/placeholder email address, not a real business email for 'Kiki Chat GmbH'.",
+    "voice_id 'v3V1d2rk6528UrLKRuy8' is present but model_id is absent from the flat response — cannot confirm TTS model tier from this payload.",
+    "No 'audio' client_event confirmed present — the MCP tool returned a flat response without a client_events array. Cannot confirm audio event state from this payload alone; must check via full ElevenLabs API or dashboard.",
+    "No tools array returned by the MCP get_agent_config — the hk_ tool set (identifyCustomer, createInquiry, getAvailableAppointments, bookAppointment, searchCustomerInquiries, cancelAppointment, plus others referenced in prompt) is embedded by name in the prompt text but NOT confirmed as registered tool configs in this payload.",
+    "No webhook URL is present in the retrieved config payload — cannot confirm whether the agent points at localhost or the prod Railway backend from this response alone.",
+    "[Name] literal appears 2x in the prompt as an example placeholder within instructional text (e.g. 'Ich notiere die Nachricht für [Name]') — this is intentional template copy, not a substitution failure."
+  ],
+  "confidence": 72
+}

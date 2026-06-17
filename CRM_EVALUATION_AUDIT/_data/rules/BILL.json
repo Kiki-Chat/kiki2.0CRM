@@ -1,0 +1,1937 @@
+{
+  "domain": "Stripe Billing, Usage Metering & Provisioning",
+  "rulePrefix": "BILL",
+  "features": [
+    {
+      "name": "Plan Catalog (Solo/Team/Premium)",
+      "category": "billing",
+      "description": "Canonical 3-tier SaaS plan catalog with included minutes, monthly/annual base prices, and per-minute overage. Prices are NET (tax_behavior=exclusive) with 19% German VAT added on top via automatic_tax. Annual = 10× monthly (2 months free). Catalog is idempotent via Stripe lookup_keys; price changes mint new prices and transfer keys.",
+      "modules": [
+        "backend/app/services/stripe_catalog.py"
+      ],
+      "apis": [
+        "GET /api/billing/plans"
+      ],
+      "tables": [],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 98,
+      "risks": [
+        "Live catalog must be re-created with live Stripe key at go-live; TEST catalog is currently active",
+        "19% VAT only applies if Stripe Tax registration is active in Dashboard"
+      ]
+    },
+    {
+      "name": "Safe Write Wrapper (stripe_call_safely)",
+      "category": "billing",
+      "description": "Every mutating Stripe call goes through a centralized safe-write wrapper that: writes a billing_events row as 'pending' BEFORE the call, blocks writes to Connect-attributed subscriptions, enforces cross-org guard, carries idempotency keys, performs additive metadata merges, and verifies the result optionally.",
+      "modules": [
+        "backend/app/services/stripe_billing.py"
+      ],
+      "apis": [],
+      "tables": [
+        "billing_events"
+      ],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 99,
+      "risks": [
+        "No auto-rollback on verification failure — detect-and-alert only",
+        "Idempotency window is 24 hours (Stripe server-side limit)"
+      ]
+    },
+    {
+      "name": "Per-Call Usage Metering",
+      "category": "billing",
+      "description": "After each call is finalized via post-call webhook, usage (duration_seconds rounded to minutes via round()) is reported to Stripe's metered usage API. Idempotent via billing_usage_reports.call_id UNIQUE. All minutes reported regardless of quota — soft-stop model (no hard cap). Historical backfill explicitly excluded.",
+      "modules": [
+        "backend/app/services/billing_usage.py",
+        "backend/app/api/routes/post_call.py"
+      ],
+      "apis": [
+        "POST /api/elevenlabs/post-call"
+      ],
+      "tables": [
+        "billing_usage_reports",
+        "calls"
+      ],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": [
+        "Gated by STRIPE_USAGE_REPORTING_ENABLED flag — currently False by default",
+        "round() rounding means some minutes may not be billed (sub-30s calls round to 0)"
+      ]
+    },
+    {
+      "name": "Quota Warning & Over-Quota Notifications",
+      "category": "billing",
+      "description": "After each call usage report, system checks if org has crossed 80% or 100% of included minutes. Sends one in-app notification + email per threshold per billing period (deduped via dedup_key). Over-quota is a soft-stop — agent stays online, overage billed automatically.",
+      "modules": [
+        "backend/app/services/billing_notifications.py",
+        "backend/app/services/billing_usage.py"
+      ],
+      "apis": [],
+      "tables": [
+        "billing_notifications"
+      ],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": [
+        "billing_quota_minutes falls back to ai_minutes_quota if billing column null — dual-source risk",
+        "billing_period_start falls back to current month start if not set — may mis-count usage"
+      ]
+    },
+    {
+      "name": "Webhook Ingest & State Sync",
+      "category": "billing",
+      "description": "Stripe webhooks are signature-verified on raw body, deduped by stripe_event_id UNIQUE, persisted, and processed in a background task. Signature failures are logged to billing_security_events and return 400. All other errors return 200 to prevent Stripe retries. Phase-1 handlers sync subscription state onto organizations table only — never write back to Stripe.",
+      "modules": [
+        "backend/app/services/stripe_webhook.py",
+        "backend/app/api/routes/stripe_webhook.py"
+      ],
+      "apis": [
+        "POST /api/billing/stripe-webhook"
+      ],
+      "tables": [
+        "billing_webhook_events",
+        "billing_security_events",
+        "organizations"
+      ],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 98,
+      "risks": [
+        "current_period_start/end moved from subscription top-level to items in Stripe's 2025-03-31 API version — handled by _sub_period fallback",
+        "Failed handlers are recorded but not auto-retried in Phase 1"
+      ]
+    },
+    {
+      "name": "Checkout & Subscription Provisioning",
+      "category": "billing",
+      "description": "Hosted Stripe Checkout session creates subscriptions with base + metered line items, optional trial period, automatic VAT, required billing address collection, tax_id collection for B2B reverse-charge, and promotion codes enabled. Self-service cancellation is DISABLED in the billing portal.",
+      "modules": [
+        "backend/app/services/stripe_provisioning.py",
+        "backend/app/api/routes/billing.py"
+      ],
+      "apis": [
+        "POST /api/billing/checkout-session",
+        "POST /api/billing/portal-session"
+      ],
+      "tables": [
+        "billing_checkout_sessions",
+        "organizations"
+      ],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 96,
+      "risks": [
+        "DEFAULT_TRIAL_DAYS = 14 — needs Amber confirmation before go-live",
+        "Portal configuration cached per-process; cache lost on restart"
+      ]
+    },
+    {
+      "name": "Org-Customer Migration Matching",
+      "category": "billing",
+      "description": "Dry-run matcher proposes CRM org ↔ Stripe customer links via email-exact or name-fuzzy (≥0.60 difflib ratio) matching with German legal suffix normalization. Proposals written to billing_migration_log only — zero Stripe writes until super-admin approves. Idempotent: orgs already in log are skipped.",
+      "modules": [
+        "backend/app/services/stripe_matcher.py",
+        "backend/app/services/stripe_admin_actions.py"
+      ],
+      "apis": [
+        "POST /api/super-admin/billing/run-matcher",
+        "POST /api/super-admin/billing/matches/{match_id}/approve",
+        "POST /api/super-admin/billing/matches/{match_id}/reject"
+      ],
+      "tables": [
+        "billing_migration_log",
+        "organizations"
+      ],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 94,
+      "risks": [
+        "Name fuzzy matching at 0.60 threshold may produce false positives for similar company names",
+        "No email uniqueness guard — two orgs sharing an email could match the same Stripe customer"
+      ]
+    },
+    {
+      "name": "Super-Admin Billing Dashboard",
+      "category": "billing",
+      "description": "Read-only cross-tenant view for super-admins: overview stats (total orgs, delinquent count, MRR estimate, YTD revenue), per-org billing state, Stripe account health, and migration match review queue. MRR excludes metered/overage items (flat base prices only); annual subscriptions normalized to monthly.",
+      "modules": [
+        "backend/app/api/routes/billing_admin.py",
+        "frontend/src/admin/AdminBillingPage.tsx"
+      ],
+      "apis": [
+        "GET /api/super-admin/billing/overview",
+        "GET /api/super-admin/billing/orgs",
+        "GET /api/super-admin/billing/stripe-health",
+        "GET /api/super-admin/billing/migration-matches"
+      ],
+      "tables": [
+        "organizations",
+        "billing_events",
+        "billing_usage_reports"
+      ],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": [
+        "MRR bounded at 1000 subscriptions, YTD at 5000 invoices — may undercount at scale",
+        "No RLS — requires require_super_admin dep for access control"
+      ]
+    },
+    {
+      "name": "Org Provisioning",
+      "category": "provisioning",
+      "description": "New CRM org creation: creates auth user, organizations row, users row, agent_configs row, and seeds default required fields. Compensating rollback on failure. Deduplicates on heykiki_org_id and login_email. No billing objects created at provisioning time — Stripe customer created on-demand at checkout.",
+      "modules": [
+        "backend/app/services/provisioning.py",
+        "backend/app/api/routes/provision.py"
+      ],
+      "apis": [
+        "POST /api/heykiki/provision"
+      ],
+      "tables": [
+        "organizations",
+        "users",
+        "agent_configs",
+        "agent_required_fields"
+      ],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": [
+        "Stripe customer creation is deferred — org can exist without billing link",
+        "Auth user deletion on rollback may fail silently"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "BILL-001",
+      "name": "Stripe Config Guard — Refuse All Calls Without API Key",
+      "description": "Every Stripe operation (read or write) is refused with StripeConfigError if STRIPE_SECRET_KEY is not set. The is_configured() check enables callers to gracefully degrade (return empty lists, skip usage reporting) without raising errors.",
+      "purpose": "Prevents accidental Stripe calls in dev/test environments without a key; makes billing module safely inert when unconfigured.",
+      "trigger": "Any call to get_stripe() or stripe_call_safely()",
+      "preconditions": [
+        "STRIPE_SECRET_KEY env var is empty"
+      ],
+      "inputs": [
+        "settings.stripe_secret_key"
+      ],
+      "validations": [
+        "if not settings.stripe_secret_key: raise StripeConfigError"
+      ],
+      "actions": [
+        "Raise StripeConfigError"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "StripeConfigError exception"
+      ],
+      "failureConditions": [],
+      "dependencies": [
+        "app.core.config.Settings"
+      ],
+      "relatedRules": [
+        "BILL-002",
+        "BILL-003"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_billing.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/stripe_billing.py:106-111",
+        "backend/app/services/stripe_billing.py:114-115"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "def _client(): if not settings.stripe_secret_key: raise StripeConfigError('STRIPE_SECRET_KEY is not set — the billing module is disabled.')"
+    },
+    {
+      "id": "BILL-002",
+      "name": "Dual Feature Gates — STRIPE_BILLING_ENABLED and STRIPE_USAGE_REPORTING_ENABLED",
+      "description": "Two independent boolean flags gate billing functionality. STRIPE_BILLING_ENABLED enables the billing module overall. STRIPE_USAGE_REPORTING_ENABLED gates usage writes to Stripe (can be enabled independently once reads go live). STRIPE_USAGE_REPORTING_ENABLED requires STRIPE_BILLING_ENABLED — a config validation error is raised at startup if this dependency is violated.",
+      "purpose": "Allows reads (summary, invoices) to go live before usage writes; prevents half-configured live key scenarios.",
+      "trigger": "Startup config validation; per-request feature check",
+      "preconditions": [],
+      "inputs": [
+        "STRIPE_BILLING_ENABLED env var",
+        "STRIPE_USAGE_REPORTING_ENABLED env var"
+      ],
+      "validations": [
+        "STRIPE_USAGE_REPORTING_ENABLED=1 requires STRIPE_BILLING_ENABLED=1",
+        "sk_live key requires STRIPE_BILLING_ENABLED=1 and non-empty STRIPE_WEBHOOK_SECRET"
+      ],
+      "actions": [
+        "Return config validation error list at startup",
+        "Skip usage reporting in post_call.py route if flag is False"
+      ],
+      "systemEffects": [
+        "Startup aborts in production if problems detected"
+      ],
+      "outputs": [
+        "list of fatal config problems"
+      ],
+      "failureConditions": [
+        "Live key without STRIPE_BILLING_ENABLED or STRIPE_WEBHOOK_SECRET configured"
+      ],
+      "dependencies": [
+        "BILL-001"
+      ],
+      "relatedRules": [
+        "BILL-001",
+        "BILL-011"
+      ],
+      "affectedModules": [
+        "backend/app/core/config.py",
+        "backend/app/api/routes/post_call.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/core/config.py:150-158",
+        "backend/app/core/config.py:198-214",
+        "backend/app/api/routes/post_call.py:24"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "stripe_usage_reporting_enabled: bool = Field(default=False, ...) ... if s.stripe_usage_reporting_enabled and not s.stripe_billing_enabled: problems.append(...)"
+    },
+    {
+      "id": "BILL-003",
+      "name": "Pre-Write Audit Row — Every Mutation Recorded Before Execution",
+      "description": "Before any Stripe mutating call, a billing_events row with status='pending' is written to the database. After the call succeeds, the row is updated to 'succeeded'. On failure, updated to 'failed' with error_code and error_message. Even refused calls (Connect block, cross-org guard) are recorded. The audit row is NEVER skipped.",
+      "purpose": "Creates an immutable ledger of every billing action for reconciliation and debugging, analogous to agent_writes_audit.",
+      "trigger": "stripe_call_safely() invocation",
+      "preconditions": [
+        "STRIPE_SECRET_KEY is set"
+      ],
+      "inputs": [
+        "op (operation name)",
+        "org_id",
+        "actor_id",
+        "stripe_object",
+        "request_payload",
+        "idempotency_payload"
+      ],
+      "validations": [],
+      "actions": [
+        "INSERT billing_events row with status='pending'",
+        "Execute Stripe call",
+        "UPDATE billing_events status to 'succeeded' or 'failed'"
+      ],
+      "systemEffects": [
+        "billing_events row written before any Stripe call"
+      ],
+      "outputs": [
+        "audit row id",
+        "Stripe API result"
+      ],
+      "failureConditions": [
+        "DB write failure for audit row (propagates — audit must not be bypassed)"
+      ],
+      "dependencies": [
+        "billing_events table"
+      ],
+      "relatedRules": [
+        "BILL-004",
+        "BILL-005"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_billing.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_billing.py:228-239",
+        "backend/app/services/stripe_billing.py:276-280"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "# Audit row FIRST — every attempted mutation is recorded, including refusals. audit_id = _audit_insert(db, op=op, ..., status='pending')"
+    },
+    {
+      "id": "BILL-004",
+      "name": "Connect-Attribution Write Block — Legacy ChatDash Subscriptions are Read-Only",
+      "description": "If a targeted Stripe subscription has a non-null 'application' field (indicating it was created by a Connect application, i.e., legacy ChatDash), all write operations are refused with ConnectAttributionError. Pure reads are still allowed. The subscription is flagged on organizations.billing_subscription_application when synced from webhooks.",
+      "purpose": "Prevents CRM from corrupting subscriptions created and owned by the legacy ChatDash Stripe Connect application.",
+      "trigger": "stripe_call_safely() with subscription_id parameter",
+      "preconditions": [
+        "subscription_id is provided",
+        "subscription.application is non-null in Stripe"
+      ],
+      "inputs": [
+        "subscription_id",
+        "Stripe Subscription object"
+      ],
+      "validations": [
+        "if application: raise ConnectAttributionError"
+      ],
+      "actions": [
+        "Refuse write",
+        "Update audit row to status='failed', error_code='connect_attribution'"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "ConnectAttributionError exception (HTTP 409 at route level)"
+      ],
+      "failureConditions": [],
+      "dependencies": [
+        "BILL-003"
+      ],
+      "relatedRules": [
+        "BILL-005",
+        "BILL-015"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_billing.py",
+        "backend/app/api/routes/billing_admin.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/super-admin/billing/orgs/{org_id}/cancel-subscription"
+      ],
+      "affectedTables": [
+        "billing_events",
+        "organizations"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_billing.py:242-249",
+        "backend/app/services/stripe_billing.py:283-288",
+        "backend/app/services/stripe_webhook.py:180"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "if application: raise ConnectAttributionError(f'Refusing write to subscription {subscription_id}: created by Connect application {application}. Legacy subscription is read-only in KikiCRM.')"
+    },
+    {
+      "id": "BILL-005",
+      "name": "Cross-Org Write Guard — Subscription Must Belong to Org's Customer",
+      "description": "When a write targets a subscription, the system verifies the subscription's customer matches the org's stored stripe_customer_id. If they do not match, StripeCrossOrgError is raised. This is a defense-in-depth check supplementing JWT-based org isolation.",
+      "purpose": "Prevents a compromised org from writing to another org's Stripe subscription.",
+      "trigger": "stripe_call_safely() with subscription_id and org_id parameters",
+      "preconditions": [
+        "subscription_id is provided",
+        "org_id is provided",
+        "org has a stripe_customer_id"
+      ],
+      "inputs": [
+        "subscription_id",
+        "org_id",
+        "organizations.stripe_customer_id"
+      ],
+      "validations": [
+        "org_customer != sub.customer → raise StripeCrossOrgError"
+      ],
+      "actions": [
+        "Refuse write",
+        "Update audit row to status='failed', error_code='cross_org'"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "StripeCrossOrgError exception"
+      ],
+      "failureConditions": [],
+      "dependencies": [
+        "BILL-003",
+        "BILL-004"
+      ],
+      "relatedRules": [
+        "BILL-004"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_billing.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_billing.py:250-257"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "if org_customer and sub_customer and sub_customer != org_customer: raise StripeCrossOrgError(...)"
+    },
+    {
+      "id": "BILL-006",
+      "name": "Idempotency Key Structure — op:org_id:sha256(payload)[:16]",
+      "description": "Every Stripe mutating call is issued with an idempotency key in the format '{op}:{org_id}:{sha256(payload)[:16]}'. The payload is JSON-serialized with sorted keys. Same op + org + logical input produces the same key, enabling Stripe to deduplicate retries for 24 hours server-side.",
+      "purpose": "Prevents double-charges or duplicate subscriptions on network retries.",
+      "trigger": "stripe_call_safely() with idempotency_payload parameter",
+      "preconditions": [],
+      "inputs": [
+        "op string",
+        "org_id",
+        "idempotency_payload dict"
+      ],
+      "validations": [],
+      "actions": [
+        "Compute SHA-256 of JSON-serialized payload",
+        "Build key as '{op}:{org_id}:{digest[:16]}'",
+        "Pass as idempotency_key to Stripe API call"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "idempotency_key string stored in billing_events"
+      ],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [
+        "BILL-003"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_billing.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_billing.py:69-75"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "def idempotency_key(op, org_id, payload): blob = json.dumps(payload or {}, sort_keys=True, default=str); digest = hashlib.sha256(blob.encode()).hexdigest()[:16]; return f'{op}:{org_id}:{digest}'"
+    },
+    {
+      "id": "BILL-007",
+      "name": "Additive Metadata — Never Clobber Existing Stripe Metadata Keys",
+      "description": "When writing metadata to Stripe objects (e.g., adding heykiki_org_id to a Customer), existing metadata keys are always preserved. The merge policy is: existing dict merged with new values on top, but only non-None new values are applied. This prevents accidentally clearing keys set by other systems.",
+      "purpose": "Preserves any metadata already on legacy ChatDash customers; safe to re-run match approval.",
+      "trigger": "stripe_call_safely() with metadata_merge parameter",
+      "preconditions": [
+        "metadata_merge is not None"
+      ],
+      "inputs": [
+        "metadata_existing dict",
+        "metadata_merge dict"
+      ],
+      "validations": [
+        "No-op short-circuit: if merged result equals existing, skip the Stripe call entirely"
+      ],
+      "actions": [
+        "Compute merged_metadata = {**existing, **{k:v for k,v in new.items() if v is not None}}",
+        "Short-circuit if no change"
+      ],
+      "systemEffects": [
+        "Audit row updated with status='succeeded', response_payload={'noop': True} on no-op"
+      ],
+      "outputs": [
+        "merged metadata dict",
+        "None on no-op"
+      ],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [
+        "BILL-003"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_billing.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_billing.py:78-84",
+        "backend/app/services/stripe_billing.py:260-262"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "def additive_metadata(existing, new): merged = dict(existing or {}); merged.update({k: v for k, v in (new or {}).items() if v is not None}); return merged"
+    },
+    {
+      "id": "BILL-008",
+      "name": "Plan Catalog — Three Tiers with Graduated Metered Pricing",
+      "description": "Three SaaS plans: Kiki Solo (99 min, €99/mo, €1.00/min overage), Kiki Team (250 min, €179/mo, €0.75/min overage), Kiki Premium (750 min, €499/mo, €0.50/min overage). Each plan has a BASE product (flat subscription) and a METERED product (graduated: first N minutes at €0, then overage rate). Annual pricing = 10× monthly (2 months free).",
+      "purpose": "Soft-stop model: report ALL minutes to the metered item; included tier-1 minutes are €0; overage tier-2 bills automatically.",
+      "trigger": "ensure_catalog() (manual or startup), find_plan_prices() (checkout)",
+      "preconditions": [
+        "STRIPE_SECRET_KEY is set"
+      ],
+      "inputs": [
+        "PLANS dict in stripe_catalog.py",
+        "plan_title",
+        "interval (month|year)"
+      ],
+      "validations": [
+        "interval must be 'month' or 'year'",
+        "Prices verified by lookup key drift detection (unit_amount, tax_behavior, tiers)"
+      ],
+      "actions": [
+        "Create/reuse Stripe Product for base and metered",
+        "Create/reuse lookup-keyed Prices with drift detection",
+        "Stale prices replaced by new price + key transfer"
+      ],
+      "systemEffects": [
+        "Stripe Products and Prices created/updated (TEST mode only until go-live)"
+      ],
+      "outputs": [
+        "dict of plan → {base_product, metered_product, prices}"
+      ],
+      "failureConditions": [
+        "Stripe API error during catalog creation"
+      ],
+      "dependencies": [
+        "BILL-001"
+      ],
+      "relatedRules": [
+        "BILL-009",
+        "BILL-010"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_catalog.py"
+      ],
+      "affectedAPIs": [
+        "GET /api/billing/plans"
+      ],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/stripe_catalog.py:34-38",
+        "backend/app/services/stripe_catalog.py:39",
+        "backend/app/services/stripe_catalog.py:125-130"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "PLANS = {'Kiki Solo': {'minutes': 99, 'monthly_cents': 9900, 'overage_cents': 100}, 'Kiki Team': {'minutes': 250, 'monthly_cents': 17900, 'overage_cents': 75}, 'Kiki Premium': {'minutes': 750, 'monthly_cents': 49900, 'overage_cents': 50}} ... ANNUAL_MONTHS = 10"
+    },
+    {
+      "id": "BILL-009",
+      "name": "Tax Behavior — All Prices NET (Exclusive), 19% German VAT Added via Automatic Tax",
+      "description": "Every Stripe price (base and metered, monthly and annual, all tiers) has tax_behavior='exclusive'. This means displayed prices are NET; 19% German MwSt is added ON TOP at checkout via automatic_tax=enabled. Applies to base subscription and per-minute overage. EU B2B reverse-charge applies when a valid VAT-ID is collected at checkout.",
+      "purpose": "Amber's policy: VAT must never be absorbed into the plan price. Ensures correct German B2B invoicing.",
+      "trigger": "ensure_catalog(), create_checkout_session()",
+      "preconditions": [
+        "Stripe Tax registration must be active in Stripe Dashboard for 19% to be charged"
+      ],
+      "inputs": [],
+      "validations": [
+        "Drift detection checks tax_behavior == 'exclusive'; inclusive prices trigger new price creation"
+      ],
+      "actions": [
+        "Set tax_behavior='exclusive' on all prices",
+        "Set automatic_tax={'enabled': True} on checkout sessions",
+        "Enable tax_id_collection at checkout for B2B reverse-charge"
+      ],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [
+        "Stripe Tax not activated in Dashboard → no VAT charged despite automatic_tax=enabled"
+      ],
+      "dependencies": [
+        "BILL-008"
+      ],
+      "relatedRules": [
+        "BILL-008",
+        "BILL-010"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_catalog.py",
+        "backend/app/services/stripe_provisioning.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/billing/checkout-session"
+      ],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/stripe_catalog.py:18-24",
+        "backend/app/services/stripe_catalog.py:99-100",
+        "backend/app/services/stripe_catalog.py:127-129",
+        "backend/app/services/stripe_provisioning.py:138-139"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "tax_behavior='exclusive' ... automatic_tax={'enabled': True} ... 'TAX: every price is NET (tax_behavior=\"exclusive\") — 19% German VAT (MwSt) is added ON TOP at checkout'"
+    },
+    {
+      "id": "BILL-010",
+      "name": "Checkout Session — Required Billing Address + Tax ID Collection",
+      "description": "Stripe Checkout sessions always collect a full billing address (billing_address_collection='required') and enable tax_id collection. The customer's address is updated from checkout ('auto'). This is required for German invoicing (full address on invoice) and exact-rate VAT calculation. Promotion codes are always enabled.",
+      "purpose": "German invoicing law requires the full billing address. Exact VAT rate requires address, not just country inference.",
+      "trigger": "POST /api/billing/checkout-session",
+      "preconditions": [
+        "org has a Stripe customer (ensure_stripe_customer called first)"
+      ],
+      "inputs": [
+        "plan_title",
+        "interval",
+        "trial_days"
+      ],
+      "validations": [
+        "interval must be 'month' or 'year'",
+        "catalog prices must exist for plan_title + interval"
+      ],
+      "actions": [
+        "Create Stripe Checkout Session in 'subscription' mode",
+        "Add base + metered line items",
+        "Set billing_address_collection='required'",
+        "Set tax_id_collection={'enabled': True}",
+        "Set allow_promotion_codes=True",
+        "Record to billing_checkout_sessions"
+      ],
+      "systemEffects": [
+        "billing_checkout_sessions row created"
+      ],
+      "outputs": [
+        "{'url': stripe_checkout_url, 'session_id': stripe_session_id}"
+      ],
+      "failureConditions": [
+        "No catalog prices found for plan/interval → StripeBillingError → HTTP 502"
+      ],
+      "dependencies": [
+        "BILL-008",
+        "BILL-009"
+      ],
+      "relatedRules": [
+        "BILL-008",
+        "BILL-009",
+        "BILL-017"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_provisioning.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/billing/checkout-session"
+      ],
+      "affectedTables": [
+        "billing_checkout_sessions",
+        "organizations"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_provisioning.py:104-163",
+        "backend/app/services/stripe_provisioning.py:140-148"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "billing_address_collection='required', tax_id_collection={'enabled': True}, allow_promotion_codes=True, automatic_tax={'enabled': True}"
+    },
+    {
+      "id": "BILL-011",
+      "name": "Per-Call Usage Reporting — One Report Per Call, Rounded Minutes, No Cap",
+      "description": "After each call is finalized (post-call webhook, status='processed'), call duration_seconds is converted to minutes via round() and reported to Stripe's SubscriptionItem usage record API. The billing_usage_reports.call_id UNIQUE constraint ensures exactly one report per call even on webhook retries. ALL minutes are reported (no quota cap) — overage is a Stripe-level concept.",
+      "purpose": "Enables automatic overage billing; prevents double-billing on retries; keeps displayed usage (round()) consistent with billed usage.",
+      "trigger": "POST /api/elevenlabs/post-call → background task",
+      "preconditions": [
+        "STRIPE_USAGE_REPORTING_ENABLED=True",
+        "call has status='processed'",
+        "org has stripe_customer_id",
+        "org has active metered subscription item",
+        "subscription is not Connect-attributed"
+      ],
+      "inputs": [
+        "call_id",
+        "org_id",
+        "calls.duration_seconds"
+      ],
+      "validations": [
+        "Unique constraint on billing_usage_reports.call_id prevents double-billing",
+        "minutes > 0 required (zero-minute calls skipped with skip_reason='zero_minutes')"
+      ],
+      "actions": [
+        "INSERT billing_usage_reports with status='pending'",
+        "Resolve metered subscription item",
+        "Compute minutes = round(duration_seconds / 60)",
+        "Report via SubscriptionItem.create_usage_record(action='increment')",
+        "UPDATE billing_usage_reports status='reported'",
+        "Link calls.billing_usage_report_id",
+        "Check and notify over-quota (best-effort)"
+      ],
+      "systemEffects": [
+        "billing_usage_reports row created",
+        "calls.billing_usage_report_id updated",
+        "Stripe usage record created"
+      ],
+      "outputs": [
+        "{'status': 'reported', 'call_id': ..., 'stripe_usage_record_id': 'mbur_...'}"
+      ],
+      "failureConditions": [
+        "no_customer: org has no stripe_customer_id",
+        "no_metered_sub: no active metered subscription item",
+        "legacy_connect_sub: subscription is Connect-attributed",
+        "zero_minutes: call duration rounds to 0"
+      ],
+      "dependencies": [
+        "BILL-001",
+        "BILL-002",
+        "BILL-004"
+      ],
+      "relatedRules": [
+        "BILL-012",
+        "BILL-013"
+      ],
+      "affectedModules": [
+        "backend/app/services/billing_usage.py",
+        "backend/app/api/routes/post_call.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/elevenlabs/post-call"
+      ],
+      "affectedTables": [
+        "billing_usage_reports",
+        "calls",
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/billing_usage.py:52-57",
+        "backend/app/services/billing_usage.py:99-180",
+        "backend/app/api/routes/post_call.py:22-28"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "def minutes_from_seconds(seconds): return round((seconds or 0) / 60) ... call_id UNIQUE not null references calls ... action='increment'"
+    },
+    {
+      "id": "BILL-012",
+      "name": "Historical Backfill Excluded from Billing",
+      "description": "Usage reporting is triggered only from the POST /api/elevenlabs/post-call route, not from the shared _process_one function used by history_import. This structurally ensures that backfilling historical ElevenLabs conversations into a new org's call log never generates Stripe usage records or charges.",
+      "purpose": "Prevents mis-billing new orgs for historical calls that predate their Kiki subscription.",
+      "trigger": "import_agent_history background task (explicitly NOT triggered from here)",
+      "preconditions": [],
+      "inputs": [],
+      "validations": [],
+      "actions": [
+        "No billing action on historical import"
+      ],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [
+        "BILL-011"
+      ],
+      "affectedModules": [
+        "backend/app/api/routes/post_call.py",
+        "backend/app/services/billing_usage.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/billing_usage.py:6-8",
+        "backend/app/api/routes/post_call.py:19-21"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "# Invoked from the post-call ROUTE (not the shared _process_one), so historical backfill via history_import never reaches this code → no mis-billing."
+    },
+    {
+      "id": "BILL-013",
+      "name": "80% Quota Warning and Over-Quota Notification — Once Per Billing Period",
+      "description": "After each usage report, the system checks the org's cumulative call minutes since billing_period_start against billing_quota_minutes. If usage >= 80% of quota, one 'quota_warning' notification is sent (deduped per period). If usage > 100%, one 'over_quota' notification is sent (deduped per period). Both send an in-app notification and attempt to dispatch an email via the existing send_email() chain.",
+      "purpose": "Warns customers before overage costs begin; alerts them when overage is being incurred.",
+      "trigger": "report_call_usage() success (best-effort, never blocks billing flow)",
+      "preconditions": [
+        "billing_quota_minutes or ai_minutes_quota is non-zero",
+        "dedup_key does not already exist in billing_notifications"
+      ],
+      "inputs": [
+        "org_id",
+        "organizations.billing_quota_minutes",
+        "organizations.ai_minutes_quota (fallback)",
+        "organizations.billing_period_start",
+        "calls.duration_seconds (all calls since period_start)"
+      ],
+      "validations": [
+        "Dedup via billing_notifications.dedup_key UNIQUE index prevents duplicate warnings"
+      ],
+      "actions": [
+        "Sum call minutes since billing_period_start",
+        "If used >= 80% of quota: record quota_warning notification",
+        "If used > quota: record over_quota notification",
+        "Attempt email dispatch via send_email()"
+      ],
+      "systemEffects": [
+        "billing_notifications row inserted",
+        "Email sent via Brevo SMTP (best-effort)"
+      ],
+      "outputs": [],
+      "failureConditions": [
+        "quota=0: notification skipped",
+        "email failure: logged, in-app notification still recorded"
+      ],
+      "dependencies": [
+        "BILL-011"
+      ],
+      "relatedRules": [
+        "BILL-011",
+        "BILL-014"
+      ],
+      "affectedModules": [
+        "backend/app/services/billing_notifications.py",
+        "backend/app/services/billing_usage.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_notifications"
+      ],
+      "sourceReferences": [
+        "backend/app/services/billing_notifications.py:175",
+        "backend/app/services/billing_notifications.py:178-206",
+        "backend/app/services/billing_notifications.py:163-172"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "QUOTA_WARNING_PCT = 0.8 ... if used > quota: notify_over_quota(...) elif used >= quota * QUOTA_WARNING_PCT: notify_quota_warning(...)"
+    },
+    {
+      "id": "BILL-014",
+      "name": "Notification Deduplication — One Alert Per Type Per Billing Period",
+      "description": "Billing notifications use a dedup_key (e.g., 'over_quota:{org_id}:{period_key}') enforced by a UNIQUE index on billing_notifications.dedup_key. A second notification of the same type in the same period silently no-ops (exception caught and ignored). This prevents duplicate emails on repeated usage reports in the same period.",
+      "purpose": "Prevents notification spam — customers receive at most one 80% warning and one over-quota alert per billing period.",
+      "trigger": "record_notification() with a dedup_key",
+      "preconditions": [
+        "dedup_key already exists in billing_notifications"
+      ],
+      "inputs": [
+        "dedup_key string"
+      ],
+      "validations": [
+        "UNIQUE constraint on billing_notifications.dedup_key where dedup_key is not null"
+      ],
+      "actions": [
+        "Exception caught silently → return None"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "None (no-op)"
+      ],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [
+        "BILL-013"
+      ],
+      "affectedModules": [
+        "backend/app/services/billing_notifications.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_notifications"
+      ],
+      "sourceReferences": [
+        "backend/app/services/billing_notifications.py:41-64",
+        "backend/app/services/billing_notifications.py:137-140",
+        "backend/app/services/billing_notifications.py:153-159"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "create unique index billing_notifications_dedup_idx on billing_notifications (dedup_key) where dedup_key is not null; ... dedup_key=f'over_quota:{org_id}:{period_key}'"
+    },
+    {
+      "id": "BILL-015",
+      "name": "Webhook Signature Verification — Raw Body Required; Failures Logged to Security Table",
+      "description": "Stripe webhooks are verified using stripe.Webhook.construct_event() on the raw request body (JSON must NOT be parsed first). Signature failures raise SignatureVerificationError → HTTP 400 → Stripe does NOT retry. Valid webhooks that fail processing still return 200 (so Stripe does not retry a processing bug). Signature failures are logged to billing_security_events with source IP and body excerpt.",
+      "purpose": "Prevents forged webhook injection; returns 400 only for authentication failures so retries are reserved for legitimate transient errors.",
+      "trigger": "POST /api/billing/stripe-webhook",
+      "preconditions": [
+        "STRIPE_WEBHOOK_SECRET is set"
+      ],
+      "inputs": [
+        "raw request body (bytes)",
+        "stripe-signature header",
+        "source IP"
+      ],
+      "validations": [
+        "stripe.Webhook.construct_event() verifies HMAC signature"
+      ],
+      "actions": [
+        "On failure: INSERT billing_security_events; raise 400",
+        "On success: deduplicate by stripe_event_id; INSERT billing_webhook_events; add background task"
+      ],
+      "systemEffects": [
+        "billing_security_events row on failure",
+        "billing_webhook_events row on success"
+      ],
+      "outputs": [
+        "{'received': True}"
+      ],
+      "failureConditions": [
+        "Missing or invalid STRIPE_WEBHOOK_SECRET → all webhooks fail verification"
+      ],
+      "dependencies": [
+        "BILL-001"
+      ],
+      "relatedRules": [
+        "BILL-016"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_webhook.py",
+        "backend/app/api/routes/stripe_webhook.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/billing/stripe-webhook"
+      ],
+      "affectedTables": [
+        "billing_webhook_events",
+        "billing_security_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_webhook.py:65-106",
+        "backend/app/api/routes/stripe_webhook.py:21-33"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "raw = await request.body() ... event = stripe.Webhook.construct_event(raw_body, sig_header, settings.stripe_webhook_secret) ... _record_security_event(...)"
+    },
+    {
+      "id": "BILL-016",
+      "name": "Webhook Deduplication — stripe_event_id UNIQUE Prevents Double-Processing",
+      "description": "Each incoming Stripe webhook event is deduplicated by its stripe_event_id (UNIQUE constraint on billing_webhook_events). If the event_id already exists in the table, the endpoint returns immediately with {new: False} and no background task is enqueued. This handles Stripe's built-in retry mechanism transparently.",
+      "purpose": "Ensures each webhook handler runs exactly once, even when Stripe retries the same event.",
+      "trigger": "POST /api/billing/stripe-webhook",
+      "preconditions": [
+        "Webhook signature is valid"
+      ],
+      "inputs": [
+        "stripe_event_id (evt_...)"
+      ],
+      "validations": [
+        "SELECT from billing_webhook_events WHERE stripe_event_id = ?",
+        "Concurrent INSERT race handled by unique violation exception catch"
+      ],
+      "actions": [
+        "If exists: return {new: False, ...}",
+        "If new: INSERT + enqueue background task"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "{'new': bool, 'stripe_event_id': ..., 'event_type': ...}"
+      ],
+      "failureConditions": [],
+      "dependencies": [
+        "BILL-015"
+      ],
+      "relatedRules": [
+        "BILL-015",
+        "BILL-017"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_webhook.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_webhook_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_webhook.py:81-106",
+        "backend/app/services/stripe_billing.py:33-36"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "billing_webhook_events.stripe_event_id text unique not null ... if existing: return {'new': False, ...}"
+    },
+    {
+      "id": "BILL-017",
+      "name": "Webhook State Sync — Subscription Events Update Organizations Table (Never Write to Stripe)",
+      "description": "Phase-1 webhook handlers are pure inbound state-syncs: they read the Stripe event payload and update organizations.billing_* columns only. They NEVER write back to Stripe. Events for unlinked customers (no matching stripe_customer_id in organizations) are silently no-ops. Handled events: customer.subscription.created/updated/trial_will_end/paused/resumed/deleted, invoice.paid/payment_succeeded/payment_failed, checkout.session.completed.",
+      "purpose": "Keeps CRM billing state (plan, quota, period, status) in sync with Stripe as the source of truth.",
+      "trigger": "Stripe webhook background task",
+      "preconditions": [
+        "organizations.stripe_customer_id matches sub.customer"
+      ],
+      "inputs": [
+        "Stripe event payload"
+      ],
+      "validations": [],
+      "actions": [
+        "customer.subscription.*: UPDATE organizations SET billing_subscription_id, billing_status, billing_plan_title, billing_quota_minutes, billing_period_start/end",
+        "invoice.paid: UPDATE organizations SET billing_status='active'",
+        "invoice.payment_failed: UPDATE organizations SET billing_status='past_due'; notify_payment_failed()",
+        "checkout.session.completed: retrieve subscription + sync + notify_subscription_activated()",
+        "customer.subscription.trial_will_end: sync + notify_trial_will_end()",
+        "customer.subscription.deleted: UPDATE organizations SET billing_status='canceled'"
+      ],
+      "systemEffects": [
+        "organizations.billing_* columns updated",
+        "billing_webhook_events.processing_status updated",
+        "billing_notifications inserted (for certain events)"
+      ],
+      "outputs": [
+        "processing_notes string"
+      ],
+      "failureConditions": [
+        "Handler exception: status='failed', notes recorded; no retry in Phase 1"
+      ],
+      "dependencies": [
+        "BILL-015",
+        "BILL-016"
+      ],
+      "relatedRules": [
+        "BILL-015",
+        "BILL-016",
+        "BILL-018"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_webhook.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "organizations",
+        "billing_webhook_events",
+        "billing_notifications"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_webhook.py:168-327",
+        "backend/app/services/stripe_webhook.py:269-280"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "_HANDLERS = {'customer.subscription.created': _handle_subscription, ..., 'invoice.payment_failed': _handle_invoice_failed, 'checkout.session.completed': _handle_checkout_completed}"
+    },
+    {
+      "id": "BILL-018",
+      "name": "Plan Derivation from Webhook — Plan Title and Quota Read from Product Metadata",
+      "description": "When processing subscription events, the plan title and included minutes are derived from the non-metered subscription item's product metadata fields 'plan_title' and 'included_call_minutes'. If the product is not expanded in the webhook payload, it is retrieved on-demand from Stripe. If derivation fails, the subscription status still syncs but plan/quota are not updated.",
+      "purpose": "Ties the org's quota minutes to the Stripe product definition — quota is the source of truth for billing warnings.",
+      "trigger": "_handle_subscription() in webhook processor",
+      "preconditions": [],
+      "inputs": [
+        "subscription.items.data",
+        "Stripe Product metadata"
+      ],
+      "validations": [
+        "Skips metered (usage_type='metered') items — only reads base product",
+        "included_call_minutes parsed with int(float()) to handle string values"
+      ],
+      "actions": [
+        "For non-metered item: retrieve product metadata",
+        "Extract plan_title and included_call_minutes",
+        "UPDATE organizations SET billing_plan_title, billing_quota_minutes"
+      ],
+      "systemEffects": [
+        "organizations.billing_plan_title updated",
+        "organizations.billing_quota_minutes updated"
+      ],
+      "outputs": [
+        "(title, minutes) tuple"
+      ],
+      "failureConditions": [
+        "Product retrieval fails: exception caught, meta={}, quota not updated"
+      ],
+      "dependencies": [
+        "BILL-017"
+      ],
+      "relatedRules": [
+        "BILL-017"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_webhook.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "organizations"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_webhook.py:124-150",
+        "backend/app/services/stripe_catalog.py:47-55"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "meta.get('plan_title') ... int(float(meta.get('included_call_minutes'))) ... if recurring.get('usage_type') == 'metered': continue"
+    },
+    {
+      "id": "BILL-019",
+      "name": "Subscription Period Sync — Dual-Location Field Read for API Compatibility",
+      "description": "current_period_start and current_period_end are read from the subscription's top-level fields first, then fall back to the first subscription item if top-level values are absent. This accommodates Stripe's 2025-03-31 API version change that moved these fields from the subscription object to subscription items.",
+      "purpose": "Ensures period-based usage tracking and notifications work correctly across Stripe API versions.",
+      "trigger": "Webhook subscription handlers",
+      "preconditions": [],
+      "inputs": [
+        "sub.current_period_start",
+        "sub.current_period_end",
+        "sub.items.data[0].current_period_start",
+        "sub.items.data[0].current_period_end"
+      ],
+      "validations": [],
+      "actions": [
+        "Read top-level, fallback to first item if None"
+      ],
+      "systemEffects": [
+        "organizations.billing_period_start updated",
+        "organizations.billing_period_end updated"
+      ],
+      "outputs": [
+        "(start_unix, end_unix) tuple"
+      ],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [
+        "BILL-017"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_webhook.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "organizations"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_webhook.py:153-165"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "# The 2025-03-31.basil API moved current_period_* OFF the subscription object ONTO its items — webhook payloads now only carry them on items.data[0]. Read top-level first (older versions / SDK back-fill), fall back to the first item."
+    },
+    {
+      "id": "BILL-020",
+      "name": "Billing Summary — Used Minutes Calculation Mirrors Billed Minutes",
+      "description": "The billing summary shown to customers (GET /api/billing/summary) calculates used_minutes as round(sum(duration_seconds) / 60) for all calls since billing_period_start. This exactly mirrors the minutes_from_seconds() function used in usage reporting, so displayed usage always matches the billed amount. period_start defaults to the 1st of the current month if not set.",
+      "purpose": "Prevents drift between the displayed usage in the UI and the billed amount in Stripe.",
+      "trigger": "GET /api/billing/summary",
+      "preconditions": [],
+      "inputs": [
+        "org_id",
+        "organizations.billing_period_start",
+        "calls.duration_seconds for org since period_start"
+      ],
+      "validations": [],
+      "actions": [
+        "Sum all call duration_seconds since billing_period_start",
+        "Apply round(sum/60)",
+        "Compute used_percent, over_quota flag"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "BillingSummary with quota_minutes, used_minutes, used_percent, over_quota"
+      ],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [
+        "BILL-011",
+        "BILL-013"
+      ],
+      "affectedModules": [
+        "backend/app/api/routes/billing.py"
+      ],
+      "affectedAPIs": [
+        "GET /api/billing/summary"
+      ],
+      "affectedTables": [
+        "organizations",
+        "calls"
+      ],
+      "sourceReferences": [
+        "backend/app/api/routes/billing.py:48-63",
+        "backend/app/api/routes/billing.py:83-116",
+        "backend/app/services/billing_usage.py:52-57"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "return round(sum((c.get('duration_seconds') or 0) for c in calls) / 60) ... # Mirrors settings._usage exactly (round(sum(duration_seconds)/60)) so the 'minutes used' shown in Abrechnung matches the rest of the app."
+    },
+    {
+      "id": "BILL-021",
+      "name": "Billing Portal — Self-Service Cancellation Disabled; Custom Configuration Required",
+      "description": "The Stripe Customer Portal is configured with a custom Configuration object that explicitly disables subscription_cancel. This prevents customers from cancelling their subscription via the portal. Customers can update address, email, phone, tax_id, and payment methods, and can view invoice history. The custom config also prevents the 'default configuration not created' 502 error.",
+      "purpose": "Amber's policy: cancellations are handled only via email or phone (info@kikichat.de), not self-service.",
+      "trigger": "POST /api/billing/portal-session",
+      "preconditions": [
+        "org has stripe_customer_id"
+      ],
+      "inputs": [
+        "org_id",
+        "customer_id"
+      ],
+      "validations": [],
+      "actions": [
+        "Ensure portal Configuration with subscription_cancel.enabled=False",
+        "Create billing_portal.Session with the custom config",
+        "Return session URL"
+      ],
+      "systemEffects": [
+        "Stripe billing portal Configuration created (cached per-process)"
+      ],
+      "outputs": [
+        "{'url': portal_session_url}"
+      ],
+      "failureConditions": [
+        "Stripe API error → HTTP 502 with German error message",
+        "Config creation failure: falls back to default config session"
+      ],
+      "dependencies": [
+        "BILL-001"
+      ],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/services/stripe_provisioning.py",
+        "backend/app/api/routes/billing.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/billing/portal-session"
+      ],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/stripe_provisioning.py:173-222",
+        "backend/app/services/stripe_provisioning.py:203-215",
+        "backend/app/api/routes/billing.py:206-244"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "'subscription_cancel': {'enabled': False} ... # Amber's policy: NO self-service cancellation in the portal."
+    },
+    {
+      "id": "BILL-022",
+      "name": "Stripe Customer Creation — Idempotent, With Org Address and heykiki_org_id Metadata",
+      "description": "When starting a checkout session, the system ensures the org has a Stripe customer (ensure_stripe_customer). If stripe_customer_id already exists on the org, the existing customer is returned. If not, a new Customer is created with the org's name, email, address (German address keys tolerated), preferred_locales=['de'], and metadata with heykiki_org_id and org_id. The org is then updated with the customer_id.",
+      "purpose": "Creates a one-to-one mapping between CRM org and Stripe customer; enables address-based exact VAT calculation.",
+      "trigger": "create_checkout_session() → ensure_stripe_customer()",
+      "preconditions": [
+        "org exists in organizations table"
+      ],
+      "inputs": [
+        "org_id",
+        "organizations.name",
+        "organizations.email",
+        "organizations.address (jsonb)",
+        "organizations.heykiki_org_id"
+      ],
+      "validations": [
+        "idempotency_payload={'org_id': str(org_id)} prevents duplicate customer creation"
+      ],
+      "actions": [
+        "Short-circuit if stripe_customer_id already set",
+        "Create Stripe Customer with org metadata",
+        "Map German address fields to Stripe address",
+        "UPDATE organizations SET stripe_customer_id, billing_last_sync_at"
+      ],
+      "systemEffects": [
+        "Stripe Customer created",
+        "organizations.stripe_customer_id set"
+      ],
+      "outputs": [
+        "stripe_customer_id string"
+      ],
+      "failureConditions": [
+        "org not found → StripeBillingError"
+      ],
+      "dependencies": [
+        "BILL-001",
+        "BILL-003"
+      ],
+      "relatedRules": [
+        "BILL-010",
+        "BILL-023"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_provisioning.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "organizations",
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_provisioning.py:59-93",
+        "backend/app/services/stripe_provisioning.py:43-56"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "if org.get('stripe_customer_id'): return org['stripe_customer_id'] ... 'preferred_locales': ['de'], 'metadata': {'heykiki_org_id': ..., 'org_id': str(org_id)}"
+    },
+    {
+      "id": "BILL-023",
+      "name": "Org-Customer Matching — Email-Exact (95% confidence) and Name-Fuzzy (≥60% ratio) Matching",
+      "description": "The dry-run matcher scans unlinked orgs (no stripe_customer_id) and proposes a Stripe customer match via: (1) email_exact: org.email == customer.email, confidence=0.95; (2) name_fuzzy: German legal suffix-stripped difflib.SequenceMatcher ratio ≥ 0.60, confidence=ratio. Orgs with any existing billing_migration_log row are skipped (idempotent). Proposals are written to billing_migration_log with status='proposed'.",
+      "purpose": "Bridges the legacy ChatDash Stripe account to the CRM without requiring manual data entry for ~80 existing customers.",
+      "trigger": "POST /api/super-admin/billing/run-matcher",
+      "preconditions": [
+        "super_admin role required"
+      ],
+      "inputs": [
+        "organizations (all without stripe_customer_id)",
+        "All active Stripe customers"
+      ],
+      "validations": [
+        "Skip org if billing_migration_log already has a row for it",
+        "name_fuzzy threshold: ratio >= 0.60",
+        "Longest German legal suffix stripped first to improve name comparison"
+      ],
+      "actions": [
+        "Fetch all Stripe customers",
+        "For each unlinked org: find best email match, then best name match",
+        "INSERT billing_migration_log with method, confidence, candidate snapshot"
+      ],
+      "systemEffects": [
+        "billing_migration_log rows inserted"
+      ],
+      "outputs": [
+        "{'orgs_scanned': n, 'stripe_customers': n, 'proposals_created': n}"
+      ],
+      "failureConditions": [],
+      "dependencies": [
+        "BILL-001"
+      ],
+      "relatedRules": [
+        "BILL-024"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_matcher.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/super-admin/billing/run-matcher"
+      ],
+      "affectedTables": [
+        "billing_migration_log",
+        "organizations"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_matcher.py:66-137",
+        "backend/app/services/stripe_matcher.py:24",
+        "backend/app/services/stripe_matcher.py:108-109"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 94,
+      "evidence": "_NAME_THRESHOLD = 0.60 ... if org_email and org_email in by_email: method, confidence, candidate = 'email_exact', 0.95, by_email[org_email]"
+    },
+    {
+      "id": "BILL-024",
+      "name": "Match Approval — Writes heykiki_org_id to Stripe Customer Metadata + Links Org",
+      "description": "Super-admin approval of a proposed match writes heykiki_org_id and org_id into the Stripe customer's metadata (additive merge) and updates organizations.stripe_customer_id. Cross-org guard: refuses if the customer_id is already linked to a different org. Match must be in status='proposed' to be approved.",
+      "purpose": "Phase-2 write-back that completes the org-customer link; enables subscription sync and usage reporting for pre-existing customers.",
+      "trigger": "POST /api/super-admin/billing/matches/{match_id}/approve",
+      "preconditions": [
+        "match.status == 'proposed'",
+        "match.stripe_customer_id is not null",
+        "customer not already linked to another org"
+      ],
+      "inputs": [
+        "match_id",
+        "reviewer_id",
+        "billing_migration_log row"
+      ],
+      "validations": [
+        "match must be in 'proposed' status",
+        "stripe_customer_id must be present",
+        "Cross-org guard: customer_id not linked to another org"
+      ],
+      "actions": [
+        "Retrieve existing Stripe customer metadata",
+        "Additive merge with heykiki_org_id + org_id",
+        "Customer.modify() via stripe_call_safely",
+        "UPDATE organizations SET stripe_customer_id, billing_last_sync_at",
+        "UPDATE billing_migration_log SET status='approved', reviewed_by, reviewed_at"
+      ],
+      "systemEffects": [
+        "Stripe Customer metadata updated",
+        "organizations.stripe_customer_id set",
+        "billing_events audit row created",
+        "billing_migration_log status updated"
+      ],
+      "outputs": [
+        "{'status': 'approved', 'org_id': ..., 'stripe_customer_id': ...}"
+      ],
+      "failureConditions": [
+        "Match not found → StripeBillingError",
+        "Match not in 'proposed' status → StripeBillingError",
+        "Customer already linked to another org → StripeBillingError → HTTP 400"
+      ],
+      "dependencies": [
+        "BILL-003",
+        "BILL-007",
+        "BILL-023"
+      ],
+      "relatedRules": [
+        "BILL-023"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_admin_actions.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/super-admin/billing/matches/{match_id}/approve"
+      ],
+      "affectedTables": [
+        "billing_migration_log",
+        "organizations",
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_admin_actions.py:23-71",
+        "backend/app/services/stripe_admin_actions.py:37-40"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "if other: raise StripeBillingError(f'customer {customer_id} is already linked to another org') ... stripe_call_safely(op='customer.metadata_writeback', metadata_merge={'heykiki_org_id': ..., 'org_id': ...})"
+    },
+    {
+      "id": "BILL-025",
+      "name": "Subscription Cancellation — Cancel at Period End, Refused on Legacy Connect Subs",
+      "description": "Super-admin can cancel a subscription by setting cancel_at_period_end=True on Stripe. The cancel is refused with ConnectAttributionError (HTTP 409) if the subscription is a legacy ChatDash Connect subscription. The org's billing_subscription_id is used to target the subscription.",
+      "purpose": "Allows HeyKiki operators to cancel subscriptions while protecting legacy ChatDash customers from accidental modification.",
+      "trigger": "POST /api/super-admin/billing/orgs/{org_id}/cancel-subscription",
+      "preconditions": [
+        "org has billing_subscription_id",
+        "subscription is not Connect-attributed"
+      ],
+      "inputs": [
+        "org_id",
+        "organizations.billing_subscription_id"
+      ],
+      "validations": [
+        "BILL-004 Connect block applies — raises ConnectAttributionError → HTTP 409"
+      ],
+      "actions": [
+        "Subscription.modify(sub_id, cancel_at_period_end=True)"
+      ],
+      "systemEffects": [
+        "Stripe subscription flagged to cancel at period end",
+        "billing_events audit row created"
+      ],
+      "outputs": [
+        "{'status': 'cancel_scheduled', 'subscription': ..., 'cancel_at_period_end': True}"
+      ],
+      "failureConditions": [
+        "No billing_subscription_id → StripeBillingError → HTTP 400",
+        "Connect-attributed sub → ConnectAttributionError → HTTP 409"
+      ],
+      "dependencies": [
+        "BILL-004"
+      ],
+      "relatedRules": [
+        "BILL-004"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_admin_actions.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/super-admin/billing/orgs/{org_id}/cancel-subscription"
+      ],
+      "affectedTables": [
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_admin_actions.py:104-121"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "result = stripe_call_safely(op='subscription.cancel_at_period_end', subscription_id=sub_id, builder=lambda ...: Subscription.modify(sub_id, cancel_at_period_end=True, ...))"
+    },
+    {
+      "id": "BILL-026",
+      "name": "Retry Open Invoice — First Open Invoice Only, Idempotent by Invoice ID",
+      "description": "Super-admin can trigger a payment retry on the org's most recent open invoice. The system fetches the first open invoice for the Stripe customer (limit=1) and calls Invoice.pay(). Idempotent by invoice_id. Returns no_open_invoice if no open invoice exists.",
+      "purpose": "Allows dunning/recovery from payment failures without requiring customer action.",
+      "trigger": "POST /api/super-admin/billing/orgs/{org_id}/retry-payment",
+      "preconditions": [
+        "org has stripe_customer_id",
+        "org has at least one open invoice"
+      ],
+      "inputs": [
+        "org_id",
+        "organizations.stripe_customer_id"
+      ],
+      "validations": [],
+      "actions": [
+        "List open invoices (limit=1)",
+        "Invoice.pay(invoice_id) via stripe_call_safely"
+      ],
+      "systemEffects": [
+        "Stripe payment collection attempt",
+        "billing_events audit row created"
+      ],
+      "outputs": [
+        "{'status': invoice_status, 'invoice': invoice_id}",
+        "{'status': 'no_open_invoice'} if none"
+      ],
+      "failureConditions": [
+        "No stripe_customer_id → StripeBillingError → HTTP 400"
+      ],
+      "dependencies": [
+        "BILL-001",
+        "BILL-003"
+      ],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/services/stripe_admin_actions.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/super-admin/billing/orgs/{org_id}/retry-payment"
+      ],
+      "affectedTables": [
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_admin_actions.py:82-101"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "open_invoices = get_stripe().Invoice.list(customer=customer_id, status='open', limit=1).data ... Invoice.pay(invoice_id, idempotency_key=idem)"
+    },
+    {
+      "id": "BILL-027",
+      "name": "Billing Sync Endpoint — Webhook Fallback for Post-Checkout State Sync",
+      "description": "POST /api/billing/sync allows the frontend to pull the org's current Stripe subscription state immediately after a checkout redirect (when webhooks may not have arrived yet in dev or before webhook setup). It reads all subscriptions, picks the primary one (prefers active/trialing/past_due/unpaid over canceled/incomplete by recency), and syncs via the same handler as webhooks. Idempotent (no Stripe writes).",
+      "purpose": "Provides immediate post-checkout UI refresh without waiting for webhook delivery; safe to call at any time.",
+      "trigger": "POST /api/billing/sync (frontend calls on ?checkout=success redirect)",
+      "preconditions": [],
+      "inputs": [
+        "org_id (from JWT)"
+      ],
+      "validations": [],
+      "actions": [
+        "List all subscriptions for customer (status='all', limit=10)",
+        "Pick primary by live status preference + created desc",
+        "Sync via _handle_subscription()",
+        "Return BillingSummary"
+      ],
+      "systemEffects": [
+        "organizations.billing_* columns updated"
+      ],
+      "outputs": [
+        "BillingSummary"
+      ],
+      "failureConditions": [],
+      "dependencies": [
+        "BILL-017"
+      ],
+      "relatedRules": [
+        "BILL-017",
+        "BILL-020"
+      ],
+      "affectedModules": [
+        "backend/app/api/routes/billing.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/billing/sync"
+      ],
+      "affectedTables": [
+        "organizations"
+      ],
+      "sourceReferences": [
+        "backend/app/api/routes/billing.py:296-340"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "_LIVE_SUB_STATES = {'active', 'trialing', 'past_due', 'unpaid'} ... sub = _pick_primary_subscription((result or {}).get('data') or []) ... _handle_subscription(client, sub)"
+    },
+    {
+      "id": "BILL-028",
+      "name": "RLS Stance — All Billing Tables Backend-Only (Service Role Bypasses, No Client Policy = Deny-All)",
+      "description": "All 7 billing tables (billing_events, billing_webhook_events, billing_usage_reports, billing_migration_log, billing_security_events, billing_notifications, billing_checkout_sessions) have RLS enabled with no client-facing policy. This means any browser JWT request is denied. Only the service role (backend) can read or write these tables.",
+      "purpose": "Prevents customers or admins from reading/writing billing audit data via the client SDK; keeps billing strictly server-side.",
+      "trigger": "Database access via client JWT token",
+      "preconditions": [],
+      "inputs": [],
+      "validations": [
+        "RLS enabled on all billing tables",
+        "No RLS policies created → deny-all for non-service-role"
+      ],
+      "actions": [
+        "Deny all client-initiated reads/writes"
+      ],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_events",
+        "billing_webhook_events",
+        "billing_usage_reports",
+        "billing_migration_log",
+        "billing_security_events",
+        "billing_notifications",
+        "billing_checkout_sessions"
+      ],
+      "sourceReferences": [
+        "supabase/migrations/0048_billing.sql:124-130",
+        "supabase/migrations/0049_billing_phase2.sql:42-44"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "alter table billing_events enable row level security; ... -- RLS (backend-only tables; service role bypasses; NO client policy) -- enabled + no policy ⇒ never readable by the browser."
+    },
+    {
+      "id": "BILL-029",
+      "name": "Trial Period — 14 Days Default, Set on Checkout Session",
+      "description": "New subscriptions created via checkout may include a trial period (trial_period_days). The default is DEFAULT_TRIAL_DAYS=14. Trial days are passed as subscription_data.trial_period_days in the Checkout Session. trial_will_end webhook (fired 3 days before trial expiry) triggers notify_trial_will_end() which sends an in-app + email notification.",
+      "purpose": "Allows prospects to evaluate the product before being charged.",
+      "trigger": "POST /api/billing/checkout-session with trial_days",
+      "preconditions": [
+        "trial_days > 0"
+      ],
+      "inputs": [
+        "CheckoutRequest.trial_days (optional)"
+      ],
+      "validations": [],
+      "actions": [
+        "Set subscription_data.trial_period_days in Checkout Session",
+        "On customer.subscription.trial_will_end webhook: sync + notify"
+      ],
+      "systemEffects": [
+        "Stripe subscription starts in trialing status",
+        "billing_notifications row for trial_will_end"
+      ],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": [
+        "BILL-010",
+        "BILL-017"
+      ],
+      "relatedRules": [
+        "BILL-010",
+        "BILL-017"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_provisioning.py",
+        "backend/app/services/stripe_webhook.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/billing/checkout-session"
+      ],
+      "affectedTables": [
+        "billing_notifications"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_provisioning.py:30",
+        "backend/app/services/stripe_provisioning.py:119-120",
+        "backend/app/services/stripe_webhook.py:225-235"
+      ],
+      "classification": "PARTIALLY_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "DEFAULT_TRIAL_DAYS = 14  # ⚠️ confirm with Amber before go-live ... if trial_days and trial_days > 0: sub_data['trial_period_days'] = trial_days"
+    },
+    {
+      "id": "BILL-030",
+      "name": "Org Provisioning — No Billing Objects at Provisioning Time",
+      "description": "Provisioning a new org (POST /api/heykiki/provision) creates organizations, users, agent_configs, and agent_required_fields rows but does NOT create a Stripe Customer or subscription. Billing is decoupled from provisioning — the Stripe customer is created on-demand when the org initiates a checkout. This allows orgs to be provisioned before billing is configured.",
+      "purpose": "Decouples onboarding from billing; allows new orgs to exist in the system before subscribing.",
+      "trigger": "POST /api/heykiki/provision",
+      "preconditions": [],
+      "inputs": [
+        "ProvisionRequest: heykiki_org_id, org_name, login_email, login_password, admin_name, contact_email, elevenlabs_agent_id"
+      ],
+      "validations": [
+        "Rejects duplicate heykiki_org_id (HTTP 409)",
+        "Rejects duplicate login_email (HTTP 409)"
+      ],
+      "actions": [
+        "Create Supabase auth user",
+        "Insert organizations row (no billing columns set)",
+        "Insert users row (role=org_admin)",
+        "Insert agent_configs row with defaults",
+        "Seed required fields",
+        "Configure ElevenLabs agent",
+        "Rollback all on failure"
+      ],
+      "systemEffects": [
+        "organizations, users, agent_configs, agent_required_fields rows created"
+      ],
+      "outputs": [
+        "ProvisionResponse: org_id, user_id, heykiki_org_id, org_secret=None"
+      ],
+      "failureConditions": [
+        "Duplicate heykiki_org_id → HTTP 409",
+        "Duplicate login_email → HTTP 409",
+        "Auth user creation failure → HTTP 502",
+        "Any subsequent failure → compensating rollback"
+      ],
+      "dependencies": [],
+      "relatedRules": [
+        "BILL-022"
+      ],
+      "affectedModules": [
+        "backend/app/services/provisioning.py",
+        "backend/app/api/routes/provision.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/heykiki/provision"
+      ],
+      "affectedTables": [
+        "organizations",
+        "users",
+        "agent_configs",
+        "agent_required_fields"
+      ],
+      "sourceReferences": [
+        "backend/app/services/provisioning.py:83-225",
+        "backend/app/api/routes/provision.py:11-29"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "# P0.9 — Fresh-tenant audit: this function inserts the three DB rows listed below and configures the EL agent. NO ... billing ... seeded."
+    },
+    {
+      "id": "BILL-031",
+      "name": "MRR Estimation — Flat Base Prices Only, Annual Normalized to Monthly",
+      "description": "Super-admin billing overview estimates MRR by summing all active subscription items' unit_amount × quantity, skipping metered (usage_type='metered') items. Annual prices are divided by 12 to normalize to monthly. Bounded at 1000 subscriptions. YTD revenue sums all paid invoices since Jan 1 of the current year, bounded at 5000 invoices. Both are best-effort (fail silently).",
+      "purpose": "Provides super-admin with a revenue health snapshot without blocking the overview on Stripe API failures.",
+      "trigger": "GET /api/super-admin/billing/overview",
+      "preconditions": [
+        "STRIPE_SECRET_KEY is set"
+      ],
+      "inputs": [
+        "Stripe active subscriptions (auto-paged, limit 1000)",
+        "Stripe paid invoices since Jan 1 (auto-paged, limit 5000)"
+      ],
+      "validations": [],
+      "actions": [
+        "Sum flat base price amounts per active subscription",
+        "Divide annual amounts by 12",
+        "Sum paid invoice amounts since Jan 1"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "mrr_estimate_cents, revenue_ytd_cents"
+      ],
+      "failureConditions": [
+        "Any Stripe API error → returns (0, 0) silently"
+      ],
+      "dependencies": [
+        "BILL-001"
+      ],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/api/routes/billing_admin.py"
+      ],
+      "affectedAPIs": [
+        "GET /api/super-admin/billing/overview"
+      ],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/api/routes/billing_admin.py:39-77"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "if recurring.get('usage_type') == 'metered': continue # overage is variable, not part of MRR ... if recurring.get('interval') == 'year': amount = amount // 12"
+    },
+    {
+      "id": "BILL-032",
+      "name": "Stripe Read Wrapper — Error-Only Audit (No Audit on Successful Reads)",
+      "description": "Pure Stripe reads use stripe_read() which audits billing_events ONLY on error. Successful reads produce no audit row, preventing high-volume read polling from flooding the billing_events ledger. Reads are NOT subject to the Connect-attribution block or idempotency keys.",
+      "purpose": "Keeps billing_events as a write ledger only; prevents noise from frequent read operations like usage summary polls.",
+      "trigger": "Any read-only Stripe API call",
+      "preconditions": [
+        "STRIPE_SECRET_KEY is set"
+      ],
+      "inputs": [
+        "op string",
+        "fn callable"
+      ],
+      "validations": [],
+      "actions": [
+        "Execute fn()",
+        "On StripeError: INSERT billing_events with status='failed', then re-raise as StripeBillingError"
+      ],
+      "systemEffects": [
+        "billing_events row only on failure"
+      ],
+      "outputs": [
+        "Stripe API result"
+      ],
+      "failureConditions": [
+        "StripeError → StripeBillingError propagated to caller"
+      ],
+      "dependencies": [
+        "BILL-001"
+      ],
+      "relatedRules": [
+        "BILL-003"
+      ],
+      "affectedModules": [
+        "backend/app/services/stripe_billing.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_events"
+      ],
+      "sourceReferences": [
+        "backend/app/services/stripe_billing.py:179-198"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "def stripe_read(*, op, fn, org_id=None, actor_id=None): # Run a pure Stripe read. Records a billing_events row ONLY on failure."
+    },
+    {
+      "id": "BILL-033",
+      "name": "Billing Status UI Labels — German Localization with Soft-Stop Messaging",
+      "description": "The frontend maps Stripe subscription statuses to German labels: active→Aktiv, trialing→Testphase, past_due→Zahlung überfällig, unpaid→Unbezahlt, canceled→Gekündigt, incomplete→Unvollständig, incomplete_expired→Abgelaufen, paused→Pausiert, legacy→Altvertrag, none→Kein Abo. The over-quota state shows a soft-stop message ('agent stays reachable, overage billed'). The 80% warning is also surfaced in the UI (client-side calculation from used/quota).",
+      "purpose": "German-language UI for billing state; soft-stop messaging prevents customer panic at over-quota.",
+      "trigger": "GET /api/billing/summary response rendered in SettingsPage",
+      "preconditions": [],
+      "inputs": [
+        "BillingSummary.status",
+        "BillingSummary.over_quota",
+        "BillingSummary.used_percent"
+      ],
+      "validations": [],
+      "actions": [
+        "Display German status label",
+        "Show 80% warning banner if used_percent >= 80 and not over quota",
+        "Show over-quota banner if over_quota=True",
+        "Show past_due payment banner if status=past_due or unpaid"
+      ],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [
+        "BILL-020",
+        "BILL-013"
+      ],
+      "affectedModules": [
+        "frontend/src/lib/dashApi.ts",
+        "frontend/src/pages/SettingsPage.tsx"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "frontend/src/lib/dashApi.ts:90-95",
+        "frontend/src/pages/SettingsPage.tsx:674-685"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "BILLING_STATUS_LABELS = {active: 'Aktiv', trialing: 'Testphase', past_due: 'Zahlung überfällig', ...} ... {over && <span>Ihr Minutenkontingent ist aufgebraucht. Ihre KI bleibt erreichbar — der <strong>Mehrverbrauch wird nach Tarif berechnet</strong>.}</span>"
+    },
+    {
+      "id": "BILL-034",
+      "name": "Subscription Welcome Email — Deduped Per Subscription, Separate from Stripe Receipt",
+      "description": "When checkout.session.completed is received and the subscription is linked, notify_subscription_activated() sends a HeyKiki-branded welcome email (via Brevo SMTP). This is distinct from Stripe's payment receipt and invoice email. Deduped per subscription_id so a re-delivered webhook cannot double-send. Best-effort: failure does not block subscription linking.",
+      "purpose": "Confirms to the customer that their KiKi subscription is active and explains cancellation policy (email/phone only).",
+      "trigger": "checkout.session.completed webhook",
+      "preconditions": [
+        "Subscription successfully synced to org"
+      ],
+      "inputs": [
+        "org_id",
+        "plan_title",
+        "subscription_id"
+      ],
+      "validations": [
+        "Dedup key: 'subscription_activated:{subscription_id or org_id}'"
+      ],
+      "actions": [
+        "record_notification() with dedup_key",
+        "Send email via send_email() with HeyKiki branding"
+      ],
+      "systemEffects": [
+        "billing_notifications row inserted",
+        "Email sent to org contact address"
+      ],
+      "outputs": [],
+      "failureConditions": [
+        "Email failure: logged, notification row status updated to 'failed'; subscription linking unaffected"
+      ],
+      "dependencies": [
+        "BILL-017"
+      ],
+      "relatedRules": [
+        "BILL-017",
+        "BILL-014"
+      ],
+      "affectedModules": [
+        "backend/app/services/billing_notifications.py",
+        "backend/app/services/stripe_webhook.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [
+        "billing_notifications"
+      ],
+      "sourceReferences": [
+        "backend/app/services/billing_notifications.py:127-141",
+        "backend/app/services/stripe_webhook.py:238-265"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "dedup_key=f'subscription_activated:{subscription_id or org_id}' ... # OUR welcome email (Brevo) — Stripe owns the receipt + invoice email. Best-effort + deduped per subscription, so it never blocks linking."
+    }
+  ]
+}

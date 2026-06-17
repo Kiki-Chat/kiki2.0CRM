@@ -1,0 +1,1132 @@
+{
+  "domain": "Projects (Projekte / PR-)",
+  "rulePrefix": "PROJ",
+  "features": [
+    {
+      "name": "Project Numbering (PR-TOKEN-NNNN)",
+      "category": "numbering",
+      "description": "Top-layer Project records receive a unique human-readable number in the format PR-{ORG_TOKEN}-{NNNN}, e.g. PR-KC007-0001. Sequence is per-org, MAX+1, and independent from the FL- (Case) sequence so the two layers never collide.",
+      "modules": [
+        "backend/app/services/projects.py",
+        "backend/app/services/common.py"
+      ],
+      "apis": ["POST /api/projects"],
+      "tables": ["projects", "organizations"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 98,
+      "risks": [
+        "No database-level unique constraint confirmed in code; relies on MAX+1 from lexical DESC order. Concurrent inserts could theoretically produce duplicate numbers if two requests race before either writes."
+      ]
+    },
+    {
+      "name": "Multi-tenant Org Scoping",
+      "category": "tenancy",
+      "description": "Every project read, write, patch, delete, and sub-resource query is filtered by the caller's org_id derived from the JWT via require_org. Service-role client is used (bypassing RLS), so org_id is always applied explicitly in every query.",
+      "modules": [
+        "backend/app/api/routes/projects.py",
+        "backend/app/api/deps.py"
+      ],
+      "apis": [
+        "GET /api/projects",
+        "POST /api/projects",
+        "GET /api/projects/{id}",
+        "PATCH /api/projects/{id}",
+        "DELETE /api/projects/{id}",
+        "GET /api/projects/{id}/cases",
+        "POST /api/projects/{id}/cases",
+        "DELETE /api/projects/{id}/cases/{case_id}",
+        "GET /api/projects/{id}/calls",
+        "GET /api/projects/{id}/inquiries",
+        "GET /api/projects/{id}/appointments",
+        "GET /api/projects/{id}/cost-estimates",
+        "GET /api/projects/{id}/invoices",
+        "GET /api/projects/{id}/documents",
+        "POST /api/projects/{id}/documents",
+        "GET /api/projects/{id}/employees",
+        "POST /api/projects/{id}/employees",
+        "DELETE /api/projects/{id}/employees/{emp_id}",
+        "GET /api/projects/{id}/activity"
+      ],
+      "tables": ["projects"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": [
+        "Service-role client bypasses Supabase RLS — if org_id filter is accidentally omitted in any branch, data leaks cross-tenant."
+      ]
+    },
+    {
+      "name": "Project-Case-Inquiry Chain Resolution",
+      "category": "data-model",
+      "description": "A Project owns no inquiries, appointments, cost-estimates, invoices, or calls directly. All sub-resources are resolved via the chain: Project → cases (cases.project_id) → inquiries (inquiries.case_id) → calls/appointments/KVAs/invoices. De-duplication by id is applied when the same row is reachable via both case_id and inquiry_id.",
+      "modules": [
+        "backend/app/api/routes/projects.py"
+      ],
+      "apis": [
+        "GET /api/projects/{id}",
+        "GET /api/projects/{id}/calls",
+        "GET /api/projects/{id}/inquiries",
+        "GET /api/projects/{id}/appointments",
+        "GET /api/projects/{id}/cost-estimates",
+        "GET /api/projects/{id}/invoices",
+        "GET /api/projects/{id}/documents",
+        "GET /api/projects/{id}/employees"
+      ],
+      "tables": ["projects", "cases", "inquiries", "calls", "appointments", "cost_estimates", "invoices", "documents", "case_employees"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 96,
+      "risks": [
+        "Large orgs with many cases/inquiries could trigger many sequential or parallel DB calls. fetch_all_rows pages past the 1000-row PostgREST cap."
+      ]
+    },
+    {
+      "name": "Auto-Create Case on Appointment Confirm",
+      "category": "automation",
+      "description": "When an appointment is confirmed (either manually via POST /appointments/{id}/confirm or by the post-call agent), the system optionally auto-creates a Case and links it to the appointment. Controlled by agent_configs.projects_enabled + projects_level. Best-effort — never blocks the confirmation.",
+      "modules": [
+        "backend/app/services/projects.py",
+        "backend/app/api/routes/appointments.py",
+        "backend/app/services/post_call.py"
+      ],
+      "apis": [
+        "POST /api/appointments/{id}/confirm"
+      ],
+      "tables": ["agent_configs", "cases", "appointments"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": [
+        "Config gate uses legacy flag names (projects_enabled / projects_level) that now control case auto-creation — the flag name mismatch is a readability/maintenance risk.",
+        "Best-effort pattern: failures are logged but silently ignored — case creation failures are not surfaced to the user."
+      ]
+    },
+    {
+      "name": "Auto-Assign Inquiry to Case (Embedding-Based Grouping)",
+      "category": "automation",
+      "description": "Every new inquiry (from inbound call ingest or agent tool) is automatically filed into a Case. The system embeds the inquiry's content (summary + transcript), compares it against up to 8 open cases for the same customer using cosine similarity, and attaches to the best match if similarity >= 0.70. Otherwise a new Case is created. Best-effort — never breaks inquiry creation.",
+      "modules": [
+        "backend/app/services/projects_auto.py",
+        "backend/app/services/inquiries.py"
+      ],
+      "apis": [],
+      "tables": ["inquiries", "cases", "calls"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": [
+        "No database-level uniqueness constraint on cases.number confirmed.",
+        "AI embedding failure silently falls back to creating a new case — may create more cases than expected.",
+        "Attach threshold (0.70) is hardcoded; no per-org configuration."
+      ]
+    },
+    {
+      "name": "Project CRUD with Customer IDOR Protection",
+      "category": "security",
+      "description": "On Project create and update, if a customer_id is supplied, it is validated via validate_fk_in_org to confirm the customer belongs to the same org. Cross-tenant IDOR is blocked at the application layer (not at RLS, since the service-role client bypasses it).",
+      "modules": [
+        "backend/app/api/routes/projects.py",
+        "backend/app/services/common.py"
+      ],
+      "apis": [
+        "POST /api/projects",
+        "PATCH /api/projects/{id}"
+      ],
+      "tables": ["projects", "customers"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 96,
+      "risks": [
+        "validate_fk_in_org is a no-op when fk_id is falsy — clearing customer_id is always allowed without validation, which is the intended behavior but should be noted."
+      ]
+    },
+    {
+      "name": "Project Team via Case-Level case_employees",
+      "category": "team-management",
+      "description": "Projects have no project_employees table. The project team is the UNION of its member cases' case_employees rows, de-duplicated by employee_id (earliest added_at wins). Adding an employee to a project fans out the insert to EVERY member case. Removing does the same.",
+      "modules": [
+        "backend/app/api/routes/projects.py"
+      ],
+      "apis": [
+        "GET /api/projects/{id}/employees",
+        "POST /api/projects/{id}/employees",
+        "DELETE /api/projects/{id}/employees/{emp_id}"
+      ],
+      "tables": ["case_employees", "employees", "appointments"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": [
+        "Adding an employee to a project with zero member cases returns HTTP 400 — the error is only surfaced when no cases exist.",
+        "Fan-out insert to all cases uses try/except to swallow unique-constraint violations (employee already in case). If a non-unique-constraint error occurs it is also silently ignored."
+      ]
+    },
+    {
+      "name": "Soft Delete via Archive",
+      "category": "lifecycle",
+      "description": "DELETE /api/projects/{id} does not physically delete the record. It sets status = 'archived' and updates updated_at. The project remains in the database and is still returned by GET /api/projects unless filtered by status.",
+      "modules": [
+        "backend/app/api/routes/projects.py"
+      ],
+      "apis": [
+        "DELETE /api/projects/{id}"
+      ],
+      "tables": ["projects"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 99,
+      "risks": [
+        "Users who issue DELETE expecting hard-delete may be confused by the project reappearing in an 'all status' query."
+      ]
+    },
+    {
+      "name": "Workspace Tabs (Project Detail View)",
+      "category": "ui",
+      "description": "The ProjectWorkspacePage renders 10 tabs: Übersicht, Fälle, Anrufe, Anfragen, Termine, Kostenvoranschläge, Rechnungen, Team, Dokumente, Notizen. Tab state is managed client-side (URL param ?tab=). Each tab fetches its own endpoint. Case status labels in the Fälle tab differ from the project status labels intentionally (Offen/In Arbeit/Fertig vs In Planung/In Bearbeitung/Abgeschlossen).",
+      "modules": [
+        "frontend/src/pages/ProjectWorkspacePage.tsx",
+        "frontend/src/pages/projectTabs.tsx"
+      ],
+      "apis": [
+        "GET /api/projects/{id}",
+        "GET /api/projects/{id}/cases",
+        "GET /api/projects/{id}/calls",
+        "GET /api/projects/{id}/inquiries",
+        "GET /api/projects/{id}/appointments",
+        "GET /api/projects/{id}/cost-estimates",
+        "GET /api/projects/{id}/invoices",
+        "GET /api/projects/{id}/employees",
+        "GET /api/projects/{id}/documents",
+        "GET /api/projects/{id}/activity"
+      ],
+      "tables": [],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 98,
+      "risks": [
+        "InquiriesTab NewInquiryModal posts project_id directly to /api/inquiries but the inquiries table has no project_id column post-migration-0073 — this may be a dead/stale field in the request payload. UNVERIFIED OBSERVATION."
+      ]
+    },
+    {
+      "name": "Project-from-Case Form Context",
+      "category": "ui-ux",
+      "description": "When ProjectFormPage is launched from a Case (via ?customer_id=&case_id=&case_number= URL params), the customer field is pre-filled and locked (disabled), the customer address is auto-copied into the project address fields, and on save the originating Case is automatically linked to the new Project via POST /api/projects/{id}/cases.",
+      "modules": [
+        "frontend/src/pages/ProjectFormPage.tsx"
+      ],
+      "apis": [
+        "POST /api/projects",
+        "POST /api/projects/{id}/cases"
+      ],
+      "tables": ["projects", "cases"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": [
+        "The German address is parsed from a free-text raw blob by a client-side regex (5-digit PLZ detection); edge cases in address formatting may produce incorrect street/PLZ/city split."
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "PROJ-001",
+      "name": "Project Number Generation (PR-TOKEN-NNNN)",
+      "description": "When a Project is created, it is assigned a unique number of the form PR-{ORG_TOKEN}-{NNNN} (e.g. PR-KC007-0001). The org token is derived from organizations.case_prefix (or computed from org name/slug/code and persisted on first use). The sequence number is MAX+1 over existing PR-{TOKEN}-NNNN numbers for this org in the projects table, queried in descending lexical order and parsed from the trailing digits. Deleted records never re-issue their number (MAX rather than COUNT).",
+      "purpose": "Gives staff a human-readable, org-namespaced project reference that is stable even after deletions, and does not collide with the FL- (Case) sequence.",
+      "trigger": "POST /api/projects (create_project route)",
+      "preconditions": [
+        "Authenticated user with a valid org_id",
+        "org is not disabled"
+      ],
+      "inputs": ["org_id from JWT"],
+      "validations": [],
+      "actions": [
+        "Call get_org_token to read/derive/persist organizations.case_prefix",
+        "Call _max_seq_for_token over projects table with prefix PR-{TOKEN}-",
+        "Increment by 1 and zero-pad to 4 digits"
+      ],
+      "systemEffects": [
+        "May write organizations.case_prefix on first use if not yet set"
+      ],
+      "outputs": ["String PR-{TOKEN}-{NNNN}"],
+      "failureConditions": [
+        "If organizations row not found, falls back to token 'X00'"
+      ],
+      "dependencies": ["PROJ-002 (org token derivation)"],
+      "relatedRules": ["PROJ-002"],
+      "affectedModules": [
+        "backend/app/services/projects.py",
+        "backend/app/services/common.py"
+      ],
+      "affectedAPIs": ["POST /api/projects"],
+      "affectedTables": ["projects", "organizations"],
+      "sourceReferences": [
+        "backend/app/services/projects.py:16-23",
+        "backend/app/services/common.py:455-475",
+        "backend/app/services/common.py:423-452"
+      ],
+      "classification": "CLEAR",
+      "confidence": 98,
+      "evidence": "gen_project_number: prefix = f'PR-{get_org_token(client, org_id)}-'; seq = _max_seq_for_token(client, 'projects', org_id, prefix) + 1; return f'{prefix}{seq:04d}'"
+    },
+    {
+      "id": "PROJ-002",
+      "name": "Org Token Derivation and Persistence",
+      "description": "The org token used in project and case numbers is read from organizations.case_prefix. If not yet set, it is derived from the org's name/slug/code (e.g. initials + numeric suffix), disambiguated against sibling orgs that already have the same token, and then written back to organizations.case_prefix. Falls back to the legacy get_org_code path if the case_prefix column is absent.",
+      "purpose": "Ensures each org has a stable, globally unique token that makes record numbers readable and namespaced.",
+      "trigger": "Any call to gen_project_number or gen_case_number",
+      "preconditions": ["organizations row exists for org_id"],
+      "inputs": ["org_id"],
+      "validations": [
+        "Checks for clash (another org with same case_prefix) and appends org code suffix if needed"
+      ],
+      "actions": [
+        "Read organizations.case_prefix",
+        "If absent: derive token from name/slug/code, check for clashes, write back"
+      ],
+      "systemEffects": [
+        "Writes organizations.case_prefix (best-effort, failure doesn't break numbering)"
+      ],
+      "outputs": ["String token e.g. 'KC007'"],
+      "failureConditions": [
+        "If organizations row not found: returns 'X00'",
+        "If write fails: continues with derived token but does not persist"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-001"],
+      "affectedModules": ["backend/app/services/common.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["organizations"],
+      "sourceReferences": [
+        "backend/app/services/common.py:423-452"
+      ],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "get_org_token reads organizations.case_prefix; if not set derives + persists with clash check. Falls back to get_org_code if column exception."
+    },
+    {
+      "id": "PROJ-003",
+      "name": "Project Create — Customer IDOR Validation",
+      "description": "On POST /api/projects, if customer_id is provided in the payload, the backend calls validate_fk_in_org to confirm the customer record exists in the projects org. If the customer belongs to a different org, HTTP 422 is raised. A null/empty customer_id bypasses the check (optional field).",
+      "purpose": "Prevents cross-tenant data linkage (IDOR): an attacker cannot attach another org's customer to their own project using a guessed UUID.",
+      "trigger": "POST /api/projects",
+      "preconditions": ["Authenticated user with org_id", "payload.customer_id is non-empty"],
+      "inputs": ["payload.customer_id", "user.org_id"],
+      "validations": [
+        "customers row with id=customer_id AND org_id=caller_org must exist"
+      ],
+      "actions": ["Insert project row with validated customer_id"],
+      "systemEffects": ["DB insert into projects table"],
+      "outputs": ["Created project row"],
+      "failureConditions": [
+        "HTTP 422 if customer_id belongs to a different org ('Kunde gehört nicht zu dieser Organisation.')"
+      ],
+      "dependencies": ["PROJ-001"],
+      "relatedRules": ["PROJ-009"],
+      "affectedModules": [
+        "backend/app/api/routes/projects.py",
+        "backend/app/services/common.py"
+      ],
+      "affectedAPIs": ["POST /api/projects"],
+      "affectedTables": ["projects", "customers"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:328-349",
+        "backend/app/services/common.py:62-94"
+      ],
+      "classification": "CLEAR",
+      "confidence": 98,
+      "evidence": "validate_fk_in_org(client, table='customers', fk_id=payload.customer_id, org_id=org_id, label='Kunde') called before insert"
+    },
+    {
+      "id": "PROJ-004",
+      "name": "Project Create — Default Status Planning",
+      "description": "When creating a project, if status is not specified in the payload, it defaults to 'planning'. The valid status set is {planning, active, completed, archived}.",
+      "purpose": "New projects start in a draft/planning state, requiring explicit promotion to active by staff.",
+      "trigger": "POST /api/projects",
+      "preconditions": [],
+      "inputs": ["payload.status (optional)"],
+      "validations": ["Status must be in {'planning','active','completed','archived'} if provided on PATCH"],
+      "actions": ["Set status = payload.status or 'planning' on insert"],
+      "systemEffects": ["DB insert with status column"],
+      "outputs": ["Project row with status = 'planning' if not specified"],
+      "failureConditions": [
+        "PATCH with invalid status raises HTTP 422 ('Invalid status')"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-008"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["POST /api/projects", "PATCH /api/projects/{id}"],
+      "affectedTables": ["projects"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:339",
+        "backend/app/api/routes/projects.py:35",
+        "backend/app/api/routes/projects.py:488-489"
+      ],
+      "classification": "CLEAR",
+      "confidence": 99,
+      "evidence": "'status': payload.status or 'planning' in _create; _STATUSES = {'planning', 'active', 'completed', 'archived'}; PATCH validates status in _STATUSES"
+    },
+    {
+      "id": "PROJ-005",
+      "name": "Notes Timestamp on Write",
+      "description": "Whenever internal_notes is written (on create or PATCH), notes_updated_at is set to the current UTC timestamp. This allows the UI to display 'last saved X minutes ago' and present a session-level edit history (client-side only, not persisted).",
+      "purpose": "Audit trail for internal note changes; enables UI to show recency of notes.",
+      "trigger": "POST /api/projects (if internal_notes non-empty), PATCH /api/projects/{id} (if internal_notes in payload)",
+      "preconditions": ["internal_notes is present and non-null in the payload"],
+      "inputs": ["payload.internal_notes"],
+      "validations": [],
+      "actions": ["Set notes_updated_at = UTC now()"],
+      "systemEffects": ["DB write of notes_updated_at column"],
+      "outputs": ["Project row with notes_updated_at set"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["POST /api/projects", "PATCH /api/projects/{id}"],
+      "affectedTables": ["projects"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:347-348",
+        "backend/app/api/routes/projects.py:491-492"
+      ],
+      "classification": "CLEAR",
+      "confidence": 98,
+      "evidence": "if payload.internal_notes: row['notes_updated_at'] = _now() in _create; if 'internal_notes' in fields: fields['notes_updated_at'] = _now() in _patch"
+    },
+    {
+      "id": "PROJ-006",
+      "name": "Soft Delete — Archive on DELETE",
+      "description": "DELETE /api/projects/{id} does NOT physically remove the project. It sets status = 'archived' and updated_at = now(). The row persists in the database and is returned by list/detail unless filtered by status.",
+      "purpose": "Preserves project history and linked financial/case data. Archived projects can be retrieved or restored.",
+      "trigger": "DELETE /api/projects/{id}",
+      "preconditions": ["Project exists in caller's org"],
+      "inputs": ["project_id", "user.org_id"],
+      "validations": [],
+      "actions": ["UPDATE projects SET status='archived', updated_at=now() WHERE org_id=? AND id=?"],
+      "systemEffects": ["Project row status set to 'archived'"],
+      "outputs": ["{success: true, status: 'archived'}"],
+      "failureConditions": [
+        "HTTP 404 if project not found or not in org"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-008"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["DELETE /api/projects/{id}"],
+      "affectedTables": ["projects"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:507-521"
+      ],
+      "classification": "CLEAR",
+      "confidence": 99,
+      "evidence": "DELETE handler: client.table('projects').update({'status': 'archived', 'updated_at': _now()}).eq('org_id',...).eq('id',...); returns {'success': True, 'status': 'archived'}"
+    },
+    {
+      "id": "PROJ-007",
+      "name": "Project List — Full Pagination (No Silent Truncation)",
+      "description": "GET /api/projects fetches ALL projects for the org using fetch_all_rows (pages past the PostgREST 1000-row cap). Sub-resource counts (cases, inquiries, appointments, etc.) are resolved in parallel for the full set. Search filtering (title or customer_name) is applied in-process after fetching all rows.",
+      "purpose": "Ensures that large orgs do not silently miss projects due to PostgREST's implicit row limit.",
+      "trigger": "GET /api/projects",
+      "preconditions": ["Authenticated user with org_id"],
+      "inputs": ["status (optional)", "customer_id (optional)", "search (optional)"],
+      "validations": [],
+      "actions": [
+        "Page all projects via fetch_all_rows",
+        "Batch-fetch cases, inquiries, appointments, KVAs, invoices, employees in parallel",
+        "Roll up counts per project",
+        "Apply search filter in-process"
+      ],
+      "systemEffects": [],
+      "outputs": ["List of projects with stats, customer_name, progress, actual_budget, open_amount"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["PROJ-010"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["GET /api/projects"],
+      "affectedTables": ["projects", "cases", "inquiries", "appointments", "cost_estimates", "invoices", "case_employees", "customers", "calls"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:142-314"
+      ],
+      "classification": "CLEAR",
+      "confidence": 95,
+      "evidence": "Comment: 'Page past the 1000-row cap: the list is filtered/searched client-side, so it must contain EVERY project'; projects = fetch_all_rows(_projects_query)"
+    },
+    {
+      "id": "PROJ-008",
+      "name": "Project Status Lifecycle (four states)",
+      "description": "A project has four statuses: planning, active, completed, archived. Status can be changed via PATCH /api/projects/{id} to any valid value; any invalid value raises HTTP 422. The UI additionally allows inline status change from a dropdown in the TopBar. The frontend maps statuses to German labels: planning=In Planung, active=In Bearbeitung, completed=Abgeschlossen, archived=Archiviert.",
+      "purpose": "Models the workflow stages of a project from inception to closure.",
+      "trigger": "PATCH /api/projects/{id} with status field; UI status dropdown",
+      "preconditions": ["Project exists in org"],
+      "inputs": ["payload.status"],
+      "validations": ["status must be in {'planning','active','completed','archived'}"],
+      "actions": ["UPDATE projects SET status=?, updated_at=now()"],
+      "systemEffects": ["Project status updated in DB"],
+      "outputs": ["Updated project row"],
+      "failureConditions": [
+        "HTTP 422 if status not in valid set",
+        "HTTP 404 if project not found"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-006"],
+      "affectedModules": [
+        "backend/app/api/routes/projects.py",
+        "frontend/src/pages/ProjectWorkspacePage.tsx",
+        "frontend/src/pages/ProjectsPage.tsx"
+      ],
+      "affectedAPIs": ["PATCH /api/projects/{id}"],
+      "affectedTables": ["projects"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:35",
+        "backend/app/api/routes/projects.py:488-489",
+        "frontend/src/pages/ProjectsPage.tsx:48-53",
+        "frontend/src/pages/ProjectWorkspacePage.tsx:75-80"
+      ],
+      "classification": "CLEAR",
+      "confidence": 99,
+      "evidence": "_STATUSES = {'planning', 'active', 'completed', 'archived'}; if 'status' in fields and fields['status'] not in _STATUSES: raise HTTPException(status_code=422, detail='Invalid status')"
+    },
+    {
+      "id": "PROJ-009",
+      "name": "Case-to-Project Link — Same Customer Validation",
+      "description": "POST /api/projects/{project_id}/cases links a Case to a Project by setting cases.project_id. Before linking, the backend verifies: (a) the case exists in the org; (b) if both the project and the case have a customer_id, they must be the same customer. A case from a different customer cannot be attached.",
+      "purpose": "A Project bundles multiple Cases for a single customer. Cross-customer case attachment would corrupt the project's data scope.",
+      "trigger": "POST /api/projects/{project_id}/cases with body {case_id}",
+      "preconditions": ["Project exists in org", "Case exists in org"],
+      "inputs": ["project_id", "payload.case_id"],
+      "validations": [
+        "Case.org_id == caller.org_id",
+        "If project.customer_id and case.customer_id: they must be equal"
+      ],
+      "actions": [
+        "UPDATE cases SET project_id=project_id, updated_at=now() WHERE org_id=? AND id=case_id"
+      ],
+      "systemEffects": ["cases.project_id set to project_id"],
+      "outputs": ["{success: true, project_id, case_id}"],
+      "failureConditions": [
+        "HTTP 404 if project not found",
+        "HTTP 404 if case not found",
+        "HTTP 422 if case belongs to a different customer ('Dieser Fall gehört zu einem anderen Kunden — ein Projekt bündelt nur Fälle desselben Kunden.')"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-010"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["POST /api/projects/{project_id}/cases"],
+      "affectedTables": ["projects", "cases"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:903-943"
+      ],
+      "classification": "CLEAR",
+      "confidence": 99,
+      "evidence": "if proj.get('customer_id') and case.get('customer_id') and proj['customer_id'] != case['customer_id']: return 'wrong_customer' → HTTP 422"
+    },
+    {
+      "id": "PROJ-010",
+      "name": "Case-from-Project Unlink (Null project_id)",
+      "description": "DELETE /api/projects/{project_id}/cases/{case_id} clears cases.project_id to NULL. The operation only succeeds if the case is currently linked to THIS project (cases.project_id = project_id guard). If the case is linked to a different project or is unlinked, HTTP 404 is returned.",
+      "purpose": "Allows staff to re-assign or remove cases from a project without deleting either record.",
+      "trigger": "DELETE /api/projects/{project_id}/cases/{case_id}",
+      "preconditions": ["Project exists in org", "Case is linked to this project"],
+      "inputs": ["project_id", "case_id", "user.org_id"],
+      "validations": ["cases.project_id == project_id (atomically checked in UPDATE WHERE clause)"],
+      "actions": [
+        "UPDATE cases SET project_id=NULL, updated_at=now() WHERE org_id=? AND id=? AND project_id=?"
+      ],
+      "systemEffects": ["cases.project_id set to NULL"],
+      "outputs": ["{success: true, project_id, case_id}"],
+      "failureConditions": [
+        "HTTP 404 if project not found",
+        "HTTP 404 if case not linked to this project ('Fall ist diesem Projekt nicht zugeordnet')"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-009"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["DELETE /api/projects/{project_id}/cases/{case_id}"],
+      "affectedTables": ["cases"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:946-968"
+      ],
+      "classification": "CLEAR",
+      "confidence": 99,
+      "evidence": "UPDATE cases SET project_id=None WHERE org_id=? AND id=case_id AND project_id=project_id; returns 'ok' if res.data else 'not_linked'"
+    },
+    {
+      "id": "PROJ-011",
+      "name": "Team Fan-Out — Add Employee to All Member Cases",
+      "description": "POST /api/projects/{id}/employees adds an employee to a project's team by inserting a case_employees row for EVERY member case (cases where cases.project_id = project_id). Unique constraint violations (employee already in case) are silently swallowed. If the project has no member cases, HTTP 400 is returned.",
+      "purpose": "There is no project_employees table; team is tracked at the case level. Fan-out ensures the employee appears in the project's aggregated team (UNION over cases).",
+      "trigger": "POST /api/projects/{id}/employees",
+      "preconditions": [
+        "Project exists in org",
+        "Employee exists in org with deleted=False",
+        "Project has at least one member case"
+      ],
+      "inputs": ["project_id", "payload.employee_id"],
+      "validations": [
+        "Employee must exist in org and not be deleted (validate via employees.eq('org_id').eq('id').eq('deleted', False))",
+        "Project must have at least one case"
+      ],
+      "actions": [
+        "For each case_id in project's cases: INSERT INTO case_employees (case_id, employee_id) (ignore unique violations)"
+      ],
+      "systemEffects": ["Inserts rows into case_employees for every member case"],
+      "outputs": ["{success: true}"],
+      "failureConditions": [
+        "HTTP 404 if project not found",
+        "HTTP 404 if employee not found or deleted ('Mitarbeiter nicht gefunden')",
+        "HTTP 400 if project has no member cases"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-012"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["POST /api/projects/{id}/employees"],
+      "affectedTables": ["case_employees", "employees", "cases"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:831-875"
+      ],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "for cid in case_ids: try: client.table('case_employees').insert({'case_id': cid, 'employee_id': payload.employee_id}).execute() except Exception: pass  # already assigned"
+    },
+    {
+      "id": "PROJ-012",
+      "name": "Team Fan-Out — Remove Employee from All Member Cases",
+      "description": "DELETE /api/projects/{id}/employees/{employee_id} removes the employee from EVERY member case (DELETE from case_employees WHERE case_id IN (project's case_ids) AND employee_id=?). This mirrors the fan-out add in PROJ-011.",
+      "purpose": "Mirrors the add fan-out: removing a project-level team member must clear them from all underlying case teams.",
+      "trigger": "DELETE /api/projects/{id}/employees/{employee_id}",
+      "preconditions": ["Project exists in org"],
+      "inputs": ["project_id", "employee_id", "user.org_id"],
+      "validations": [],
+      "actions": [
+        "DELETE FROM case_employees WHERE case_id IN (project case_ids) AND employee_id=?"
+      ],
+      "systemEffects": ["Removes case_employees rows for all member cases"],
+      "outputs": ["{success: true}"],
+      "failureConditions": [
+        "HTTP 404 if project not found"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-011"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["DELETE /api/projects/{id}/employees/{employee_id}"],
+      "affectedTables": ["case_employees"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:878-895"
+      ],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "client.table('case_employees').delete().in_('case_id', case_ids).eq('employee_id', employee_id).execute()"
+    },
+    {
+      "id": "PROJ-013",
+      "name": "Project Team — Earliest added_at Wins De-duplication",
+      "description": "When reading the project team (GET /api/projects/{id}/employees), the system unions case_employees rows across all member cases. If the same employee_id appears in multiple cases, a single entry is returned using the earliest added_at timestamp across all the case memberships.",
+      "purpose": "Presents a deduplicated project team where the employee's seniority is measured from their first case assignment.",
+      "trigger": "GET /api/projects/{id}/employees",
+      "preconditions": ["Project exists in org"],
+      "inputs": ["project_id", "user.org_id"],
+      "validations": [],
+      "actions": [
+        "Fetch case_employees for all member cases",
+        "De-dup by employee_id: keep earliest added_at",
+        "Fetch employee display_name, role, calendar_color",
+        "Count appointments handled per employee across the project"
+      ],
+      "systemEffects": [],
+      "outputs": ["List of {id, name, role, color, appointments_handled, added_at}"],
+      "failureConditions": [
+        "HTTP 404 if project not found"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-011"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["GET /api/projects/{id}/employees"],
+      "affectedTables": ["case_employees", "employees", "appointments"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:779-828"
+      ],
+      "classification": "CLEAR",
+      "confidence": 96,
+      "evidence": "first_added: dict[str, str] = {}; for e in pe: eid = e['employee_id']; if eid not in first_added or (e.get('added_at') or '') < (first_added[eid] or ''): first_added[eid] = e.get('added_at')"
+    },
+    {
+      "id": "PROJ-014",
+      "name": "Invoice Overdue Computed Status",
+      "description": "In GET /api/projects/{id}/invoices, the backend adds a computed 'overdue' status: if an invoice's status == 'sent' AND due_date < today (Berlin date), the status field is mutated to 'overdue' in the response. This is a presentation-layer computation — the underlying DB row remains 'sent'.",
+      "purpose": "Surfaces overdue payment obligations without a separate DB status value.",
+      "trigger": "GET /api/projects/{id}/invoices",
+      "preconditions": [],
+      "inputs": ["invoice rows from DB"],
+      "validations": [],
+      "actions": [
+        "For each invoice: if status == 'sent' and due_date < today: set status = 'overdue' in response"
+      ],
+      "systemEffects": [],
+      "outputs": ["Invoice rows with possibly-mutated status field"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["GET /api/projects/{id}/invoices"],
+      "affectedTables": ["invoices"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:698-707"
+      ],
+      "classification": "CLEAR",
+      "confidence": 99,
+      "evidence": "if r.get('status') == 'sent' and r.get('due_date') and str(r['due_date']) < today: r['status'] = 'overdue'"
+    },
+    {
+      "id": "PROJ-015",
+      "name": "Document Upload — Stored Against Customer (Not Case)",
+      "description": "POST /api/projects/{id}/documents uploads a file to the Supabase 'customer-files' bucket at path {org_id}/projects/{project_id}/{uuid}_{filename}. The resulting documents row is inserted with customer_id = project.customer_id but NO case_id (projects have no case_id FK on the documents table). The document is re-discovered via the project documents endpoint through the customer fan-in (customer-wide docs included in GET /api/projects/{id}/documents).",
+      "purpose": "Persists project-level documents in a way that survives case reorganization, since the project has no direct case_id on documents.",
+      "trigger": "POST /api/projects/{id}/documents",
+      "preconditions": [
+        "Project exists in org",
+        "File size <= 10MB"
+      ],
+      "inputs": ["file (multipart)", "category (form field, optional)"],
+      "validations": [
+        "File size <= 10 * 1024 * 1024 bytes (HTTP 413 if exceeded)"
+      ],
+      "actions": [
+        "Upload file to Supabase Storage bucket 'customer-files' at {org_id}/projects/{project_id}/{uuid}_{filename}",
+        "INSERT INTO documents (org_id, customer_id, name, path, category, mime_type, size_bytes, is_image)"
+      ],
+      "systemEffects": [
+        "File stored in Supabase Storage",
+        "documents row inserted with customer_id = project.customer_id, no case_id"
+      ],
+      "outputs": ["Document row with signed URL (1-hour expiry)"],
+      "failureConditions": [
+        "HTTP 413 if file > 10MB",
+        "HTTP 404 if project not found"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-016"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["POST /api/projects/{id}/documents"],
+      "affectedTables": ["documents"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:740-773",
+        "backend/app/api/routes/projects.py:33-34"
+      ],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "row = client.table('documents').insert({'org_id': user.org_id, 'customer_id': p.get('customer_id'), ...}); comment: 'A top-layer project has no case_id column on documents; file it against the customer'"
+    },
+    {
+      "id": "PROJ-016",
+      "name": "Document List — Customer-Wide Fan-In",
+      "description": "GET /api/projects/{id}/documents returns documents via two paths: (1) documents linked to the project's cases/inquiries (via _action_rows); (2) documents linked to the project's customer (customer_id = project.customer_id, no case/inquiry). Both sets are merged and de-duplicated by id. All documents include a 1-hour signed URL from Supabase Storage.",
+      "purpose": "Makes customer-level documents (e.g. photos uploaded directly to a customer) visible within the project context, even when they have no case_id.",
+      "trigger": "GET /api/projects/{id}/documents",
+      "preconditions": ["Project exists in org"],
+      "inputs": ["project_id", "user.org_id"],
+      "validations": [],
+      "actions": [
+        "Fetch documents via case_ids and inquiry_ids (_action_rows)",
+        "Fetch customer-wide documents if project.customer_id is set",
+        "De-dup by id, sort by uploaded_at desc",
+        "Generate signed URLs for each document"
+      ],
+      "systemEffects": [],
+      "outputs": ["List of document rows with url field"],
+      "failureConditions": [
+        "HTTP 404 if project not found"
+      ],
+      "dependencies": [],
+      "relatedRules": ["PROJ-015"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["GET /api/projects/{id}/documents"],
+      "affectedTables": ["documents"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:714-737"
+      ],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "customer-wide docs: if p.get('customer_id'): for d in client.table('documents').select('*').eq('org_id',...).eq('customer_id', p['customer_id']).execute().data or []: if d['id'] not in seen: rows.append(d)"
+    },
+    {
+      "id": "PROJ-017",
+      "name": "Auto-Create Case on Appointment Confirm (Agent Config Gate)",
+      "description": "When an appointment is confirmed (POST /api/appointments/{id}/confirm or post-call auto-confirm), the system calls maybe_create_case_for_appointment. It reads agent_configs.projects_enabled and projects_level for the org. If projects_enabled is False or level <= 1: no-op. If level == 2: create a case with status 'planning'. If level >= 3: create a case with status 'active'. The case is linked to the appointment via appointments.case_id. The function is best-effort and never raises (failures logged only).",
+      "purpose": "Automates case creation from appointment confirmation as a back-office workflow, configurable per org.",
+      "trigger": "POST /api/appointments/{id}/confirm; post_call auto-confirm sweep",
+      "preconditions": [
+        "appointment.case_id is not already set",
+        "agent_configs row exists for org_id",
+        "projects_enabled == True",
+        "projects_level > 1"
+      ],
+      "inputs": ["org_id", "appointment dict", "user_id (or None for post-call)"],
+      "validations": [],
+      "actions": [
+        "Read agent_configs.projects_enabled and projects_level",
+        "INSERT INTO cases (org_id, customer_id, number, title, description, status, created_by)",
+        "UPDATE appointments SET case_id = new_case_id WHERE org_id=? AND id=?"
+      ],
+      "systemEffects": [
+        "Case created in cases table with status 'planning' (level=2) or 'active' (level>=3)",
+        "Appointment updated with case_id"
+      ],
+      "outputs": ["Created case row, or None if gated off"],
+      "failureConditions": [
+        "Any exception: logged as WARNING, function returns None (never raises)"
+      ],
+      "dependencies": ["PROJ-018"],
+      "relatedRules": ["PROJ-018"],
+      "affectedModules": [
+        "backend/app/services/projects.py",
+        "backend/app/api/routes/appointments.py",
+        "backend/app/services/post_call.py"
+      ],
+      "affectedAPIs": ["POST /api/appointments/{id}/confirm"],
+      "affectedTables": ["agent_configs", "cases", "appointments"],
+      "sourceReferences": [
+        "backend/app/services/projects.py:26-84",
+        "backend/app/api/routes/appointments.py:404-416",
+        "backend/app/services/post_call.py:81-109"
+      ],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "if not row.get('projects_enabled'): return None; level = int(row.get('projects_level') or 2); if level <= 1: return None; status='active' if level >= 3 else 'planning'"
+    },
+    {
+      "id": "PROJ-018",
+      "name": "Case Number Generation (FL-TOKEN-NNNN)",
+      "description": "Case (Fall) numbers use the format FL-{ORG_TOKEN}-{NNNN}, e.g. FL-KC007-0001. This is a completely separate sequence from Project numbers (PR-). Both use _max_seq_for_token but over different tables (cases vs projects) and with different prefixes (FL- vs PR-). Numbers are never reused after deletion (MAX+1).",
+      "purpose": "Distinguishes the Case layer (FL-) from the Project layer (PR-) in human-readable record identifiers.",
+      "trigger": "Case creation (auto from inquiry, auto from appointment confirm, or direct INSERT)",
+      "preconditions": [],
+      "inputs": ["org_id"],
+      "validations": [],
+      "actions": [
+        "get_org_token to resolve/derive org token",
+        "_max_seq_for_token over cases table with FL- prefix",
+        "Return FL-{TOKEN}-{NNNN:04d}"
+      ],
+      "systemEffects": [],
+      "outputs": ["Case number string"],
+      "failureConditions": [],
+      "dependencies": ["PROJ-002"],
+      "relatedRules": ["PROJ-001", "PROJ-002"],
+      "affectedModules": ["backend/app/services/common.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["cases", "organizations"],
+      "sourceReferences": [
+        "backend/app/services/common.py:515-522"
+      ],
+      "classification": "CLEAR",
+      "confidence": 98,
+      "evidence": "def gen_case_number: prefix = f'FL-{get_org_token(client, org_id)}-'; seq = _max_seq_for_token(client, 'cases', org_id, prefix) + 1; return f'{prefix}{seq:04d}'"
+    },
+    {
+      "id": "PROJ-019",
+      "name": "Auto-Assign New Inquiry to Case (Embedding Grouper)",
+      "description": "On every new inquiry creation (inbound call ingest via create_inquiry_from_call or agent tool via create_inquiry), the function safe_auto_assign is called. It: (1) no-ops if the inquiry already has a case_id; (2) fetches up to 8 open cases (status in planning/active) for the same customer ordered by created_at desc; (3) if AI is within cap, embeds the inquiry signal (subject+summary+notes+transcript) and each case's signal (title+description+member inquiry summaries), computes cosine similarity, and attaches to the best case if similarity >= 0.70; (4) on any failure (embed error, AI cap exceeded, no open cases, similarity below threshold) creates a new case.",
+      "purpose": "Automatically groups related inquiries under the same Case, reducing staff effort to manually organize inbound calls.",
+      "trigger": "Inquiry creation from call ingest (inquiries.py:create_inquiry_from_call) or agent tool (inquiries.py:create_inquiry)",
+      "preconditions": ["inquiry.case_id is None"],
+      "inputs": ["org_id", "inquiry dict (id, customer_id, subject, title, notes)"],
+      "validations": [],
+      "actions": [
+        "Fetch up to _MAX_OPEN_CASES (8) open cases for customer",
+        "If AI within cap: embed inquiry signal and case signals using text-embedding-3-small",
+        "Compute cosine similarity between inquiry and each case",
+        "If best_sim >= _ATTACH_SIM (0.70): UPDATE inquiries SET case_id, case_source='ai', case_confidence, case_reason",
+        "Else: INSERT INTO cases (org_id, customer_id, number, title, description='Automatisch aus neuer Anfrage erstellt.', status='active'), then UPDATE inquiries SET case_id, case_source='ai', case_confidence=1.0, case_reason='automatisch: neuer Fall'"
+      ],
+      "systemEffects": [
+        "inquiries.case_id set (either to existing or new case)",
+        "inquiries.case_source = 'ai'",
+        "inquiries.case_confidence set to similarity score or 1.0",
+        "inquiries.case_reason set to German explanation",
+        "New case row may be created in cases table"
+      ],
+      "outputs": ["Case dict, or None if inquiry already had case_id"],
+      "failureConditions": [
+        "Any exception: logged as WARNING, returns None (safe_auto_assign wrapper never raises)"
+      ],
+      "dependencies": ["PROJ-018"],
+      "relatedRules": ["PROJ-017", "PROJ-018"],
+      "affectedModules": [
+        "backend/app/services/projects_auto.py",
+        "backend/app/services/inquiries.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": ["cases", "inquiries", "calls"],
+      "sourceReferences": [
+        "backend/app/services/projects_auto.py:34-172",
+        "backend/app/services/inquiries.py:153-157",
+        "backend/app/services/inquiries.py:255-258"
+      ],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "_ATTACH_SIM = 0.70; _MAX_OPEN_CASES = 8; _MEMBER_SAMPLE = 6; if best_sim >= _ATTACH_SIM: return _attach(...); return _create_case_for_inquiry(...)"
+    },
+    {
+      "id": "PROJ-020",
+      "name": "Inquiry-to-Case Grouping — Audit Trail Columns",
+      "description": "When an inquiry is attached to a case (either by AI similarity match or new-case creation), three columns are written on the inquiries row: case_source ('ai'), case_confidence (similarity score 0-1, or 1.0 for auto-create), and case_reason (German text explaining the decision). This audit trail is shared with the manual grouping workflow.",
+      "purpose": "Provides full auditability of how each inquiry was assigned to its case, distinguishing AI auto-assignment from manual moves.",
+      "trigger": "AI attach or create in projects_auto.auto_assign_inquiry_to_case",
+      "preconditions": [],
+      "inputs": ["inquiry_id", "case_id", "similarity score (if attach)"],
+      "validations": [],
+      "actions": [
+        "UPDATE inquiries SET case_id, case_source='ai', case_confidence, case_reason WHERE org_id=? AND id=?"
+      ],
+      "systemEffects": ["inquiries row updated with case attribution metadata"],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": ["PROJ-019"],
+      "relatedRules": ["PROJ-019"],
+      "affectedModules": ["backend/app/services/projects_auto.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["inquiries"],
+      "sourceReferences": [
+        "backend/app/services/projects_auto.py:107-112",
+        "backend/app/services/projects_auto.py:116-123"
+      ],
+      "classification": "CLEAR",
+      "confidence": 98,
+      "evidence": "_create_case_for_inquiry: update inquiries SET case_source='ai', case_confidence=1.0, case_reason='automatisch: neuer Fall'; _attach: case_source='ai', case_confidence=round(sim,2), case_reason=f'automatisch zugeordnet (Ähnlichkeit {sim:.2f})'"
+    },
+    {
+      "id": "PROJ-021",
+      "name": "Project Progress Computed Field",
+      "description": "Both the list endpoint and the detail endpoint compute a 'progress' field as: round(done_appointments / total_appointments * 100) if total_appointments > 0, else 0. 'Done' means appointment.status == 'completed'.",
+      "purpose": "Gives staff a quick percentage-complete view of project work based on appointment completion rate.",
+      "trigger": "GET /api/projects and GET /api/projects/{id}",
+      "preconditions": [],
+      "inputs": ["appointments with status field"],
+      "validations": [],
+      "actions": ["Compute progress = round(done/total*100) or 0"],
+      "systemEffects": [],
+      "outputs": ["progress integer (0-100) in project response"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["GET /api/projects", "GET /api/projects/{id}"],
+      "affectedTables": ["appointments"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:304",
+        "backend/app/api/routes/projects.py:465"
+      ],
+      "classification": "CLEAR",
+      "confidence": 99,
+      "evidence": "p['progress'] = round(done / total * 100) if total else 0"
+    },
+    {
+      "id": "PROJ-022",
+      "name": "Invoice Budget Computation — Cancelled Excluded",
+      "description": "actual_budget (shown in the project detail and list) is the sum of invoice totals where status != 'cancelled'. open_amount is the sum of invoice totals where status == 'sent'. Cancelled invoices are excluded from both totals.",
+      "purpose": "Accurately reflects real financial exposure: cancelled invoices should not inflate the budget.",
+      "trigger": "GET /api/projects/{id} and GET /api/projects",
+      "preconditions": [],
+      "inputs": ["invoice rows"],
+      "validations": [],
+      "actions": [
+        "actual = sum(v.total for v in invs if v.status != 'cancelled')",
+        "open_inv = sum(v.total for v in invs if v.status == 'sent')"
+      ],
+      "systemEffects": [],
+      "outputs": ["actual_budget (float)", "open_amount (float)"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["PROJ-014"],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["GET /api/projects", "GET /api/projects/{id}"],
+      "affectedTables": ["invoices"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:447-448",
+        "backend/app/api/routes/projects.py:284-286"
+      ],
+      "classification": "CLEAR",
+      "confidence": 99,
+      "evidence": "open_inv = round(sum((v.get('total') or 0) for v in invs if v.get('status') == 'sent'), 2); actual = round(sum((v.get('total') or 0) for v in invs if v.get('status') != 'cancelled'), 2)"
+    },
+    {
+      "id": "PROJ-023",
+      "name": "Project Form — Case Context Pre-fill and Auto-Link",
+      "description": "When ProjectFormPage is opened with URL params ?customer_id=&case_id=&case_number=, the customer field is pre-filled and locked (disabled for editing), the customer's address is auto-fetched and parsed into street/postcode/city fields. On save, after creating the project, the frontend immediately calls POST /api/projects/{new_id}/cases with the originating case_id to link the case to the new project. On success, the user is navigated back to the case (/cases?case={case_id}).",
+      "purpose": "Streamlines the 'create project from a case' workflow: customer and address are pre-populated, and the case is automatically attached.",
+      "trigger": "Navigate to /projects/new?customer_id=&case_id=&case_number=",
+      "preconditions": [],
+      "inputs": ["customer_id (URL param)", "case_id (URL param)", "case_number (URL param, for display)"],
+      "validations": [
+        "Title must be non-empty (UI enforced: save button disabled)",
+        "Customer must be selected (UI enforced: save button disabled)"
+      ],
+      "actions": [
+        "POST /api/projects with title, customer_id, and other fields",
+        "POST /api/projects/{new_id}/cases with {case_id: attachCaseId}"
+      ],
+      "systemEffects": [
+        "New project created",
+        "Case linked to project (cases.project_id set)"
+      ],
+      "outputs": ["Navigation to /cases?case={case_id}"],
+      "failureConditions": [
+        "API error → 'Speichern fehlgeschlagen.' error message shown"
+      ],
+      "dependencies": ["PROJ-009"],
+      "relatedRules": ["PROJ-009"],
+      "affectedModules": [
+        "frontend/src/pages/ProjectFormPage.tsx"
+      ],
+      "affectedAPIs": ["POST /api/projects", "POST /api/projects/{id}/cases"],
+      "affectedTables": ["projects", "cases"],
+      "sourceReferences": [
+        "frontend/src/pages/ProjectFormPage.tsx:37-40",
+        "frontend/src/pages/ProjectFormPage.tsx:114-148"
+      ],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "attachCaseId = !isEdit ? params.get('case_id') || '' : ''; if (attachCaseId && res.id) { await apiFetch(`/api/projects/${res.id}/cases`, { method: 'POST', body: JSON.stringify({ case_id: attachCaseId }) }) }"
+    },
+    {
+      "id": "PROJ-024",
+      "name": "Fälle Tab — Case Candidate Filter (Same Customer)",
+      "description": "In the ProjectWorkspacePage Fälle tab, the 'Fall hinzufügen' dropdown only shows cases not already in this project AND (if the project has a customer_id) belonging to the same customer. This mirrors the backend validation in PROJ-009 but is applied client-side using the cached /api/cases response.",
+      "purpose": "Prevents staff from accidentally attaching a case from a different customer to the project.",
+      "trigger": "User opens 'Fall hinzufügen' dropdown in Fälle tab",
+      "preconditions": [],
+      "inputs": ["All cases from /api/cases", "project.id", "project.customer_id"],
+      "validations": [
+        "Client-side: c.project_id !== project.id AND (!project.customer_id OR c.customer_id === project.customer_id)"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": ["Filtered candidate list in dropdown"],
+      "failureConditions": [],
+      "dependencies": ["PROJ-009"],
+      "relatedRules": ["PROJ-009"],
+      "affectedModules": [
+        "frontend/src/pages/ProjectWorkspacePage.tsx"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "frontend/src/pages/ProjectWorkspacePage.tsx:349"
+      ],
+      "classification": "CLEAR",
+      "confidence": 98,
+      "evidence": "const candidates = cases.filter((c) => c.project_id !== project.id && (!project.customer_id || c.customer_id === project.customer_id))"
+    },
+    {
+      "id": "PROJ-025",
+      "name": "Project Required Fields — Title and Customer (UI Enforcement Only)",
+      "description": "In the ProjectFormPage, the save button is disabled if title is empty or customer is not selected. There is NO backend enforcement of title being non-null or customer_id being set on the POST schema (ProjectUpsert has title as required but customer_id is Optional). The backend accepts a project without customer_id.",
+      "purpose": "Guides staff to always associate a project with a customer, though the backend does not enforce this.",
+      "trigger": "User interaction in /projects/new or /projects/{id}/edit",
+      "preconditions": [],
+      "inputs": ["title", "customerId"],
+      "validations": [
+        "UI: save button disabled if !title.trim() || !customerId"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "frontend/src/pages/ProjectFormPage.tsx",
+        "backend/app/schemas/admin.py"
+      ],
+      "affectedAPIs": ["POST /api/projects"],
+      "affectedTables": [],
+      "sourceReferences": [
+        "frontend/src/pages/ProjectFormPage.tsx:241",
+        "backend/app/schemas/admin.py:265-274"
+      ],
+      "classification": "PARTIALLY_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "UI: disabled={!title.trim() || !customerId || save.isPending}. Backend schema: title: str (required), customer_id: str | None = None (optional). Backend allows customer-less project creation."
+    },
+    {
+      "id": "PROJ-026",
+      "name": "Activity Feed — Chronological Event Stream",
+      "description": "GET /api/projects/{id}/activity returns up to {limit} (default 20) events from the project's history, sourced from: new inquiries (type=inquiry), appointments (planned or completed), cost estimates created, invoices (sent/created), payments received, and inbound/outbound calls. All items are sorted by date descending, filtered to items with a non-null date field. Calls are fetched up to limit=10 from the member inquiries chain.",
+      "purpose": "Gives staff a unified timeline view of all meaningful events in a project.",
+      "trigger": "GET /api/projects/{id}/activity",
+      "preconditions": ["Project exists in org"],
+      "inputs": ["project_id", "limit (default 20)"],
+      "validations": [],
+      "actions": [
+        "Resolve project → cases → inquiries → action rows",
+        "Build activity items from inquiries, appointments, KVAs, invoices, calls",
+        "Filter out items with no date",
+        "Sort by date desc",
+        "Slice to limit"
+      ],
+      "systemEffects": [],
+      "outputs": ["List of {type, date, label, amount?} sorted chronologically"],
+      "failureConditions": [
+        "HTTP 404 if project not found"
+      ],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/projects.py"],
+      "affectedAPIs": ["GET /api/projects/{id}/activity"],
+      "affectedTables": ["cases", "inquiries", "appointments", "cost_estimates", "invoices", "calls"],
+      "sourceReferences": [
+        "backend/app/api/routes/projects.py:524-567"
+      ],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "items = [it for it in items if it.get('date')]; items.sort(key=lambda x: str(x['date']), reverse=True); return items[:limit]"
+    },
+    {
+      "id": "PROJ-027",
+      "name": "Org Disabled Gate — Project Access Blocked",
+      "description": "All project routes depend on require_org which checks if the caller's organization has a disabled_at timestamp set. If the org is disabled, all project API calls return HTTP 403 ('Diese Organisation ist deaktiviert.'). Super-admins bypass this check.",
+      "purpose": "Prevents access to project data when an organization has been suspended.",
+      "trigger": "Any /api/projects/* endpoint call",
+      "preconditions": [],
+      "inputs": ["JWT with org_id", "organizations.disabled_at"],
+      "validations": [
+        "If org.disabled_at is set and user.role != 'super_admin': HTTP 403"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": ["HTTP 403 if org is disabled"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/api/deps.py"
+      ],
+      "affectedAPIs": ["All /api/projects/* endpoints"],
+      "affectedTables": ["organizations"],
+      "sourceReferences": [
+        "backend/app/api/deps.py:66-90"
+      ],
+      "classification": "CLEAR",
+      "confidence": 98,
+      "evidence": "require_org: if org_rows and org_rows[0].get('disabled_at'): raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail='Diese Organisation ist deaktiviert.')"
+    },
+    {
+      "id": "PROJ-028",
+      "name": "Project Address — Structured JSON Field",
+      "description": "The project_address field is stored as a JSON object with keys {street, postcode, city}. It is populated from user input in the ProjectFormPage (either manually typed or auto-parsed from the customer's raw address). The backend accepts any dict without schema validation on the address shape. Can be set to null to clear.",
+      "purpose": "Allows a project to have a site address (e.g. a construction site) that differs from the customer's billing address.",
+      "trigger": "POST /api/projects or PATCH /api/projects/{id}",
+      "preconditions": [],
+      "inputs": ["project_address: {street, postcode, city} or null"],
+      "validations": ["None server-side; UI validates hasAddr = street || postcode || city"],
+      "actions": ["Store project_address as JSONB in projects table"],
+      "systemEffects": [],
+      "outputs": ["project_address field in project row"],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/schemas/admin.py",
+        "frontend/src/pages/ProjectFormPage.tsx"
+      ],
+      "affectedAPIs": ["POST /api/projects", "PATCH /api/projects/{id}"],
+      "affectedTables": ["projects"],
+      "sourceReferences": [
+        "backend/app/schemas/admin.py:273",
+        "frontend/src/pages/ProjectFormPage.tsx:116-125"
+      ],
+      "classification": "CLEAR",
+      "confidence": 96,
+      "evidence": "project_address: dict | None = None  # {street, postcode, city} in ProjectUpsert schema; UI: hasAddr = street || postcode || city; project_address: hasAddr ? { street, postcode, city } : null"
+    }
+  ]
+}
