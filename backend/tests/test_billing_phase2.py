@@ -54,10 +54,10 @@ def test_checkout_session_builds_and_records(monkeypatch):
         return {"id": "cs_1", "url": "https://checkout.stripe.com/x"}
 
     monkeypatch.setattr(sp, "stripe_call_safely", fake_safe)
-    res = sp.create_checkout_session("o1", "Kiki Solo", "month", trial_days=14)
+    res = sp.create_checkout_session("o1", "Kiki Solo", "month")
     assert res == {"url": "https://checkout.stripe.com/x", "session_id": "cs_1"}
     assert captured["request_payload"]["plan"] == "Kiki Solo"
-    assert captured["request_payload"]["trial_days"] == 14
+    assert "trial_days" not in captured["request_payload"]
     assert any(t == "billing_checkout_sessions" for t, _ in db.inserts)
 
 

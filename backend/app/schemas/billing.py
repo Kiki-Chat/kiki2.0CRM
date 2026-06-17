@@ -57,7 +57,6 @@ class PortalSessionResponse(BaseModel):
 class CheckoutRequest(BaseModel):
     plan_title: str
     interval: str = "month"
-    trial_days: int | None = None
 
 
 class CheckoutResponse(BaseModel):

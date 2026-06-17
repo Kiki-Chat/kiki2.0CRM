@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_super_admin
@@ -503,6 +503,95 @@ async def sync_agent_config(
         prompt_skipped_reason=summary.get("prompt_skipped_reason"),
         webhook_enabled=bool(summary.get("webhook_enabled")),
         audio_ok=bool(summary.get("audio_ok")),
+        verify=AgentHealthReport(**report),
+    )
+
+
+# ─── n8n BIND-ONLY: re-bind an externally-rebuilt agent ─────────────────────
+class BindAgentRequest(BaseModel):
+    """Body for POST /api/super-admin/orgs/{id}/bind-agent.
+
+    n8n now CREATES the ElevenLabs agent (prompt + tools + webhook + number)
+    externally and the CRM only BINDS it. This endpoint writes the agent ids
+    onto an EXISTING org and runs the READ-ONLY ``verify_agent_health`` — it
+    NEVER calls ``configure_agent`` (which would clobber n8n's prompt/tools/
+    webhook). Use it to re-bind an org to an agent n8n rebuilt.
+
+    Assumptions (n8n contract): n8n set the EL conversation-init webhook to the
+    prod backend URL + ``X-HeyKiki-Secret`` header (the CRM only verifies it),
+    and passes ``elevenlabs_phone_number_id`` (needed for outbound).
+    """
+
+    elevenlabs_agent_id: str = Field(..., alias="elevenlabsAgentId")
+    phone_number: str | None = Field(default=None, alias="phoneNumber")
+    elevenlabs_phone_number_id: str | None = Field(
+        default=None, alias="elevenlabsPhoneNumberId"
+    )
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+
+
+class BindAgentResponse(BaseModel):
+    """Response for the bind-agent endpoint: the written ids + verify report."""
+
+    org_id: str
+    elevenlabs_agent_id: str
+    phone_number: str | None
+    elevenlabs_phone_number_id: str | None
+    verify: AgentHealthReport
+
+
+@router.post("/orgs/{org_id}/bind-agent", response_model=BindAgentResponse)
+async def bind_agent(
+    org_id: str,
+    payload: BindAgentRequest,
+    _user: CurrentUser = Depends(require_super_admin),
+) -> BindAgentResponse:
+    """BIND an n8n-rebuilt ElevenLabs agent onto an existing org (no re-config).
+
+    Writes ``elevenlabs_agent_id`` + ``phone_number`` +
+    ``elevenlabs_phone_number_id`` onto the org, stamps ``agent_provisioned_at``,
+    then runs the READ-ONLY ``verify_agent_health`` and returns the report.
+
+    Deliberately does NOT call ``configure_agent`` — n8n owns the agent's
+    prompt/tools/webhook/number and re-running configure_agent would clobber
+    them. For the legacy CRM-builds-the-agent path use ``sync-agent-config``
+    instead. A red verify is reported (not an error): the agent is n8n's to
+    fix, and the operator sees ok/red.
+    """
+    org = await run_in_threadpool(_get_org, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation nicht gefunden.")
+
+    agent_id = (payload.elevenlabs_agent_id or "").strip()
+    if not agent_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Es wurde keine ElevenLabs Agent ID übergeben.",
+        )
+
+    def _bind() -> None:
+        client = get_service_client()
+        patch: dict = {
+            "elevenlabs_agent_id": agent_id,
+            "agent_provisioned_at": _now(),
+            "updated_at": _now(),
+        }
+        if payload.phone_number is not None:
+            patch["phone_number"] = payload.phone_number
+        if payload.elevenlabs_phone_number_id is not None:
+            patch["elevenlabs_phone_number_id"] = payload.elevenlabs_phone_number_id
+        client.table("organizations").update(patch).eq("id", org_id).execute()
+
+    await run_in_threadpool(_bind)
+
+    # Read-only verify gate — never writes to the agent.
+    report = await run_in_threadpool(verify_agent_health, org_id, agent_id)
+
+    return BindAgentResponse(
+        org_id=org_id,
+        elevenlabs_agent_id=agent_id,
+        phone_number=payload.phone_number,
+        elevenlabs_phone_number_id=payload.elevenlabs_phone_number_id,
         verify=AgentHealthReport(**report),
     )
 

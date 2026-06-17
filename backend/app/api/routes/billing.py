@@ -278,7 +278,7 @@ def _checkout(org_id: str, actor_id: str, body: CheckoutRequest) -> CheckoutResp
 
     try:
         result = create_checkout_session(
-            org_id, body.plan_title, body.interval, trial_days=body.trial_days, actor_id=actor_id
+            org_id, body.plan_title, body.interval, actor_id=actor_id
         )
     except StripeBillingError as exc:
         raise HTTPException(status_code=502, detail=f"Checkout fehlgeschlagen: {exc}") from exc
