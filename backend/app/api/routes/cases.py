@@ -19,6 +19,7 @@ from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.services.cases.grouper import propose_cases_for_customer
 from app.services.common import gen_case_number, validate_fk_in_org
+from app.services import invoices
 
 router = APIRouter(prefix="/api", tags=["cases"])
 
@@ -416,7 +417,23 @@ async def update_case(case_id: str, payload: CaseUpdateIn, user: CurrentUser = D
         fields["updated_at"] = _now()
         return client.table("cases").update(fields).eq("org_id", org_id).eq("id", case_id).execute().data[0]
 
-    return await run_in_threadpool(_run)
+    case_row = await run_in_threadpool(_run)
+
+    # INV-027 / 6.2: auto-draft an invoice when a Fall is completed.
+    # Best-effort — any error in the helper is already swallowed inside the
+    # function, but we guard here too so a future refactor can never surface.
+    if payload.status == "completed":
+        try:
+            await run_in_threadpool(
+                invoices.maybe_create_invoice_for_project,
+                user.org_id,
+                case_row,
+                _uid(user),
+            )
+        except Exception:  # noqa: BLE001
+            pass  # never fail the case update
+
+    return case_row
 
 
 class CaseEmployeeIn(BaseModel):
