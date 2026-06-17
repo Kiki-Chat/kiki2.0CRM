@@ -1,0 +1,373 @@
+{
+  "configSettings": [
+    {
+      "name": "Persona Name (agent name)",
+      "uiSource": "PATCH /api/kiki-zentrale/verhalten (persona_name field)",
+      "storageLocation": "ElevenLabs only (agents.name)",
+      "dbTable": "none",
+      "apiLayer": "patch_agent_safely() with field_patches={name: ...}",
+      "externalSyncLayer": "Immediate EL PATCH on save; no DB twin",
+      "runtimeImpact": "Agent's displayed name in ElevenLabs; no prompt effect"
+    },
+    {
+      "name": "First Message (Eröffnungstext)",
+      "uiSource": "PATCH /api/kiki-zentrale/verhalten (first_message field)",
+      "storageLocation": "ElevenLabs conversation_config.agent.first_message; optionally overridden per-call via conversation_config_override",
+      "dbTable": "agent_configs.welcome_message (legacy), agent_configs.welcome_messages (time-based variants)",
+      "apiLayer": "patch_agent_safely() for stored value; conversation_init returns per-call override",
+      "externalSyncLayer": "FULL: stored in EL; per-call variant injected via /conversation-init webhook",
+      "runtimeImpact": "The text the agent speaks when the call connects"
+    },
+    {
+      "name": "Voice ID",
+      "uiSource": "PATCH /api/kiki-zentrale/verhalten (voice_id field), GET /api/kiki-zentrale/voices",
+      "storageLocation": "ElevenLabs conversation_config.tts.voice_id",
+      "dbTable": "none",
+      "apiLayer": "patch_agent_safely() with field_patches={conversation_config:{tts:{voice_id:...}}}",
+      "externalSyncLayer": "FULL: EL only, no DB copy",
+      "runtimeImpact": "Voice used for TTS synthesis on all calls"
+    },
+    {
+      "name": "Language",
+      "uiSource": "PATCH /api/kiki-zentrale/verhalten (language field)",
+      "storageLocation": "ElevenLabs conversation_config.agent.language",
+      "dbTable": "none",
+      "apiLayer": "patch_agent_safely()",
+      "externalSyncLayer": "FULL: EL only",
+      "runtimeImpact": "Agent's primary language model selection"
+    },
+    {
+      "name": "Master Prompt",
+      "uiSource": "Auto-rendered from agent_prompt_template.txt + config tables; super-admin may hand-edit via PATCH /api/kiki-zentrale/prompt",
+      "storageLocation": "ElevenLabs conversation_config.agent.prompt.prompt",
+      "dbTable": "agent_configs.prompt_manual_override (gate flag only; prompt text NOT stored in DB)",
+      "apiLayer": "render_prompt_for_org() → patch_agent_safely()",
+      "externalSyncLayer": "FULL on config changes (background repush); SKIPPED when prompt_manual_override=True",
+      "runtimeImpact": "Entire system prompt for every inbound call; drives all agent behavior"
+    },
+    {
+      "name": "hk_* Tool IDs (11 tools)",
+      "uiSource": "No UI; set during provisioning and sync-agent-config",
+      "storageLocation": "ElevenLabs conversation_config.agent.prompt.tool_ids",
+      "dbTable": "none (cache only in _HK_TOOL_ID_CACHE)",
+      "apiLayer": "_resolve_hk_tool_ids() → patch_agent_safely() with merge_arrays=[TOOL_IDS_PATH]",
+      "externalSyncLayer": "PARTIAL: additive merge on provisioning; no ongoing sync (deleted tools stay on agent until reprovisioned)",
+      "runtimeImpact": "Which tool webhooks the agent can invoke during a call"
+    },
+    {
+      "name": "Knowledge Base Documents (URL + PDF)",
+      "uiSource": "PATCH /api/kiki-zentrale/knowledge-resources/*",
+      "storageLocation": "ElevenLabs knowledge_base array + Supabase Storage (PDFs); knowledge_resources table tracks metadata",
+      "dbTable": "knowledge_resources (org_id, kind, source, display_name, status, elevenlabs_doc_id, chunk_count)",
+      "apiLayer": "push_knowledge_resource_to_elevenlabs() / remove_knowledge_resource_from_elevenlabs()",
+      "externalSyncLayer": "FULL: add/remove synced immediately; reindex = remove+recreate",
+      "runtimeImpact": "Native RAG source the agent queries for company-specific answers"
+    },
+    {
+      "name": "Price List Knowledge Base Document",
+      "uiSource": "PATCH /api/kiki-zentrale/price-info (toggle), indirectly via catalog_items changes",
+      "storageLocation": "ElevenLabs knowledge_base (type=text, name='Preisliste (Richtpreise)')",
+      "dbTable": "agent_configs.price_list_doc_id (tracking only), agent_configs.price_info_enabled",
+      "apiLayer": "sync_price_list_kb() via price_knowledge.py",
+      "externalSyncLayer": "FULL: reconcile-by-name on toggle + catalog save; PARTIAL: concurrent sync race documented",
+      "runtimeImpact": "Agent's source of truth for Richtpreise; ON=agent quotes prices, OFF=doc absent so agent cannot quote"
+    },
+    {
+      "name": "Conversation Initiation Webhook",
+      "uiSource": "No UI; configured during provisioning (B.4)",
+      "storageLocation": "ElevenLabs platform_settings.workspace_overrides.conversation_initiation_client_data_webhook.url + enabled flag",
+      "dbTable": "none (derived from settings.backend_public_url at provisioning time)",
+      "apiLayer": "configure_agent B.4 → patch_agent_safely()",
+      "externalSyncLayer": "FULL: set once at provisioning; idempotent on re-run",
+      "runtimeImpact": "Fires on every call connect; delivers dynamic variables + optional first-message override"
+    },
+    {
+      "name": "client_events: audio",
+      "uiSource": "No UI; set during provisioning (B.5), enforced by audio assertion on all writes",
+      "storageLocation": "ElevenLabs conversation_config.conversation.client_events",
+      "dbTable": "none",
+      "apiLayer": "configure_agent B.5 + assert_audio_event() on every write",
+      "externalSyncLayer": "FULL: additive — never removed; assertion blocks any write that would remove it",
+      "runtimeImpact": "Required for the agent to produce audio; without it, TTS is silent"
+    },
+    {
+      "name": "Autonomy Levels (appointments_level, kva_level)",
+      "uiSource": "PATCH /api/kiki-zentrale/verhalten",
+      "storageLocation": "agent_configs.appointments_enabled, appointments_level, kva_enabled, kva_level, kiki_level (legacy)",
+      "dbTable": "agent_configs",
+      "apiLayer": "render_autonomy_block() → rerender_and_push_for_org() (background)",
+      "externalSyncLayer": "FULL: DB write + background EL prompt repush",
+      "runtimeImpact": "Whether the agent books appointments (level 1/2/3) and drafts cost estimates"
+    },
+    {
+      "name": "Emergency Configuration",
+      "uiSource": "PATCH /api/kiki-zentrale/emergency",
+      "storageLocation": "agent_configs.(emergency_enabled, emergency_number, emergency_only_outside_business_hours, emergency_keywords, emergency_extra_windows, emergency_surcharge_notice_enabled, emergency_surcharge_text)",
+      "dbTable": "agent_configs",
+      "apiLayer": "render_emergency_block() + build_transfer_tool() → repush + sync_system_tools_for_org()",
+      "externalSyncLayer": "FULL: DB + prompt repush + transfer_to_number tool sync (both triggered by kz_emergency label)",
+      "runtimeImpact": "Emergency keywords, transfer target, surcharge notice — all in live prompt and built_in_tools"
+    },
+    {
+      "name": "Phone / Forwarding Numbers",
+      "uiSource": "PATCH /api/kiki-zentrale/phone",
+      "storageLocation": "agent_configs.(forwarding_number, incoming_forwarding_number), organizations.existing_business_number",
+      "dbTable": "agent_configs, organizations",
+      "apiLayer": "render_staff_transfer_block() + build_transfer_tool() → repush + sync_system_tools_for_org()",
+      "externalSyncLayer": "FULL: DB + prompt repush + transfer_to_number tool sync (kz_phone label)",
+      "runtimeImpact": "Staff transfer target and emergency fallback number in prompt and built_in_tools"
+    },
+    {
+      "name": "Transfer to Number (built_in_tools)",
+      "uiSource": "Derived from emergency + phone config; no direct UI",
+      "storageLocation": "ElevenLabs conversation_config.agent.prompt.built_in_tools.transfer_to_number",
+      "dbTable": "agent_configs (source data: emergency_number, forwarding_number, incoming_forwarding_number)",
+      "apiLayer": "sync_system_tools_for_org() → build_transfer_tool() → patch_agent_safely()",
+      "externalSyncLayer": "FULL: pushed after every Notdienst/Telefon save",
+      "runtimeImpact": "Actual call-transfer mechanism (native EL bridge); replaces TwiML redirect"
+    },
+    {
+      "name": "Voicemail Detection (built_in_tools)",
+      "uiSource": "No UI; always pushed during system_tools_sync",
+      "storageLocation": "ElevenLabs conversation_config.agent.prompt.built_in_tools.voicemail_detection",
+      "dbTable": "none",
+      "apiLayer": "sync_system_tools_for_org() → build_voicemail_tool() → patch_agent_safely()",
+      "externalSyncLayer": "FULL: always included in system tools sync",
+      "runtimeImpact": "Prevents agent from misidentifying live humans as voicemail (hardened description)"
+    },
+    {
+      "name": "Scheduling Rules (lead time, buffer, parallel slots)",
+      "uiSource": "PATCH /api/kiki-zentrale/scheduling-rules",
+      "storageLocation": "agent_configs.(lead_time_hours, lead_time_days, lead_time_only_weekdays, lead_time_earliest_clock, buffer_minutes, max_appointments_per_day, parallel_slots, scheduling_enabled)",
+      "dbTable": "agent_configs",
+      "apiLayer": "render_scheduling_rules_block() → rerender_and_push_for_org()",
+      "externalSyncLayer": "FULL: DB + background prompt repush",
+      "runtimeImpact": "Agent's booking window constraints baked into the system prompt"
+    },
+    {
+      "name": "Required Fields / Leitfaden",
+      "uiSource": "PATCH /api/kiki-zentrale/leitfaden, POST/PATCH/DELETE /api/kiki-zentrale/required-fields/*",
+      "storageLocation": "agent_required_fields table (per org, ordered by sort_order)",
+      "dbTable": "agent_required_fields",
+      "apiLayer": "render_required_fields_block() → rerender_and_push_for_org()",
+      "externalSyncLayer": "FULL: DB write + background prompt repush",
+      "runtimeImpact": "The ordered list of fields and offer-steps the agent is instructed to collect/make"
+    },
+    {
+      "name": "Appointment Categories",
+      "uiSource": "POST/PATCH/DELETE /api/kiki-zentrale/appointment-categories",
+      "storageLocation": "appointment_categories table",
+      "dbTable": "appointment_categories",
+      "apiLayer": "render_appointment_categories_block() → rerender_and_push_for_org()",
+      "externalSyncLayer": "FULL: DB write + background prompt repush",
+      "runtimeImpact": "Which appointment categories the agent can book and their durations/assignees"
+    },
+    {
+      "name": "Conversation Logic (Wenn/Dann)",
+      "uiSource": "PATCH /api/kiki-zentrale/conversation-logic",
+      "storageLocation": "agent_configs.conversation_logic (JSON), agent_configs.conversation_logic_enabled",
+      "dbTable": "agent_configs",
+      "apiLayer": "render_conversation_logic_block() → rerender_and_push_for_org()",
+      "externalSyncLayer": "FULL: DB write + background prompt repush; compile failure at render time silently returns ''",
+      "runtimeImpact": "Org-specific Wenn/Dann rules inserted as Schritt 1a in the agent's prompt"
+    }
+  ],
+  "syncMatrix": [
+    {
+      "item": "Master Prompt",
+      "syncs": "FULL",
+      "overwriteRisk": "LOW — prompt_manual_override gate prevents auto-render from overwriting hand-edited prompts; first-run guard prevents reprovision from trampling customer edits",
+      "evidence": "agent_config.py:rerender_and_push_for_org() checks prompt_manual_override; configure_agent() checks agent_provisioned_at"
+    },
+    {
+      "item": "hk_* Tool IDs",
+      "syncs": "PARTIAL",
+      "overwriteRisk": "LOW — additive merge only; existing tool_ids are never removed by provisioning. RISK: a tool deleted from the workspace stays on the agent until the next reprovisioning",
+      "evidence": "agent_config.py:configure_agent B.2 — merge_arrays=[TOOL_IDS_PATH]; no periodic cleanup of stale tool_ids"
+    },
+    {
+      "item": "client_events (audio)",
+      "syncs": "FULL",
+      "overwriteRisk": "NONE — audio assertion blocks any write that would remove it; additive merge always adds it back",
+      "evidence": "elevenlabs_agent.py:assert_audio_event() + _compute_final_client_events() REQUIRED_AUDIO_EVENT guarantee"
+    },
+    {
+      "item": "Voice ID",
+      "syncs": "FULL",
+      "overwriteRisk": "MEDIUM — no DB copy; voice_id can only be read back via GET /agent-health or _el_read_state(); if the EL agent is replaced, the voice setting is lost",
+      "evidence": "UNVERIFIED OBSERVATION: no voice_id column in agent_configs or organizations tables found in codebase"
+    },
+    {
+      "item": "First Message (stored)",
+      "syncs": "FULL",
+      "overwriteRisk": "LOW — stored in EL; can be overridden per-call via conversation_config_override (time-based variants). Synced immediately on PATCH /verhalten",
+      "evidence": "kiki_zentrale.py:_el_patch() for stored value; conversation_init.py:_pick_welcome_message() for per-call"
+    },
+    {
+      "item": "Conversation Initiation Webhook",
+      "syncs": "FULL",
+      "overwriteRisk": "LOW — idempotent: configure_agent checks cur_url and cur_enabled before PATCHing; preserves existing request_headers",
+      "evidence": "agent_config.py:1205-1242 — needs_url and needs_toggle checks before webhook PATCH"
+    },
+    {
+      "item": "Knowledge Resources (URL/PDF)",
+      "syncs": "FULL",
+      "overwriteRisk": "LOW — additive attach; remove is explicit. RISK: knowledge_resources.elevenlabs_doc_id can be stale if EL doc was deleted out-of-band",
+      "evidence": "elevenlabs_agent.py:push_knowledge_resource_to_elevenlabs() / remove_knowledge_resource_from_elevenlabs()"
+    },
+    {
+      "item": "Price List KB Doc",
+      "syncs": "FULL",
+      "overwriteRisk": "MEDIUM — reconcile-by-name heals orphans; BUT concurrent syncs can race on the GET→PATCH window (documented open risk in price_knowledge.py:85)",
+      "evidence": "price_knowledge.py:86 — 'NOTE: the GET→PATCH window is still not serialized'"
+    },
+    {
+      "item": "Transfer to Number (built_in_tools)",
+      "syncs": "FULL",
+      "overwriteRisk": "LOW — pushed on every Notdienst/Phone save. RISK: sync is best-effort (swallows exceptions); a silent failure leaves DB and EL diverged without a user-visible error",
+      "evidence": "agent_config.py:sync_system_tools_for_org() — 'except Exception: logger.warning(...)'"
+    },
+    {
+      "item": "Voicemail Detection (built_in_tools)",
+      "syncs": "FULL",
+      "overwriteRisk": "LOW — always included in system_tools_sync; description is hardcoded in build_voicemail_tool()",
+      "evidence": "agent_config.py:build_voicemail_tool() always returns the hardened config"
+    },
+    {
+      "item": "Path A Override Flags (platform_settings.overrides)",
+      "syncs": "FULL",
+      "overwriteRisk": "LOW — idempotent; checked with override_flags_ok() before writing; post-verify confirms all three flags",
+      "evidence": "agent_config.py:1263-1294 B.6 step + required_override_flags=True"
+    },
+    {
+      "item": "Language",
+      "syncs": "FULL",
+      "overwriteRisk": "LOW — immediate EL PATCH on PATCH /verhalten",
+      "evidence": "kiki_zentrale.py:_el_patch() includes language"
+    },
+    {
+      "item": "agent_configs.scheduling, scheduling.business_hours",
+      "syncs": "PARTIAL",
+      "overwriteRisk": "MEDIUM — business_hours are stored in agent_configs.scheduling (JSONB) and rendered into the prompt's === Geschäftszeiten === block via _render_business_hours(). The scheduling JSONB is NOT directly shown in the Kiki-Zentrale UI mapping; changes to it trigger prompt repush but the scheduling route (calendar_settings?) is not in scope here",
+      "evidence": "agent_config.py:_render_business_hours() reads scheduling.business_hours; _fetch_kz_config() selects 'scheduling' column"
+    },
+    {
+      "item": "Conversation Logic (Wenn/Dann)",
+      "syncs": "FULL",
+      "overwriteRisk": "LOW — DB write + repush. RISK: compile failure at render time silently drops the Schritt 1a block from the prompt; operator has no visible indication",
+      "evidence": "agent_config.py:render_conversation_logic_block() — 'except Exception: logger.warning(...) return \"\"'"
+    }
+  ],
+  "elevenlabsObservations": [
+    {
+      "observation": "ElevenLabs deep-merges nested conversation_config objects on PATCH — a surgical first_message patch preserves tools and the system prompt",
+      "status": "UNVERIFIED OBSERVATION",
+      "source": "elevenlabs_agent.py:219-230 (docstring comment: 'Verified empirically that ElevenLabs deep-merges nested conversation_config objects')"
+    },
+    {
+      "observation": "built_in_tools entries must be sent as COMPLETE objects in the PATCH body — a surgical leaf patch inside one (e.g. only params.transfers) returns 400 'Field required'",
+      "status": "UNVERIFIED OBSERVATION",
+      "source": "elevenlabs_agent.py:314-317 and _widen_built_in_tool_changes() at lines 417-430"
+    },
+    {
+      "observation": "ElevenLabs /v1/convai/phone-numbers returns phones with assigned_agent.agent_id; multiple phones can be bound to one agent (picks first, logs warning)",
+      "status": "UNVERIFIED OBSERVATION",
+      "source": "agent_config.py:237-259 fetch_phone_meta_for_agent()"
+    },
+    {
+      "observation": "ElevenLabs GET /v1/convai/tools returns a payload of shape {tools:[{tool_config:{name,...}, id,...}]} OR a plain list; the code handles both",
+      "status": "UNVERIFIED OBSERVATION",
+      "source": "agent_config.py:154-164 _fetch_workspace_tools()"
+    },
+    {
+      "observation": "ElevenLabs webhook PATCH for conversation_initiation_client_data_webhook requires request_headers even if empty; sending only {url:...} causes a 'Field required' error",
+      "status": "UNVERIFIED OBSERVATION",
+      "source": "agent_config.py:1207-1231 B.4 comment"
+    },
+    {
+      "observation": "ElevenLabs /v1/convai/knowledge-base/text endpoint creates a text-type KB doc; it returns {id, chunk_count, chunks} (detail via GET)",
+      "status": "UNVERIFIED OBSERVATION",
+      "source": "elevenlabs_agent.py:568-579 kb_create_from_text()"
+    },
+    {
+      "observation": "ElevenLabs DELETE /v1/convai/knowledge-base/{doc_id}?force=true: 404 is treated as success (already deleted); other 3xx+ statuses raise ElevenLabsWriteError",
+      "status": "UNVERIFIED OBSERVATION",
+      "source": "elevenlabs_agent.py:603-609 _kb_delete()"
+    },
+    {
+      "observation": "The native ElevenLabs knowledge base (usage_mode=auto) is what the agent uses for RAG — NOT the hk_queryKnowledgeBase tool webhook, which is a static fallback stub",
+      "status": "CODE-VERIFIED",
+      "source": "services/knowledge.py:1-17 (stub comment + static return)"
+    },
+    {
+      "observation": "ElevenLabs verifies the PATCH body against its schema at the agent level — incomplete objects for known fields return 400; the post-write verify is therefore needed to detect partial applications",
+      "status": "UNVERIFIED OBSERVATION",
+      "source": "elevenlabs_agent.py:373-411 _verify() function rationale"
+    }
+  ],
+  "driftRisks": [
+    {
+      "area": "hk_* Tool ID Cache Staleness",
+      "risk": "A tool renamed or deleted in the ElevenLabs workspace will remain in _HK_TOOL_ID_CACHE for up to 3600 s (TTL). Within that window, a provisioning call would try to merge the stale id onto the agent, which may no longer exist in the workspace.",
+      "severity": "MEDIUM",
+      "mitigation": "Cache refresh is triggered on any required-name miss; full eviction on refresh (clear+update, not merge). TTL ensures eventual convergence.",
+      "source": "agent_config.py:112-176"
+    },
+    {
+      "area": "Prompt vs. ElevenLabs Drift on Manual Override",
+      "risk": "When prompt_manual_override=True, every Kiki-Zentrale config save (required fields, categories, emergency, scheduling) silently skips the EL prompt repush. The agent continues running the stale hand-edited prompt even if config changes would materially affect behavior (e.g. emergency disabled but agent prompt still instructs transfer).",
+      "severity": "HIGH",
+      "mitigation": "No automated mitigation. Operator must manually re-edit the prompt or clear prompt_manual_override. The Kiki-Zentrale UI should warn about this state.",
+      "source": "agent_config.py:1595-1600"
+    },
+    {
+      "area": "Concurrent Price List KB Sync Race",
+      "risk": "Two concurrent sync_price_list_kb calls for the same org (e.g. toggle + catalog save at the same time) operate on the GET→PATCH window without a lock. Both may create fresh text docs; one PATCH wins and the other's doc may be orphaned in the EL workspace.",
+      "severity": "MEDIUM",
+      "mitigation": "Reconcile-by-name on the next sync will remove orphaned docs. price_list_doc_id may transiently reference the losing doc.",
+      "source": "price_knowledge.py:85-86"
+    },
+    {
+      "area": "System Tools Sync Best-Effort Failure",
+      "risk": "sync_system_tools_for_org() swallows exceptions and logs a warning. A failed sync after a Notdienst or Phone save leaves the EL agent's built_in_tools in a stale state while the DB config is already updated. The agent may use old transfer targets.",
+      "severity": "HIGH",
+      "mitigation": "The sync-status banner does report the failure (agent_sync_status='failed') for the triggering save. Operator can retry via POST /sync-status/retry.",
+      "source": "agent_config.py:1474-1478, kiki_zentrale.py:98-103"
+    },
+    {
+      "area": "Snapshot Restore Does Not Cover platform_settings",
+      "risk": "_restore_full() restores only conversation_config + name from the snapshot. platform_settings changes (webhook URL, override flags, workspace_overrides) are NOT captured in agent_config_snapshots and therefore NOT restored on rollback. A failed B.4 or B.6 step cannot be rolled back via snapshot.",
+      "severity": "MEDIUM",
+      "mitigation": "B.4 and B.6 are additive/idempotent; re-running configure_agent (sync-agent-config) resets them. Manual rollback of platform_settings requires direct EL UI access.",
+      "source": "elevenlabs_agent.py:447-452 _restore_full()"
+    },
+    {
+      "area": "EL-Side Prompt Edits Between Snapshot and Rollback",
+      "risk": "A snapshot captures the full_config at write time. If the tradesperson manually edits the EL agent between the snapshot and the rollback, the rollback will overwrite those manual changes.",
+      "severity": "MEDIUM",
+      "mitigation": "The audit trail (agent_writes_audit) shows what changed and when. Manual coordination required.",
+      "source": "elevenlabs_agent.py:476-518"
+    },
+    {
+      "area": "voice_id Not Persisted in DB",
+      "risk": "The agent's voice_id is stored only in ElevenLabs. If the EL agent is deleted and recreated, or if an EL account migration occurs, the voice setting is lost. The DB has no record of the configured voice.",
+      "severity": "LOW",
+      "mitigation": "UNVERIFIED OBSERVATION: may be readable from EL GET agent config and re-applied; no automated recovery exists.",
+      "source": "UNVERIFIED OBSERVATION based on _el_patch() in kiki_zentrale.py:330-349"
+    },
+    {
+      "area": "Conversation Logic Compile Failure Silently Drops Schritt 1a",
+      "risk": "If agent_configs.conversation_logic contains a tree that fails to compile at render time (e.g. due to a schema change or corrupt data), render_conversation_logic_block() swallows the exception and returns ''. The Schritt 1a block vanishes from the live prompt without any user-visible error.",
+      "severity": "MEDIUM",
+      "mitigation": "Validation occurs at save time (PATCH /conversation-logic). The risk is a schema evolution that makes existing stored data incompatible with a new validator.",
+      "source": "agent_config.py:607-609"
+    },
+    {
+      "area": "Process-Local Repush Lock",
+      "risk": "_REPUSH_LOCKS is a defaultdict(threading.Lock), process-local. In a multi-process deployment, the serialization guarantee (last-write-wins for overlapping saves) holds only within a single process. Across processes, two saves can race and overwrite each other's prompts.",
+      "severity": "LOW (single Railway process per notes in memory context)",
+      "mitigation": "agent_sync_seq DB RPC provides last-write-wins at the status-banner level; the prompt overwrite risk is process-scoped.",
+      "source": "agent_config.py:1546-1547"
+    }
+  ]
+}

@@ -1,0 +1,857 @@
+{
+  "domain": "Inquiries (Anfragen / ANF-)",
+  "rulePrefix": "INQ",
+  "features": [
+    {
+      "name": "Inquiry Creation from Inbound Call (Post-Call Ingest)",
+      "category": "creation",
+      "description": "Every inbound call automatically spawns exactly one inquiry (Vorgang) via ensure_call_inquiry, idempotent on call_id. The inquiry stores the call's title, notes, emergency_flag, and links back to the call and customer. Outbound calls do NOT spawn inquiries.",
+      "modules": [
+        "backend/app/services/inquiries.py",
+        "backend/app/services/post_call.py",
+        "backend/app/api/routes/calls.py"
+      ],
+      "apis": ["POST /api/calls/{call_id}/inquiry"],
+      "tables": ["inquiries", "calls"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 98,
+      "risks": ["Race condition if post-call webhook fires twice before idempotency check completes"]
+    },
+    {
+      "name": "Agent Tool: Create Inquiry",
+      "category": "creation",
+      "description": "AI agent can create an inquiry mid-call via the /api/elevenlabs/tools/create-inquiry webhook. Resolves or creates a customer, generates ANF- number, sets type=appointment_request, then auto-files into a Case.",
+      "modules": [
+        "backend/app/api/routes/tools/create_inquiry.py",
+        "backend/app/services/inquiries.py",
+        "backend/app/schemas/tools.py"
+      ],
+      "apis": ["POST /api/elevenlabs/tools/create-inquiry"],
+      "tables": ["inquiries", "customers"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": ["ElevenLabs webhook authentication relies on X-HeyKiki-Secret header or _agentId body field; missing both → 401"]
+    },
+    {
+      "name": "ANF- Inquiry Numbering",
+      "category": "numbering",
+      "description": "Inquiry numbers follow ANF-{TOKEN}-{NNNN} format (e.g. ANF-KC007-0007). Token is org-specific (company initials + slug number), stored in organizations.case_prefix. Sequence is MAX+1, not COUNT+1, ensuring deletes never re-issue numbers. Backed by partial unique index.",
+      "modules": [
+        "backend/app/services/common.py",
+        "supabase/migrations/0065_unique_record_numbers.sql",
+        "supabase/migrations/0072_org_case_prefix.sql"
+      ],
+      "apis": [],
+      "tables": ["inquiries", "organizations"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": ["Token derivation is best-effort; concurrent org renames could theoretically cause token drift before persistence"]
+    },
+    {
+      "name": "Emergency Flag Detection",
+      "category": "classification",
+      "description": "emergency_flag is set TRUE only when BOTH: (a) call arrived outside business hours AND org has emergency_enabled=true, AND (b) agent's data_collection explicitly marked it urgent OR the call content contains bilingual DE/EN emergency keywords. Schema: boolean not null default false with partial index on (org_id) where emergency_flag=true.",
+      "modules": [
+        "backend/app/services/inquiries.py",
+        "backend/app/services/scheduling.py",
+        "supabase/migrations/0024_inquiry_emergency_flag.sql"
+      ],
+      "apis": [],
+      "tables": ["inquiries", "agent_configs"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": ["Content-based emergency detection is heuristic and may miss novel phrasing not in the _EMERGENCY_TERMS list"]
+    },
+    {
+      "name": "Auto-Assignment to Case (FL-)",
+      "category": "grouping",
+      "description": "Every new inquiry is auto-filed into a Case (FL-) via safe_auto_assign. Uses AI embedding cosine similarity (>= 0.70) against the customer's up to 8 newest open Cases. If no match, creates a new Case. Best-effort: any failure leaves the inquiry unfiled; grouping page handles it later.",
+      "modules": [
+        "backend/app/services/projects_auto.py"
+      ],
+      "apis": [],
+      "tables": ["inquiries", "cases"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 92,
+      "risks": ["AI embedding calls can fail or be rate-capped; fallback always creates a new case (conservative)", "A wrong match is a worse outcome than a new case"]
+    },
+    {
+      "name": "Inquiry Status Lifecycle",
+      "category": "status",
+      "description": "Inquiries have 4 valid statuses: open, in_progress, completed, deleted. Status transitions are validated server-side against the allowed set. 'deleted' is a soft-delete (status value, not a boolean column). The status is included in the Vorgang thread event timeline.",
+      "modules": [
+        "backend/app/api/routes/inquiries.py",
+        "supabase/migrations/0001_init_schema.sql"
+      ],
+      "apis": ["PATCH /api/inquiries/{inquiry_id}"],
+      "tables": ["inquiries"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": ["No explicit state machine preventing regression (e.g. completed → open is allowed by code)"]
+    },
+    {
+      "name": "Employee Assignment (Inquiry)",
+      "category": "assignment",
+      "description": "Inquiries can be assigned to an employee via PATCH /assign. Validates employee belongs to the same org and is not deleted. Plain employees can only assign/unassign their own work; org_admin/super_admin can assign to anyone.",
+      "modules": [
+        "backend/app/api/routes/inquiries.py",
+        "backend/app/services/common.py"
+      ],
+      "apis": ["PATCH /api/inquiries/{inquiry_id}/assign", "PATCH /api/inquiries/{inquiry_id}"],
+      "tables": ["inquiries", "employees"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 96,
+      "risks": []
+    },
+    {
+      "name": "Vorgang Thread (Case Timeline)",
+      "category": "view",
+      "description": "GET /api/inquiries/{id}/thread returns the full Vorgang header plus a chronological timeline of all inbound/outbound calls, appointments, KVAs, and status changes. Also includes related/duplicate cases from case_links. Calls are fetched via calls.inquiry_id.",
+      "modules": [
+        "backend/app/api/routes/inquiries.py",
+        "backend/app/api/routes/calls.py",
+        "frontend/src/pages/VorgangThreadPage.tsx"
+      ],
+      "apis": ["GET /api/inquiries/{inquiry_id}/thread"],
+      "tables": ["inquiries", "calls", "appointments", "cost_estimates", "case_links"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 93,
+      "risks": []
+    },
+    {
+      "name": "Case Linking and Merging",
+      "category": "cross-reference",
+      "description": "Inquiries can be linked (related/duplicate) without merging via POST /{id}/link, or merged via POST /{id}/merge. Merging moves all calls/appointments/KVAs from child to parent, marks child as completed, and creates a duplicate case_link. Not a hard delete.",
+      "modules": [
+        "backend/app/api/routes/inquiries.py",
+        "supabase/migrations/0055_vorgang_threading.sql"
+      ],
+      "apis": ["POST /api/inquiries/{inquiry_id}/link", "POST /api/inquiries/{inquiry_id}/merge"],
+      "tables": ["inquiries", "case_links", "calls", "appointments", "cost_estimates"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 94,
+      "risks": ["Merge is irreversible at the application level; child is closed but not deleted"]
+    },
+    {
+      "name": "Outbound Call Case Linking",
+      "category": "creation",
+      "description": "Outbound calls do NOT create their own inquiry. Instead, link_outbound_call_to_case ties the outbound call to the triggering case by matching elevenlabs_conversation_id to the outbound_calls ledger. Falls back to resolving case from referenz_typ/referenz_id if no direct inquiry_id.",
+      "modules": [
+        "backend/app/services/inquiries.py",
+        "backend/app/services/post_call.py"
+      ],
+      "apis": [],
+      "tables": ["calls", "outbound_calls", "inquiries", "appointments", "cost_estimates", "invoices"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 93,
+      "risks": ["Best-effort only; a failure is logged but never breaks post-call ingest"]
+    },
+    {
+      "name": "Agent Search for Customer Inquiries",
+      "category": "search",
+      "description": "AI agent can search a customer's past inquiries by customer_id (explicit) or caller phone number. Excludes status=deleted. Supports status filter, date range, sort order (newest/oldest). Returns up to 20 results with German status labels.",
+      "modules": [
+        "backend/app/api/routes/tools/search_inquiries.py",
+        "backend/app/services/inquiries.py"
+      ],
+      "apis": ["POST /api/elevenlabs/tools/search-inquiries"],
+      "tables": ["inquiries", "customers"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": []
+    },
+    {
+      "name": "Multi-Tenancy / Row-Level Security",
+      "category": "tenancy",
+      "description": "All inquiry reads and writes are scoped to org_id. RLS policy inquiries_org_all enforces org_id = auth_org_id() at DB level. Service-client bypasses RLS but all service/route code adds org_id filters manually. FK hardening in route code prevents cross-tenant FK references.",
+      "modules": [
+        "supabase/migrations/0001_init_schema.sql",
+        "backend/app/api/routes/inquiries.py",
+        "backend/app/services/common.py"
+      ],
+      "apis": [],
+      "tables": ["inquiries"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": ["Service client bypasses RLS; code-level org_id filters are the only guard on service-client calls"]
+    }
+  ],
+  "rules": [
+    {
+      "id": "INQ-001",
+      "name": "Every inbound call auto-creates exactly one inquiry (idempotent)",
+      "description": "When a post-call webhook arrives for an inbound call, ensure_call_inquiry is called. It checks inquiries WHERE org_id=X AND call_id=Y (LIMIT 1). If a row exists it returns it (and stamps calls.inquiry_id if unset). If not, it inserts a new inquiry with status=open, type=info, and computed emergency_flag.",
+      "purpose": "Every customer call becomes an actionable request in the staff's Call Logs panel (Posteingang).",
+      "trigger": "POST /api/elevenlabs/post-call webhook when direction != 'outbound'; also available on-demand via POST /api/calls/{call_id}/inquiry",
+      "preconditions": ["Call row must exist in the calls table with a known org_id"],
+      "inputs": ["call.id", "call.org_id", "call.customer_id", "call.summary_title", "call.data_collection", "call.started_at"],
+      "validations": ["call_id must resolve to a call in the org"],
+      "actions": [
+        "SELECT inquiries WHERE call_id = ? AND org_id = ? LIMIT 1",
+        "If exists: UPDATE calls SET inquiry_id = ? WHERE inquiry_id IS NULL",
+        "If not exists: INSERT INTO inquiries with computed fields",
+        "UPDATE calls SET inquiry_id = ? WHERE inquiry_id IS NULL",
+        "Call safe_auto_assign to file the inquiry into a Case"
+      ],
+      "systemEffects": [
+        "INSERT inquiries row with status=open",
+        "UPDATE calls.inquiry_id (best-effort, only when NULL)",
+        "INSERT or UPDATE cases row via safe_auto_assign"
+      ],
+      "outputs": ["The inquiry row (new or existing)"],
+      "failureConditions": ["Call not found in org → None returned, HTTP 404 on the route"],
+      "dependencies": ["INQ-004 (emergency detection)", "INQ-005 (numbering)", "INQ-009 (auto-case-assignment)"],
+      "relatedRules": ["INQ-002", "INQ-004", "INQ-005", "INQ-009"],
+      "affectedModules": [
+        "backend/app/services/inquiries.py",
+        "backend/app/services/post_call.py",
+        "backend/app/api/routes/calls.py"
+      ],
+      "affectedAPIs": ["POST /api/calls/{call_id}/inquiry"],
+      "affectedTables": ["inquiries", "calls"],
+      "sourceReferences": [
+        "backend/app/services/inquiries.py:91-158",
+        "backend/app/services/post_call.py:408-416"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "ensure_call_inquiry: 'existing = client.table(\"inquiries\").select(\"*\").eq(\"org_id\", org_id).eq(\"call_id\", call[\"id\"]).limit(1).execute().data; if existing: _set_call_inquiry_id(...); return existing[0]'"
+    },
+    {
+      "id": "INQ-002",
+      "name": "Outbound calls are linked to the triggering case, never create their own inquiry",
+      "description": "When a post-call webhook arrives for an outbound call, link_outbound_call_to_case is called instead of ensure_call_inquiry. It looks up the outbound_calls ledger by elevenlabs_conversation_id, takes the stored inquiry_id directly or resolves it from referenz_typ/referenz_id (Vorgang→inquiry, Termin→appointment.inquiry_id, KVA→cost_estimate.inquiry_id, Rechnung→invoice→KVA→inquiry_id). Wartung/Rückruf resolve to None.",
+      "purpose": "Outbound calls are follow-ups to existing cases; creating a separate inquiry would duplicate the case and break call-log threading.",
+      "trigger": "POST /api/elevenlabs/post-call webhook when direction == 'outbound'",
+      "preconditions": ["call.elevenlabs_conversation_id must match a row in outbound_calls"],
+      "inputs": ["call.elevenlabs_conversation_id", "call.org_id", "outbound_calls.inquiry_id", "outbound_calls.referenz_typ", "outbound_calls.referenz_id"],
+      "validations": [],
+      "actions": [
+        "SELECT outbound_calls WHERE conversation_id = ? AND org_id = ? LIMIT 1",
+        "Resolve inquiry_id from ledger or via referenz resolution chain",
+        "UPDATE calls SET inquiry_id = ? WHERE inquiry_id IS NULL (best-effort)"
+      ],
+      "systemEffects": ["UPDATE calls.inquiry_id"],
+      "outputs": ["inquiry_id (string or None)"],
+      "failureConditions": ["conversation_id not in outbound_calls → None; exceptions swallowed (best-effort)"],
+      "dependencies": ["INQ-001"],
+      "relatedRules": ["INQ-001"],
+      "affectedModules": [
+        "backend/app/services/inquiries.py",
+        "backend/app/services/post_call.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": ["calls", "outbound_calls", "appointments", "cost_estimates", "invoices"],
+      "sourceReferences": [
+        "backend/app/services/inquiries.py:161-222",
+        "backend/app/services/post_call.py:417-426"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "'OUTBOUND calls do NOT spawn their own inquiry — they are already linked to the triggering case via outbound_calls.inquiry_id. Letting ensure_call_inquiry run here would orphan a duplicate inquiry per outbound call (the bug that produced ANF-2026-0020).' (post_call.py:409-412)"
+    },
+    {
+      "id": "INQ-003",
+      "name": "Agent tool creates inquiry mid-call with customer get-or-create",
+      "description": "The AI agent can call POST /api/elevenlabs/tools/create-inquiry during a call to capture a request. It resolves or creates the customer via phone/name/email, generates an ANF- number, inserts the inquiry with type=appointment_request and emergency_flag from payload.urgent, then auto-files into a Case. Returns inquiryNumber and message string to the agent.",
+      "purpose": "Allows the agent to capture a service request as a named Vorgang during the call itself, so staff see it immediately in the Posteingang.",
+      "trigger": "ElevenLabs agent tool call during an active conversation",
+      "preconditions": ["Request authenticated via X-HeyKiki-Secret or _agentId→org lookup"],
+      "inputs": ["inquiry_title", "message", "name", "phone (or _callerNumber)", "address", "email", "urgent", "additional_fields"],
+      "validations": ["Org must be resolved from secret or agent_id"],
+      "actions": [
+        "get_or_create_customer with phone/name/email",
+        "gen_inquiry_number(client, org_id)",
+        "INSERT inquiries with type=appointment_request, status=open, emergency_flag=bool(payload.urgent)",
+        "safe_auto_assign(client, org_id, inquiry)"
+      ],
+      "systemEffects": [
+        "INSERT inquiries",
+        "INSERT or UPDATE customers (get_or_create_customer)",
+        "INSERT or UPDATE cases (safe_auto_assign)"
+      ],
+      "outputs": [
+        "{success: true, inquiryId, inquiryNumber, customerId, message: 'Anliegen aufgenommen. Referenznummer: {number}. Jemand wird sich in Kürze bei Ihnen melden.'}"
+      ],
+      "failureConditions": ["Org not resolved → 401"],
+      "dependencies": ["INQ-005 (numbering)", "INQ-009 (auto-case-assignment)"],
+      "relatedRules": ["INQ-005", "INQ-009"],
+      "affectedModules": [
+        "backend/app/api/routes/tools/create_inquiry.py",
+        "backend/app/services/inquiries.py"
+      ],
+      "affectedAPIs": ["POST /api/elevenlabs/tools/create-inquiry"],
+      "affectedTables": ["inquiries", "customers", "cases"],
+      "sourceReferences": [
+        "backend/app/services/inquiries.py:225-267",
+        "backend/app/api/routes/tools/create_inquiry.py:1-16"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "row = {..., 'type': 'appointment_request', 'status': 'open', 'emergency_flag': bool(payload.urgent)} (inquiries.py:239-253)"
+    },
+    {
+      "id": "INQ-004",
+      "name": "Emergency flag: dual-gate — outside business hours AND urgent content",
+      "description": "emergency_flag is true ONLY when BOTH conditions hold: (a) is_emergency_by_hours(org_id, started_at) is True — meaning the org has emergency_enabled=true in agent_configs AND the call's started_at falls OUTSIDE configured business hours; AND (b) the agent set an explicit urgent flag (is_emergency/emergency/notfall/urgent = true/ja/yes/1) OR the call summary/data_collection contains DE/EN emergency terms (_EMERGENCY_TERMS list). For agent-tool-created inquiries, only payload.urgent is used (no hour check).",
+      "purpose": "Show a NOTDIENST badge on the call-log card so emergency after-hours calls are immediately visible to staff.",
+      "trigger": "Called inside ensure_call_inquiry (INQ-001) at post-call ingest time",
+      "preconditions": ["call.started_at must be parseable ISO-8601 for hour check to apply"],
+      "inputs": ["call.started_at", "call.data_collection", "call.summary_title", "call.summary", "agent_configs.emergency_enabled", "agent_configs.scheduling.business_hours"],
+      "validations": [],
+      "actions": [
+        "is_emergency_by_hours: SELECT agent_configs WHERE org_id=? → check emergency_enabled + outside hours",
+        "Scan dc keys (is_emergency, emergency, notfall, urgent) for truthy values",
+        "If not agent_urgent: scan concatenated (summary_title, summary, issue_summary, ultimate_summary, next_action) for _EMERGENCY_TERMS case-insensitively",
+        "emergency = outside_hours AND agent_urgent"
+      ],
+      "systemEffects": ["Stored in inquiries.emergency_flag"],
+      "outputs": ["boolean emergency_flag"],
+      "failureConditions": ["is_emergency_by_hours raises → outside_hours defaults False (emergency = False)"],
+      "dependencies": ["scheduling.is_emergency_by_hours"],
+      "relatedRules": ["INQ-001"],
+      "affectedModules": [
+        "backend/app/services/inquiries.py",
+        "backend/app/services/scheduling.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": ["inquiries", "agent_configs"],
+      "sourceReferences": [
+        "backend/app/services/inquiries.py:28-61",
+        "backend/app/services/inquiries.py:115-138",
+        "backend/app/services/scheduling.py:129-146",
+        "supabase/migrations/0024_inquiry_emergency_flag.sql:1-17"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "emergency = outside_hours and agent_urgent (inquiries.py:138). _EMERGENCY_TERMS bilingual list with 23 precise terms (inquiries.py:34-42). Legacy rows NOT backfilled per migration 0024."
+    },
+    {
+      "id": "INQ-005",
+      "name": "ANF- number: org-specific token + MAX+1 sequence, globally unique per org",
+      "description": "Inquiry numbers are ANF-{TOKEN}-{NNNN} where TOKEN is the org's case_prefix from organizations.case_prefix (derived from company initials + slug number on first use, e.g. KC007). The sequence is MAX+1 over existing ANF-{TOKEN}-NNNN numbers so deleted numbers are never reissued. A partial unique index on (org_id, number) at the DB level prevents duplicates from concurrent inserts.",
+      "purpose": "Human-readable, globally unique references for staff and customers; readable across orgs without collision.",
+      "trigger": "gen_inquiry_number() called during any inquiry creation path",
+      "preconditions": ["organizations.case_prefix may be NULL on first use (derived on demand)"],
+      "inputs": ["org_id"],
+      "validations": ["Unique constraint uq_inquiries_org_number ensures no two inquiries in the same org share a number"],
+      "actions": [
+        "get_org_token(client, org_id) → read or derive case_prefix from org name/slug",
+        "De-clash token if another org already has it",
+        "Persist token to organizations.case_prefix (best-effort)",
+        "_max_seq_for_token(client, 'inquiries', org_id, prefix) → highest existing suffix",
+        "Return f'{prefix}{seq+1:04d}'"
+      ],
+      "systemEffects": ["UPDATE organizations.case_prefix (first-use, best-effort)"],
+      "outputs": ["string e.g. 'ANF-KC007-0007'"],
+      "failureConditions": ["Token persist failure is swallowed; numbering still works with derived token in memory"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/services/common.py",
+        "supabase/migrations/0003_inquiry_number.sql",
+        "supabase/migrations/0065_unique_record_numbers.sql",
+        "supabase/migrations/0072_org_case_prefix.sql"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": ["inquiries", "organizations"],
+      "sourceReferences": [
+        "backend/app/services/common.py:504-512",
+        "backend/app/services/common.py:387-452",
+        "supabase/migrations/0065_unique_record_numbers.sql:9-12"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "gen_inquiry_number: 'prefix = f\"ANF-{get_org_token(client, org_id)}-\"; seq = _max_seq_for_token(...)+1; return f\"{prefix}{seq:04d}\"' (common.py:510-512)"
+    },
+    {
+      "id": "INQ-006",
+      "name": "Inquiry status is validated server-side against an allowlist",
+      "description": "The PATCH /api/inquiries/{id} route validates any status value against _ALLOWED_STATUS = {'open', 'in_progress', 'completed', 'deleted'}. Values outside this set return HTTP 422. 'deleted' is a logical soft-delete; no separate deleted_at column exists on inquiries.",
+      "purpose": "Prevent invalid status values from entering the database and breaking UI status labels.",
+      "trigger": "PATCH /api/inquiries/{inquiry_id} with a status field",
+      "preconditions": ["User must be authenticated with require_org"],
+      "inputs": ["payload.status"],
+      "validations": ["status must be in {'open', 'in_progress', 'completed', 'deleted'}"],
+      "actions": ["Reject with 422 if status not in allowed set", "Include status in UPDATE fields"],
+      "systemEffects": ["UPDATE inquiries.status + updated_at = now()"],
+      "outputs": ["Updated inquiry row or 404"],
+      "failureConditions": ["Invalid status → 422", "No matching inquiry in org → 404"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/api/routes/inquiries.py"
+      ],
+      "affectedAPIs": ["PATCH /api/inquiries/{inquiry_id}"],
+      "affectedTables": ["inquiries"],
+      "sourceReferences": [
+        "backend/app/api/routes/inquiries.py:13",
+        "backend/app/api/routes/inquiries.py:78-81"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "_ALLOWED_STATUS = {\"open\", \"in_progress\", \"completed\", \"deleted\"} (inquiries.py:13); if payload.status not in _ALLOWED_STATUS: raise HTTPException(status_code=422, detail=\"Invalid status\") (inquiries.py:79-80)"
+    },
+    {
+      "id": "INQ-007",
+      "name": "Employee assignment requires same-org validation and role-based authorization",
+      "description": "POST /api/inquiries/{id}/assign validates: (1) inquiry belongs to caller's org; (2) employee exists in org and is not deleted; (3) plain employees can only claim or release their OWN inquiry — a non-admin cannot reassign someone else's work. Admins (org_admin, super_admin) can assign to anyone. employee_id=null unassigns.",
+      "purpose": "Prevent cross-tenant employee assignments and unauthorized reassignment by non-admin staff.",
+      "trigger": "PATCH /api/inquiries/{inquiry_id}/assign",
+      "preconditions": ["Caller must be authenticated with require_org"],
+      "inputs": ["inquiry_id", "employee_id (nullable)"],
+      "validations": [
+        "inquiry.org_id must match caller's org (else 404)",
+        "employee must exist in org with deleted=False (else 422)",
+        "Non-admin: current_assignee_id must be None or caller's own employee row (else 403)"
+      ],
+      "actions": [
+        "SELECT inquiries for ownership check",
+        "enforce_self_assignment check",
+        "SELECT employees WHERE org_id=? AND id=? AND deleted=False",
+        "UPDATE inquiries SET assigned_employee_id=?, updated_at=now()"
+      ],
+      "systemEffects": ["UPDATE inquiries.assigned_employee_id"],
+      "outputs": ["Updated inquiry row or 404"],
+      "failureConditions": ["Inquiry not found → 404", "Employee not in org → 422", "Non-admin reassignment attempt → 403"],
+      "dependencies": ["common.enforce_self_assignment"],
+      "relatedRules": ["INQ-006"],
+      "affectedModules": [
+        "backend/app/api/routes/inquiries.py",
+        "backend/app/services/common.py"
+      ],
+      "affectedAPIs": ["PATCH /api/inquiries/{inquiry_id}/assign"],
+      "affectedTables": ["inquiries", "employees"],
+      "sourceReferences": [
+        "backend/app/api/routes/inquiries.py:127-203",
+        "backend/app/services/common.py:99-120"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "'A plain employee may only (un)assign their OWN inquiries, and only to themselves — admins may assign to anyone in the org.' (inquiries.py:150-152)"
+    },
+    {
+      "id": "INQ-008",
+      "name": "Inquiry creation (UI path) defaults type to 'info' and status to 'open'",
+      "description": "The operator-facing POST /api/inquiries route (used by the CRM UI, not the agent) inserts with type defaulting to 'info' and status always 'open'. The customer_id and case_id FKs are validated to belong to the same org before insert. Default title is 'Neue Anfrage' if none provided.",
+      "purpose": "Staff can manually create inquiries for calls not handled by the AI agent.",
+      "trigger": "POST /api/inquiries (authenticated CRM user)",
+      "preconditions": ["User authenticated with require_org"],
+      "inputs": ["customer_id (optional)", "title (optional)", "type (optional)", "notes (optional)", "case_id (optional)"],
+      "validations": [
+        "customer_id must belong to same org if provided (validate_fk_in_org)",
+        "case_id must belong to same org if provided (validate_fk_in_org)"
+      ],
+      "actions": [
+        "validate_fk_in_org for customer_id and case_id",
+        "INSERT inquiries with status=open, type=payload.type or 'info', title=payload.title or 'Neue Anfrage', number=gen_inquiry_number(...)"
+      ],
+      "systemEffects": ["INSERT inquiries"],
+      "outputs": ["New inquiry row"],
+      "failureConditions": ["FK not in org → 422"],
+      "dependencies": ["INQ-005 (numbering)"],
+      "relatedRules": ["INQ-005"],
+      "affectedModules": [
+        "backend/app/api/routes/inquiries.py"
+      ],
+      "affectedAPIs": ["POST /api/inquiries"],
+      "affectedTables": ["inquiries"],
+      "sourceReferences": [
+        "backend/app/api/routes/inquiries.py:16-46"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "row = {..., 'title': payload.title or 'Neue Anfrage', 'type': payload.type or 'info', 'status': 'open', 'number': gen_inquiry_number(client, org_id)} (inquiries.py:29-38)"
+    },
+    {
+      "id": "INQ-009",
+      "name": "Auto-file new inquiry into a Case via AI embedding similarity (conservative)",
+      "description": "Every new inquiry (both post-call and agent-created) is passed to safe_auto_assign. If the customer has open Cases (status in planning/active), their inquiry content is embedded and compared to the Case embeddings; if best cosine similarity >= 0.70 it attaches to that Case; otherwise a new Case is created with status=active. Any failure leaves inquiry with case_id=NULL. The audit trail is written to inquiries.case_source, case_confidence, case_reason.",
+      "purpose": "Reduce manual filing by AI-grouping new inquiries into existing open matters; err on the side of creating a new case over a wrong attachment.",
+      "trigger": "Called inside ensure_call_inquiry (INQ-001) and create_inquiry (INQ-003) at inquiry creation time",
+      "preconditions": ["inquiry row must already be inserted (needs inquiry.id)", "ai_usage.within_cap(org_id) must be true for embedding path"],
+      "inputs": ["inquiry dict", "org_id", "customer_id", "open cases for customer"],
+      "validations": ["AI cap check before calling embedding API"],
+      "actions": [
+        "SELECT cases WHERE customer_id=? AND status IN ('planning','active') ORDER BY created_at DESC LIMIT 8",
+        "Embed inquiry text + case texts via text-embedding-3-small",
+        "If best_sim >= 0.70: UPDATE inquiries SET case_id, case_source='ai', case_confidence, case_reason",
+        "Else: INSERT cases with status=active; UPDATE inquiries SET case_id, case_source='ai', case_confidence=1.0, case_reason='automatisch: neuer Fall'"
+      ],
+      "systemEffects": [
+        "UPDATE inquiries.case_id + case_source + case_confidence + case_reason",
+        "Possibly INSERT cases (new FL- number)"
+      ],
+      "outputs": ["The Case row (attached or newly created), or None on failure"],
+      "failureConditions": ["AI embedding failure → create new case (fallback), no exception propagated", "AI cap exceeded → skip similarity, create new case"],
+      "dependencies": ["INQ-005 for case number (gen_case_number)"],
+      "relatedRules": ["INQ-001", "INQ-003"],
+      "affectedModules": [
+        "backend/app/services/projects_auto.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": ["inquiries", "cases", "calls"],
+      "sourceReferences": [
+        "backend/app/services/projects_auto.py:1-172",
+        "backend/app/services/projects_auto.py:35-36"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 92,
+      "evidence": "_ATTACH_SIM = 0.70 (projects_auto.py:35); 'attaching to the WRONG case is worse than one case too many' (projects_auto.py:17-18); exceptions → log.warning + return None (projects_auto.py:159-160, 165-172)"
+    },
+    {
+      "id": "INQ-010",
+      "name": "Agent inquiry search excludes deleted inquiries; resolves customer by phone if no customer_id",
+      "description": "POST /api/elevenlabs/tools/search-inquiries looks up a customer by explicit customer_id or by caller phone (.eq('phone', payload.caller_number)). If neither resolves, returns empty list. Excludes status=deleted. Supports optional filters: status, date_from, date_to, sort_order (newest/oldest). Default sort is newest-first. Hard limit of 20 results.",
+      "purpose": "Agent can look up a caller's history by phone number during a call without knowing their customer_id.",
+      "trigger": "ElevenLabs agent tool call",
+      "preconditions": ["Org resolved from secret/agent_id"],
+      "inputs": ["customer_id (optional)", "caller_number (optional)", "status (optional)", "date_from (optional)", "date_to (optional)", "sort_order (optional, default 'newest')"],
+      "validations": [],
+      "actions": [
+        "If no customer_id and caller_number provided: SELECT customers WHERE org_id=? AND phone=? LIMIT 1",
+        "SELECT inquiries WHERE org_id=? AND customer_id=? AND status != 'deleted' + optional filters ORDER BY created_at DESC/ASC LIMIT 20"
+      ],
+      "systemEffects": [],
+      "outputs": ["{success, inquiries: [{inquiryId, inquiryNumber, title, status, statusLabel, createdAt, lastUpdate, note}], total, message}"],
+      "failureConditions": ["Customer not found by phone → empty list"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/api/routes/tools/search_inquiries.py",
+        "backend/app/services/inquiries.py"
+      ],
+      "affectedAPIs": ["POST /api/elevenlabs/tools/search-inquiries"],
+      "affectedTables": ["inquiries", "customers"],
+      "sourceReferences": [
+        "backend/app/services/inquiries.py:270-335"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "q = client.table(\"inquiries\").select(...).eq(\"org_id\", org_id).eq(\"customer_id\", customer_id).neq(\"status\", \"deleted\") (inquiries.py:297-302)"
+    },
+    {
+      "id": "INQ-011",
+      "name": "Inquiry-to-Case FK is validated same-org on every write path",
+      "description": "Both the creation (POST /api/inquiries) and update (PATCH /api/inquiries/{id}) routes validate case_id FK via validate_fk_in_org before writing. Prevents an org from attaching an inquiry to a Case owned by a different tenant.",
+      "purpose": "Cross-tenant FK integrity — a bad case_id silently attaches an inquiry to another org's Case if not guarded.",
+      "trigger": "POST /api/inquiries or PATCH /api/inquiries/{inquiry_id} with a non-null case_id",
+      "preconditions": [],
+      "inputs": ["case_id"],
+      "validations": ["SELECT cases WHERE org_id=? AND id=? must return a row"],
+      "actions": ["validate_fk_in_org(client, table='cases', fk_id=payload.case_id, org_id=org_id, label='Fall')"],
+      "systemEffects": [],
+      "outputs": ["HTTP 422 'Fall gehört nicht zu dieser Organisation.' if invalid"],
+      "failureConditions": ["case_id not in org → 422"],
+      "dependencies": ["common.validate_fk_in_org"],
+      "relatedRules": ["INQ-007", "INQ-008"],
+      "affectedModules": [
+        "backend/app/api/routes/inquiries.py",
+        "backend/app/services/common.py"
+      ],
+      "affectedAPIs": ["POST /api/inquiries", "PATCH /api/inquiries/{inquiry_id}"],
+      "affectedTables": ["inquiries", "cases"],
+      "sourceReferences": [
+        "backend/app/api/routes/inquiries.py:27-28",
+        "backend/app/api/routes/inquiries.py:55-56",
+        "backend/app/services/common.py:62-96"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "validate_fk_in_org(client, table='cases', fk_id=payload.case_id, org_id=org_id, label='Fall') (inquiries.py:28 and 55)"
+    },
+    {
+      "id": "INQ-012",
+      "name": "Row-level security on inquiries enforces org_id = auth_org_id()",
+      "description": "The inquiries table has RLS enabled. A single policy 'inquiries_org_all' created by the init migration covers all operations (SELECT, INSERT, UPDATE, DELETE) with USING and WITH CHECK of org_id = auth_org_id(). The service client (used in backend routes) bypasses RLS; the code adds manual org_id filters in all queries.",
+      "purpose": "Multi-tenancy: prevent one org's session from reading or writing another org's inquiries.",
+      "trigger": "Any DB query on the inquiries table from a Supabase authenticated session",
+      "preconditions": ["RLS enabled on inquiries table"],
+      "inputs": ["auth.uid() / auth_org_id()"],
+      "validations": ["org_id must match the authenticated user's org"],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": ["Rows filtered to caller's org; inserts checked against org"],
+      "failureConditions": ["Service client bypasses RLS — org_id must be enforced in code"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "supabase/migrations/0001_init_schema.sql"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": ["inquiries"],
+      "sourceReferences": [
+        "supabase/migrations/0001_init_schema.sql:256",
+        "supabase/migrations/0001_init_schema.sql:274-291"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "'alter table inquiries enable row level security' and loop creating 'inquiries_org_all for all using (org_id = auth_org_id()) with check (org_id = auth_org_id())' (0001_init_schema.sql:256, 279-290)"
+    },
+    {
+      "id": "INQ-013",
+      "name": "Case linking is normalised and idempotent; relations are 'related' or 'duplicate'",
+      "description": "POST /api/inquiries/{id}/link creates a case_links row linking two inquiries. Pair order is normalised (sorted UUIDs) to collapse (a,b) and (b,a) into one row. Allowed relations: 'related', 'duplicate'. Self-link is rejected (422). If the link already exists, an upsert updates only the relation. Both inquiry IDs must belong to the same org.",
+      "purpose": "Allow staff to cross-reference related or duplicate cases without destroying either.",
+      "trigger": "POST /api/inquiries/{inquiry_id}/link",
+      "preconditions": ["Both inquiry IDs must exist in caller's org"],
+      "inputs": ["related_case_id", "relation ('related' | 'duplicate')"],
+      "validations": [
+        "related_case_id != inquiry_id (else 422)",
+        "relation in ('related', 'duplicate') (else 422)",
+        "Both inquiry IDs validated via validate_fk_in_org"
+      ],
+      "actions": [
+        "a, b = sorted([inquiry_id, related_case_id])",
+        "INSERT INTO case_links(org_id, case_id=a, related_case_id=b, relation)",
+        "On conflict: UPDATE relation"
+      ],
+      "systemEffects": ["INSERT or UPDATE case_links"],
+      "outputs": ["{success: true}"],
+      "failureConditions": ["Self-link → 422", "Unknown relation → 422", "Either inquiry not in org → 422"],
+      "dependencies": [],
+      "relatedRules": ["INQ-014"],
+      "affectedModules": [
+        "backend/app/api/routes/inquiries.py",
+        "supabase/migrations/0055_vorgang_threading.sql"
+      ],
+      "affectedAPIs": ["POST /api/inquiries/{inquiry_id}/link"],
+      "affectedTables": ["case_links"],
+      "sourceReferences": [
+        "backend/app/api/routes/inquiries.py:248-280",
+        "supabase/migrations/0055_vorgang_threading.sql:25-35"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "a, b = sorted([inquiry_id, payload.related_case_id]) (inquiries.py:262); unique (org_id, case_id, related_case_id) + check (case_id <> related_case_id) in migration (0055:33-34)"
+    },
+    {
+      "id": "INQ-014",
+      "name": "Case merge moves child activities to parent, closes child as duplicate — reversible",
+      "description": "POST /api/inquiries/{id}/merge INTO another moves all calls, appointments, and cost_estimates from the child (source) to the parent (target) by updating their inquiry_id FK. The child is then set to status=completed (not deleted). A case_links row with relation=duplicate is inserted/updated. History stays intact. Both must be different same-org inquiries.",
+      "purpose": "Consolidate duplicate cases while preserving full history (calls, KVAs, appointments).",
+      "trigger": "POST /api/inquiries/{inquiry_id}/merge",
+      "preconditions": ["Both inquiry IDs must exist in caller's org", "child_id != parent_id"],
+      "inputs": ["into_case_id"],
+      "validations": [
+        "child_id != parent_id (else 422)",
+        "Both validated via validate_fk_in_org"
+      ],
+      "actions": [
+        "UPDATE calls SET inquiry_id=parent WHERE inquiry_id=child AND org_id=org",
+        "UPDATE appointments SET inquiry_id=parent WHERE inquiry_id=child AND org_id=org",
+        "UPDATE cost_estimates SET inquiry_id=parent WHERE inquiry_id=child AND org_id=org",
+        "UPDATE inquiries SET status='completed', updated_at=now() WHERE id=child",
+        "INSERT/UPDATE case_links with relation='duplicate'"
+      ],
+      "systemEffects": [
+        "UPDATE calls.inquiry_id for child's calls",
+        "UPDATE appointments.inquiry_id for child's appointments",
+        "UPDATE cost_estimates.inquiry_id for child's KVAs",
+        "UPDATE inquiries.status=completed for child",
+        "INSERT or UPDATE case_links"
+      ],
+      "outputs": ["{success: true, into_case_id: parent_id}"],
+      "failureConditions": ["Self-merge → 422", "Either inquiry not in org → 422"],
+      "dependencies": ["INQ-013"],
+      "relatedRules": ["INQ-013"],
+      "affectedModules": [
+        "backend/app/api/routes/inquiries.py"
+      ],
+      "affectedAPIs": ["POST /api/inquiries/{inquiry_id}/merge"],
+      "affectedTables": ["inquiries", "calls", "appointments", "cost_estimates", "case_links"],
+      "sourceReferences": [
+        "backend/app/api/routes/inquiries.py:283-321"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 94,
+      "evidence": "'Move the child's activities onto the surviving case (reversible — just FKs). Mark the child a duplicate of the parent and close it — reachable via the link, NOT deleted (history stays intact).' (inquiries.py:293-300)"
+    },
+    {
+      "id": "INQ-015",
+      "name": "Posteingang shows pending decisions from /api/actions/pending, not raw inquiries",
+      "description": "The frontend Posteingang page fetches /api/actions/pending (ActionKind list) and separately /api/calls (last 200) for enrichment. Decisions are grouped by kind (termin_anfrage, kva_to_send, kva_pending_acceptance, callback_owed, alt_time_proposal, appointment_cancelled). Calls with no inquiry_id are excluded from the Vorgang grouping. Emergencies sort first; multi-call Vorgänge second; pending decisions third.",
+      "purpose": "Staff see a prioritised queue of actionable items (confirm appointment, send KVA, etc.), not a raw list of inquiries.",
+      "trigger": "User navigates to /posteingang; refetchInterval = 30s",
+      "preconditions": [],
+      "inputs": ["/api/actions/pending response", "/api/calls?limit=200 response"],
+      "validations": [],
+      "actions": [
+        "Filter actions to known KIND_CFG kinds",
+        "Build inquiry meta map from calls (caseName, caseTicket, assigneeId)",
+        "Build VorgangVM list from calls grouped by case_id ?? inquiry_id",
+        "Sort: emergency > multi-call > has-decision > latest"
+      ],
+      "systemEffects": [],
+      "outputs": ["DecisionVM[] for the card list; VorgangVM[] for the sidebar"],
+      "failureConditions": ["/api/actions/pending error → error state shown; /api/calls error → decisions still show (enrichment optional)"],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": [
+        "frontend/src/pages/PosteingangPage.tsx",
+        "frontend/src/pages/posteingang/api.ts"
+      ],
+      "affectedAPIs": ["GET /api/actions/pending", "GET /api/calls?limit=200", "PATCH /api/inquiries/{id}/assign"],
+      "affectedTables": [],
+      "sourceReferences": [
+        "frontend/src/pages/posteingang/api.ts:140-169",
+        "frontend/src/pages/posteingang/api.ts:220-269",
+        "frontend/src/pages/posteingang/api.ts:283-299"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": "actionsQ loading state gates the UI; callsQ 'must NOT gate the loading state (that was the dashboard lag)' (api.ts:279-281); sort: 'Emergencies first, then bundled (multi-call) tickets, then those needing a decision' (api.ts:263-268)"
+    },
+    {
+      "id": "INQ-016",
+      "name": "Appointment confirmation requires inquiry assignment first (Posteingang UI gate)",
+      "description": "In the PosteingangPage, a DecisionCard for kind=termin_anfrage has its primary 'Bestätigen' button disabled when the inquiry exists (d.inquiryId is set) but has no assignee (d.assigneeId is null). The gate is: needsAssignee = d.kind === 'termin_anfrage' && !!d.inquiryId && !d.assigneeId. An inquiry-less appointment (no Vorgang link) has no assign control and stays confirmable.",
+      "purpose": "Force staff to first assign responsibility before confirming a customer appointment.",
+      "trigger": "User renders a termin_anfrage decision card in Posteingang",
+      "preconditions": ["Decision kind is termin_anfrage", "inquiry_id is non-null"],
+      "inputs": ["d.kind", "d.inquiryId", "d.assigneeId"],
+      "validations": [],
+      "actions": ["disabled={needsAssignee} on primary button"],
+      "systemEffects": [],
+      "outputs": ["Button disabled with tooltip 'Erst zuweisen, dann bestätigen'"],
+      "failureConditions": [],
+      "dependencies": ["INQ-007 (assignment)"],
+      "relatedRules": ["INQ-007"],
+      "affectedModules": [
+        "frontend/src/pages/PosteingangPage.tsx",
+        "frontend/src/pages/posteingang/api.ts"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "frontend/src/pages/PosteingangPage.tsx:27-32",
+        "frontend/src/pages/PosteingangPage.tsx:73"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": "const needsAssignee = d.kind === 'termin_anfrage' && !!d.inquiryId && !d.assigneeId (PosteingangPage.tsx:32). Comment: 'Strict assign ≠ confirm (point 1)' (PosteingangPage.tsx:27-30)"
+    },
+    {
+      "id": "INQ-017",
+      "name": "Post-call dedup prevents double-processing on webhook retries",
+      "description": "Before running ensure_call_inquiry or any other post-call work, the system checks if a calls row with the same elevenlabs_conversation_id already exists AND has status=completed AND (summary OR transcript). If fully processed, it returns 'skipped/already_processed' without re-running ensure_call_inquiry or broadcasting.",
+      "purpose": "ElevenLabs and N8N may retry the same webhook multiple times; dedup prevents duplicate inquiries from the same conversation.",
+      "trigger": "POST /api/elevenlabs/post-call",
+      "preconditions": ["elevenlabs_conversation_id is set on the incoming payload"],
+      "inputs": ["conversation_id"],
+      "validations": ["prior.status == 'completed' AND (prior.summary OR prior.transcript)"],
+      "actions": [
+        "SELECT calls WHERE org_id=? AND elevenlabs_conversation_id=? LIMIT 1",
+        "If already_done: return skipped result without calling ensure_call_inquiry"
+      ],
+      "systemEffects": [],
+      "outputs": ["'skipped' result; call_log_id is still returned"],
+      "failureConditions": ["Partial row (no summary/transcript yet) is NOT considered done; next retry completes the work"],
+      "dependencies": ["INQ-001"],
+      "relatedRules": ["INQ-001"],
+      "affectedModules": [
+        "backend/app/services/post_call.py"
+      ],
+      "affectedAPIs": ["POST /api/elevenlabs/post-call"],
+      "affectedTables": ["calls"],
+      "sourceReferences": [
+        "backend/app/services/post_call.py:267-300"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "'Defense against N8N / ElevenLabs retries on the same conversation_id within milliseconds. The DB-level elevenlabs_conversation_id text unique constraint prevents the row from duplicating, but without this short-circuit each retry would still run get_or_create_customer, broadcast, and ensure_call_inquiry' (post_call.py:268-272)"
+    },
+    {
+      "id": "INQ-018",
+      "name": "calls.inquiry_id stamp is null-only (never clobbers an existing link)",
+      "description": "_set_call_inquiry_id updates calls.inquiry_id only WHERE inquiry_id IS NULL. A deliberate re-link (e.g. 'Vorgang zuordnen' in UI via POST /api/calls/{call_id}/assign-inquiry) bypasses this guard. Failures in _set_call_inquiry_id are swallowed; it is always best-effort.",
+      "purpose": "Prevent automated post-call linking from overwriting a manually set or previously linked inquiry_id.",
+      "trigger": "Called by ensure_call_inquiry (INQ-001) and link_outbound_call_to_case (INQ-002) after inquiry creation",
+      "preconditions": [],
+      "inputs": ["org_id", "call_id", "inquiry_id"],
+      "validations": [".is_('inquiry_id', 'null') filter in UPDATE"],
+      "actions": [
+        "UPDATE calls SET inquiry_id=? WHERE org_id=? AND id=? AND inquiry_id IS NULL"
+      ],
+      "systemEffects": ["UPDATE calls.inquiry_id (conditional)"],
+      "outputs": [],
+      "failureConditions": ["Exception swallowed via bare except"],
+      "dependencies": [],
+      "relatedRules": ["INQ-001", "INQ-002"],
+      "affectedModules": [
+        "backend/app/services/inquiries.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": ["calls"],
+      "sourceReferences": [
+        "backend/app/services/inquiries.py:74-88"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "'.is_(\"inquiry_id\", \"null\")' filter on the UPDATE (inquiries.py:82). 'Only fills NULLs so a deliberate re-link is never clobbered. Best-effort — a failure here must never break post-call ingest.' (inquiries.py:76-78)"
+    },
+    {
+      "id": "INQ-019",
+      "name": "Inquiry title falls back through summary_title → data_collection.issue_summary → 'Anruf'",
+      "description": "When ensure_call_inquiry creates an inquiry from a call, the title is: call.summary_title OR data_collection.issue_summary OR 'Anruf'. The notes field uses data_collection.ultimate_summary OR call.summary OR ''. For agent-tool-created inquiries, the title is payload.inquiry_title OR payload.message[:60] OR 'Anfrage'.",
+      "purpose": "Ensure every inquiry has a human-readable title even when the AI analysis is incomplete.",
+      "trigger": "Inquiry creation in ensure_call_inquiry or create_inquiry",
+      "preconditions": [],
+      "inputs": ["call.summary_title", "call.data_collection", "payload.inquiry_title", "payload.message"],
+      "validations": [],
+      "actions": [],
+      "systemEffects": ["inquiries.title and inquiries.notes populated"],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["INQ-001", "INQ-003"],
+      "affectedModules": [
+        "backend/app/services/inquiries.py"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": ["inquiries"],
+      "sourceReferences": [
+        "backend/app/services/inquiries.py:111-113",
+        "backend/app/services/inquiries.py:245-248"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "title = call.get('summary_title') or dc.get('issue_summary') or 'Anruf' (inquiries.py:112); title=payload.inquiry_title or (payload.message or 'Anfrage')[:60] (inquiries.py:247)"
+    },
+    {
+      "id": "INQ-020",
+      "name": "Vorgang thread endpoint builds chronological event timeline for one case",
+      "description": "GET /api/inquiries/{id}/thread returns the inquiry header (customer, assigned employee), all non-deleted calls (inbound/outbound labelled), all appointments with their status-event history, all cost estimates, and a case_links lookup for related/duplicate cases. Events are assembled but order not explicitly guaranteed in the route (frontend sorts by timestamp). Returns 404 if inquiry not in org.",
+      "purpose": "Give staff a complete chronological view of a customer case without switching screens.",
+      "trigger": "GET /api/inquiries/{inquiry_id}/thread",
+      "preconditions": ["User authenticated with require_org"],
+      "inputs": ["inquiry_id"],
+      "validations": ["inquiry must exist in caller's org"],
+      "actions": [
+        "SELECT inquiries for header",
+        "run_parallel: customer, employee, calls (via inquiry_id, non-deleted), appointments, KVAs",
+        "Assemble events list with call/appointment/KVA/status events",
+        "SELECT case_links to find related/duplicate cases"
+      ],
+      "systemEffects": [],
+      "outputs": ["{ inquiry, customer, assigned_employee, calls, appointments, cost_estimates, events, related }"],
+      "failureConditions": ["Inquiry not found in org → 404"],
+      "dependencies": [],
+      "relatedRules": ["INQ-013", "INQ-014"],
+      "affectedModules": [
+        "backend/app/api/routes/inquiries.py",
+        "backend/app/api/routes/calls.py",
+        "frontend/src/pages/VorgangThreadPage.tsx"
+      ],
+      "affectedAPIs": ["GET /api/inquiries/{inquiry_id}/thread"],
+      "affectedTables": ["inquiries", "calls", "appointments", "cost_estimates", "case_links", "customers", "employees"],
+      "sourceReferences": [
+        "backend/app/api/routes/inquiries.py:232-245",
+        "backend/app/api/routes/calls.py:784-884"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "build_case_thread returns header + run_parallel call to fetch calls/appts/kvas + events assembly + related cases via _related_cases (calls.py:784-884; inquiries.py:239-244)"
+    }
+  ]
+}

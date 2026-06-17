@@ -1,0 +1,708 @@
+{
+  "structure": [
+    {
+      "path": "backend/",
+      "role": "FastAPI Python backend (Python 3.12, uvicorn/gunicorn). All business logic, ElevenLabs agent integration, post-call processing, outbound orchestration, billing, and third-party integrations.",
+      "keyFiles": [
+        "backend/app/main.py",
+        "backend/app/core/config.py",
+        "backend/app/db/supabase_client.py",
+        "backend/requirements.txt"
+      ]
+    },
+    {
+      "path": "frontend/",
+      "role": "Vite + React 19 SPA. German-only UI, Supabase auth, React Query v5 for server state, Tailwind + Radix UI components, recharts for dashboards, FullCalendar for appointments.",
+      "keyFiles": [
+        "frontend/src/main.tsx",
+        "frontend/src/App.tsx",
+        "frontend/src/lib/supabase.ts",
+        "frontend/src/lib/api.ts",
+        "frontend/src/lib/env.ts",
+        "frontend/Dockerfile",
+        "frontend/package.json"
+      ]
+    },
+    {
+      "path": "supabase/migrations/",
+      "role": "73 numbered SQL migrations applied to Supabase (PostgreSQL). Defines all schema: tables, RLS policies, indexes.",
+      "keyFiles": [
+        "supabase/migrations/0001_init_schema.sql",
+        "supabase/migrations/0015_kiki_zentrale.sql",
+        "supabase/migrations/0056_cases.sql",
+        "supabase/migrations/0073_case_project_split.sql"
+      ]
+    },
+    {
+      "path": "backend/app/api/routes/",
+      "role": "FastAPI routers — one file per domain. Includes a tools/ sub-directory for 11 ElevenLabs agent tool webhook handlers.",
+      "keyFiles": [
+        "backend/app/api/routes/post_call.py",
+        "backend/app/api/routes/conversation_init.py",
+        "backend/app/api/routes/outbound.py",
+        "backend/app/api/routes/pds.py",
+        "backend/app/api/routes/stripe_webhook.py"
+      ]
+    },
+    {
+      "path": "backend/app/services/",
+      "role": "Business-logic layer. Every route delegates to a service function here. Sub-dirs: ai/ (OpenAI copilot), cases/ (LLM grouper), copilot/ (orchestrator + tools).",
+      "keyFiles": [
+        "backend/app/services/elevenlabs_agent.py",
+        "backend/app/services/post_call.py",
+        "backend/app/services/outbound_call.py",
+        "backend/app/services/email_send.py",
+        "backend/app/services/calendar_sync.py",
+        "backend/app/services/pds.py",
+        "backend/app/services/stripe_billing.py",
+        "backend/app/services/provisioning.py",
+        "backend/app/services/transfer.py"
+      ]
+    },
+    {
+      "path": "backend/app/core/",
+      "role": "Cross-cutting infrastructure: config (Pydantic Settings), Redis cache, Fernet crypto, logging/observability middleware.",
+      "keyFiles": [
+        "backend/app/core/config.py",
+        "backend/app/core/cache.py",
+        "backend/app/core/crypto.py"
+      ]
+    },
+    {
+      "path": "CRM_EVALUATION_AUDIT/",
+      "role": "Architecture audit artefacts. _data/ holds machine-readable maps (this file). rules/ for audit rules.",
+      "keyFiles": [
+        "CRM_EVALUATION_AUDIT/_data/repo_map.json"
+      ]
+    },
+    {
+      "path": "scripts/",
+      "role": "One-off operational scripts (history import, backfills, etc.).",
+      "keyFiles": []
+    },
+    {
+      "path": "n8n_heykiki_provision.json",
+      "role": "n8n workflow export — legacy automation blueprint for provisioning and post-call forwarding (superseded by native backend routes).",
+      "keyFiles": []
+    }
+  ],
+
+  "backendModules": [
+    {
+      "area": "Core infrastructure",
+      "routes": ["GET /", "GET /api/health"],
+      "services": ["app.core.config", "app.core.cache", "app.core.crypto", "app.core.logging_config", "app.core.observability", "app.db.supabase_client"]
+    },
+    {
+      "area": "Provisioning & super-admin",
+      "routes": ["POST /api/heykiki/provision", "GET|POST /api/super-admin/orgs", "POST /api/super-admin/orgs/{id}/import-history"],
+      "services": ["app.services.provisioning", "app.services.history_import", "app.services.agent_config"]
+    },
+    {
+      "area": "ElevenLabs agent webhooks (inbound call flow)",
+      "routes": [
+        "POST /api/elevenlabs/conversation-init",
+        "POST /api/elevenlabs/post-call",
+        "POST /api/tools/identify-customer",
+        "POST /api/tools/update-customer",
+        "POST /api/tools/create-inquiry",
+        "POST /api/tools/get-available-slots",
+        "POST /api/tools/book-appointment",
+        "POST /api/tools/cancel-appointment",
+        "POST /api/tools/change-appointment",
+        "POST /api/tools/search-inquiries",
+        "POST /api/tools/query-knowledge-base",
+        "POST /api/tools/transfer-call",
+        "POST /api/tools/draft-cost-estimate"
+      ],
+      "services": ["app.services.conversation_init", "app.services.post_call", "app.services.identify", "app.services.inquiries", "app.services.scheduling", "app.services.appointments", "app.services.knowledge", "app.services.transfer", "app.services.cost_estimates", "app.services.elevenlabs_agent"]
+    },
+    {
+      "area": "Outbound calling",
+      "routes": ["POST /api/outbound/run-due-reminders", "POST /api/outbound/send"],
+      "services": ["app.services.outbound_call", "app.services.outbound_dispatch", "app.services.outbound_occasions", "app.services.outbound_scope"]
+    },
+    {
+      "area": "Calls & inquiries",
+      "routes": ["GET /api/calls", "GET /api/calls/{id}", "DELETE /api/calls/{id}", "GET /api/inquiries", "GET /api/inquiries/{id}", "POST /api/inquiries", "PATCH /api/inquiries/{id}"],
+      "services": ["app.services.inquiries"]
+    },
+    {
+      "area": "Cases",
+      "routes": ["GET /api/cases", "POST /api/cases", "PATCH /api/cases/{id}", "DELETE /api/cases/{id}", "GET /api/cases/{id}/jobs", "POST /api/cases/group", "POST /api/cases/apply"],
+      "services": ["app.services.cases.grouper", "app.services.cases.apply_run", "app.services.cases.dryrun"]
+    },
+    {
+      "area": "Customers",
+      "routes": ["GET /api/customers", "GET /api/customers/{id}", "POST /api/customers", "PATCH /api/customers/{id}"],
+      "services": ["app.services.customers", "app.services.csv_import"]
+    },
+    {
+      "area": "Appointments & calendar",
+      "routes": ["GET /api/appointments", "POST /api/appointments", "PATCH /api/appointments/{id}", "DELETE /api/appointments/{id}", "POST /api/calendar-settings/sync-google"],
+      "services": ["app.services.appointments", "app.services.scheduling", "app.services.calendar_sync", "app.services.appointment_notify", "app.services.appointment_emails", "app.services.appointment_classifier"]
+    },
+    {
+      "area": "Projects",
+      "routes": ["GET /api/projects", "POST /api/projects", "GET /api/projects/{id}", "PATCH /api/projects/{id}", "DELETE /api/projects/{id}"],
+      "services": ["app.services.projects", "app.services.projects_auto"]
+    },
+    {
+      "area": "Planning board",
+      "routes": ["GET /api/planning-board", "PATCH /api/planning-board/assignments"],
+      "services": []
+    },
+    {
+      "area": "Cost estimates & invoices",
+      "routes": ["GET /api/cost-estimates", "POST /api/cost-estimates", "GET /api/invoices", "POST /api/invoices"],
+      "services": ["app.services.cost_estimates", "app.services.invoices"]
+    },
+    {
+      "area": "Catalog & text modules",
+      "routes": ["GET /api/catalog", "POST /api/catalog/items", "GET /api/text-modules", "POST /api/text-modules"],
+      "services": ["app.services.stripe_catalog"]
+    },
+    {
+      "area": "Employees & users",
+      "routes": ["GET /api/employees", "POST /api/employees", "PATCH /api/employees/{id}", "GET /api/users/me", "POST /api/users/invite"],
+      "services": ["app.services.employee_invite"]
+    },
+    {
+      "area": "Kiki-Zentrale (agent config UI)",
+      "routes": ["GET /api/kiki-zentrale/config", "PATCH /api/kiki-zentrale/config", "POST /api/kiki-zentrale/knowledge-resources", "DELETE /api/kiki-zentrale/knowledge-resources/{id}", "GET /api/kiki-zentrale/agent-health", "POST /api/kiki-zentrale/rollback/{snapshot_id}"],
+      "services": ["app.services.elevenlabs_agent", "app.services.agent_config", "app.services.knowledge", "app.services.price_knowledge"]
+    },
+    {
+      "area": "OAuth & email settings",
+      "routes": ["GET /api/settings/oauth/{provider}/authorize", "GET /api/settings/oauth/{provider}/callback", "DELETE /api/settings/oauth/{provider}", "GET /api/settings/email-config", "PATCH /api/settings/email-config"],
+      "services": ["app.services.oauth_tokens", "app.services.oauth_providers", "app.services.email_send"]
+    },
+    {
+      "area": "Billing (Stripe, gate: STRIPE_BILLING_ENABLED)",
+      "routes": ["GET /api/billing/status", "POST /api/billing/portal", "POST /api/stripe-webhook"],
+      "services": ["app.services.stripe_billing", "app.services.stripe_webhook", "app.services.stripe_provisioning", "app.services.stripe_matcher", "app.services.stripe_admin_actions", "app.services.billing_usage", "app.services.billing_notifications"]
+    },
+    {
+      "area": "PDS integration",
+      "routes": ["POST /api/pds/log-call", "POST /api/pds/greeting", "POST /api/pds/create-contact"],
+      "services": ["app.services.pds"]
+    },
+    {
+      "area": "AI copilot (gate: COPILOT_ENABLED)",
+      "routes": ["POST /api/copilot/message", "GET /api/copilot/conversations"],
+      "services": ["app.services.copilot.orchestrator", "app.services.copilot.tools", "app.services.ai.client", "app.services.ai.usage"]
+    },
+    {
+      "area": "Documents & vehicles",
+      "routes": ["GET /api/documents", "POST /api/documents", "GET /api/vehicles", "POST /api/vehicles"],
+      "services": []
+    },
+    {
+      "area": "Public / no-auth portals",
+      "routes": ["GET /api/public/jobs/{token}", "GET /api/public/technician/{token}"],
+      "services": ["app.services.technician_jobs"]
+    },
+    {
+      "area": "Action suggestions",
+      "routes": ["GET /api/actions", "POST /api/actions/{id}/apply", "DELETE /api/actions/{id}"],
+      "services": []
+    },
+    {
+      "area": "Dashboard",
+      "routes": ["GET /api/dashboard/overview"],
+      "services": []
+    }
+  ],
+
+  "frontendModules": [
+    {
+      "area": "Auth",
+      "pages": ["src/auth/AuthProvider.tsx", "src/auth/ProtectedRoute.tsx", "src/pages/LoginPage.tsx", "src/pages/SetPasswordPage.tsx", "src/admin/AdminAuthProvider.tsx"]
+    },
+    {
+      "area": "Dashboard",
+      "pages": ["src/pages/DashboardPage.tsx"]
+    },
+    {
+      "area": "Call log",
+      "pages": ["src/pages/CallLogsPage.tsx", "src/pages/PosteingangPage.tsx"]
+    },
+    {
+      "area": "Customers",
+      "pages": ["src/pages/CustomersPage.tsx", "src/pages/CustomerDetailPage.tsx"]
+    },
+    {
+      "area": "Cases (Fälle)",
+      "pages": ["src/pages/CasesPage.tsx", "src/pages/VorgangThreadPage.tsx"]
+    },
+    {
+      "area": "Projects",
+      "pages": ["src/pages/ProjectsPage.tsx", "src/pages/ProjectWorkspacePage.tsx", "src/pages/ProjectFormPage.tsx"]
+    },
+    {
+      "area": "Calendar & appointments",
+      "pages": ["src/pages/CalendarPage.tsx", "src/pages/MyAbsencePage.tsx"]
+    },
+    {
+      "area": "Planning board",
+      "pages": ["src/pages/PlanningBoardPage.tsx"]
+    },
+    {
+      "area": "Cost estimates & invoices",
+      "pages": ["src/pages/CostEstimatesPage.tsx", "src/pages/CostEstimateFormPage.tsx", "src/pages/InvoicesPage.tsx", "src/pages/InvoiceFormPage.tsx"]
+    },
+    {
+      "area": "Catalog",
+      "pages": ["src/pages/CatalogPage.tsx"]
+    },
+    {
+      "area": "Employees",
+      "pages": ["src/pages/EmployeesPage.tsx"]
+    },
+    {
+      "area": "Kiki-Zentrale (agent config)",
+      "pages": ["src/pages/KikiZentralePage.tsx", "src/pages/RufumleitungGuidePage.tsx"]
+    },
+    {
+      "area": "Settings",
+      "pages": ["src/pages/SettingsPage.tsx"]
+    },
+    {
+      "area": "Technician portal (public)",
+      "pages": ["src/pages/JobLinkPage.tsx", "src/pages/TechnicianPortalPage.tsx"]
+    },
+    {
+      "area": "Super-admin (separate React tree)",
+      "pages": ["src/admin/AdminApp.tsx", "src/admin/AdminOrgsPage.tsx", "src/admin/AdminBillingPage.tsx", "src/admin/AdminOrgFormPage.tsx"]
+    },
+    {
+      "area": "Copilot widget",
+      "pages": ["src/components/kiki/VerlaufSection.tsx"]
+    },
+    {
+      "area": "Shared libs",
+      "pages": ["src/lib/api.ts", "src/lib/supabase.ts", "src/lib/env.ts", "src/lib/kikiApi.ts", "src/lib/dashApi.ts", "src/lib/datetime.ts"]
+    }
+  ],
+
+  "dbTables": [
+    {"table": "organizations", "introducedBy": "0001_init_schema.sql", "purpose": "Root tenant table: one row per tradesperson business. Holds ElevenLabs agent_id, org_code, billing fields."},
+    {"table": "org_secrets", "introducedBy": "0001_init_schema.sql", "purpose": "Per-org encrypted secrets (legacy; main secrets now in env or oauth_connections)."},
+    {"table": "users", "introducedBy": "0001_init_schema.sql", "purpose": "CRM user accounts (org_admin + employees). Linked to Supabase Auth."},
+    {"table": "customers", "introducedBy": "0001_init_schema.sql", "purpose": "Customer/caller contact records per org."},
+    {"table": "calls", "introducedBy": "0001_init_schema.sql", "purpose": "Inbound/outbound call records from ElevenLabs. Central CRM event. Enhanced by many later migrations (emergency_flag 0024, deleted_at 0043, pds_synced 0069, is_spam 0071)."},
+    {"table": "inquiries", "introducedBy": "0001_init_schema.sql", "purpose": "Service requests created during a call (ANF- numbered). Linked to calls, customers, cases."},
+    {"table": "appointments", "introducedBy": "0001_init_schema.sql", "purpose": "Scheduled appointments, slots, and Google Calendar imports (source='google_import' from migration 0033)."},
+    {"table": "cost_estimates", "introducedBy": "0001_init_schema.sql", "purpose": "KVA (Kostenvoranschlag) / cost estimate documents with line items."},
+    {"table": "invoices", "introducedBy": "0001_init_schema.sql", "purpose": "Invoices linked to customers and projects, with PDF generation."},
+    {"table": "employees", "introducedBy": "0001_init_schema.sql", "purpose": "Employee records per org with roles, colors, absence tracking. Extended by 0059 (is_technician)."},
+    {"table": "agent_configs", "introducedBy": "0001_init_schema.sql", "purpose": "Per-org Kiki AI agent config: scheduling rules, autonomy level, enabled features."},
+    {"table": "catalog_items", "introducedBy": "0001_init_schema.sql", "purpose": "Service catalog items with pricing (used for cost estimates and price knowledge base)."},
+    {"table": "ai_suggestions", "introducedBy": "0001_init_schema.sql", "purpose": "AI-generated suggestions for CRM actions (proactive AI)."},
+    {"table": "time_entries", "introducedBy": "0001_init_schema.sql", "purpose": "Time tracking entries for employees."},
+    {"table": "documents", "introducedBy": "0007_documents.sql", "purpose": "File attachments (PDFs, images) linked to various entities. Stored in Supabase Storage."},
+    {"table": "employee_absences", "introducedBy": "0008_employee_management.sql", "purpose": "Employee absence records (vacation, sick leave) affecting slot availability."},
+    {"table": "vehicles", "introducedBy": "0009_planning_board.sql", "purpose": "Fleet vehicles for the planning board."},
+    {"table": "tools", "introducedBy": "0009_planning_board.sql", "purpose": "Tool/equipment inventory for the planning board."},
+    {"table": "text_modules", "introducedBy": "0011_catalog_templates.sql", "purpose": "Reusable text snippets for cost estimates, invoices, emails."},
+    {"table": "projects", "introducedBy": "0013_projects.sql (originally), recreated by 0073_case_project_split.sql", "purpose": "Top-layer project grouping above Cases (PR- numbered). Restored in migration 0073 as a separate layer above cases."},
+    {"table": "project_employees", "introducedBy": "0013_projects.sql", "purpose": "Many-to-many: project ↔ employee assignments."},
+    {"table": "email_configs", "introducedBy": "0014_settings_fields.sql", "purpose": "Per-org email sending config: OAuth provider choice or custom SMTP credentials (Fernet-encrypted)."},
+    {"table": "pds_configs", "introducedBy": "0014_settings_fields.sql", "purpose": "PDS-Software ERP integration config: API URL + Bearer key (Fernet-encrypted) per org."},
+    {"table": "agent_required_fields", "introducedBy": "0015_kiki_zentrale.sql", "purpose": "Ordered list of fields Kiki must capture during a call (name, phone, address, etc.)."},
+    {"table": "appointment_categories", "introducedBy": "0015_kiki_zentrale.sql", "purpose": "Named appointment types per org with duration defaults."},
+    {"table": "agent_services", "introducedBy": "0015_kiki_zentrale.sql", "purpose": "Services the agent is trained to handle (plumbing, heating, etc.)."},
+    {"table": "knowledge_resources", "introducedBy": "0015_kiki_zentrale.sql", "purpose": "Knowledge base documents (URL/file/text) pushed to ElevenLabs KB. Tracks sync status and elevenlabs_doc_id."},
+    {"table": "agent_config_snapshots", "introducedBy": "0015_kiki_zentrale.sql", "purpose": "Full ElevenLabs agent config snapshots before every write (enables rollback)."},
+    {"table": "agent_writes_audit", "introducedBy": "0015_kiki_zentrale.sql", "purpose": "Audit log of every ElevenLabs agent config mutation: diff, HTTP status, rollback flag."},
+    {"table": "ai_suggestion_actions", "introducedBy": "0016_ai_suggestion_actions.sql", "purpose": "Structured actions attached to AI suggestions (e.g., create appointment, update customer)."},
+    {"table": "outbound_calls", "introducedBy": "0029_outbound_calls.sql", "purpose": "Ledger for outbound call dispatches — idempotency guard prevents double-dialing."},
+    {"table": "maintenance_plans", "introducedBy": "0031_maintenance_plans.sql", "purpose": "Recurring service maintenance plan records per customer."},
+    {"table": "missed_calls", "introducedBy": "0032_missed_calls.sql", "purpose": "Calls that went unanswered, for follow-up tracking."},
+    {"table": "oauth_connections", "introducedBy": "0028_oauth_connections.sql", "purpose": "Stored OAuth tokens (Google/Microsoft/Calendly) per org. Refresh tokens encrypted at rest."},
+    {"table": "oauth_purpose_links", "introducedBy": "0034_oauth_purpose_links.sql", "purpose": "Links an oauth_connection to a purpose (email, calendar) enabling multi-provider routing."},
+    {"table": "copilot_conversations", "introducedBy": "0042_ai_copilot.sql (recreated by 0062_copilot_conversations.sql)", "purpose": "AI copilot session threads per org/user."},
+    {"table": "copilot_messages", "introducedBy": "0042_ai_copilot.sql (recreated by 0062_copilot_conversations.sql)", "purpose": "Individual messages within a copilot conversation (user + assistant turns)."},
+    {"table": "copilot_action_audit", "introducedBy": "0042_ai_copilot.sql", "purpose": "Audit log of copilot-initiated CRM mutations."},
+    {"table": "copilot_escalations", "introducedBy": "0042_ai_copilot.sql", "purpose": "Cases where the copilot escalated to a human operator."},
+    {"table": "ai_usage_log", "introducedBy": "0042_ai_copilot.sql", "purpose": "Per-org AI spend ledger (tokens * cost) enforcing monthly cap (COPILOT_MONTHLY_COST_CAP_USD)."},
+    {"table": "action_tasks", "introducedBy": "0054_action_tasks.sql", "purpose": "Scheduled/deferred action tasks triggered by agent suggestions or outbound occasions."},
+    {"table": "case_links", "introducedBy": "0055_vorgang_threading.sql", "purpose": "Many-to-many links between calls/inquiries and cases for the Vorgang threading view."},
+    {"table": "cases", "introducedBy": "0056_cases.sql", "purpose": "Case records (FL- numbered). The core CRM ticket: groups calls + inquiries under a customer. Renamed from former projects table in migration 0073."},
+    {"table": "billing_events", "introducedBy": "0048_billing.sql", "purpose": "Write ledger for every Stripe mutation (audit-first model, like agent_writes_audit)."},
+    {"table": "billing_webhook_events", "introducedBy": "0048_billing.sql", "purpose": "Received Stripe webhook events for idempotency and audit."},
+    {"table": "billing_usage_reports", "introducedBy": "0048_billing.sql", "purpose": "Per-call Stripe usage records (idempotent by call_id)."},
+    {"table": "billing_migration_log", "introducedBy": "0048_billing.sql", "purpose": "Log of subscription migration steps when moving orgs between Stripe plans."},
+    {"table": "billing_security_events", "introducedBy": "0048_billing.sql", "purpose": "Security-sensitive billing events (cross-org guard violations, etc.)."},
+    {"table": "billing_notifications", "introducedBy": "0049_billing_phase2.sql", "purpose": "In-app billing alert records (80% usage warning, plan upgrade prompts)."},
+    {"table": "billing_checkout_sessions", "introducedBy": "0049_billing_phase2.sql", "purpose": "Stripe Checkout session records for plan upgrades."},
+    {"table": "technician_job_links", "introducedBy": "0064_technician_job_links.sql", "purpose": "Token-secured job links sent to field technicians (no login required — token IS the credential)."},
+    {"table": "pds_sync_log", "introducedBy": "0070_pds_sync_log.sql", "purpose": "Log of PDS-Software sync attempts (call log push, contact create) with status and error details."}
+  ],
+
+  "integrations": [
+    {
+      "name": "ElevenLabs",
+      "usedBy": [
+        "backend/app/services/elevenlabs_agent.py",
+        "backend/app/services/outbound_call.py",
+        "backend/app/services/agent_config.py",
+        "backend/app/services/history_import.py",
+        "backend/app/api/routes/conversation_init.py",
+        "backend/app/api/routes/post_call.py",
+        "backend/app/api/routes/tools/*.py"
+      ],
+      "direction": "both",
+      "authMechanism": "xi-api-key header (ELEVENLABS_API_KEY). Inbound tool webhooks authenticated via org_id scoping (resolve_tool_org dep). Inbound post-call via POST_CALL_WEBHOOK_SECRET.",
+      "failureMode": "ElevenLabsWriteError / VerificationFailedError — auto-rollback from snapshot on verify failure. Post-call: non-fatal (logged). Transfer: graceful degradation (speaks number, no bridge).",
+      "evidence": "backend/app/services/elevenlabs_agent.py:34"
+    },
+    {
+      "name": "Supabase",
+      "usedBy": [
+        "backend/app/db/supabase_client.py",
+        "backend/app/db/realtime.py",
+        "frontend/src/lib/supabase.ts",
+        "frontend/src/auth/AuthProvider.tsx"
+      ],
+      "direction": "both",
+      "authMechanism": "Backend: service-role key (SUPABASE_SERVICE_ROLE_KEY) bypasses RLS. Frontend: anon key (VITE_SUPABASE_ANON_KEY) with Supabase JWT session tokens. JWT verified via SUPABASE_JWT_SECRET (backend).",
+      "failureMode": "RuntimeError at startup if URL/key missing in production. HTTP 500 on query failure. Frontend: auth state cleared, redirect to /login.",
+      "evidence": "backend/app/db/supabase_client.py:1"
+    },
+    {
+      "name": "Stripe",
+      "usedBy": [
+        "backend/app/services/stripe_billing.py",
+        "backend/app/services/stripe_webhook.py",
+        "backend/app/services/stripe_provisioning.py",
+        "backend/app/services/stripe_catalog.py",
+        "backend/app/services/stripe_matcher.py",
+        "backend/app/services/stripe_admin_actions.py",
+        "backend/app/services/billing_usage.py",
+        "backend/app/api/routes/billing.py",
+        "backend/app/api/routes/stripe_webhook.py",
+        "backend/app/api/routes/billing_admin.py"
+      ],
+      "direction": "both",
+      "authMechanism": "STRIPE_SECRET_KEY (sk_test_* / sk_live_*). Webhook signature verification via STRIPE_WEBHOOK_SECRET. Entire router only mounted when STRIPE_BILLING_ENABLED=1.",
+      "failureMode": "StripeConfigError / StripeBillingError on API error. ConnectAttributionError blocks writes to legacy Connect subs. Pinned to stripe==11.6.0 (pre-v12) due to usage-records API incompatibility.",
+      "evidence": "backend/app/services/stripe_billing.py:1"
+    },
+    {
+      "name": "Brevo (SMTP + HTTP API)",
+      "usedBy": [
+        "backend/app/services/email_send.py",
+        "backend/app/core/config.py"
+      ],
+      "direction": "outbound",
+      "authMechanism": "BREVO_SMTP_KEY for SMTP relay (smtp-relay.brevo.com:587). BREVO_API_KEY for HTTP API (api.brevo.com/v3) as tier-3 fallback (Railway blocks outbound SMTP 587).",
+      "failureMode": "Tier-3 fallback in 3-tier chain (Gmail OAuth -> customer SMTP -> Brevo). If all tiers fail, exception re-raised to caller. Failure logged but never silently swallowed.",
+      "evidence": "backend/app/services/email_send.py:1"
+    },
+    {
+      "name": "Google (OAuth2 / Gmail API / Calendar API)",
+      "usedBy": [
+        "backend/app/services/oauth_providers.py",
+        "backend/app/services/oauth_tokens.py",
+        "backend/app/services/email_send.py",
+        "backend/app/services/calendar_sync.py",
+        "backend/app/api/routes/oauth.py",
+        "backend/app/api/routes/calendar_settings.py"
+      ],
+      "direction": "both",
+      "authMechanism": "OAuth2 authorization code flow. GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET. Access tokens refreshed automatically via oauth_tokens.get_valid_access_token(). Stored encrypted in oauth_connections.",
+      "failureMode": "OAuthTokenError when no valid connection. Calendar sync failure is non-fatal (logged). Email: falls through to next tier in 3-tier chain.",
+      "evidence": "backend/app/services/oauth_providers.py:33"
+    },
+    {
+      "name": "Microsoft (Azure AD OAuth2 / Graph API)",
+      "usedBy": [
+        "backend/app/services/oauth_providers.py",
+        "backend/app/services/oauth_tokens.py",
+        "backend/app/services/email_send.py",
+        "backend/app/api/routes/oauth.py"
+      ],
+      "direction": "both",
+      "authMechanism": "OAuth2 authorization code flow via login.microsoftonline.com/common. MS_CLIENT_ID + MS_CLIENT_SECRET. Scopes: Mail.Send + Calendars.ReadWrite.",
+      "failureMode": "OAuthTokenError when token expired/missing. Email send falls through to next tier.",
+      "evidence": "backend/app/services/oauth_providers.py:46"
+    },
+    {
+      "name": "Calendly",
+      "usedBy": [
+        "backend/app/services/oauth_providers.py",
+        "backend/app/services/oauth_tokens.py",
+        "backend/app/api/routes/oauth.py",
+        "backend/app/api/routes/calendar_settings.py"
+      ],
+      "direction": "inbound",
+      "authMechanism": "OAuth2 via auth.calendly.com. CALENDLY_CLIENT_ID + CALENDLY_CLIENT_SECRET. Calendar-only (no email). Token stored in oauth_connections.",
+      "failureMode": "OAuthTokenError when no connection. Calendar-only integration — no email fallback path.",
+      "evidence": "backend/app/services/oauth_providers.py:61"
+    },
+    {
+      "name": "OpenAI",
+      "usedBy": [
+        "backend/app/services/ai/client.py",
+        "backend/app/services/ai/usage.py",
+        "backend/app/services/copilot/orchestrator.py",
+        "backend/app/services/copilot/tools.py",
+        "backend/app/services/conversation_logic_ai.py",
+        "backend/app/services/appointment_classifier.py"
+      ],
+      "direction": "outbound",
+      "authMechanism": "OPENAI_API_KEY. Router only mounted when COPILOT_ENABLED=1. Model configurable via OPENAI_COPILOT_MODEL (default gpt-4o) and OPENAI_CLASSIFIER_MODEL (default gpt-4o-mini). Monthly cost cap via ai_usage_log.",
+      "failureMode": "Client disabled (no-op) when API key not set. Timeout after OPENAI_TIMEOUT_SECONDS (default 30s). Spend cap enforced per-org.",
+      "evidence": "backend/app/services/ai/client.py:1"
+    },
+    {
+      "name": "Redis",
+      "usedBy": [
+        "backend/app/core/cache.py",
+        "backend/app/services/ratelimit.py"
+      ],
+      "direction": "both",
+      "authMechanism": "REDIS_URL (connection string includes password). Lazy-initialized: disabled entirely when REDIS_URL is empty. Org-scoped keys only.",
+      "failureMode": "Fail-open: any Redis error is a cache miss / no-op. Never breaks a request. Single-flight stampede guard with lock TTL.",
+      "evidence": "backend/app/core/cache.py:1"
+    },
+    {
+      "name": "Twilio",
+      "usedBy": [
+        "backend/app/services/transfer.py",
+        "backend/app/services/outbound_call.py",
+        "backend/app/services/agent_config.py",
+        "backend/app/api/routes/kiki_zentrale.py"
+      ],
+      "direction": "outbound",
+      "authMechanism": "TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN (basic auth to api.twilio.com). For outbound calls: ElevenLabs orchestrates via its native Twilio integration (no direct Twilio dial). For transfer: direct TwiML redirect via REST.",
+      "failureMode": "Graceful degradation on transfer: if creds or call_sid missing, speaks number to caller but does not bridge. Logged with reason. OutboundCallError on ElevenLabs/Twilio integration failure.",
+      "evidence": "backend/app/services/transfer.py:36"
+    },
+    {
+      "name": "n8n",
+      "usedBy": [
+        "backend/app/api/routes/post_call.py",
+        "backend/app/api/routes/outbound.py",
+        "backend/app/services/post_call.py"
+      ],
+      "direction": "inbound",
+      "authMechanism": "POST_CALL_WEBHOOK_SECRET / MASTER_WEBHOOK_SECRET (X-HeyKiki-Secret or Authorization header). n8n forwards ElevenLabs post-call payloads to /api/elevenlabs/post-call and triggers /api/outbound/run-due-reminders.",
+      "failureMode": "Body shape normalized (ElevenLabs envelope / flat / N8N item array). Deduplication prevents double-processing on n8n retries. PDS routes provide native replacement for n8n PDS workflows.",
+      "evidence": "backend/app/main.py:169"
+    },
+    {
+      "name": "PDS-Software",
+      "usedBy": [
+        "backend/app/services/pds.py",
+        "backend/app/api/routes/pds.py",
+        "backend/app/services/post_call.py"
+      ],
+      "direction": "outbound",
+      "authMechanism": "Bearer token stored Fernet-encrypted in pds_configs.api_key. Per-org api_url. Ported from n8n workflows.",
+      "failureMode": "Non-fatal: PDS failure never breaks call processing. best-effort on post-call auto-sync. Errors recorded in pds_sync_log.",
+      "evidence": "backend/app/services/pds.py:1"
+    },
+    {
+      "name": "Sentry",
+      "usedBy": [
+        "backend/app/main.py"
+      ],
+      "direction": "outbound",
+      "authMechanism": "SENTRY_DSN environment variable. Lazy-initialized at startup only when DSN is set.",
+      "failureMode": "Dormant (no-op) when SENTRY_DSN not set. Init failure logged as warning but never blocks boot.",
+      "evidence": "backend/app/main.py:70"
+    }
+  ],
+
+  "dependencyEdges": [
+    {"from": "frontend/src/lib/supabase.ts", "to": "Supabase", "reason": "Auth sessions (anon key + JWT). Two clients: heykiki-customer-auth + heykiki-admin-auth storage keys."},
+    {"from": "frontend/src/lib/api.ts", "to": "backend FastAPI", "reason": "All CRM data reads/writes via VITE_API_URL + Supabase JWT Bearer token."},
+    {"from": "backend/app/db/supabase_client.py", "to": "Supabase", "reason": "Service-role client for all DB operations. HTTP/1.1 forced for thread-safe concurrent fan-out."},
+    {"from": "backend/app/services/elevenlabs_agent.py", "to": "ElevenLabs", "reason": "Agent config CRUD, knowledge base management, health probes via xi-api-key REST."},
+    {"from": "backend/app/services/outbound_call.py", "to": "ElevenLabs", "reason": "POST /v1/convai/twilio/outbound-call to place outbound calls via ElevenLabs-Twilio bridge."},
+    {"from": "backend/app/api/routes/tools/", "to": "ElevenLabs", "reason": "Tool webhook handlers called by ElevenLabs agent during active calls."},
+    {"from": "backend/app/api/routes/conversation_init.py", "to": "ElevenLabs", "reason": "Conversation initiation webhook — ElevenLabs calls this on call connect to get per-org config."},
+    {"from": "backend/app/api/routes/post_call.py", "to": "n8n", "reason": "n8n forwards ElevenLabs post-call payload here after call ends."},
+    {"from": "backend/app/services/post_call.py", "to": "PDS-Software", "reason": "Auto-sync call log to PDS after processing (best-effort, non-fatal)."},
+    {"from": "backend/app/services/transfer.py", "to": "Twilio", "reason": "Direct Twilio REST API call to redirect live inbound call TwiML to human number."},
+    {"from": "backend/app/services/email_send.py", "to": "Google", "reason": "Tier-1 email: Gmail API via OAuth access token."},
+    {"from": "backend/app/services/email_send.py", "to": "Microsoft", "reason": "Tier-1 email: Microsoft Graph API via OAuth access token."},
+    {"from": "backend/app/services/email_send.py", "to": "Brevo (SMTP + HTTP API)", "reason": "Tier-3 fallback email relay when org has no OAuth or custom SMTP configured."},
+    {"from": "backend/app/services/calendar_sync.py", "to": "Google", "reason": "Read-only pull of Google primary calendar events into appointments table."},
+    {"from": "backend/app/services/ai/client.py", "to": "OpenAI", "reason": "Copilot chat completions and tool calls. Classifiers for emergency detection and employee auto-assign."},
+    {"from": "backend/app/services/stripe_billing.py", "to": "Stripe", "reason": "Subscription reads, usage records, billing portal sessions, customer management."},
+    {"from": "backend/app/api/routes/stripe_webhook.py", "to": "Stripe", "reason": "Receives Stripe webhook events (subscription created/updated/deleted, invoice paid)."},
+    {"from": "backend/app/core/cache.py", "to": "Redis", "reason": "Org-scoped caching for read-heavy endpoints. Fail-open: disabled when REDIS_URL not set."},
+    {"from": "backend/app/services/ratelimit.py", "to": "Redis", "reason": "Per-org rate limiting using Redis counters."},
+    {"from": "backend/app/main.py", "to": "Sentry", "reason": "Error tracking for unhandled exceptions. Dormant until SENTRY_DSN set."}
+  ],
+
+  "dataFlows": [
+    {
+      "name": "Inbound call: caller rings → inquiry created",
+      "steps": [
+        "1. Caller dials Twilio number linked to ElevenLabs agent.",
+        "2. ElevenLabs fires GET /api/elevenlabs/conversation-init → backend looks up org by phone number, returns per-org config (business hours, first message, agent prompt override).",
+        "3. ElevenLabs conducts conversation; each tool call hits /api/tools/* webhook endpoints (identify-customer, create-inquiry, book-appointment, etc.).",
+        "4. Call ends → ElevenLabs notifies n8n with post-call payload.",
+        "5. n8n forwards to POST /api/elevenlabs/post-call (secret-protected).",
+        "6. post_call.py normalizes payload, inserts/updates call row in Supabase, links inquiry, creates missed_call if needed.",
+        "7. If org has PDS config: best-effort sync of call log to PDS-Software via pds.py.",
+        "8. If STRIPE_USAGE_REPORTING_ENABLED: background task reports call duration to Stripe usage records.",
+        "9. Appointment notification emails sent if appointment was booked (email_send.py 3-tier chain)."
+      ],
+      "crossesIntegrations": ["ElevenLabs", "n8n", "Supabase", "PDS-Software", "Stripe", "Brevo (SMTP + HTTP API)"]
+    },
+    {
+      "name": "Outbound call: occasion-driven reminder",
+      "steps": [
+        "1. Cron / n8n fires POST /api/outbound/run-due-reminders (secret-protected).",
+        "2. outbound_dispatch.py scans outbound-enabled orgs for due occasions (appointment_reminder, kva_followup, etc.).",
+        "3. Scope guard: if OUTBOUND_TEST_SCOPE_ONLY=1, only allowed org IDs can proceed; real numbers replaced by test number.",
+        "4. outbound_call.py POSTs to ElevenLabs /v1/convai/twilio/outbound-call with per-call dynamic variables + prompt override.",
+        "5. ElevenLabs + Twilio places the call; conversation_id written to outbound_calls ledger.",
+        "6. Call ends → post-call flow (same as inbound) processes the conversation.",
+        "7. Optional occasion email (OUTBOUND_OCCASION_EMAILS_ENABLED) sent in parallel via email_send.py."
+      ],
+      "crossesIntegrations": ["ElevenLabs", "Twilio", "n8n", "Supabase", "Brevo (SMTP + HTTP API)"]
+    },
+    {
+      "name": "Agent configuration (Kiki-Zentrale)",
+      "steps": [
+        "1. Org admin edits config in KikiZentralePage (first message, prompt, voice, business hours, knowledge resources).",
+        "2. Frontend POSTs to /api/kiki-zentrale/config.",
+        "3. Backend calls patch_agent_safely(): cross-org guard → snapshot to agent_config_snapshots → deep-merge → audio assertion → PATCH ElevenLabs REST → post-write verify → audit to agent_writes_audit.",
+        "4. On verify failure: automatic rollback to snapshot + VerificationFailedError returned.",
+        "5. Knowledge resources: uploaded to Supabase Storage → pushed to ElevenLabs KB API → doc_id stored in knowledge_resources."
+      ],
+      "crossesIntegrations": ["ElevenLabs", "Supabase"]
+    },
+    {
+      "name": "Call transfer (emergency / staff)",
+      "steps": [
+        "1. ElevenLabs agent detects transfer intent and calls /api/tools/transfer-call.",
+        "2. transfer.py reads emergency_number / incoming_forwarding_number from agent_configs.",
+        "3. If Twilio creds + call_sid present: Twilio REST API redirects live call TwiML to human number.",
+        "4. Returns success + transfer message regardless (graceful degradation if Twilio not configured)."
+      ],
+      "crossesIntegrations": ["ElevenLabs", "Twilio", "Supabase"]
+    },
+    {
+      "name": "Email send (3-tier chain)",
+      "steps": [
+        "1. Trigger: appointment confirmation, KVA PDF, invoice, employee invite.",
+        "2. Tier 1: if org has Google OAuth → Gmail API send.",
+        "3. Tier 2: if org has Microsoft OAuth → Microsoft Graph API send.",
+        "4. Tier 3: if org has customer SMTP → smtplib SMTP (Fernet-decrypt password).",
+        "5. Tier 4 (HeyKiki fallback): Brevo HTTP API (api.brevo.com/v3) — Railway blocks outbound SMTP 587."
+      ],
+      "crossesIntegrations": ["Google", "Microsoft", "Brevo (SMTP + HTTP API)", "Supabase"]
+    },
+    {
+      "name": "Google Calendar sync",
+      "steps": [
+        "1. Org admin triggers sync from SettingsPage → POST /api/calendar-settings/sync-google.",
+        "2. calendar_sync.py fetches OAuth token (auto-refresh via oauth_tokens.py).",
+        "3. Google Calendar API: GET primary calendar events for 60-day forward window.",
+        "4. Events upserted into appointments table (source='google_import') to block AI slot finder.",
+        "5. Deleted events → status='cancelled' to free slots."
+      ],
+      "crossesIntegrations": ["Google", "Supabase"]
+    },
+    {
+      "name": "Org provisioning",
+      "steps": [
+        "1. Super-admin POSTs to /api/heykiki/provision (MASTER_WEBHOOK_SECRET required).",
+        "2. provisioning.py: creates organization row, seeds agent_configs with defaults, creates required_fields.",
+        "3. agent_config.py: configures ElevenLabs agent (webhook URL, tool IDs, override flags, language).",
+        "4. Background: history_import.py fetches historical ElevenLabs conversations and backfills calls table.",
+        "5. Optional Stripe: stripe_provisioning.py links org to Stripe customer."
+      ],
+      "crossesIntegrations": ["ElevenLabs", "Supabase", "Stripe"]
+    },
+    {
+      "name": "Stripe billing lifecycle",
+      "steps": [
+        "1. Customer visits /settings/abrechnung → GET /api/billing/status (reads Stripe subscription).",
+        "2. Upgrade: POST /api/billing/portal → Stripe Billing Portal session URL → redirect.",
+        "3. Stripe webhook: POST /api/stripe-webhook (signature verified) → stripe_webhook.py updates org billing fields in Supabase.",
+        "4. Per-call usage: post-call hook triggers billing_usage.report_call_usage → Stripe usage record.",
+        "5. 80% warning: billing_notifications inserted → frontend billing banner."
+      ],
+      "crossesIntegrations": ["Stripe", "Supabase"]
+    },
+    {
+      "name": "PDS-Software sync (post-call)",
+      "steps": [
+        "1. post_call.py finishes inserting call row.",
+        "2. If org has pds_configs row: pds.sync_call_to_pds() called (best-effort, non-fatal).",
+        "3. pds.py decrypts Bearer token from pds_configs, calls PDS API: person/listpersonen (lookup by phone) → crm/createaufgabe (log call task).",
+        "4. Result (success/error) written to pds_sync_log."
+      ],
+      "crossesIntegrations": ["PDS-Software", "Supabase"]
+    },
+    {
+      "name": "AI copilot (Kiki Assistent)",
+      "steps": [
+        "1. User types message in copilot widget (VITE_COPILOT_ENABLED=1 + COPILOT_ENABLED=1).",
+        "2. POST /api/copilot/message → copilot/orchestrator.py.",
+        "3. OpenAI gpt-4o completion with tool definitions (read/write CRM data).",
+        "4. Tool calls: copilot/tools.py executes CRM actions (create inquiry, update customer, etc.), audited in copilot_action_audit.",
+        "5. Response + actions streamed back. ai_usage_log updated. Monthly cap checked."
+      ],
+      "crossesIntegrations": ["OpenAI", "Supabase"]
+    }
+  ],
+
+  "envVars": [
+    {"name": "APP_ENV", "usedFor": "Deployment environment flag. 'production' enables fail-fast startup validation and Sentry prod tag.", "required": false},
+    {"name": "SUPABASE_URL", "usedFor": "Supabase project REST endpoint. Required in production.", "required": true},
+    {"name": "SUPABASE_SERVICE_ROLE_KEY", "usedFor": "Supabase service-role key (bypasses RLS). Backend only. Required in production.", "required": true},
+    {"name": "SUPABASE_JWT_SECRET", "usedFor": "Supabase JWT signing secret for verifying user Bearer tokens on backend routes.", "required": true},
+    {"name": "MASTER_WEBHOOK_SECRET", "usedFor": "Shared secret guarding /api/heykiki/provision and super-admin routes. Must be set in production.", "required": true},
+    {"name": "POST_CALL_WEBHOOK_SECRET", "usedFor": "Shared secret guarding /api/elevenlabs/post-call and /api/outbound/run-due-reminders (X-HeyKiki-Secret).", "required": true},
+    {"name": "JWKS_TTL_SECONDS", "usedFor": "TTL for cached Supabase JWKS (default 300s). Controls how quickly a rotated signing key stops being trusted.", "required": false},
+    {"name": "CORS_ORIGINS", "usedFor": "Comma-separated list of allowed CORS origins (e.g., frontend URL). Default: http://localhost:5173.", "required": false},
+    {"name": "ELEVENLABS_API_KEY", "usedFor": "ElevenLabs xi-api-key for agent config reads/writes, KB management, and history import.", "required": true},
+    {"name": "TWILIO_ACCOUNT_SID", "usedFor": "Twilio Account SID for live call transfer (TwiML redirect). Optional — graceful degradation without it.", "required": false},
+    {"name": "TWILIO_AUTH_TOKEN", "usedFor": "Twilio Auth Token (paired with TWILIO_ACCOUNT_SID). Optional.", "required": false},
+    {"name": "OPENAI_API_KEY", "usedFor": "OpenAI API key for copilot + classifiers. Dormant when not set.", "required": false},
+    {"name": "COPILOT_ENABLED", "usedFor": "Feature flag (0/1) — mounts the /api/copilot router and shows copilot widget. Default 0.", "required": false},
+    {"name": "OPENAI_COPILOT_MODEL", "usedFor": "OpenAI model for copilot completions. Default: gpt-4o.", "required": false},
+    {"name": "OPENAI_CLASSIFIER_MODEL", "usedFor": "OpenAI model for cheap classifiers (emergency detection, employee auto-assign). Default: gpt-4o-mini.", "required": false},
+    {"name": "OPENAI_TIMEOUT_SECONDS", "usedFor": "Network timeout for OpenAI API calls. Default: 30.0s.", "required": false},
+    {"name": "COPILOT_MONTHLY_COST_CAP_USD", "usedFor": "Soft per-org monthly OpenAI spend cap in USD. 0 = no cap. Default: 25.0.", "required": false},
+    {"name": "SETTINGS_ENC_KEY", "usedFor": "Fernet symmetric encryption key for storing third-party credentials (OAuth tokens, PDS API keys, customer SMTP passwords).", "required": true},
+    {"name": "GOOGLE_CLIENT_ID", "usedFor": "Google OAuth2 client ID for Gmail + Calendar integration.", "required": false},
+    {"name": "GOOGLE_CLIENT_SECRET", "usedFor": "Google OAuth2 client secret.", "required": false},
+    {"name": "MS_CLIENT_ID", "usedFor": "Microsoft Azure AD OAuth2 client ID for Outlook/Graph integration.", "required": false},
+    {"name": "MS_CLIENT_SECRET", "usedFor": "Microsoft Azure AD OAuth2 client secret.", "required": false},
+    {"name": "CALENDLY_CLIENT_ID", "usedFor": "Calendly OAuth2 client ID for calendar sync.", "required": false},
+    {"name": "CALENDLY_CLIENT_SECRET", "usedFor": "Calendly OAuth2 client secret.", "required": false},
+    {"name": "BACKEND_PUBLIC_URL", "usedFor": "Publicly reachable backend URL (used to build OAuth redirect URIs registered with Google/Azure). Default: http://localhost:8000.", "required": false},
+    {"name": "FRONTEND_PUBLIC_URL", "usedFor": "Public frontend URL for employee set-password links and billing portal return URL. Must be on Supabase Auth redirect allow-list.", "required": false},
+    {"name": "BREVO_SMTP_KEY", "usedFor": "Brevo SMTP relay API key (read as BREVO_SMTP_KEY env var). Tier-3 email fallback.", "required": false},
+    {"name": "BREVO_SMTP_FROM_ADDRESS", "usedFor": "From address for Brevo SMTP emails. Default: info@kiki-zusammenfassung.de.", "required": false},
+    {"name": "BREVO_API_KEY", "usedFor": "Brevo transactional HTTP API key for /v3/smtp/email (used when SMTP 587 is blocked by Railway).", "required": false},
+    {"name": "REDIS_URL", "usedFor": "Redis connection URL (includes password). Activates caching and rate limiting. Dormant when empty.", "required": false},
+    {"name": "CACHE_PREFIX", "usedFor": "Redis key namespace prefix to prevent collisions between environments sharing one Redis. Default: kj.", "required": false},
+    {"name": "OBSERVABILITY_ENABLED", "usedFor": "Feature flag (0/1) — enables structured JSON logging + request-context middleware. Default 0.", "required": false},
+    {"name": "OUTBOUND_TEST_SCOPE_ONLY", "usedFor": "Safety guard (default 1=ON). Forces all outbound calls/emails to test numbers/addresses only. Set to 0 for go-live.", "required": false},
+    {"name": "OUTBOUND_TEST_NUMBER", "usedFor": "Override destination for outbound calls when scope guard is ON. Default: +917879997839.", "required": false},
+    {"name": "OUTBOUND_TEST_EMAIL", "usedFor": "Override destination for outbound emails when scope guard is ON. Default: agrawalamber01@gmail.com.", "required": false},
+    {"name": "OUTBOUND_TEST_ORG_IDS", "usedFor": "Comma-separated org UUIDs allowed to use outbound when scope guard is ON.", "required": false},
+    {"name": "OUTBOUND_OCCASION_EMAILS_ENABLED", "usedFor": "Feature flag (0/1) — enables emails attached to outbound calling occasions. Default 0.", "required": false},
+    {"name": "STRIPE_SECRET_KEY", "usedFor": "Stripe secret API key (sk_test_* or sk_live_*). Billing disabled when empty. Live key triggers additional validation.", "required": false},
+    {"name": "STRIPE_WEBHOOK_SECRET", "usedFor": "Stripe webhook signing secret (whsec_*) for verifying incoming events. Required if using live Stripe key.", "required": false},
+    {"name": "STRIPE_BILLING_ENABLED", "usedFor": "Feature flag (0/1) — mounts billing router (billing, billing_admin, stripe_webhook). Default 0.", "required": false},
+    {"name": "STRIPE_USAGE_REPORTING_ENABLED", "usedFor": "Feature flag (0/1) — enables per-call Stripe usage reporting. Requires STRIPE_BILLING_ENABLED=1. Default 0.", "required": false},
+    {"name": "BILLING_PORTAL_RETURN_URL", "usedFor": "Return URL for Stripe billing portal session. Falls back to FRONTEND_PUBLIC_URL + /settings/abrechnung.", "required": false},
+    {"name": "SENTRY_DSN", "usedFor": "Sentry DSN for error tracking. Dormant when not set — zero behavior change without it.", "required": false},
+    {"name": "VITE_API_URL", "usedFor": "Frontend: backend API base URL baked into the Vite build. Default: https://backend-production-3f88a.up.railway.app.", "required": true},
+    {"name": "VITE_SUPABASE_URL", "usedFor": "Frontend: Supabase project URL baked into Vite build for @supabase/supabase-js client.", "required": true},
+    {"name": "VITE_SUPABASE_ANON_KEY", "usedFor": "Frontend: Supabase anon (publishable) key baked into Vite build.", "required": true},
+    {"name": "VITE_COPILOT_ENABLED", "usedFor": "Frontend: build-time flag (0/1) to show/hide the copilot widget. Default 1 in prod builds.", "required": false}
+  ]
+}

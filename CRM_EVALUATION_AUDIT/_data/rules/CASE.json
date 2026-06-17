@@ -1,0 +1,1167 @@
+{
+  "domain": "Cases (Fälle / FL-)",
+  "rulePrefix": "CASE",
+  "features": [
+    {
+      "name": "Case (Fall) entity",
+      "category": "data-model",
+      "description": "A Fall (case) is a bundled grouping ticket that binds multiple inquiries (Anfragen) from the same customer into one real-world matter. The cases table is the former projects table, renamed by migration 0073. Carries title, status, customer_id, org_id, number (FL-), and an optional project_id linking it to a top-layer Projekt (PR-).",
+      "modules": [
+        "supabase/migrations/0073_case_project_split.sql",
+        "supabase/migrations/0056_cases.sql",
+        "backend/app/api/routes/cases.py"
+      ],
+      "apis": [
+        "GET /api/cases",
+        "GET /api/cases/{case_id}",
+        "POST /api/customers/{customer_id}/cases",
+        "PATCH /api/cases/{case_id}"
+      ],
+      "tables": ["cases", "inquiries", "case_employees"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": [
+        "cases.status has no DB-enforced allowed-values list post-migration (carried from old projects CHECK); check constraint needs verification",
+        "RLS on cases was originally projects_org_all (renamed via ALTER POLICY, not recreated) — still valid but relies on Supabase OID tracking"
+      ]
+    },
+    {
+      "name": "LLM case grouper (AI matchmaker)",
+      "category": "ai",
+      "description": "Given a customer's ungrouped inquiries, generates embeddings (text-embedding-3-small), uses union-find cosine clustering as candidate hints, then calls GPT-4o or GPT-4o-mini (temperature=0) to propose which inquiries belong to the same Vorgang. Pure read — writes nothing. Returns tiered proposals (auto/review/low/single) with confidence scores.",
+      "modules": [
+        "backend/app/services/cases/grouper.py",
+        "backend/app/api/routes/cases.py"
+      ],
+      "apis": ["POST /api/customers/{customer_id}/cases/propose"],
+      "tables": ["inquiries", "calls", "appointments", "ai_usage_log"],
+      "validationStatus": "RUNTIME-NEEDED",
+      "confidence": 90,
+      "risks": [
+        "LLM output coverage loop may produce single-member fallback cases when the model returns non-exhaustive JSON — those are silent (logged only)",
+        "Outlier-ejection guardrail based on cosine similarity may incorrectly eject action/follow-up calls if action keyword list is incomplete"
+      ]
+    },
+    {
+      "name": "Technician dispatch (job link)",
+      "category": "workflow",
+      "description": "From the appointment confirmation, an org user can dispatch a technician (employee with is_technician=true) via POST /api/appointments/{id}/dispatch-technician. This creates a tokenized job link, revokes prior un-submitted links for the same appointment, and emails the technician. The technician opens /job/{token} (no login required) to start, photo-upload, and submit a report.",
+      "modules": [
+        "backend/app/services/technician_jobs.py",
+        "backend/app/api/routes/appointments.py",
+        "backend/app/api/routes/public_technician.py"
+      ],
+      "apis": [
+        "POST /api/appointments/{appointment_id}/dispatch-technician",
+        "GET /api/cases/{case_id}/jobs",
+        "GET /api/public/technician/{token}"
+      ],
+      "tables": ["technician_job_links", "appointments", "employees", "documents"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 92,
+      "risks": [
+        "Email delivery failure (send_email exception) is logged but does not roll back the job link — technician has a live link but no email notification",
+        "Photo upload mirrors into documents table; if the mirror fails, the photo still counts in the report (exception is swallowed)"
+      ]
+    },
+    {
+      "name": "Case list (Fälle page)",
+      "category": "ui",
+      "description": "Split-view dirC 'Karteikarte' design. Left pane: filterable, date-grouped case list sorted by last activity (updated_at, then created_at). Right pane: case detail card with status switch, pending actions panel, quick-action tiles (Termin/KVA/Rechnung/Mitarbeiter), and five record tables (Anfragen/Termine/KVA/Rechnungen/Techniker). Deep-linkable via ?case=<id>.",
+      "modules": [
+        "frontend/src/pages/CasesPage.tsx",
+        "frontend/src/pages/cases/CaseList.tsx",
+        "frontend/src/pages/cases/CaseDetailPane.tsx",
+        "frontend/src/pages/cases/types.ts"
+      ],
+      "apis": ["GET /api/cases", "GET /api/cases/{case_id}", "GET /api/cases/{case_id}/jobs"],
+      "tables": ["cases", "inquiries", "appointments", "cost_estimates", "invoices", "case_employees"],
+      "validationStatus": "RUNTIME-NEEDED",
+      "confidence": 85,
+      "risks": [
+        "Default selection is the first (newest) case — could confuse users who deep-link to a specific case id that ends up being deselected after data refresh",
+        "techForm guard requires a case-linked appointment to exist before dispatch, but this check is frontend-only; backend validates appointment independently"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "CASE-001",
+      "name": "Case hierarchy: Call → Inquiry → Case → Project",
+      "description": "The system enforces a four-level hierarchy: a Call (Anruf) links to an Inquiry (ANF-, inquiries table) via calls.inquiry_id; an Inquiry optionally links to a Case (FL-, cases table) via inquiries.case_id; a Case optionally links to a top-layer Project (PR-, projects table) via cases.project_id. The cases table is the renamed former projects table (migration 0073). A case may have no Project (nullable), meaning small matters stay at the Case level only.",
+      "purpose": "Allows real-world matters (Vorgänge) to be grouped hierarchically from individual calls up to portfolio-level projects, while keeping small matters lightweight.",
+      "trigger": "Data model / schema constraint",
+      "preconditions": [],
+      "inputs": [],
+      "validations": [
+        "inquiries.case_id FK → cases(id) ON DELETE SET NULL",
+        "cases.project_id FK → projects(id) ON DELETE SET NULL (migration 0073)",
+        "calls.inquiry_id FK → inquiries(id) ON DELETE SET NULL (migration 0055)"
+      ],
+      "actions": [],
+      "systemEffects": [
+        "Deleting a case nulls inquiries.case_id (no inquiry data lost)",
+        "Deleting a project nulls cases.project_id (no case data lost)",
+        "Deleting an inquiry nulls calls.inquiry_id (no call data lost)"
+      ],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": [],
+      "relatedRules": ["CASE-002", "CASE-003", "CASE-004"],
+      "affectedModules": [
+        "supabase/migrations/0073_case_project_split.sql",
+        "supabase/migrations/0055_vorgang_threading.sql",
+        "supabase/migrations/0056_cases.sql"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": ["cases", "inquiries", "calls", "projects"],
+      "sourceReferences": [
+        "supabase/migrations/0073_case_project_split.sql:1-30",
+        "supabase/migrations/0055_vorgang_threading.sql:17-19",
+        "supabase/migrations/0056_cases.sql:27"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "Migration 0073 comment: 'Call → Inquiry (ANF-) → Case (FL-) → Project (PR-, restored top container)'. All three FK cascades (SET NULL) confirmed in migration DDL."
+    },
+    {
+      "id": "CASE-002",
+      "name": "Case number format: FL-{TOKEN}-{NNNN}",
+      "description": "Case numbers follow the pattern FL-{ORG_TOKEN}-{NNNN} (e.g. FL-KC007-0001). The org token is derived from company initials + slug number (e.g. 'KC007') and is persisted in organizations.case_prefix. The sequence is MAX+1 (not COUNT+1) to prevent re-issuance after deletes. A partial unique index (org_id, number) WHERE number IS NOT NULL enforces no duplicates.",
+      "purpose": "Human-readable, org-unique, rename-proof numbering that allows staff to reference cases unambiguously across tenants.",
+      "trigger": "Any case creation: POST /api/customers/{id}/cases, POST /api/cases/apply, manual apply_run.py offline run",
+      "preconditions": [
+        "org must exist in organizations table",
+        "organizations.case_prefix should exist (migration 0072); falls back to get_org_code if column missing"
+      ],
+      "inputs": ["org_id"],
+      "validations": [
+        "If organizations.case_prefix exists, use it directly",
+        "If not set, derive from company name initials + slug number, persist it, de-clash against other orgs",
+        "Partial unique index uq_cases_org_number prevents duplicate numbers within an org"
+      ],
+      "actions": [
+        "Call gen_case_number(client, org_id)",
+        "Build prefix = 'FL-{get_org_token()}-'",
+        "Query cases table for highest existing suffix with same prefix (lexical DESC, parse tail digit)",
+        "Return prefix + zero-padded (seq+1, 4 digits)"
+      ],
+      "systemEffects": [
+        "On first use for an org: persists derived token to organizations.case_prefix",
+        "Token de-clashing: if token already taken by another org, appends org code suffix"
+      ],
+      "outputs": ["case number string e.g. FL-KC007-0001"],
+      "failureConditions": [
+        "If case_prefix persistence fails (DB error), gen_case_number still works with derived token (best-effort persist)"
+      ],
+      "dependencies": ["CASE-001"],
+      "relatedRules": ["CASE-003"],
+      "affectedModules": [
+        "backend/app/services/common.py",
+        "supabase/migrations/0072_org_case_prefix.sql",
+        "supabase/migrations/0065_unique_record_numbers.sql"
+      ],
+      "affectedAPIs": [
+        "POST /api/customers/{customer_id}/cases",
+        "POST /api/cases/apply"
+      ],
+      "affectedTables": ["cases", "organizations"],
+      "sourceReferences": [
+        "backend/app/services/common.py:515-522",
+        "backend/app/services/common.py:387-452",
+        "supabase/migrations/0065_unique_record_numbers.sql:9-10"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "gen_case_number: 'Next case (Fall) number: FL-{TOKEN}-{NNNN}'. MAX+1 comment: 'MAX+1 instead of COUNT+1 (audit 2026-06-11): COUNT+1 re-issues numbers after a delete'."
+    },
+    {
+      "id": "CASE-003",
+      "name": "Case creation defaults",
+      "description": "When a case is created (via apply endpoint or direct create endpoint), it defaults to status='active', title is truncated to 120 characters, org_id is stamped from the authenticated user's org, customer_id is required, created_by is set to the authenticated user's id. For AI-created cases, description is set to 'Aus KI-Gruppierung erstellt.'",
+      "purpose": "Ensures all new cases are immediately workable (active status) and correctly tenant-scoped.",
+      "trigger": "POST /api/customers/{customer_id}/cases or POST /api/cases/apply",
+      "preconditions": [
+        "User must be authenticated and have an org_id (require_org dependency)",
+        "customer_id must exist within caller's org (validate_fk_in_org check)"
+      ],
+      "inputs": ["customer_id", "label/title (optional, max 120 chars)"],
+      "validations": [
+        "validate_fk_in_org(client, table='customers', fk_id=customer_id, org_id=org_id): HTTP 422 if customer not in org",
+        "title capped to 120 chars in apply endpoint, 120 chars in create endpoint (uses 'Neuer Fall' default)"
+      ],
+      "actions": [
+        "Insert into cases table with org_id, customer_id, title, created_by, number (gen_case_number), status='active'"
+      ],
+      "systemEffects": [
+        "New row in cases table",
+        "cases.number assigned (FL-{TOKEN}-{NNNN})"
+      ],
+      "outputs": ["Full cases row as JSON"],
+      "failureConditions": [
+        "HTTP 422 if customer_id is not in caller's org",
+        "DB unique constraint violation if two concurrent creates produce the same number (races the unique index)"
+      ],
+      "dependencies": ["CASE-002"],
+      "relatedRules": ["CASE-004", "CASE-009"],
+      "affectedModules": [
+        "backend/app/api/routes/cases.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/customers/{customer_id}/cases",
+        "POST /api/cases/apply"
+      ],
+      "affectedTables": ["cases"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:374-383",
+        "backend/app/api/routes/cases.py:210-216"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "cases.insert call in create_case: {'org_id': user.org_id, 'customer_id': customer_id, 'title': (payload.label or 'Neuer Fall')[:120], 'created_by': _uid(user), 'number': gen_case_number(client, user.org_id), 'status': 'active'}."
+    },
+    {
+      "id": "CASE-004",
+      "name": "Case status lifecycle",
+      "description": "Cases have three user-visible statuses: planning ('Offen'), active ('In Arbeit'), completed ('Fertig'). A fourth status 'archived' exists in the frontend LIST_STATUS map. Status is set at creation to 'active' for all new cases. Any status can be set by PATCH /api/cases/{case_id} without restrictions on transitions (no state machine enforcement). The UI shows status as a three-button switch.",
+      "purpose": "Allows staff to track the progress of a real-world matter through its lifecycle.",
+      "trigger": "PATCH /api/cases/{case_id} with status field",
+      "preconditions": [
+        "Case must exist within caller's org (HTTP 404 otherwise)"
+      ],
+      "inputs": ["status: planning|active|completed (schema allows archived too, per frontend code)"],
+      "validations": [
+        "Case existence + org membership check: cases.select('id').eq('org_id', org_id).eq('id', case_id)",
+        "No allowed-values validation at the API level — any string accepted (RISK)"
+      ],
+      "actions": [
+        "Update cases.status",
+        "Update cases.updated_at to current UTC timestamp"
+      ],
+      "systemEffects": ["cases.status and updated_at are updated"],
+      "outputs": ["Updated cases row"],
+      "failureConditions": [
+        "HTTP 404 if case not found in org"
+      ],
+      "dependencies": [],
+      "relatedRules": ["CASE-003"],
+      "affectedModules": [
+        "backend/app/api/routes/cases.py",
+        "frontend/src/pages/cases/types.ts",
+        "frontend/src/pages/cases/CaseDetailPane.tsx"
+      ],
+      "affectedAPIs": ["PATCH /api/cases/{case_id}"],
+      "affectedTables": ["cases"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:394-419",
+        "frontend/src/pages/cases/types.ts:94-98",
+        "frontend/src/pages/cases/CaseList.tsx:15-20"
+      ],
+      "classification": "PARTIALLY_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "CASE_STATUS in types.ts defines planning/active/completed with tones. API PATCH accepts payload.status without validating allowed values. 'archived' appears only in CaseList LIST_STATUS map (frontend display only)."
+    },
+    {
+      "id": "CASE-005",
+      "name": "Case org-scoping (multi-tenancy)",
+      "description": "Every case is scoped to its organization via cases.org_id. All API reads and writes filter by the authenticated user's org_id. The DB-level RLS policy cases_org_all (renamed from projects_org_all by migration 0073) enforces org isolation at the Supabase level for direct client queries. The service role client bypasses RLS but all service-role queries include .eq('org_id', org_id) filters explicitly.",
+      "purpose": "Prevents data leakage between tenant organizations.",
+      "trigger": "All case read/write operations",
+      "preconditions": ["User must be authenticated with a valid org_id via require_org"],
+      "inputs": ["org_id from authenticated user session"],
+      "validations": [
+        "RLS policy: org_id = auth_org_id() on cases table",
+        "case_employees RLS: checks via JOIN to cases.org_id",
+        "All service-role queries include explicit org_id filter"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [
+        "HTTP 403 if user has no org_id (require_org dependency)",
+        "HTTP 403 if org is disabled_at (require_org dependency)"
+      ],
+      "dependencies": [],
+      "relatedRules": ["CASE-003"],
+      "affectedModules": [
+        "backend/app/api/routes/cases.py",
+        "backend/app/api/deps.py",
+        "supabase/migrations/0073_case_project_split.sql"
+      ],
+      "affectedAPIs": ["GET /api/cases", "GET /api/cases/{case_id}", "PATCH /api/cases/{case_id}"],
+      "affectedTables": ["cases", "case_employees"],
+      "sourceReferences": [
+        "supabase/migrations/0073_case_project_split.sql:43",
+        "supabase/migrations/0073_case_project_split.sql:73-78",
+        "backend/app/api/deps.py:66-90",
+        "backend/app/api/routes/cases.py:53-56"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "ALTER POLICY projects_org_all ON cases RENAME TO cases_org_all; case_employees policy uses JOIN to cases table checking org_id. require_org raises HTTP 403 on missing org_id or disabled_at."
+    },
+    {
+      "id": "CASE-006",
+      "name": "LLM grouper — only proposes for UNGROUPED inquiries",
+      "description": "The grouper's _gather_signals function only fetches inquiries where case_id IS NULL. It explicitly never re-proposes already-grouped inquiries, preventing double-grouping. For customers with only 1 inquiry, the grouper returns a single-member 'single' tier result with confidence=1.0 without calling the LLM.",
+      "purpose": "Avoids orphaning already-grouped inquiries by re-stamping them with a new case_id.",
+      "trigger": "POST /api/customers/{customer_id}/cases/propose",
+      "preconditions": [
+        "Customer must exist in caller's org",
+        "Monthly AI cost cap must not be exceeded",
+        "Rate limit must not be exceeded (6 calls per 60 seconds per org)"
+      ],
+      "inputs": ["customer_id", "org_id"],
+      "validations": [
+        "Rate limit: enforce_rate_limit('cases_propose', user.org_id, max_calls=6, per_seconds=60)",
+        "Monthly AI cap: ai_usage.within_cap(user.org_id) — HTTP 429 if exceeded",
+        "Customer FK in org: validate_fk_in_org"
+      ],
+      "actions": [
+        "Fetch inquiries WHERE case_id IS NULL AND status != 'deleted' for customer",
+        "Build rich signal strings (topic + call summaries + appointment dates + customer transcript words)",
+        "If n<=1: return single-member proposal without LLM call",
+        "If n>=2: embed all signals (text-embedding-3-small), build cosine candidate clusters (threshold 0.70)",
+        "Call GPT-4o (if n>=12) or GPT-4o-mini (temperature=0, json_object response)",
+        "Post-process: coverage fill for LLM misses, outlier ejection, size-cap confidence"
+      ],
+      "systemEffects": [
+        "Logs usage to ai_usage_log table (feature='case_grouping')"
+      ],
+      "outputs": [
+        "Proposal JSON: {cases: [{label, members, confidence, reason, tier}], model, n_inquiries, tokens, cost}"
+      ],
+      "failureConditions": [
+        "HTTP 429 if rate limit exceeded",
+        "HTTP 429 with German message if monthly AI cost cap exceeded",
+        "HTTP 422 if customer not in org",
+        "LLM/embed errors: logged, fallback to one-per-inquiry proposals with confidence=0.0"
+      ],
+      "dependencies": ["CASE-005"],
+      "relatedRules": ["CASE-007", "CASE-008"],
+      "affectedModules": [
+        "backend/app/services/cases/grouper.py",
+        "backend/app/api/routes/cases.py",
+        "backend/app/services/ratelimit.py",
+        "backend/app/services/ai/usage.py"
+      ],
+      "affectedAPIs": ["POST /api/customers/{customer_id}/cases/propose"],
+      "affectedTables": ["inquiries", "calls", "appointments", "ai_usage_log"],
+      "sourceReferences": [
+        "backend/app/services/cases/grouper.py:65-74",
+        "backend/app/services/cases/grouper.py:37-44",
+        "backend/app/services/cases/grouper.py:195-213",
+        "backend/app/api/routes/cases.py:147-165"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": ".is_('case_id', 'null') filter in _gather_signals. grouper docstring: 'Only UNGROUPED inquiries — the matchmaker proposes NEW groupings for what isn't filed yet; it never re-proposes (and duplicates) existing groups.'"
+    },
+    {
+      "id": "CASE-007",
+      "name": "LLM grouper — confidence tiers and guardrails",
+      "description": "The grouper classifies each proposed case into one of four tiers: 'single' (1-member), 'auto' (confidence>=0.80), 'review' (0.50<=confidence<0.80), 'low' (confidence<0.50). Two deterministic guardrails override the LLM: (1) Outlier ejection — a TOPICAL inquiry whose max cosine similarity to its case-mates is below 0.30 is ejected to its own case; action-call inquiries (keywords: confirm/cancel/reschedule/etc.) are exempt. (2) Size-cap — a proposed case with more than 6 members can never be 'auto'; its confidence is capped at 0.79 and tier forced to 'review'.",
+      "purpose": "Prevents over-merging (the dry-run exposed failure mode) and ensures human review for large or low-confidence groupings.",
+      "trigger": "Internal to the grouper, called from propose_cases_for_customer",
+      "preconditions": [],
+      "inputs": [
+        "LLM-proposed case list",
+        "Embedding vectors (num_to_vec)",
+        "Action-flag map (num_to_action)"
+      ],
+      "validations": [
+        "_SEPARATION_FLOOR = 0.30 — below this, topical inquiries are different problems",
+        "_SIZE_REVIEW = 6 — cases larger than this can never be 'auto'",
+        "AUTO = 0.80, REVIEW = 0.50 — tier thresholds"
+      ],
+      "actions": [
+        "For each proposed case: run _eject_outliers (skip action-calls, eject if max_sim < 0.30)",
+        "Ejected inquiries become standalone single-member cases (tier='single', confidence=1.0)",
+        "If kept group size > 6: cap confidence at min(conf, 0.79), force tier='review'",
+        "Assign tier based on final confidence: >=0.80→auto, >=0.50→review, else→low"
+      ],
+      "systemEffects": [],
+      "outputs": ["Cleaned proposal list with tier, confidence, members"],
+      "failureConditions": [],
+      "dependencies": ["CASE-006"],
+      "relatedRules": ["CASE-008"],
+      "affectedModules": ["backend/app/services/cases/grouper.py"],
+      "affectedAPIs": ["POST /api/customers/{customer_id}/cases/propose"],
+      "affectedTables": [],
+      "sourceReferences": [
+        "backend/app/services/cases/grouper.py:37-44",
+        "backend/app/services/cases/grouper.py:175-193",
+        "backend/app/services/cases/grouper.py:265-288"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 92,
+      "evidence": "_eject_outliers: 'a TOPICAL member whose max similarity to the other members is below the floor is ejected'. _SIZE_REVIEW comment: 'a case bigger than _SIZE_REVIEW can never be auto; it always drops to human review regardless of the LLM's score'."
+    },
+    {
+      "id": "CASE-008",
+      "name": "LLM grouper — apply confirmed groups (materialise Cases)",
+      "description": "After the user reviews the LLM proposal, POST /api/cases/apply materialises confirmed groups. For each group: fetches only UNGROUPED (case_id IS NULL) inquiries matching the supplied inquiry numbers. If no ungrouped inquiries remain for a group (e.g. double-submit), no case is created. Creates a cases row (status='active'), then stamps inquiries.case_id, case_confidence, case_reason, and case_source='ai_confirmed'. Returns the list of created cases.",
+      "purpose": "Idempotency guard: a double-submit does not create empty cases or re-stamp already-grouped inquiries.",
+      "trigger": "POST /api/cases/apply",
+      "preconditions": [
+        "User authenticated with org (require_org)",
+        "customer_id must exist in org"
+      ],
+      "inputs": [
+        "customer_id",
+        "groups: list of {label, members: [inquiry_numbers], confidence, reason}"
+      ],
+      "validations": [
+        "validate_fk_in_org for customer_id",
+        "Only inquiry numbers that (a) belong to org/customer, (b) status != 'deleted', (c) case_id IS NULL are included",
+        "Empty members list per group: skip (no case created)",
+        "All-already-grouped members: skip (no empty case)"
+      ],
+      "actions": [
+        "For each non-empty group: fetch ungrouped matching inquiry rows",
+        "INSERT into cases (status='active', description='Aus KI-Gruppierung erstellt.')",
+        "UPDATE inquiries SET case_id=new_case.id, case_confidence=..., case_reason=..., case_source='ai_confirmed'"
+      ],
+      "systemEffects": [
+        "New cases rows created",
+        "inquiries.case_id, case_confidence, case_reason, case_source stamped"
+      ],
+      "outputs": ["{created: [{id, label, number, members}], count}"],
+      "failureConditions": [
+        "HTTP 422 if customer not in org"
+      ],
+      "dependencies": ["CASE-006", "CASE-007"],
+      "relatedRules": ["CASE-010"],
+      "affectedModules": ["backend/app/api/routes/cases.py"],
+      "affectedAPIs": ["POST /api/cases/apply"],
+      "affectedTables": ["cases", "inquiries"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:181-228",
+        "backend/app/api/routes/cases.py:196-209"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "Apply comment: 'Only fold UNGROUPED inquiries (audit 2026-06-11): the grouper proposes case_id-null only, but apply trusted client-supplied numbers. A stale/double-submit would re-stamp already-grouped inquiries — orphaning their old case as an empty row.' The .is_('case_id', 'null') filter was added as the fix."
+    },
+    {
+      "id": "CASE-009",
+      "name": "Inquiry-to-case assignment (move-inquiry)",
+      "description": "POST /api/inquiries/{inquiry_id}/case allows moving one inquiry to a different case, to a new case (with a label), or ungrouping it (case_id=null). When moving to an existing case: validates that the target case belongs to the SAME customer as the inquiry (cross-customer move is rejected). When creating a new case: creates a new cases row with status='active'. Sets case_source='human' and case_confidence=1.0 (or None if ungrouping).",
+      "purpose": "Manual override of the AI grouping; ensures an inquiry always belongs to a case that matches its customer.",
+      "trigger": "POST /api/inquiries/{inquiry_id}/case (MoveMenu UI component)",
+      "preconditions": [
+        "User authenticated with org (require_org)",
+        "Inquiry must exist in org"
+      ],
+      "inputs": [
+        "inquiry_id (path)",
+        "case_id (optional, existing case) OR new_case_label (optional, create new) OR neither (ungroup)"
+      ],
+      "validations": [
+        "Inquiry existence + org check",
+        "Same-customer guard: if moving to existing case, target case customer_id must match inquiry customer_id (HTTP 422 if mismatch)",
+        "Target case existence in org (HTTP 422 if not found)"
+      ],
+      "actions": [
+        "If new_case_label: INSERT into cases (status='active', customer_id from inquiry)",
+        "UPDATE inquiries SET case_id=target, case_source='human', case_confidence=(None or 1.0), case_reason=(None or 'manuell zugeordnet')"
+      ],
+      "systemEffects": [
+        "inquiries.case_id updated",
+        "New cases row if new_case_label provided"
+      ],
+      "outputs": ["{success: True, case_id: target}"],
+      "failureConditions": [
+        "HTTP 404 if inquiry not found in org",
+        "HTTP 422 if target case not in org",
+        "HTTP 422 if target case belongs to a different customer ('Dieser Fall gehört zu einem anderen Kunden')"
+      ],
+      "dependencies": ["CASE-005"],
+      "relatedRules": ["CASE-003", "CASE-008"],
+      "affectedModules": [
+        "backend/app/api/routes/cases.py",
+        "frontend/src/components/cases/grouping.tsx"
+      ],
+      "affectedAPIs": ["POST /api/inquiries/{inquiry_id}/case"],
+      "affectedTables": ["inquiries", "cases"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:238-287",
+        "backend/app/api/routes/cases.py:264-276",
+        "frontend/src/components/cases/grouping.tsx:39-46"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "Same-customer guard comment: 'Same-customer guard (audit 2026-06-11): a case is customer-scoped, so an inquiry may only join a case belonging to ITS customer.' HTTP 422 with German message enforced."
+    },
+    {
+      "id": "CASE-010",
+      "name": "Case umbrella view (GET /api/cases/{id})",
+      "description": "Returns a complete Fall view: case header (number, title/label, status, customer, emergency flag, project_id), member inquiries (non-deleted, ordered oldest-first), cross-inquiry timeline events (calls/appointments/KVA, newest-first), appointments, cost_estimates (via member inquiry ids), invoices (directly keyed on case_id), and assigned employees. The emergency flag is set if ANY member inquiry has emergency_flag=true.",
+      "purpose": "Single read to power the Cases right-pane card with all related records without N+1 queries.",
+      "trigger": "GET /api/cases/{case_id}",
+      "preconditions": [
+        "User authenticated with org (require_org)",
+        "case_id must belong to org (HTTP 404 if not)"
+      ],
+      "inputs": ["case_id (path)"],
+      "validations": [
+        "Case existence: cases.select('id,...').eq('org_id', org_id).eq('id', case_id)",
+        "Inquiries filtered: status != 'deleted'"
+      ],
+      "actions": [
+        "Fetch case header",
+        "Fetch member inquiries (case_id=case_id, status!=deleted)",
+        "Compute emergency = any(inquiry.emergency_flag)",
+        "Fetch customer data",
+        "In parallel: fetch calls (via inquiry_ids), appointments (via inquiry_ids), cost_estimates (via inquiry_ids)",
+        "Build cross-inquiry timeline (sort by timestamp DESC)",
+        "Fetch invoices directly by case_id",
+        "Fetch case_employees → resolve employee display names + is_technician",
+        "Compute open_count (pending appointments + draft/sent KVAs)"
+      ],
+      "systemEffects": [],
+      "outputs": ["CaseUmbrella: {case: {..., emergency}, inquiries, timeline, calls, appointments, cost_estimates, invoices, employees, open_count}"],
+      "failureConditions": [
+        "HTTP 404 if case not found in org"
+      ],
+      "dependencies": ["CASE-005", "CASE-015"],
+      "relatedRules": ["CASE-011"],
+      "affectedModules": [
+        "backend/app/api/routes/cases.py",
+        "backend/app/api/routes/calls.py"
+      ],
+      "affectedAPIs": ["GET /api/cases/{case_id}"],
+      "affectedTables": ["cases", "inquiries", "calls", "appointments", "cost_estimates", "invoices", "case_employees", "employees", "customers"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:290-299",
+        "backend/app/api/routes/calls.py:920-961",
+        "backend/app/api/routes/calls.py:1001-1067"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 94,
+      "evidence": "build_case_umbrella fetches invoices by case_id directly (not via inquiries), employees via case_employees join. _umbrella_bundle builds parallel fetches for calls/appts/kvas via inq_ids. emergency = any(bool(i.get('emergency_flag')) for i in inquiries)."
+    },
+    {
+      "id": "CASE-011",
+      "name": "Case list rollup (GET /api/cases) — batched, no N+1",
+      "description": "Returns all cases for the org with per-case rollup stats (calls count, inquiries count, open_inquiries count, appointments/done count, cost_estimates count, invoices count, employees count) and a case-level emergency flag. Queries are batched: all inquiries, all calls, all appointments, all KVAs, all invoices, all case_employees are fetched in bulk for all case_ids, then aggregated in Python. Customer names are joined in one pass.",
+      "purpose": "Powers the Cases left-pane list with rich stats without N+1 DB queries per case.",
+      "trigger": "GET /api/cases",
+      "preconditions": ["User authenticated with org (require_org)"],
+      "inputs": [],
+      "validations": [
+        "Inquiries: status != 'deleted'",
+        "Calls: deleted_at IS NULL"
+      ],
+      "actions": [
+        "Fetch all cases for org (ordered by created_at DESC)",
+        "Batch-fetch all inquiries for all case_ids",
+        "Batch-fetch calls (by inquiry_ids), appointments (by case_ids), cost_estimates (by case_ids), invoices (by case_ids), case_employees (by case_ids)",
+        "Aggregate per-case stats in Python",
+        "Compute emergency = any(bool(inquiry.emergency_flag)) per case"
+      ],
+      "systemEffects": [],
+      "outputs": ["Array of CaseListRow with stats and emergency flag"],
+      "failureConditions": [],
+      "dependencies": ["CASE-005"],
+      "relatedRules": ["CASE-004", "CASE-010"],
+      "affectedModules": ["backend/app/api/routes/cases.py"],
+      "affectedAPIs": ["GET /api/cases"],
+      "affectedTables": ["cases", "inquiries", "calls", "appointments", "cost_estimates", "invoices", "case_employees", "customers"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:46-138"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "_count_by_case helper batches all counts via .in_(col, ids). Appointments done count: status in ('completed', 'done'). Closed-inquiry definition: _CLOSED_INQ = {'completed', 'closed', 'done', 'resolved', 'deleted'}."
+    },
+    {
+      "id": "CASE-012",
+      "name": "Technician dispatch — one live link per appointment",
+      "description": "When POST /api/appointments/{id}/dispatch-technician is called: (1) revokes all existing un-submitted links for the same appointment (sets revoked_at=now()), (2) creates a new technician_job_links row with a secrets.token_urlsafe(32) token, (3) assigns the employee to the appointment (via the normal PATCH path), (4) emails the technician the tokenized job URL. A cancelled appointment cannot have a new link dispatched.",
+      "purpose": "Ensures only one live (non-revoked) link exists per appointment at any time, preventing confusion from old links.",
+      "trigger": "POST /api/appointments/{appointment_id}/dispatch-technician",
+      "preconditions": [
+        "User authenticated with org (require_org)",
+        "Appointment must not be cancelled (JobLinkError if cancelled)",
+        "Employee must have an email address (HTTP 422 if missing)"
+      ],
+      "inputs": ["appointment_id", "employee_id"],
+      "validations": [
+        "Appointment exists in org",
+        "Appointment status != 'cancelled'",
+        "Employee must have non-empty email field",
+        "Employee assignment via _patch: FK hardening + self-assignment rules apply"
+      ],
+      "actions": [
+        "Revoke prior un-submitted links: UPDATE technician_job_links SET revoked_at=now() WHERE appointment_id=... AND submitted_at IS NULL AND revoked_at IS NULL",
+        "INSERT technician_job_links with token=secrets.token_urlsafe(32), inquiry_id from appointment",
+        "PATCH appointment.assigned_employee_id = employee_id",
+        "Send email with job link URL to employee.email",
+        "UPDATE technician_job_links.email_status = 'sent'|'failed'"
+      ],
+      "systemEffects": [
+        "Prior links revoked",
+        "New technician_job_links row created",
+        "appointment.assigned_employee_id updated",
+        "Email sent (Brevo SMTP)"
+      ],
+      "outputs": ["{success: True, link_url, email_status, appointment}"],
+      "failureConditions": [
+        "HTTP 404 if appointment not found",
+        "HTTP 422 if employee has no email ('Dieser Mitarbeiter hat keine E-Mail-Adresse hinterlegt')",
+        "HTTP 422 if appointment is cancelled",
+        "Email failure: email_status='failed', link still created"
+      ],
+      "dependencies": ["CASE-013"],
+      "relatedRules": ["CASE-013", "CASE-014"],
+      "affectedModules": [
+        "backend/app/api/routes/appointments.py",
+        "backend/app/services/technician_jobs.py"
+      ],
+      "affectedAPIs": ["POST /api/appointments/{appointment_id}/dispatch-technician"],
+      "affectedTables": ["technician_job_links", "appointments", "employees"],
+      "sourceReferences": [
+        "backend/app/services/technician_jobs.py:36-61",
+        "backend/app/api/routes/appointments.py:769-833",
+        "backend/app/services/technician_jobs.py:49-53"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 94,
+      "evidence": "create_job_link: 'prior un-submitted links of the same appointment are revoked so exactly one live link exists per job'. Revoke: UPDATE ... SET revoked_at=now() WHERE appointment_id=... AND submitted_at IS NULL AND revoked_at IS NULL."
+    },
+    {
+      "id": "CASE-013",
+      "name": "Technician job link validity rules",
+      "description": "A job link (technician_job_links row) is valid if: (1) token exists, (2) revoked_at IS NULL, (3) the linked appointment is not cancelled, (4) the linked inquiry (if any) is not in 'completed' status (unless the report has already been submitted). A revoked link returns an error directing the technician to use the newest email. A submitted link can be viewed but not re-submitted.",
+      "purpose": "Prevents technicians from accessing stale or superseded job links while preserving submitted reports.",
+      "trigger": "Any public job link access (GET /job/{token}, POST start/photo/submit)",
+      "preconditions": [],
+      "inputs": ["token (URL path, capability credential)"],
+      "validations": [
+        "Token existence: HTTP 410 if not found",
+        "revoked_at check: error if revoked_at is set",
+        "Appointment status: error if appointment cancelled",
+        "Inquiry status: error if inquiry completed AND report not yet submitted"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [
+        "JobLinkError('Dieser Auftrags-Link ist ungültig') if token not found → HTTP 410",
+        "JobLinkError('Dieser Auftrags-Link wurde ersetzt') if revoked_at is set → HTTP 410",
+        "JobLinkError('Dieser Termin wurde storniert') if appointment cancelled → HTTP 410",
+        "JobLinkError('Dieser Vorgang ist bereits abgeschlossen') if inquiry completed + not yet submitted → HTTP 410"
+      ],
+      "dependencies": [],
+      "relatedRules": ["CASE-012", "CASE-014"],
+      "affectedModules": ["backend/app/services/technician_jobs.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["technician_job_links", "appointments", "inquiries"],
+      "sourceReferences": [
+        "backend/app/services/technician_jobs.py:152-188",
+        "backend/app/services/technician_jobs.py:184-188"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": "_load_link: raises JobLinkError on revoked. _load_context: 'if inquiry and inquiry.get(status)==completed and not link.get(submitted_at): raise JobLinkError'. Appointment cancelled check also in _load_context."
+    },
+    {
+      "id": "CASE-014",
+      "name": "Technician job report submission rules",
+      "description": "Submitting a job report via submit_job requires: (1) at least one photo uploaded, (2) a non-empty description (2000 char max). Optional fields: experience_good, extra_demands, site_visit_notes, job_started (default True), job_finished, needs (array, max 10 items). Submission is one-way (idempotent guard: re-submit rejected). On submit: sets submitted_at, conditionally sets started_at (if not already set) and finished_at (if job_finished=True). start_job is idempotent (returns existing started_at if already set).",
+      "purpose": "Ensures reports are complete (photo + description) and cannot be accidentally re-submitted.",
+      "trigger": "Technician clicks submit on /job/{token} public form",
+      "preconditions": [
+        "Link must be valid (CASE-013)",
+        "submitted_at must be NULL (not already submitted)"
+      ],
+      "inputs": [
+        "description (required, max 2000 chars)",
+        "photo_paths (must have >=1 photo already uploaded)",
+        "experience_good (bool, optional)",
+        "extra_demands (str, optional)",
+        "site_visit_notes (str, optional)",
+        "job_started (bool, default True)",
+        "job_finished (bool, optional)",
+        "needs (array of str, max 10 items)"
+      ],
+      "validations": [
+        "submitted_at IS NULL (otherwise JobLinkError: 'Dieser Auftrag wurde bereits abgeschlossen')",
+        "description.strip() must be non-empty (JobLinkError if empty)",
+        "photo_paths must have >=1 entry (JobLinkError if none: 'Bitte laden Sie mindestens ein Foto hoch')"
+      ],
+      "actions": [
+        "Set report = {experience_good, extra_demands, site_visit_notes, job_started, job_finished, needs, description}",
+        "SET submitted_at=now()",
+        "If started_at was NULL: SET started_at=now()",
+        "If job_finished=True and finished_at NULL: SET finished_at=now()"
+      ],
+      "systemEffects": [
+        "technician_job_links.report, submitted_at, started_at, finished_at updated"
+      ],
+      "outputs": ["{submitted_at: timestamp}"],
+      "failureConditions": [
+        "JobLinkError on link invalidity, already-submitted, missing description, no photos"
+      ],
+      "dependencies": ["CASE-013"],
+      "relatedRules": ["CASE-015"],
+      "affectedModules": ["backend/app/services/technician_jobs.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["technician_job_links"],
+      "sourceReferences": [
+        "backend/app/services/technician_jobs.py:310-342",
+        "backend/app/services/technician_jobs.py:319-323"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 94,
+      "evidence": "submit_job: 'requires an end-of-job description and >=1 photo (always, not only when finished)'. Guards: 'if not description: raise JobLinkError' + 'if not (link.get(photo_paths) or []): raise JobLinkError'."
+    },
+    {
+      "id": "CASE-015",
+      "name": "Technician job photo upload rules",
+      "description": "Photos are uploaded via add_photo, stored in Supabase Storage bucket 'customer-files' at path {org_id}/jobs/{link_id}/{uuid}_{filename}. Max 30 photos per job link. Max 10 MB per photo. Only image MIME types accepted. On each upload, a mirror row is inserted into the documents table (category='Einsatzbericht', is_image=True, inquiry_id and case_id stamped, uploaded_by_name='Techniker: {display_name}'). Mirror failures are swallowed (photo still counted).",
+      "purpose": "Photos are accessible both in the job report and in the customer's documents tab with technician attribution.",
+      "trigger": "Technician uploads photo via /job/{token} form",
+      "preconditions": [
+        "Link must be valid and not yet submitted",
+        "MIME type must be image/*",
+        "File size must be <=10 MB",
+        "Current photo count < 30"
+      ],
+      "inputs": ["token", "filename", "content (bytes)", "mime_type"],
+      "validations": [
+        "Link validity (CASE-013)",
+        "submitted_at IS NULL",
+        "mime_type.startswith('image/')",
+        "len(content) <= MAX_PHOTO_BYTES (10 MB)",
+        "len(photo_paths) < MAX_PHOTOS (30)"
+      ],
+      "actions": [
+        "Sanitize filename: replace '/' with '_', truncate to 80 chars",
+        "Upload to Supabase Storage: {org_id}/jobs/{link_id}/{uuid}_{filename}",
+        "Append path to technician_job_links.photo_paths",
+        "Mirror: INSERT into documents (org_id, customer_id, inquiry_id, case_id, name, path, category='Einsatzbericht', mime_type, is_image=True, size_bytes, uploaded_by_name)"
+      ],
+      "systemEffects": [
+        "File stored in Supabase Storage bucket 'customer-files'",
+        "technician_job_links.photo_paths updated",
+        "documents row inserted (best-effort)"
+      ],
+      "outputs": ["{photo_count: N}"],
+      "failureConditions": [
+        "JobLinkError on link invalid, submitted, wrong MIME, too large, too many photos",
+        "Storage upload failure raises exception (not caught: blocks the upload)",
+        "Documents mirror failure: swallowed, photo still counted"
+      ],
+      "dependencies": ["CASE-013"],
+      "relatedRules": ["CASE-014"],
+      "affectedModules": ["backend/app/services/technician_jobs.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["technician_job_links", "documents"],
+      "sourceReferences": [
+        "backend/app/services/technician_jobs.py:255-307",
+        "backend/app/services/technician_jobs.py:265-266",
+        "backend/app/services/technician_jobs.py:279-306"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 91,
+      "evidence": "MAX_PHOTO_BYTES = 10 * 1024 * 1024, MAX_PHOTOS = 30, PHOTO_BUCKET = 'customer-files'. Documents mirror comment: 'Mirror into the customer's documents so the CRM shows the photos in place. Stamped with inquiry + Fall (case) + technician name'."
+    },
+    {
+      "id": "CASE-016",
+      "name": "Case jobs list (GET /api/cases/{id}/jobs)",
+      "description": "Returns all non-revoked technician dispatch records for a Fall, derived from all member inquiries. Each record includes: employee name, appointment title+scheduled_at, computed status (offen/läuft/abgeschlossen), started_at, finished_at, submitted_at, photo_count, report, and a tokenized job link URL. Revoked links (revoked_at IS NOT NULL) are excluded so only the live link per appointment is shown.",
+      "purpose": "Powers the Techniker table in the case detail pane, showing the full dispatch history for a matter.",
+      "trigger": "GET /api/cases/{case_id}/jobs",
+      "preconditions": [
+        "User authenticated with org (require_org)",
+        "case_id must exist in org (validate_fk_in_org)"
+      ],
+      "inputs": ["case_id"],
+      "validations": [
+        "validate_fk_in_org(client, table='cases', fk_id=case_id, org_id=org_id)"
+      ],
+      "actions": [
+        "Fetch inquiry_ids for case (status != 'deleted')",
+        "If no inquiries: return []",
+        "Fetch technician_job_links WHERE inquiry_id IN (...) AND revoked_at IS NULL",
+        "Batch-fetch employee display_names and appointment title/scheduled_at",
+        "Compute status: if submitted_at → 'abgeschlossen'; elif started_at → 'läuft'; else → 'offen'",
+        "Build job_link_url(token) from settings.frontend_public_url"
+      ],
+      "systemEffects": [],
+      "outputs": ["Array of CaseJob with status, url, report, photo_count"],
+      "failureConditions": [
+        "HTTP 422 if case_id not in org (validate_fk_in_org)"
+      ],
+      "dependencies": ["CASE-005", "CASE-012"],
+      "relatedRules": ["CASE-012", "CASE-013"],
+      "affectedModules": [
+        "backend/app/api/routes/cases.py",
+        "backend/app/services/technician_jobs.py"
+      ],
+      "affectedAPIs": ["GET /api/cases/{case_id}/jobs"],
+      "affectedTables": ["technician_job_links", "cases", "inquiries", "employees", "appointments"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:310-360",
+        "backend/app/api/routes/cases.py:302-307"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "_job_status: 'if link.get(submitted_at): return abgeschlossen; if link.get(started_at): return läuft; return offen'. .is_('revoked_at', 'null') filter explicitly excludes revoked links."
+    },
+    {
+      "id": "CASE-017",
+      "name": "Case employee assignment (case_employees)",
+      "description": "Employees can be assigned to a Fall via POST /api/cases/{id}/employees. Assignment is idempotent (duplicate-checked before insert). Employees can be removed via DELETE /api/cases/{id}/employees/{employee_id}. The employee must be active (require_active=True in validate_fk_in_org). No role restriction — any org user can assign/remove employees from a case.",
+      "purpose": "Tracks which employees are working on a matter for team visibility.",
+      "trigger": "POST /api/cases/{case_id}/employees or DELETE /api/cases/{case_id}/employees/{employee_id}",
+      "preconditions": [
+        "User authenticated with org (require_org)",
+        "Case must exist in org",
+        "Employee must be active and in org"
+      ],
+      "inputs": ["case_id", "employee_id"],
+      "validations": [
+        "validate_fk_in_org for case (label='Fall')",
+        "validate_fk_in_org for employee with require_active=True (label='Mitarbeiter'): checks deleted=False"
+      ],
+      "actions": [
+        "Assign: check for existing case_employees row; insert if not found",
+        "Remove: DELETE from case_employees WHERE case_id=... AND employee_id=..."
+      ],
+      "systemEffects": [
+        "case_employees row inserted or deleted"
+      ],
+      "outputs": ["{success: True}"],
+      "failureConditions": [
+        "HTTP 422 if case not in org",
+        "HTTP 422 if employee not active/not in org"
+      ],
+      "dependencies": ["CASE-005"],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/api/routes/cases.py"],
+      "affectedAPIs": [
+        "POST /api/cases/{case_id}/employees",
+        "DELETE /api/cases/{case_id}/employees/{employee_id}"
+      ],
+      "affectedTables": ["case_employees", "cases", "employees"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:426-455",
+        "backend/app/api/routes/cases.py:433"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "add_case_employee: validate_fk_in_org(... table='employees' ... require_active=True). Idempotent: 'if not dup: client.table(case_employees).insert(...)'. RLS on case_employees checks via JOIN to cases.org_id."
+    },
+    {
+      "id": "CASE-018",
+      "name": "Case-to-project link (PATCH /api/cases/{id} project_id)",
+      "description": "A case can be linked to a top-layer Projekt (PR-) via PATCH /api/cases/{id} with project_id field. Setting project_id to empty string unlinks the case from its project (sets project_id to NULL). The target project must exist within the same org. The UI presents this as 'Zu Projekt hinzufügen' / 'ändern' / 'Aus Projekt lösen' and also provides 'Neues Projekt erstellen' navigation.",
+      "purpose": "Allows grouping multiple cases under a top-layer Projekt for complex multi-case engagements.",
+      "trigger": "PATCH /api/cases/{case_id} with project_id",
+      "preconditions": [
+        "User authenticated with org (require_org)",
+        "Case must exist in org"
+      ],
+      "inputs": ["case_id", "project_id (UUID or empty string to unlink)"],
+      "validations": [
+        "If project_id is non-empty: validate_fk_in_org(client, table='projects', fk_id=pid, org_id=org_id, label='Projekt')"
+      ],
+      "actions": [
+        "If project_id is empty string: set fields['project_id'] = None",
+        "If project_id is UUID: validate + set fields['project_id'] = pid",
+        "UPDATE cases.project_id, cases.updated_at"
+      ],
+      "systemEffects": ["cases.project_id updated"],
+      "outputs": ["Updated cases row"],
+      "failureConditions": [
+        "HTTP 404 if case not in org",
+        "HTTP 422 if project not in org"
+      ],
+      "dependencies": ["CASE-005"],
+      "relatedRules": ["CASE-001"],
+      "affectedModules": [
+        "backend/app/api/routes/cases.py",
+        "frontend/src/pages/cases/CaseDetailPane.tsx"
+      ],
+      "affectedAPIs": ["PATCH /api/cases/{case_id}"],
+      "affectedTables": ["cases", "projects"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:405-417",
+        "frontend/src/pages/cases/CaseDetailPane.tsx:363-381"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 92,
+      "evidence": "PATCH handler: 'if payload.project_id is not None: pid = payload.project_id or None; if pid: validate_fk_in_org(... table=projects ...)'. Empty string becomes None (unlink). Frontend: 'Aus Projekt lösen' calls patchCase.mutate({ project_id: '' })."
+    },
+    {
+      "id": "CASE-019",
+      "name": "Case emergency flag rollup from inquiries",
+      "description": "A case displays as 'Notdienst' (emergency) if any of its member inquiries has emergency_flag=true. This is computed dynamically in both the list endpoint (GET /api/cases) and the umbrella endpoint (GET /api/cases/{id}); it is not stored on the cases table itself. In the list, it is also computed for the stats rollup. The frontend shows a pulsing red dot and a 'Notdienst' badge on emergency cases.",
+      "purpose": "Surfaces emergency cases immediately in the list view so urgent matters are not missed.",
+      "trigger": "GET /api/cases and GET /api/cases/{case_id}",
+      "preconditions": [],
+      "inputs": ["member inquiries with emergency_flag field"],
+      "validations": [],
+      "actions": [
+        "Compute: emergency = any(bool(i.get('emergency_flag')) for i in member_inquiries)"
+      ],
+      "systemEffects": [],
+      "outputs": ["emergency: bool on CaseListRow and CaseUmbrella.case"],
+      "failureConditions": [],
+      "dependencies": ["CASE-010", "CASE-011"],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/api/routes/cases.py",
+        "backend/app/api/routes/calls.py",
+        "frontend/src/pages/cases/CaseList.tsx",
+        "frontend/src/pages/cases/CaseDetailPane.tsx"
+      ],
+      "affectedAPIs": ["GET /api/cases", "GET /api/cases/{case_id}"],
+      "affectedTables": ["inquiries"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:124-125",
+        "backend/app/api/routes/calls.py:944-945",
+        "frontend/src/pages/cases/CaseList.tsx:88-89"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": "List: 'emergency: any(bool(i.get(emergency_flag)) for i in members)'. Umbrella: 'header[emergency] = any(bool(i.get(emergency_flag)) for i in inquiries)'. Emergency also available as status filter option 'Notdienst' in the UI."
+    },
+    {
+      "id": "CASE-020",
+      "name": "Offline case grouper (apply_run.py) — idempotent full-org re-group",
+      "description": "The apply_run.py script is an offline tool that re-groups all inquiries for an org from scratch. It first clears the org's existing cases (DELETE) and nulls all inquiry grouping fields (case_id, case_confidence, case_reason, case_source), then re-proposes and materialises cases for every customer. The case_source is set to 'ai' (not 'ai_confirmed'). This is destructive and not exposed as an API — only runnable from the server CLI.",
+      "purpose": "Allows a full org re-grouping for development/testing; the web endpoint (POST /api/cases/apply) is the production path.",
+      "trigger": "CLI: cd backend && .venv/bin/python -m app.services.cases.apply_run [org_prefix]",
+      "preconditions": [
+        "OPENAI_API_KEY must be configured",
+        "Monthly AI cost cap must not be exceeded"
+      ],
+      "inputs": ["org_id prefix (first 8 chars)"],
+      "validations": [
+        "ai_client.is_configured()",
+        "ai_usage.within_cap(org_id)"
+      ],
+      "actions": [
+        "NULL all inquiry grouping fields for org",
+        "DELETE all cases for org (inquiries.case_id auto-nulls via FK ON DELETE SET NULL)",
+        "For each customer: propose groups, materialise cases, stamp inquiries (case_source='ai')"
+      ],
+      "systemEffects": [
+        "All existing cases for org deleted",
+        "All inquiry.case_id nulled",
+        "New cases created (only for multi-inquiry merges)"
+      ],
+      "outputs": ["Console log of created cases"],
+      "failureConditions": [
+        "Exits if OPENAI not configured or monthly cap exceeded"
+      ],
+      "dependencies": ["CASE-006", "CASE-007"],
+      "relatedRules": ["CASE-008"],
+      "affectedModules": ["backend/app/services/cases/apply_run.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["cases", "inquiries"],
+      "sourceReferences": [
+        "backend/app/services/cases/apply_run.py:37-41",
+        "backend/app/services/cases/apply_run.py:1-7"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "apply_run.py docstring: 'Idempotent: clears the org's existing cases first (case_id auto-nulls via ON DELETE SET NULL), then re-groups every customer'. case_source='ai' (not 'ai_confirmed', which is the human-confirmed path)."
+    },
+    {
+      "id": "CASE-021",
+      "name": "Case display list filtering and sort",
+      "description": "The frontend CaseList component provides: text search (customer_name or title, case-insensitive), status filter (Notdienst/planning/active/completed/all), contact filter (by customer_name). Sort is always by last activity (updated_at, falling back to created_at, newest first). Date dividers (Heute/Gestern/full date) are shown above groups. Filters are client-side only (no server filtering). Default selection after page load: explicit ?case= param, else first (newest) case.",
+      "purpose": "Provides quick triage of cases by urgency (emergency at top), status, and customer.",
+      "trigger": "UI interaction on CasesPage",
+      "preconditions": [],
+      "inputs": ["cases array from GET /api/cases"],
+      "validations": [],
+      "actions": [
+        "Apply search filter on customer_name and title",
+        "Apply status filter (emergency = c.emergency boolean, or c.status match)",
+        "Apply contact filter on customer_name",
+        "Sort by ts(updated_at || created_at) descending"
+      ],
+      "systemEffects": [],
+      "outputs": ["Filtered, grouped, sorted case rows"],
+      "failureConditions": [],
+      "dependencies": ["CASE-011"],
+      "relatedRules": [],
+      "affectedModules": [
+        "frontend/src/pages/cases/CaseList.tsx",
+        "frontend/src/pages/CasesPage.tsx"
+      ],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": [
+        "frontend/src/pages/cases/CaseList.tsx:105-113",
+        "frontend/src/pages/cases/CaseList.tsx:128-134"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "filtered = cases.filter((c) => (!q || ...).includes(q)) && (statusF==='all' || (statusF==='emergency' ? c.emergency : c.status === statusF)). Sort: (a, b) => ts(b.updated_at || b.created_at) - ts(a.updated_at || a.created_at)."
+    },
+    {
+      "id": "CASE-022",
+      "name": "Technician portal (standing link, no-login)",
+      "description": "Each technician has an optional technician_portal_token on their employees row (migration 0066, unique index). GET /api/public/technician/{token} returns the technician's full job history (newest 100 jobs): revoked+unsubmitted links are hidden, as are cancelled appointments with no submitted report. Submitted reports are shown forever (permanent track record). No auth required — the unguessable token IS the credential.",
+      "purpose": "Gives technicians a persistent view of all their jobs without requiring app login.",
+      "trigger": "GET /api/public/technician/{token}",
+      "preconditions": [],
+      "inputs": ["technician_portal_token (URL path)"],
+      "validations": [
+        "Employee row must exist and not be deleted (deleted=False)",
+        "If deleted: JobLinkError('Dieser Techniker-Link ist ungültig') → HTTP 410"
+      ],
+      "actions": [
+        "Fetch employee by technician_portal_token",
+        "Fetch latest 100 job links for employee",
+        "Filter out: revoked+unsubmitted links; cancelled appointments with no submitted report",
+        "Resolve appointment title, scheduled_at, customer name+address",
+        "Compute job status per link"
+      ],
+      "systemEffects": [],
+      "outputs": ["{technician_name, org_name, jobs: [{job_token, title, scheduled_at, customer_name, customer_address, status, submitted_at, photo_count}]}"],
+      "failureConditions": [
+        "HTTP 410 if token invalid or employee deleted"
+      ],
+      "dependencies": [],
+      "relatedRules": ["CASE-012"],
+      "affectedModules": [
+        "backend/app/services/technician_jobs.py",
+        "backend/app/api/routes/public_technician.py"
+      ],
+      "affectedAPIs": ["GET /api/public/technician/{token}"],
+      "affectedTables": ["employees", "technician_job_links", "appointments", "customers", "organizations"],
+      "sourceReferences": [
+        "backend/app/services/technician_jobs.py:74-149",
+        "backend/app/services/technician_jobs.py:118-123",
+        "supabase/migrations/0066_technician_phone_portal.sql:11-17"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "get_technician_portal: 'Hide superseded/cancelled links that never produced a report; keep every SUBMITTED one forever — that's the technician's track record.' technician_portal_token unique index: uq_employees_technician_portal_token WHERE technician_portal_token IS NOT NULL."
+    },
+    {
+      "id": "CASE-023",
+      "name": "Vorgang thread view (inquiry-level, GET /api/inquiries/{id}/thread)",
+      "description": "The VorgangThreadPage renders a single inquiry (Anfrage) as a thread: inquiry header + chronological timeline (calls, appointment lifecycle events, KVA events, technician job events) + raw record lists. Related inquiries are fetched from case_links (related/duplicate). This is the older inquiry-level view; the new Cases split-view (CasesPage) operates at the case level (multiple inquiries). The thread view still exists and is navigable.",
+      "purpose": "Provides a detailed per-inquiry view for staff to track the full lifecycle of a single Anfrage.",
+      "trigger": "GET /api/inquiries/{inquiry_id}/thread (from VorgangThreadPage)",
+      "preconditions": [
+        "User authenticated with org (require_org)",
+        "Inquiry must exist in org"
+      ],
+      "inputs": ["inquiry_id"],
+      "validations": [],
+      "actions": [
+        "build_case_thread(org_id, inquiry_id)",
+        "Append related cases from case_links",
+        "Return: {inquiry, timeline, calls, appointments, cost_estimates, related, open_count}"
+      ],
+      "systemEffects": [],
+      "outputs": ["CaseThread bundle"],
+      "failureConditions": [
+        "HTTP 404 if inquiry not found in org"
+      ],
+      "dependencies": [],
+      "relatedRules": ["CASE-010"],
+      "affectedModules": [
+        "backend/app/api/routes/inquiries.py",
+        "backend/app/api/routes/calls.py",
+        "frontend/src/pages/VorgangThreadPage.tsx"
+      ],
+      "affectedAPIs": ["GET /api/inquiries/{inquiry_id}/thread"],
+      "affectedTables": ["inquiries", "calls", "appointments", "cost_estimates", "case_links"],
+      "sourceReferences": [
+        "backend/app/api/routes/calls.py:784-917",
+        "backend/app/api/routes/inquiries.py:235-244",
+        "frontend/src/pages/VorgangThreadPage.tsx:28-79"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "build_case_thread docstring: 'One Vorgang (case) = one thread. Returns the case header + a single chronological timeline of EVERY call (inbound + outbound), appointment, KVA and status change tied to this inquiry'. Technician job events also appended from job_events_for_inquiry."
+    },
+    {
+      "id": "CASE-024",
+      "name": "Inquiry-case linking audit trail",
+      "description": "Every time an inquiry's case assignment changes, three audit fields on the inquiry row are updated: case_confidence (float 0-1, null=ungrouped), case_reason (text, max 200 chars, null=ungrouped), and case_source ('ai' = offline run, 'ai_confirmed' = human-reviewed AI proposal, 'human' = manual move, null = ungrouped). This provides a full audit of how each inquiry was grouped.",
+      "purpose": "Staff can see WHY an inquiry is in a case (LLM confidence + reason) and HOW it was assigned (AI vs human).",
+      "trigger": "Any case assignment: apply run, move-inquiry, apply endpoint",
+      "preconditions": [],
+      "inputs": [],
+      "validations": [],
+      "actions": [
+        "On AI grouping (apply_run): case_source='ai'",
+        "On human-reviewed AI grouping (POST /api/cases/apply): case_source='ai_confirmed'",
+        "On manual move (POST /api/inquiries/{id}/case): case_source='human', case_confidence=1.0, case_reason='manuell zugeordnet'",
+        "On ungroup: case_source=null, case_confidence=null, case_reason=null"
+      ],
+      "systemEffects": [
+        "inquiries.case_confidence, case_reason, case_source updated"
+      ],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": ["CASE-008", "CASE-009", "CASE-020"],
+      "relatedRules": [],
+      "affectedModules": [
+        "backend/app/api/routes/cases.py",
+        "backend/app/services/cases/apply_run.py"
+      ],
+      "affectedAPIs": [
+        "POST /api/cases/apply",
+        "POST /api/inquiries/{inquiry_id}/case"
+      ],
+      "affectedTables": ["inquiries"],
+      "sourceReferences": [
+        "backend/app/api/routes/cases.py:218-222",
+        "backend/app/api/routes/cases.py:277-281",
+        "backend/app/services/cases/apply_run.py:74-76",
+        "supabase/migrations/0056_cases.sql:28-30"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "apply endpoint stamps case_source='ai_confirmed'. Move-inquiry stamps case_source='human', case_confidence=1.0, case_reason='manuell zugeordnet'. Ungroup sets all three to null. Migration 0056 adds the three audit columns."
+    },
+    {
+      "id": "CASE-025",
+      "name": "Technician job events in case timeline",
+      "description": "Technician job lifecycle events are threaded into the inquiry/case timeline via job_events_for_inquiry. Three event types are emitted: 'technician_dispatched' (at created_at, only for non-revoked links), 'technician_job_started' (at started_at), 'technician_report_submitted' (at submitted_at, includes report summary and photo_count). Revoked dispatch events are excluded from the timeline. Job event failures are swallowed to never break the thread view.",
+      "purpose": "Provides a unified case timeline that includes field technician activity alongside calls and appointments.",
+      "trigger": "build_case_thread or _umbrella_bundle construction (read-time)",
+      "preconditions": [],
+      "inputs": ["org_id", "inquiry_id"],
+      "validations": [
+        "Only non-revoked links emit 'technician_dispatched' events (revoked_at IS NULL check)"
+      ],
+      "actions": [
+        "Fetch all job links for inquiry_id (including revoked)",
+        "For non-revoked: emit 'technician_dispatched' event at created_at",
+        "If started_at: emit 'technician_job_started' event",
+        "If submitted_at: emit 'technician_report_submitted' event with report description"
+      ],
+      "systemEffects": [],
+      "outputs": ["List of timeline events with kind/timestamp/actor/description/extras"],
+      "failureConditions": [
+        "Any exception: swallowed, no events emitted (build_case_thread guard: 'never break the thread view on job rows')"
+      ],
+      "dependencies": ["CASE-014"],
+      "relatedRules": ["CASE-023"],
+      "affectedModules": ["backend/app/services/technician_jobs.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["technician_job_links", "employees"],
+      "sourceReferences": [
+        "backend/app/services/technician_jobs.py:345-391",
+        "backend/app/api/routes/calls.py:885-892"
+      ],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 92,
+      "evidence": "job_events_for_inquiry: 'if l.get(created_at) and not l.get(revoked_at): events.append({kind: technician_dispatched})'. build_case_thread: 'try: events.extend(job_events_for_inquiry(...)) except Exception: pass'."
+    }
+  ]
+}

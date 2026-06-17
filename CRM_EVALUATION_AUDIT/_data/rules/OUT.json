@@ -1,0 +1,1154 @@
+{
+  "domain": "Outbound Calls & Dispatch",
+  "rulePrefix": "OUT",
+  "features": [
+    {
+      "name": "ElevenLabs Outbound Call Placement",
+      "category": "Telephony Integration",
+      "description": "Wraps the ElevenLabs POST /v1/convai/twilio/outbound-call API. Passes agent_id, agent_phone_number_id (Twilio-linked), to_number, call_recording_enabled, and per-call conversation_initiation_client_data (dynamic_variables + conversation_config_override). Raises OutboundCallError on non-200 or success=false.",
+      "modules": ["backend/app/services/outbound_call.py"],
+      "apis": ["POST https://api.elevenlabs.io/v1/convai/twilio/outbound-call"],
+      "tables": ["organizations"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 98,
+      "risks": [
+        "No retry on transient ElevenLabs 5xx — a single failed POST marks the ledger row 'failed'",
+        "30s HTTP timeout; a slow ElevenLabs response blocks the sweep thread",
+        "agent_phone_number_id not validated against ElevenLabs at dispatch time — a stale value causes a silent 4xx failure"
+      ]
+    },
+    {
+      "name": "Scheduled Sweep (run_due_outbound)",
+      "category": "Automation",
+      "description": "Registry-driven sweep across all outbound-enabled orgs. Dispatches every due occasion. Triggered by external cron/N8N via POST /api/outbound/run-due-reminders (secret-protected). Includes short-hangup retries and reschedule expiry sub-sweeps.",
+      "modules": ["backend/app/services/outbound_dispatch.py", "backend/app/api/routes/outbound.py"],
+      "apis": ["POST /api/outbound/run-due-reminders"],
+      "tables": ["agent_configs", "outbound_calls", "appointments", "cost_estimates", "invoices", "maintenance_plans", "missed_calls", "inquiries", "customers", "organizations"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": [
+        "No in-repo scheduler — relies 100% on external cron/N8N; if that stops, no calls fire",
+        "Sweep is synchronous per org/occasion — a slow ElevenLabs response delays all subsequent records",
+        "Sweep processes a single DB snapshot; records modified mid-sweep get the stale version"
+      ]
+    },
+    {
+      "name": "Manual Single Dispatch (send_single_outbound)",
+      "category": "UAT / Manual Trigger",
+      "description": "Ad-hoc single-record dispatch callable via POST /api/outbound/send (org-scoped, requires login). Bypasses time-window, weekday, and case-gate checks. to_number_override dials a test number and skips the ledger (repeatable).",
+      "modules": ["backend/app/services/outbound_dispatch.py", "backend/app/api/routes/outbound.py"],
+      "apis": ["POST /api/outbound/send"],
+      "tables": ["outbound_calls", "organizations", "appointments", "cost_estimates", "invoices", "maintenance_plans", "missed_calls", "customers"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": [
+        "Bypasses all time gates — can place calls outside configured hours",
+        "Bypasses close-case gate — can call on a closed case"
+      ]
+    },
+    {
+      "name": "Occasion Registry",
+      "category": "Configuration",
+      "description": "OccasionSpec dataclass registry (OCCASIONS dict) holding 10 occasion keys: appointment_reminder, kva_followup, payment_reminder, satisfaction_survey, review_request, maintenance_due, missed_callback, appointment_confirmation, appointment_cancellation, appointment_reschedule. Each spec declares select/render functions, idempotency behaviour, case gate, email renderer, and org flags.",
+      "modules": ["backend/app/services/outbound_occasions.py"],
+      "apis": [],
+      "tables": ["appointments", "cost_estimates", "invoices", "inquiries", "maintenance_plans", "missed_calls"],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 98,
+      "risks": [
+        "maintenance_due and missed_callback have no real-world data writers yet (stubs/manual seeding)",
+        "missed_callback depends on a Twilio status-callback writer that is not built"
+      ]
+    },
+    {
+      "name": "Scope Guard (OUTBOUND_TEST_SCOPE_ONLY)",
+      "category": "Safety",
+      "description": "Environment-variable safety net. When ON (default=True): refuses calls/emails to any org not in OUTBOUND_TEST_ORG_IDS; forces all calls to OUTBOUND_TEST_NUMBER and all emails to OUTBOUND_TEST_EMAIL. When OFF: passes real destinations through. Applied to email in dispatch sweep; applied to calls only in appointment_notify (click path). The sweep phone-call path does NOT call enforce_call_scope.",
+      "modules": ["backend/app/services/outbound_scope.py", "backend/app/core/config.py", "backend/app/services/appointment_notify.py"],
+      "apis": [],
+      "tables": [],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 97,
+      "risks": [
+        "CRITICAL: enforce_call_scope is NOT called in the scheduled sweep path (outbound_dispatch._dispatch_one). Scope guard on the sweep is only applied for emails, not for the actual phone call. In-scope orgs in the sweep will dial the real customer number even when OUTBOUND_TEST_SCOPE_ONLY=True.",
+        "Setting OUTBOUND_TEST_SCOPE_ONLY=0 enables live calls to real customers globally — no per-org granularity"
+      ]
+    },
+    {
+      "name": "Occasion Email Side-Effect",
+      "category": "Email",
+      "description": "Per-occasion email fires alongside each placed call. The 3 appointment-click occasions (confirmation, cancellation, reschedule) always send email (email_always=True). The 7 sweep occasions send only when OUTBOUND_OCCASION_EMAILS_ENABLED=True (defaults False — ships inert). Email is best-effort, capped at 5s in a daemon thread; failure never affects the placed call.",
+      "modules": ["backend/app/services/outbound_dispatch.py", "backend/app/services/occasion_emails.py"],
+      "apis": [],
+      "tables": [],
+      "validationStatus": "CODE-ONLY",
+      "confidence": 95,
+      "risks": [
+        "5s timeout cap means email may be abandoned silently on slow SMTP provider",
+        "Cluster C emails (7 occasions) ship wired but inert — easy to accidentally enable globally"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "OUT-001",
+      "name": "ElevenLabs Outbound Call Placement",
+      "description": "All outbound calls are placed via a single authenticated POST to ElevenLabs /v1/convai/twilio/outbound-call. The call requires agent_id (org's ElevenLabs agent), agent_phone_number_id (the ElevenLabs ID of the imported Twilio number — separate from agent_id), and to_number. Per-call conversation personalisation is sent as conversation_initiation_client_data containing dynamic_variables (structured ID/occasion layer) and conversation_config_override (occasion-specific first_message, language='de', system prompt). call_recording_enabled defaults to True.",
+      "purpose": "ElevenLabs owns the Twilio integration natively; no separate Twilio dial/TwiML layer is needed. Per-call overrides allow occasion-specific German prompts without touching the stored agent config.",
+      "trigger": "Called by outbound_dispatch._dispatch_one for every non-dry-run, non-skipped dispatch",
+      "preconditions": [
+        "org.elevenlabs_agent_id is non-empty",
+        "org.elevenlabs_phone_number_id is non-empty",
+        "to_number is non-empty"
+      ],
+      "inputs": [
+        "agent_id: str",
+        "agent_phone_number_id: str",
+        "to_number: str",
+        "dynamic_variables: dict (outboundCallId, organisationId, anlassTyp, kundeId, kundenName, voicemailMessage, referenzTyp, referenzId)",
+        "conversation_config_override: dict (agent.first_message, agent.language='de', agent.prompt.prompt)",
+        "call_recording_enabled: bool (default True)"
+      ],
+      "validations": [
+        "Raises OutboundCallError if agent_id is empty",
+        "Raises OutboundCallError if agent_phone_number_id is empty",
+        "Raises OutboundCallError if to_number is empty",
+        "Raises OutboundCallError if HTTP response status != 200",
+        "Raises OutboundCallError if response body has success=false"
+      ],
+      "actions": [
+        "POST to https://api.elevenlabs.io/v1/convai/twilio/outbound-call with xi-api-key header",
+        "Returns {success, conversation_id, callSid}"
+      ],
+      "systemEffects": [
+        "ElevenLabs places a Twilio call from the org's linked phone number to to_number",
+        "Call is recorded (call_recording_enabled=True by default)"
+      ],
+      "outputs": [
+        "dict with conversation_id and callSid on success"
+      ],
+      "failureConditions": [
+        "HTTP non-200 → OutboundCallError",
+        "Response success=false → OutboundCallError",
+        "Timeout after 30s → httpx exception propagates as OutboundCallError"
+      ],
+      "dependencies": [
+        "settings.elevenlabs_api_key",
+        "ElevenLabs API availability",
+        "Twilio number linked to the ElevenLabs agent (pre-provisioned)"
+      ],
+      "relatedRules": ["OUT-002", "OUT-003", "OUT-010"],
+      "affectedModules": ["backend/app/services/outbound_call.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": ["backend/app/services/outbound_call.py:30", "backend/app/services/outbound_call.py:64", "backend/app/services/outbound_call.py:78"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "place_outbound_call() at line 30: body built with agent_id/agent_phone_number_id/to_number; cicd dict assembled from dynamic_variables + conversation_config_override and attached as conversation_initiation_client_data (line 76); POST to EL_BASE + _OUTBOUND_PATH (line 79); raises OutboundCallError on non-200 (line 87) or success=false (line 93)."
+    },
+    {
+      "id": "OUT-002",
+      "name": "Sweep Entry Point — Secret-Gated HTTP Endpoint",
+      "description": "POST /api/outbound/run-due-reminders is the external trigger for the scheduled sweep. It requires the X-HeyKiki-Secret header to match either settings.post_call_webhook_secret or settings.master_webhook_secret. Accepts optional query parameters: dry_run (bool), only_org_id (str), occasions (comma-separated string). Delegates to outbound_dispatch.run_due_outbound via run_in_threadpool.",
+      "purpose": "Allows an external cron or N8N workflow to trigger the outbound sweep without requiring an authenticated user session. The secret prevents unauthorised sweep invocations.",
+      "trigger": "External cron or N8N HTTP POST to /api/outbound/run-due-reminders",
+      "preconditions": [
+        "Valid X-HeyKiki-Secret header matching post_call_webhook_secret or master_webhook_secret"
+      ],
+      "inputs": [
+        "dry_run: bool (default False)",
+        "only_org_id: str | None",
+        "occasions: str | None (comma-separated occasion keys)"
+      ],
+      "validations": [
+        "Returns HTTP 401 if X-HeyKiki-Secret is absent or does not match either secret"
+      ],
+      "actions": [
+        "Parses occasions string into list",
+        "Calls outbound_dispatch.run_due_outbound in threadpool"
+      ],
+      "systemEffects": [
+        "Triggers the full sweep across all outbound-enabled orgs (or one org)",
+        "Returns a summary dict with orgs_processed, dispatched, calls, skipped, errors, retries, reschedule_expiry"
+      ],
+      "outputs": [
+        "JSON summary dict"
+      ],
+      "failureConditions": [
+        "401 Unauthorized if secret header is missing or wrong"
+      ],
+      "dependencies": [
+        "settings.post_call_webhook_secret",
+        "settings.master_webhook_secret",
+        "OUT-003 (run_due_outbound)"
+      ],
+      "relatedRules": ["OUT-003", "OUT-004"],
+      "affectedModules": ["backend/app/api/routes/outbound.py", "backend/app/api/deps.py"],
+      "affectedAPIs": ["POST /api/outbound/run-due-reminders"],
+      "affectedTables": [],
+      "sourceReferences": ["backend/app/api/routes/outbound.py:28", "backend/app/api/deps.py:123"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "Route at line 28 of outbound.py uses `Depends(verify_post_call_secret)`; deps.py:123 checks header against {post_call_webhook_secret, master_webhook_secret}."
+    },
+    {
+      "id": "OUT-003",
+      "name": "Uniform Gate — All Occasions Must Pass Before Dispatch",
+      "description": "Before any occasion fires for an org, _passes_gate() checks: (1) agent_configs.outbound_enabled must be True; (2) agent_configs.outbound_occasions[occasion_key] must be truthy (absent key treated as False, never fires); (3) current Berlin-local weekday must be in outbound_weekdays (empty list means all weekdays allowed); (4) current Berlin-local time must be within outbound_time_from..outbound_time_to. Returns None if all pass, or a skip reason string.",
+      "purpose": "Ensures outbound calls only fire when the org has opted in and during configured business hours on configured days, preventing unwanted calls outside working hours.",
+      "trigger": "Called per (org, occasion) pair inside the sweep loop of run_due_outbound",
+      "preconditions": [
+        "agent_configs row exists for org_id"
+      ],
+      "inputs": [
+        "cfg: dict (agent_configs row with outbound_enabled, outbound_occasions, outbound_weekdays, outbound_time_from, outbound_time_to)",
+        "occasion_key: str",
+        "now_local: datetime (Berlin timezone)",
+        "weekday_key: str (mon/tue/wed/thu/fri/sat/sun)"
+      ],
+      "validations": [
+        "outbound_enabled must be True or skip with 'outbound_disabled'",
+        "outbound_occasions[occasion_key] must be truthy or skip with 'occasion_disabled'",
+        "weekday_key must be in outbound_weekdays (if non-empty) or skip with 'weekday_excluded'",
+        "now_local.time() must be within outbound_time_from..outbound_time_to or skip with 'outside_window'"
+      ],
+      "actions": [
+        "Returns None (may fire) or skip-reason string (must skip)"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "None if the occasion may fire",
+        "str skip reason if it must be skipped"
+      ],
+      "failureConditions": [
+        "If outbound_time_from or outbound_time_to is None, the time window check is bypassed (treats as 'any time')"
+      ],
+      "dependencies": [
+        "agent_configs table",
+        "Europe/Berlin timezone availability"
+      ],
+      "relatedRules": ["OUT-004", "OUT-005", "OUT-007"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:88", "backend/app/services/outbound_dispatch.py:92", "backend/app/services/outbound_dispatch.py:96", "backend/app/services/outbound_dispatch.py:98"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "_passes_gate() at line 88: sequential checks — outbound_enabled (line 92), outbound_occasions[occasion_key] (line 93, absent key → falsy → 'occasion_disabled'), weekdays (line 95), time window (line 98). Time window uses _within_window() which supports overnight windows (frm > to)."
+    },
+    {
+      "id": "OUT-004",
+      "name": "Org Identity Prerequisite — elevenlabs_agent_id and elevenlabs_phone_number_id Required",
+      "description": "After the gate passes, the sweep checks that the org has both elevenlabs_agent_id and elevenlabs_phone_number_id set. If either is missing, the occasion is skipped with reason 'missing_agent_identity'. Additionally, if the occasion has an org_flag (e.g. review_request requires google_reviews_enabled=True), that flag is also checked.",
+      "purpose": "Prevents dispatch attempts against orgs that have not completed provisioning or have not linked a Twilio number to their ElevenLabs agent.",
+      "trigger": "Sweep loop after _passes_gate succeeds",
+      "preconditions": [
+        "Gate check passed"
+      ],
+      "inputs": [
+        "org dict from organizations table",
+        "spec.org_flag (optional per-occasion flag)"
+      ],
+      "validations": [
+        "org.elevenlabs_agent_id must be non-empty",
+        "org.elevenlabs_phone_number_id must be non-empty",
+        "If spec.org_flag is set, org[spec.org_flag] must be truthy"
+      ],
+      "actions": [
+        "Appends skip entry with reason 'missing_agent_identity' or 'org_flag_off'"
+      ],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [
+        "org not found in organizations returns empty dict — all checks fail silently (all skipped)"
+      ],
+      "dependencies": [
+        "organizations table",
+        "ElevenLabs provisioning flow (sync-agent-config must be run to populate elevenlabs_phone_number_id)"
+      ],
+      "relatedRules": ["OUT-003", "OUT-001"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["organizations"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:458", "backend/app/services/outbound_dispatch.py:463"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "Lines 458-467 of outbound_dispatch.py: `if not org.get('elevenlabs_agent_id') or not org.get('elevenlabs_phone_number_id'):` → skip 'missing_agent_identity'; `if spec.org_flag and not org.get(spec.org_flag):` → skip 'org_flag_off'."
+    },
+    {
+      "id": "OUT-005",
+      "name": "Close-Case Gate — must_be_open and must_be_completed",
+      "description": "Each OccasionSpec declares a case_gate value. 'must_be_open': if the triggering record's linked inquiry_id has status 'completed' or 'deleted', the occasion is skipped with reason 'case_closed'. NULL inquiry_id bypasses this gate (record has no case). 'must_be_completed': occasions like satisfaction_survey and review_request select only completed inquiries in their select() function. 'ignore': no case gate (maintenance_due, missed_callback, appointment click-occasions).",
+      "purpose": "Prevents outbound calls on work that has already been closed, avoiding confusing customers about completed cases. Post-completion occasions (satisfaction/review) conversely only fire after the case is done.",
+      "trigger": "Per-record check in the sweep loop after records are fetched",
+      "preconditions": [
+        "spec.case_gate == 'must_be_open'",
+        "inquiry_id is non-null"
+      ],
+      "inputs": [
+        "inquiry_id derived from the record",
+        "status_map from inquiries table"
+      ],
+      "validations": [
+        "If inquiry_id's status is in ('completed', 'deleted'), skip with 'case_closed'"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [
+        "If inquiry_id derivation fails, returns None — the gate is bypassed for that record"
+      ],
+      "dependencies": [
+        "inquiries table",
+        "inquiry_id_of() function per occasion spec"
+      ],
+      "relatedRules": ["OUT-003", "OUT-006"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py", "backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["inquiries", "appointments", "cost_estimates", "invoices"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:489", "backend/app/services/outbound_dispatch.py:55", "backend/app/services/outbound_occasions.py:675"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "outbound_dispatch.py:489-498: `if spec.case_gate == 'must_be_open' and inquiry_id and status_map.get(inquiry_id) in _CLOSED_STATUSES:` → skip 'case_closed'. _CLOSED_STATUSES = ('completed', 'deleted') at line 55."
+    },
+    {
+      "id": "OUT-006",
+      "name": "Cycle-Based Idempotency — Partial Unique Index Guard",
+      "description": "The outbound_calls table has a partial unique index on (org_id, occasion, referenz_id, cycle_no) WHERE status <> 'failed'. One-shot occasions (recurring=False) always use cycle_no=1 — the index prevents any second attempt for the same record+occasion. Recurring occasions (payment_reminder with max_cycles=3, maintenance_due with max_cycles=3) advance cycle_no once the configured cooldown elapses. The INSERT of the claim row is the atomic guard against concurrent sweeps. A 'failed' status row is excluded from the index so it can be retried on the next sweep.",
+      "purpose": "Ensures no customer is called twice for the same occasion+record, even under overlapping sweeps. Failed attempts are retryable; successful ones are permanently blocked for one-shot occasions.",
+      "trigger": "_claim() INSERT before the ElevenLabs call is placed",
+      "preconditions": [
+        "use_ledger is True (to_number_override is None)",
+        "Eligible and cycle_no determined by _cycle_decision()"
+      ],
+      "inputs": [
+        "org_id, occasion, referenz_id, cycle_no",
+        "status: 'pending'"
+      ],
+      "validations": [
+        "_cycle_decision(): one-shot → skip if any non-failed attempt exists",
+        "_cycle_decision(): recurring → skip if max_cycles reached, or if cooldown has not elapsed since last attempt",
+        "_claim(): INSERT fails on unique violation → already_dispatched skip"
+      ],
+      "actions": [
+        "Inserts outbound_calls row with status='pending'",
+        "On ElevenLabs success: updates to status='placed' + conversation_id + call_sid + placed_at",
+        "On ElevenLabs failure: updates to status='failed' + error"
+      ],
+      "systemEffects": [
+        "outbound_calls row inserted then updated",
+        "failed status rows remain in outbound_calls and are retryable by subsequent sweeps"
+      ],
+      "outputs": [],
+      "failureConditions": [
+        "Unique constraint violation → _claim returns False → skip 'already_dispatched'",
+        "If ElevenLabs raises OutboundCallError and use_ledger=True, row is updated to 'failed'"
+      ],
+      "dependencies": [
+        "outbound_calls table",
+        "Unique index outbound_calls_dedup",
+        "OUT-001"
+      ],
+      "relatedRules": ["OUT-001", "OUT-007", "OUT-008"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["outbound_calls"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:264", "backend/app/services/outbound_dispatch.py:243", "backend/app/services/outbound_dispatch.py:321", "supabase/migrations/0029_outbound_calls.sql:34", "supabase/migrations/0030_outbound_calls_case_link.sql:25"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "_claim() at line 264 tries INSERT; exception → False. _cycle_decision() at line 243: `if not spec.recurring: return (False, None, 'already_dispatched') if n else (True, 1, None)`. Unique index at 0029:34 and updated at 0030:25 to include cycle_no."
+    },
+    {
+      "id": "OUT-007",
+      "name": "Recurring Occasion Cooldown and Max-Cycles Cap",
+      "description": "For recurring occasions (payment_reminder, maintenance_due), the cooldown period between calls is read from agent_configs[spec.cooldown_config_key] if set, else falls back to spec.cooldown_days (default: payment=14 days, maintenance=30 days). Max cycles are capped at spec.max_cycles (both = 3). The cycle advances when the last non-failed attempt was more than cooldown days ago.",
+      "purpose": "Prevents harassment — a customer with an overdue invoice will get at most 3 payment reminder calls, spaced at least 14 days apart (or the org-configured interval).",
+      "trigger": "_cycle_decision() called per record in the sweep loop",
+      "preconditions": [
+        "spec.recurring == True"
+      ],
+      "inputs": [
+        "attempts: list of non-failed outbound_calls rows for this org+occasion+record",
+        "cfg: agent_configs row",
+        "spec.max_cycles, spec.cooldown_config_key, spec.cooldown_days"
+      ],
+      "validations": [
+        "If attempts count >= max_cycles, skip with 'max_cycles_reached'",
+        "If cooldown days > 0 and last attempt was within cooldown period, skip with 'cooldown'"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [
+        "(eligible: bool, cycle_no: int | None, reason: str | None)"
+      ],
+      "failureConditions": [
+        "If created_at cannot be parsed, last attempt date is treated as None — cooldown check skipped, call fires"
+      ],
+      "dependencies": [
+        "agent_configs table (payment_reminder_days, maintenance_reminder_days)",
+        "outbound_calls table (non-failed rows)"
+      ],
+      "relatedRules": ["OUT-006"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py", "backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["outbound_calls", "agent_configs"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:243", "backend/app/services/outbound_occasions.py:730", "backend/app/services/outbound_occasions.py:419"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "_cycle_decision() at line 243: `if spec.max_cycles is not None and n >= spec.max_cycles: return (False, None, 'max_cycles_reached')`. cooldown_days read from cfg[spec.cooldown_config_key] else spec.cooldown_days (line 252-253). payment_reminder: max_cycles=3, cooldown_config_key='payment_reminder_days', cooldown_days=14 (outbound_occasions.py:730-735). maintenance_due: max_cycles=3, cooldown_config_key='maintenance_reminder_days', cooldown_days=30 (line 419)."
+    },
+    {
+      "id": "OUT-008",
+      "name": "UAT to_number Override — Ledger-Bypass Mode",
+      "description": "When to_number_override is provided to _dispatch_one(), the actual phone number dialled is overridden and the ledger claim step is skipped (use_ledger=False). This makes the dispatch repeatable — the same record can be dispatched multiple times for testing. The scope guard (enforce_call_scope) is NOT called here; the override number is used directly. dry_run=True returns the payload that would be sent without placing any call or touching the ledger.",
+      "purpose": "Allows UAT testing against a designated test phone number without polluting the idempotency ledger and without accidentally calling real customers.",
+      "trigger": "send_single_outbound called with to_number_override, or dry_run=True",
+      "preconditions": [],
+      "inputs": [
+        "to_number_override: str | None",
+        "dry_run: bool"
+      ],
+      "validations": [],
+      "actions": [
+        "If to_number_override: use it as to_number, skip ledger INSERT",
+        "If dry_run: return payload dict without calling ElevenLabs or writing DB"
+      ],
+      "systemEffects": [
+        "No outbound_calls row written when to_number_override is set",
+        "No ElevenLabs call when dry_run=True"
+      ],
+      "outputs": [
+        "dry_run result dict with dynamic_variables and first_message",
+        "Live result dict with conversation_id and call_sid"
+      ],
+      "failureConditions": [],
+      "dependencies": ["OUT-001"],
+      "relatedRules": ["OUT-006", "OUT-009"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py"],
+      "affectedAPIs": ["POST /api/outbound/send"],
+      "affectedTables": [],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:321", "backend/app/services/outbound_dispatch.py:307"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "outbound_dispatch.py:321: `use_ledger = to_number_override is None`. Line 307: `if dry_run: return {..., 'dry_run': True}` before any DB or ElevenLabs call."
+    },
+    {
+      "id": "OUT-009",
+      "name": "OUTBOUND_TEST_SCOPE_ONLY — Call Scope Guard",
+      "description": "enforce_call_scope(org_id, to_number) is the gate for phone calls. When OUTBOUND_TEST_SCOPE_ONLY=True (default): raises OutOfScopeError if org_id is not in OUTBOUND_TEST_ORG_IDS; forces the return value to OUTBOUND_TEST_NUMBER regardless of to_number. When False: passes to_number through; raises OutOfScopeError if to_number is empty. CRITICAL GAP: enforce_call_scope is only called in appointment_notify.notify_appointment_outcome (click path). The scheduled sweep path (outbound_dispatch._dispatch_one) does NOT call enforce_call_scope. This means the scope guard for phone calls is effectively absent from the sweep.",
+      "purpose": "Prevents accidental real-customer calls during development/testing on the shared production database. Go-live requires setting OUTBOUND_TEST_SCOPE_ONLY=0.",
+      "trigger": "Called in appointment_notify.notify_appointment_outcome before send_single_outbound",
+      "preconditions": [],
+      "inputs": [
+        "org_id: str | None",
+        "to_number: str | None"
+      ],
+      "validations": [
+        "scope guard ON + org not in test set → OutOfScopeError",
+        "scope guard ON + test number not configured → OutOfScopeError",
+        "scope guard OFF + to_number empty → OutOfScopeError"
+      ],
+      "actions": [
+        "Returns test number (scope guard ON) or real number (scope guard OFF)"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "Effective phone number to dial"
+      ],
+      "failureConditions": [
+        "OutOfScopeError if org not in allowlist or test number unconfigured"
+      ],
+      "dependencies": [
+        "settings.outbound_test_scope_only",
+        "settings.outbound_test_org_ids",
+        "settings.outbound_test_number"
+      ],
+      "relatedRules": ["OUT-010", "OUT-008"],
+      "affectedModules": ["backend/app/services/outbound_scope.py", "backend/app/services/appointment_notify.py", "backend/app/core/config.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": ["backend/app/services/outbound_scope.py:36", "backend/app/services/appointment_notify.py:121", "backend/app/services/outbound_dispatch.py:294"],
+      "classification": "PARTIALLY_IMPLEMENTED",
+      "confidence": 99,
+      "evidence": "enforce_call_scope is imported and called in appointment_notify.py:121 (click path). In outbound_dispatch._dispatch_one (line 294): `to_number = to_number_override or (spec.to_number_of(record, customer) if spec.to_number_of else (customer or {}).get('phone'))` — no enforce_call_scope call follows. Only enforce_email_scope is imported/used in dispatch (line 42, 152). The scope guard is therefore NOT applied to phone calls in the scheduled sweep path."
+    },
+    {
+      "id": "OUT-010",
+      "name": "OUTBOUND_TEST_SCOPE_ONLY — Email Scope Guard",
+      "description": "enforce_email_scope(org_id, to_email) gates outbound occasion emails. When OUTBOUND_TEST_SCOPE_ONLY=True: raises OutOfScopeError if org not in OUTBOUND_TEST_ORG_IDS; forces to OUTBOUND_TEST_EMAIL. When False: passes real email through; raises OutOfScopeError if to_email is empty. Applied in _maybe_send_occasion_email inside both the sweep and click dispatch paths. Scope errors cause the email to be skipped (logged, not fatal).",
+      "purpose": "Prevents outbound emails from reaching real customers during dev/UAT on the shared production database.",
+      "trigger": "_maybe_send_occasion_email in outbound_dispatch._dispatch_one",
+      "preconditions": [
+        "spec.email_render is set",
+        "spec.email_always=True OR settings.outbound_occasion_emails_enabled=True"
+      ],
+      "inputs": [
+        "org_id",
+        "customer.email"
+      ],
+      "validations": [
+        "OutOfScopeError caught and logged → email skipped, call unaffected"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [
+        "Email address actually sent to, or None if skipped"
+      ],
+      "failureConditions": [
+        "OutOfScopeError → email skipped silently (logged)"
+      ],
+      "dependencies": [
+        "settings.outbound_test_scope_only",
+        "settings.outbound_test_email",
+        "settings.outbound_test_org_ids"
+      ],
+      "relatedRules": ["OUT-009", "OUT-011"],
+      "affectedModules": ["backend/app/services/outbound_scope.py", "backend/app/services/outbound_dispatch.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": ["backend/app/services/outbound_scope.py:60", "backend/app/services/outbound_dispatch.py:152"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "outbound_dispatch.py:152: `to_email = enforce_email_scope(org_id, (customer or {}).get('email'))` followed by `except OutOfScopeError as e: logger.info(...); return None`."
+    },
+    {
+      "id": "OUT-011",
+      "name": "OUTBOUND_OCCASION_EMAILS_ENABLED Flag — Cluster C Emails Ship Inert",
+      "description": "The 7 sweep occasions (appointment_reminder, kva_followup, payment_reminder, satisfaction_survey, review_request, maintenance_due, missed_callback) have email_always=False and only send their occasion emails when settings.outbound_occasion_emails_enabled=True (defaults False). The 3 appointment click-occasions (confirmation, cancellation, reschedule) have email_always=True and always send email regardless of this flag.",
+      "purpose": "Allows the email wiring to be deployed to production without activating it, so Amber can review and manually enable it.",
+      "trigger": "_maybe_send_occasion_email gating check",
+      "preconditions": [],
+      "inputs": [
+        "spec.email_always",
+        "settings.outbound_occasion_emails_enabled"
+      ],
+      "validations": [
+        "If not (email_always or outbound_occasion_emails_enabled): return None immediately"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": ["settings.outbound_occasion_emails_enabled"],
+      "relatedRules": ["OUT-010"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py", "backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:149", "backend/app/services/outbound_occasions.py:684"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "outbound_dispatch.py:149: `if not (spec.email_always or settings.outbound_occasion_emails_enabled): return None`. OccasionSpec field email_always at outbound_occasions.py:684: 'True ⇒ email sends regardless of the OUTBOUND_OCCASION_EMAILS_ENABLED flag (the 3 appointment occasions)'. appointment_confirmation/cancellation/reschedule all have email_always=True (lines 806, 817, 829)."
+    },
+    {
+      "id": "OUT-012",
+      "name": "Appointment Reminder — N-Day-Out Selection",
+      "description": "appointment_reminder selects appointments where scheduled_at falls on the calendar date exactly N days from today (Berlin time), status in ('pending', 'confirmed'). N is read from agent_configs.appointment_reminder_days, defaulting to 1 (day-before reminder). One-shot occasion (recurring=False). Case gate: must_be_open.",
+      "purpose": "Proactively confirms appointments with customers before the day-of to reduce no-shows and allow rescheduling.",
+      "trigger": "Sweep loop when appointment_reminder is enabled for the org",
+      "preconditions": [
+        "outbound_occasions['appointment_reminder'] = true",
+        "Gate passes (time window, weekday)"
+      ],
+      "inputs": [
+        "agent_configs.appointment_reminder_days (default 1)"
+      ],
+      "validations": [
+        "status must be 'pending' or 'confirmed'",
+        "scheduled_at must fall on today+N Berlin date",
+        "Pre-dial liveness recheck: at dispatch time, re-reads appointment status and requires it still be 'pending' or 'confirmed'"
+      ],
+      "actions": [
+        "Selects matching appointments",
+        "Fires one call per appointment (one-shot)"
+      ],
+      "systemEffects": [
+        "outbound_calls row created",
+        "ElevenLabs call placed with TERMIN_ERINNERUNG anlassTyp"
+      ],
+      "outputs": [],
+      "failureConditions": [
+        "If appointment is cancelled between selection and dispatch: pre-dial check catches it, skipped with 'record_inactive'"
+      ],
+      "dependencies": ["agent_configs", "appointments"],
+      "relatedRules": ["OUT-005", "OUT-006", "OUT-013"],
+      "affectedModules": ["backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["appointments", "outbound_calls"],
+      "sourceReferences": ["backend/app/services/outbound_occasions.py:163", "backend/app/services/outbound_occasions.py:700", "backend/app/services/outbound_dispatch.py:284"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "_select_appointment_reminder at line 163: selects by date range (today+N Berlin) and status in _ACTIVE_APPT_STATUSES. Pre-dial check at dispatch line 284: re-reads status, allowed=('pending','confirmed') unless occasion_key=='appointment_cancellation'."
+    },
+    {
+      "id": "OUT-013",
+      "name": "KVA Followup — Sent-At Threshold Selection",
+      "description": "kva_followup selects cost_estimates with type='kva', status='sent', and sent_at <= (today - N days ago in Berlin time). N from agent_configs.kva_followup_days, default 7. One-shot occasion. Case gate: must_be_open (uses inquiry_id from cost_estimates.inquiry_id).",
+      "purpose": "Follows up on unanswered quotations that have been waiting for customer response for N+ days.",
+      "trigger": "Sweep loop when kva_followup is enabled for the org",
+      "preconditions": [],
+      "inputs": [
+        "agent_configs.kva_followup_days (default 7)"
+      ],
+      "validations": [
+        "status must be 'sent' (excludes accepted/rejected)",
+        "sent_at must be <= cutoff (lte excludes NULL sent_at)"
+      ],
+      "actions": [],
+      "systemEffects": [
+        "outbound_calls row created",
+        "ElevenLabs call placed with KVA_NACHFASSEN anlassTyp"
+      ],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": ["cost_estimates", "agent_configs"],
+      "relatedRules": ["OUT-005", "OUT-006"],
+      "affectedModules": ["backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["cost_estimates", "outbound_calls"],
+      "sourceReferences": ["backend/app/services/outbound_occasions.py:217", "backend/app/services/outbound_occasions.py:711"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "_select_kva_followup at line 217: `.eq('type', 'kva').eq('status', 'sent').lte('sent_at', cutoff)`. Comment notes `.lte` excludes NULL sent_at."
+    },
+    {
+      "id": "OUT-014",
+      "name": "Payment Reminder — Overdue Invoice Recurring Calls",
+      "description": "payment_reminder selects invoices with status in ('sent', 'overdue'), paid_at IS NULL, due_date < today (Berlin). Recurring occasion with max_cycles=3 and cooldown from agent_configs.payment_reminder_days (default 14 days). Case gate: must_be_open (resolved via invoice → KVA → inquiry chain). Call tone is explicitly friendly, not a formal legal Mahnung.",
+      "purpose": "Reminds customers of overdue invoices in a friendly manner, up to 3 times spaced at least 14 days apart.",
+      "trigger": "Sweep loop when payment_reminder is enabled",
+      "preconditions": [],
+      "inputs": [
+        "agent_configs.payment_reminder_days (default 14)"
+      ],
+      "validations": [
+        "due_date must be in the past",
+        "paid_at must be NULL",
+        "status must be 'sent' or 'overdue'"
+      ],
+      "actions": [],
+      "systemEffects": [
+        "outbound_calls row with cycle_no 1-3",
+        "Call placed with ZAHLUNGSERINNERUNG anlassTyp"
+      ],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": ["invoices", "cost_estimates", "inquiries", "agent_configs"],
+      "relatedRules": ["OUT-007", "OUT-005", "OUT-006"],
+      "affectedModules": ["backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["invoices", "outbound_calls"],
+      "sourceReferences": ["backend/app/services/outbound_occasions.py:288", "backend/app/services/outbound_occasions.py:723"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "_select_payment_reminder at line 288. OccasionSpec at line 723: recurring=True, cooldown_config_key='payment_reminder_days', cooldown_days=14, max_cycles=3, inquiry_id_of=_inq_from_invoice, case_gate='must_be_open'."
+    },
+    {
+      "id": "OUT-015",
+      "name": "Satisfaction Survey and Review Request — Completed Case Window",
+      "description": "Both satisfaction_survey and review_request select inquiries with status='completed' and updated_at >= (today - 30 days). One-shot per inquiry. review_request additionally requires org.google_reviews_enabled=True (org_flag). Case gate: must_be_completed (inquiry IS the record — inquiry_id_of=_inq_self).",
+      "purpose": "Collects customer satisfaction feedback and Google reviews after cases are closed, within a 30-day recency window.",
+      "trigger": "Sweep loop when satisfaction_survey / review_request are enabled",
+      "preconditions": [
+        "review_request additionally requires organizations.google_reviews_enabled=True"
+      ],
+      "inputs": [
+        "_COMPLETED_WINDOW_DAYS = 30"
+      ],
+      "validations": [
+        "status must be 'completed'",
+        "updated_at within last 30 days",
+        "review_request: org.google_reviews_enabled must be truthy"
+      ],
+      "actions": [],
+      "systemEffects": [
+        "ZUFRIEDENHEIT / BEWERTUNG anlassTyp calls placed"
+      ],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": ["inquiries", "organizations"],
+      "relatedRules": ["OUT-004", "OUT-006"],
+      "affectedModules": ["backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["inquiries", "outbound_calls"],
+      "sourceReferences": ["backend/app/services/outbound_occasions.py:341", "backend/app/services/outbound_occasions.py:737", "backend/app/services/outbound_occasions.py:749"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "_select_completed_inquiries at line 341: `.eq('status', 'completed').gte('updated_at', cutoff)`. review_request spec at line 749: org_flag='google_reviews_enabled'. _inq_self at line 505: returns record.get('id')."
+    },
+    {
+      "id": "OUT-016",
+      "name": "Maintenance Due — Active Plan Overdue Selection",
+      "description": "maintenance_due selects maintenance_plans with status='active' and next_due_at <= today (Berlin date). Recurring with max_cycles=3 and cooldown from agent_configs.maintenance_reminder_days (default 30). Case gate: 'ignore' (plans have no linked case).",
+      "purpose": "Proactively contacts customers when their scheduled maintenance interval has passed.",
+      "trigger": "Sweep loop when maintenance_due is enabled",
+      "preconditions": [],
+      "inputs": [
+        "agent_configs.maintenance_reminder_days (default 30)"
+      ],
+      "validations": [
+        "status must be 'active'",
+        "next_due_at <= today"
+      ],
+      "actions": [],
+      "systemEffects": [
+        "WARTUNG_FAELLIG anlassTyp calls"
+      ],
+      "outputs": [],
+      "failureConditions": [
+        "No real-world writer for maintenance_plans — data must be seeded manually (UNVERIFIED OBSERVATION: no Twilio writer exists)"
+      ],
+      "dependencies": ["maintenance_plans"],
+      "relatedRules": ["OUT-007"],
+      "affectedModules": ["backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["maintenance_plans", "outbound_calls"],
+      "sourceReferences": ["backend/app/services/outbound_occasions.py:422", "backend/app/services/outbound_occasions.py:762"],
+      "classification": "PARTIALLY_IMPLEMENTED",
+      "confidence": 88,
+      "evidence": "_select_maintenance_due at line 422. OccasionSpec at line 762. Migration 0031_maintenance_plans.sql creates the table. Comment at outbound_occasions.py:832: 'missed_callback real-traffic capture: a Twilio status-callback writer... is the one external dependency still needed' — same dependency applies to maintenance_plans population."
+    },
+    {
+      "id": "OUT-017",
+      "name": "Missed Callback — Pending Missed Calls Selection",
+      "description": "missed_callback selects missed_calls with status='pending'. One-shot. Case gate: 'ignore'. to_number_of is the caller_number from the missed_calls row (not the customer's stored phone, since the missed call may have no linked customer).",
+      "purpose": "Returns missed inbound calls so no customer inquiry is lost.",
+      "trigger": "Sweep loop when missed_callback is enabled",
+      "preconditions": [],
+      "inputs": [],
+      "validations": [
+        "status must be 'pending'"
+      ],
+      "actions": [],
+      "systemEffects": [
+        "RUECKRUF_VERPASST anlassTyp calls dialled to caller_number"
+      ],
+      "outputs": [],
+      "failureConditions": [
+        "MISSING DEPENDENCY: missed_calls rows are only populated by a Twilio status-callback handler (no-answer/busy/failed) that is not yet built. Table exists but has no real-traffic writer."
+      ],
+      "dependencies": ["missed_calls"],
+      "relatedRules": ["OUT-006"],
+      "affectedModules": ["backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["missed_calls", "outbound_calls"],
+      "sourceReferences": ["backend/app/services/outbound_occasions.py:463", "backend/app/services/outbound_occasions.py:777", "supabase/migrations/0032_missed_calls.sql:8"],
+      "classification": "PARTIALLY_IMPLEMENTED",
+      "confidence": 90,
+      "evidence": "_select_missed_callback at line 463. 0032_missed_calls.sql comment line 8: 'DEPENDENCY (not built this session): the real writer is a Twilio status-callback handler (no-answer/busy/failed → insert a row here). Until that exists, rows are seeded manually; the occasion flow itself is complete.'"
+    },
+    {
+      "id": "OUT-018",
+      "name": "Click-Triggered Appointment Occasions — Confirm, Cancel, Reschedule",
+      "description": "Three occasions (appointment_confirmation, appointment_cancellation, appointment_reschedule) are never auto-swept (their select() always returns []). They are fired exclusively by human clicks in the call-log action tab via appointment_notify.notify_appointment_outcome. The mapping is: 'confirm' → appointment_confirmation, 'cancel' → appointment_cancellation, 'reschedule' → appointment_reschedule. They bypass the time-window and weekday gates. email_always=True so their emails send regardless of OUTBOUND_OCCASION_EMAILS_ENABLED.",
+      "purpose": "Allows staff to manually trigger outbound confirmation, cancellation, or reschedule calls after taking action on an appointment, gated by the appointment_reminder master toggle.",
+      "trigger": "Human click in call-log action tab → routes/appointments.py calls notify_appointment_outcome → send_single_outbound with to_number_override from enforce_call_scope",
+      "preconditions": [
+        "outbound_enabled AND outbound_occasions['appointment_reminder'] must be True (master gate)",
+        "Per-action toggle (outbound_appt_confirm_enabled / outbound_appt_cancel_enabled / outbound_appt_reschedule_enabled) must not be explicitly False"
+      ],
+      "inputs": [
+        "org_id",
+        "appointment_id",
+        "action: 'confirm' | 'cancel' | 'reschedule'"
+      ],
+      "validations": [
+        "appointment_outbound_enabled(org_id, action) must return True",
+        "enforce_call_scope must return a valid number (scope guard applied here)",
+        "action must be in APPOINTMENT_OCCASIONS dict"
+      ],
+      "actions": [
+        "Fires send_single_outbound with to_number_override=enforce_call_scope result",
+        "Returns result dict; NEVER raises (status mutation already committed)"
+      ],
+      "systemEffects": [
+        "outbound_calls ledger written (cycle_no=1 since to_number_override is passed and use_ledger=False — actually, since appointment_notify passes to_number_override, no ledger write)",
+        "ElevenLabs call placed",
+        "Occasion email sent (email_always=True)"
+      ],
+      "outputs": [
+        "dict {fired: bool, occasion, dry_run, result} or {fired: False, reason, error}"
+      ],
+      "failureConditions": [
+        "Returns fired=False silently on OutboundCallError, LookupError, OutOfScopeError",
+        "Status mutation on appointment is NOT rolled back on call failure"
+      ],
+      "dependencies": ["appointments", "customers", "agent_configs", "OUT-009"],
+      "relatedRules": ["OUT-009", "OUT-019"],
+      "affectedModules": ["backend/app/services/appointment_notify.py", "backend/app/api/routes/appointments.py"],
+      "affectedAPIs": ["PATCH /api/appointments/{id}", "POST /api/appointments/{id}/confirm", "POST /api/appointments/{id}/cancel"],
+      "affectedTables": ["appointments"],
+      "sourceReferences": ["backend/app/services/appointment_notify.py:31", "backend/app/services/appointment_notify.py:105", "backend/app/services/outbound_occasions.py:536", "backend/app/api/routes/appointments.py:414"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "APPOINTMENT_OCCASIONS dict at appointment_notify.py:31. notify_appointment_outcome at line 105: checks appointment_outbound_enabled, calls enforce_call_scope, calls send_single_outbound with to_number_override. _select_none at outbound_occasions.py:536: always returns []. MASTER_OCCASION_KEY = 'appointment_reminder' at line 39. Per-action toggles at lines 44-48."
+    },
+    {
+      "id": "OUT-019",
+      "name": "Per-Action Appointment Sub-Toggles",
+      "description": "Beyond the master outbound toggle, each appointment click-occasion (confirm/cancel/reschedule) has its own independent disable column: outbound_appt_confirm_enabled, outbound_appt_cancel_enabled, outbound_appt_reschedule_enabled (all default True). If a per-action column is explicitly False, that action's call is suppressed. If the column is NULL or absent, the call fires (treated as True).",
+      "purpose": "Allows orgs to selectively disable, e.g., cancellation calls without disabling confirmation calls.",
+      "trigger": "appointment_outbound_enabled(org_id, action) check in notify_appointment_outcome",
+      "preconditions": [],
+      "inputs": [
+        "action: str",
+        "agent_configs row"
+      ],
+      "validations": [
+        "Only suppresses if col is explicitly False (row.get(col) is False) — None or True pass"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [],
+      "dependencies": ["agent_configs"],
+      "relatedRules": ["OUT-018"],
+      "affectedModules": ["backend/app/services/appointment_notify.py"],
+      "affectedAPIs": ["PATCH /api/kiki-zentrale/outbound"],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": ["backend/app/services/appointment_notify.py:44", "backend/app/services/appointment_notify.py:79", "supabase/migrations/0045_outbound_options_welcome_variants.sql:13"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 96,
+      "evidence": "_ACTION_TOGGLE_COL at line 44. Suppression logic at line 79: `if col and row.get(col) is False: return False`. Migration 0045:13 adds columns with default true."
+    },
+    {
+      "id": "OUT-020",
+      "name": "Short-Hangup Retry Scheduling",
+      "description": "When an OUTBOUND call ends with duration_seconds < outbound_short_hangup_seconds threshold AND outbound_recall_on_short_hangup=True AND cycle_no <= outbound_retry_max_attempts, the outbound_calls row is stamped with next_retry_at = (now + outbound_retry_interval_minutes). The next sweep run picks up due retries via run_due_retries() and re-dispatches via send_single_outbound. next_retry_at is cleared before the re-dial to prevent double-firing.",
+      "purpose": "Re-dials customers who hung up quickly (likely didn't hear the message or mistakenly dropped), automatically, without any human action.",
+      "trigger": "schedule_short_hangup_retry() called post-call (from post-call webhook handler after a completed outbound call)",
+      "preconditions": [
+        "outbound_recall_on_short_hangup=True in agent_configs",
+        "duration_seconds < outbound_short_hangup_seconds (default 20)",
+        "outbound_retry_max_attempts > 0 (default 0 — off by default)",
+        "outbound_calls row's cycle_no <= max_attempts"
+      ],
+      "inputs": [
+        "conversation_id",
+        "duration_seconds",
+        "agent_configs.outbound_short_hangup_seconds (default 20)",
+        "agent_configs.outbound_retry_max_attempts (default 0, range 0-10)",
+        "agent_configs.outbound_retry_interval_minutes (default 5, range 1-1440)"
+      ],
+      "validations": [
+        "duration_seconds must be non-None",
+        "Recall config columns must be present"
+      ],
+      "actions": [
+        "Updates outbound_calls: next_retry_at, retry_reason='short_hangup', retry_count+=1"
+      ],
+      "systemEffects": [
+        "outbound_calls row stamped with retry schedule",
+        "Next sweep tick re-dials via run_due_retries() → send_single_outbound()"
+      ],
+      "outputs": [],
+      "failureConditions": [
+        "Function is best-effort — any exception is caught and logged, never re-raised",
+        "If max_attempts=0 (default), this is a no-op for all calls"
+      ],
+      "dependencies": ["agent_configs", "outbound_calls"],
+      "relatedRules": ["OUT-021", "OUT-006"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["outbound_calls", "agent_configs"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:614", "backend/app/services/outbound_dispatch.py:634", "supabase/migrations/0045_outbound_options_welcome_variants.sql:17"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 93,
+      "evidence": "schedule_short_hangup_retry at line 614. Check at line 634: `if not row.get('outbound_recall_on_short_hangup'): return`. dur < threshold check at line 639. Update at line 659: next_retry_at, retry_reason, retry_count. Default outbound_retry_max_attempts=0 (migration 0045:17) means feature is OFF by default."
+    },
+    {
+      "id": "OUT-021",
+      "name": "Due Retry Sweep — run_due_retries",
+      "description": "run_due_retries() is called at the start of every run_due_outbound sweep. It fetches outbound_calls rows where next_retry_at <= now (up to 200), clears next_retry_at first (preventing double-fire by a concurrent sweep), then calls send_single_outbound() for each. Errors on individual retries are caught and logged; the rest continue.",
+      "purpose": "Drives short-hangup re-dials without requiring a separate endpoint or cron job.",
+      "trigger": "Called at the top of run_due_outbound before the per-org sweep",
+      "preconditions": [],
+      "inputs": [
+        "now: datetime",
+        "dry_run: bool"
+      ],
+      "validations": [],
+      "actions": [
+        "Clears next_retry_at before re-dialling (prevents double-fire)",
+        "Calls send_single_outbound for each due row"
+      ],
+      "systemEffects": [
+        "outbound_calls next_retry_at set to NULL",
+        "New outbound_calls row created by send_single_outbound (next cycle_no)"
+      ],
+      "outputs": [
+        "dict {due, fired, errors}"
+      ],
+      "failureConditions": [
+        "send_single_outbound errors are caught per-row; sweep continues"
+      ],
+      "dependencies": ["outbound_calls", "OUT-020"],
+      "relatedRules": ["OUT-020", "OUT-003"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["outbound_calls"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:670", "backend/app/services/outbound_dispatch.py:410"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "run_due_retries at line 670. Called at line 410: `summary['retries'] = run_due_retries(now=now, dry_run=dry_run)`. next_retry_at cleared at line 693 before re-dial. 200 row limit at line 680."
+    },
+    {
+      "id": "OUT-022",
+      "name": "Reschedule Expiry — L3 Auto-Resolution Sweep",
+      "description": "run_due_reschedule_expiry() is called on every sweep tick. It fetches appointments with customer_proposed_at not null AND reschedule_expires_at < now AND status != 'cancelled'. For L1/L2 orgs, these are flagged as overdue (no action taken — UI shows badge). For L3 orgs (appointments_level >= 3), if reschedule_replace_intent=True AND inside the org's outbound time window, the appointment is conditionally cancelled (cleared of proposal fields, status='cancelled') and notify_appointment_outcome fires. If the UPDATE matches 0 rows (human resolved it in the gap), a 'raced' counter increments.",
+      "purpose": "Automatically expires stale customer reschedule proposals for autonomous (L3) orgs, triggering a cancellation call. For non-autonomous orgs, the timer drives a UI overdue indicator without automated action.",
+      "trigger": "Called by run_due_outbound on every sweep tick",
+      "preconditions": [
+        "L3 org (appointments_level >= 3 or kiki_level >= 3)",
+        "reschedule_replace_intent=True for auto-cancel",
+        "Must be within org's outbound time window and weekday"
+      ],
+      "inputs": [
+        "appointments with pending customer proposals past reschedule_expires_at"
+      ],
+      "validations": [
+        "Conditional UPDATE filters on customer_proposed_at not null + reschedule_expires_at not null + status != 'cancelled' — race-safe",
+        "If UPDATE matches 0 rows: raced counter increments, no cancel or call"
+      ],
+      "actions": [
+        "Clears customer_proposed_* fields",
+        "If replace_intent=True: sets status='cancelled', cancelled_at, clears google_event_id",
+        "Deletes Google Calendar event (best-effort)",
+        "Calls notify_appointment_outcome(org_id, appt_id, 'cancel') — fires the cancellation call"
+      ],
+      "systemEffects": [
+        "appointments row updated",
+        "Google Calendar event deleted (best-effort)",
+        "Outbound cancellation call placed (L3 + replace_intent + in-window)"
+      ],
+      "outputs": [
+        "dict {due, flagged, expired, cancelled, deferred, raced, errors}"
+      ],
+      "failureConditions": [
+        "Outside time window + replace_intent: deferred to next in-window tick",
+        "Race condition: human resolved in gap — raced counter, no double-action",
+        "Best-effort errors per appointment; sweep continues"
+      ],
+      "dependencies": ["appointments", "agent_configs", "OUT-018"],
+      "relatedRules": ["OUT-018", "OUT-003"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["appointments"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:727", "backend/app/services/outbound_dispatch.py:820", "backend/app/services/outbound_dispatch.py:839", "supabase/migrations/0063_reschedule_timer.sql"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 92,
+      "evidence": "run_due_reschedule_expiry at line 727. Time-window gate at line 822: `if replace and not _in_outbound_window(org_id): out['deferred'] += 1; continue`. Conditional UPDATE at line 843: `.not_.is_('customer_proposed_at', 'null').not_.is_('reschedule_expires_at', 'null').neq('status', 'cancelled')`. Race detection at line 851: `if not updated: out['raced'] += 1`."
+    },
+    {
+      "id": "OUT-023",
+      "name": "Path A Per-Call Conversation Override — German Content Rendered on Backend",
+      "description": "build_call_content() assembles the per-call ElevenLabs payload. The occasion spec's render() function returns a Rendered dataclass (first_message, voicemail, task_block, kunden_name). assemble_system_prompt() slots in the company-agnostic _BASE_OUTBOUND template with the org name, customer name, and occasion task_block. All text is rendered in German using locale-independent de_* formatters (de_long_date, de_short_date, de_time, de_eur). The result is shipped as conversation_config_override.agent (first_message, language='de', prompt.prompt) and dynamic_variables (structured IDs only — no display strings).",
+      "purpose": "Moves call content rendering to the backend so it is versioned, unit-tested, and occasion-specific without requiring ElevenLabs placeholder interpolation. Every company fact is interpolated from the org/record; nothing is hardcoded.",
+      "trigger": "_dispatch_one() for every dispatch",
+      "preconditions": [],
+      "inputs": [
+        "spec: OccasionSpec",
+        "record: dict",
+        "customer: dict | None",
+        "org: dict",
+        "outbound_call_id: str (UUID)"
+      ],
+      "validations": [],
+      "actions": [
+        "Calls spec.render(record, customer, org) → Rendered",
+        "Calls assemble_system_prompt(company, kunden_name, task_block)",
+        "Builds dynamic_variables and conversation_config_override dicts"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "{dynamic_variables: {...}, conversation_config_override: {agent: {first_message, language, prompt}}}"
+      ],
+      "failureConditions": [
+        "If org.name is None, company defaults to 'uns'",
+        "If customer is None, kunden_name is empty string → _BASE_OUTBOUND uses 'unbekannt'"
+      ],
+      "dependencies": [],
+      "relatedRules": ["OUT-001"],
+      "affectedModules": ["backend/app/services/outbound_occasions.py"],
+      "affectedAPIs": [],
+      "affectedTables": [],
+      "sourceReferences": ["backend/app/services/outbound_occasions.py:839", "backend/app/services/outbound_occasions.py:102", "backend/app/services/outbound_occasions.py:139"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 98,
+      "evidence": "build_call_content at line 839: calls spec.render(), assemble_system_prompt(), builds dynamic_variables and conversation_config_override. _BASE_OUTBOUND at line 102 is the company-agnostic German template. assemble_system_prompt at line 139 uses str.replace (not .format) to avoid German prose brace collisions."
+    },
+    {
+      "id": "OUT-024",
+      "name": "Outbound Call Case Linking in Post-Call Ingest",
+      "description": "During post-call ingest, OUTBOUND calls do NOT spawn a new inquiry (unlike inbound calls). Instead, link_outbound_call_to_case() is called to tie the call log row to the case that triggered it. It looks up the outbound_calls ledger by conversation_id, reads the stored inquiry_id (or derives it from referenz_typ/referenz_id), and writes the inquiry_id onto the calls row. This makes the case Vorgang thread and call-log action buttons resolve for outbound calls.",
+      "purpose": "Prevents outbound calls from appearing as orphaned call log entries disconnected from their triggering case.",
+      "trigger": "Post-call webhook ingest (post_call.py) when direction == 'outbound'",
+      "preconditions": [
+        "outbound_calls row with matching conversation_id must exist in the ledger"
+      ],
+      "inputs": [
+        "call dict with elevenlabs_conversation_id",
+        "org_id"
+      ],
+      "validations": [],
+      "actions": [
+        "Looks up outbound_calls by conversation_id",
+        "Resolves inquiry_id from stored value or derives from (referenz_typ, referenz_id)",
+        "Writes inquiry_id to calls row"
+      ],
+      "systemEffects": [
+        "calls.inquiry_id updated",
+        "Vorgang thread + action buttons become functional for this call"
+      ],
+      "outputs": [
+        "inquiry_id linked, or None if not found"
+      ],
+      "failureConditions": [
+        "Best-effort — exception caught and logged, ingest never fails",
+        "If outbound call used to_number_override (UAT), no ledger row exists — link_outbound_call_to_case returns None"
+      ],
+      "dependencies": ["outbound_calls", "inquiries", "appointments", "cost_estimates", "invoices"],
+      "relatedRules": ["OUT-006"],
+      "affectedModules": ["backend/app/services/inquiries.py", "backend/app/services/post_call.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["calls", "outbound_calls"],
+      "sourceReferences": ["backend/app/services/post_call.py:413", "backend/app/services/inquiries.py:195", "backend/app/services/inquiries.py:163"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "post_call.py:413: `if call_log_id and direction != 'outbound': ensure_call_inquiry(...)` else `link_outbound_call_to_case(...)` (line 422). inquiries.py:195: link_outbound_call_to_case() looks up outbound_calls by conversation_id, prefers stored inquiry_id, falls back to _resolve_case_from_referenz."
+    },
+    {
+      "id": "OUT-025",
+      "name": "Outbound Appointment Targeting — Ledger-Based Reschedule",
+      "description": "When an in-call reschedule request (hk_changeAppointment) is received during an OUTBOUND call, _appointment_from_conversation() resolves the appointment being discussed by looking up the outbound_calls ledger row by conversation_id + referenz_typ='Termin'. This provides deterministic targeting without any phone/name guessing. If the ledger row is not found or is not a Termin occasion, the function returns None and the system falls back to standard identifier-based lookup.",
+      "purpose": "Fixes a post-mortem bug where the LLM passed a hallucinated phone number during a reschedule request on an outbound call, causing the reschedule to be silently lost.",
+      "trigger": "hk_changeAppointment tool webhook during an active outbound conversation",
+      "preconditions": [
+        "outbound_calls row with matching conversation_id AND referenz_typ='Termin'"
+      ],
+      "inputs": [
+        "conversation_id from the tool webhook request"
+      ],
+      "validations": [
+        "referenz_typ must be 'Termin'",
+        "Appointment must have status 'pending' or 'confirmed'"
+      ],
+      "actions": [
+        "Returns appointment row for use in the change operation"
+      ],
+      "systemEffects": [],
+      "outputs": [
+        "appointment dict or None"
+      ],
+      "failureConditions": [
+        "If ledger row absent (UAT override, inbound call): returns None, fallback to standard lookup"
+      ],
+      "dependencies": ["outbound_calls", "appointments"],
+      "relatedRules": ["OUT-006", "OUT-012"],
+      "affectedModules": ["backend/app/services/appointments.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["outbound_calls", "appointments"],
+      "sourceReferences": ["backend/app/services/appointments.py:703", "backend/app/services/appointments.py:712"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 95,
+      "evidence": "_appointment_from_conversation at line 703: 'Deterministic reschedule targeting on OUTBOUND calls: the outbound_calls ledger row stamped with this conversation_id says exactly which appointment this call is about'. Post-mortem reference: 'conv_7401ktv…: the LLM passed a hallucinated phoneNumber'."
+    },
+    {
+      "id": "OUT-026",
+      "name": "Outbound Settings Configuration — Org Admin Only",
+      "description": "PATCH /api/kiki-zentrale/outbound allows org_admin users to configure: outbound_enabled, outbound_occasions (JSONB dict of occasion key → bool), outbound_time_from, outbound_time_to, outbound_weekdays, outbound_appt_confirm_enabled, outbound_appt_cancel_enabled, outbound_appt_reschedule_enabled, outbound_retry_max_attempts (0-10), outbound_retry_interval_minutes (1-1440), outbound_recall_on_short_hangup, outbound_short_hangup_seconds (5-120). All updates go to agent_configs via _upsert_config.",
+      "purpose": "Gives org admins full control over when and which outbound calls fire without requiring code changes.",
+      "trigger": "Human admin action in Kiki-Zentrale Ausgehende Anrufe UI",
+      "preconditions": [
+        "Authenticated org_admin user"
+      ],
+      "inputs": [
+        "OutboundUpdate payload (all fields optional)"
+      ],
+      "validations": [
+        "_require_admin(user) — raises 403 if not org_admin"
+      ],
+      "actions": [
+        "Upserts agent_configs for the org with the provided fields"
+      ],
+      "systemEffects": [
+        "agent_configs row updated",
+        "Changes take effect on next sweep tick"
+      ],
+      "outputs": [
+        "Updated agent_configs row"
+      ],
+      "failureConditions": [],
+      "dependencies": ["agent_configs"],
+      "relatedRules": ["OUT-003", "OUT-019"],
+      "affectedModules": ["backend/app/api/routes/kiki_zentrale.py"],
+      "affectedAPIs": ["PATCH /api/kiki-zentrale/outbound"],
+      "affectedTables": ["agent_configs"],
+      "sourceReferences": ["backend/app/api/routes/kiki_zentrale.py:1425", "backend/app/api/routes/kiki_zentrale.py:268", "supabase/migrations/0015_kiki_zentrale.sql:34", "supabase/migrations/0045_outbound_options_welcome_variants.sql:11"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "Route at kiki_zentrale.py:1425 with `_require_admin(user)`. OutboundUpdate at line 268. Default values: outbound_time_from='09:00', outbound_time_to='20:00', outbound_weekdays=['mon','tue','wed','thu','fri'] from migration 0015:36-38."
+    },
+    {
+      "id": "OUT-027",
+      "name": "Pre-Dial Liveness Recheck for Appointment Occasions",
+      "description": "Immediately before placing an outbound call for any appointment occasion, _dispatch_one() re-reads the appointment's current status from the DB. For all occasions except appointment_cancellation, the appointment must still be 'pending' or 'confirmed'. For appointment_cancellation, the appointment must be 'cancelled'. If the status does not match, the dispatch is skipped with reason 'record_inactive'. This check is not performed in dry_run mode.",
+      "purpose": "Prevents calling a customer about an appointment that was cancelled (or confirmed) AFTER the sweep selected it but before the call was placed — a race condition that would produce a confusing call.",
+      "trigger": "_dispatch_one() before ElevenLabs call for Termin occasions",
+      "preconditions": [
+        "spec.referenz_typ == 'Termin'",
+        "dry_run == False"
+      ],
+      "inputs": [
+        "record['id'], org_id"
+      ],
+      "validations": [
+        "Re-reads appointment status from DB",
+        "Skips if status not in allowed set for the occasion"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [
+        "{'skipped': 'record_inactive', 'referenz_id': ..., 'status': ...} if stale"
+      ],
+      "failureConditions": [
+        "If DB read returns no rows, status is None — fails the status check and skips the call"
+      ],
+      "dependencies": ["appointments"],
+      "relatedRules": ["OUT-012", "OUT-018"],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["appointments"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:284", "backend/app/services/outbound_dispatch.py:290"],
+      "classification": "WELL_IMPLEMENTED",
+      "confidence": 97,
+      "evidence": "outbound_dispatch.py:284: `if spec.referenz_typ == 'Termin' and not dry_run:` re-reads status. Line 290: `allowed = ('cancelled',) if spec.key == 'appointment_cancellation' else ('pending', 'confirmed')`. Comment: 'tester 2026-06-11'."
+    },
+    {
+      "id": "OUT-028",
+      "name": "Org-Scoped Data Access — No RLS on Service Role",
+      "description": "The dispatch engine uses get_service_client() (Supabase service role) which bypasses Row-Level Security. All queries explicitly filter by org_id in WHERE clauses. outbound_calls has no RLS policy; organizations, agent_configs, appointments, etc. access is filtered by explicit .eq('org_id', org_id) calls. This is the same pattern used throughout the backend.",
+      "purpose": "Consistent multi-tenancy without RLS overhead on the service role path. Org isolation is enforced at the application layer.",
+      "trigger": "All dispatch DB reads/writes",
+      "preconditions": [],
+      "inputs": [],
+      "validations": [
+        "Every query includes .eq('org_id', org_id) or .in_('org_id', ids)"
+      ],
+      "actions": [],
+      "systemEffects": [],
+      "outputs": [],
+      "failureConditions": [
+        "If org_id is omitted from a query, cross-org data leakage is possible at the service role level"
+      ],
+      "dependencies": [],
+      "relatedRules": [],
+      "affectedModules": ["backend/app/services/outbound_dispatch.py", "backend/app/db/supabase_client.py"],
+      "affectedAPIs": [],
+      "affectedTables": ["outbound_calls", "agent_configs", "organizations", "appointments", "cost_estimates", "invoices", "inquiries", "customers", "maintenance_plans", "missed_calls"],
+      "sourceReferences": ["backend/app/services/outbound_dispatch.py:108", "backend/app/services/outbound_dispatch.py:124", "backend/app/services/outbound_dispatch.py:211"],
+      "classification": "CLEAR",
+      "confidence": 97,
+      "evidence": "_resolve_org at line 108: `.eq('id', org_id)`. _resolve_customers at line 124: `.eq('org_id', org_id)`. _fetch_record at line 211: `.eq('org_id', org_id)`. All data access uses explicit org_id filtering."
+    }
+  ]
+}
