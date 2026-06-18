@@ -157,7 +157,7 @@ export function CallLogsPage() {
         </div>
       )}
 
-      <div className="mx-auto max-w-[1500px] px-4 py-7 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1760px] px-4 py-7 sm:px-6 lg:px-8">
         {/* header */}
         <div className="mb-6">
           <h1 className="text-[26px] font-extrabold tracking-tight text-text">Anrufe</h1>

@@ -103,9 +103,9 @@ function LogTableRow({
         </span>
       </td>
 
-      {/* 4 — Anrufer (name + number) */}
+      {/* 4 — Anrufer (name + number) — flexes to share the slack on wide screens */}
       <td className={td}>
-        <div className="min-w-0 max-w-[200px]">
+        <div className="min-w-0">
           <div className={cn('truncate text-[13.5px]', unread ? 'font-extrabold text-text' : 'font-bold text-body')}>
             {callerTitle(call)}
           </div>
@@ -116,7 +116,7 @@ function LogTableRow({
       {/* 5 — Betreff (subject) — emergency shows as a compact icon so the subject
           text stays readable; the full "Notdienst" label lives in the drawer. */}
       <td className={td}>
-        <div className="flex min-w-0 max-w-[260px] items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           {call.emergency_flag && <NotdienstBadge small iconOnly />}
           <span className="flex-shrink-0 text-[15px] leading-none" aria-hidden>
             {subjectEmoji(call)}
@@ -185,17 +185,14 @@ function LogTableRow({
       {/* 8 — Uhrzeit (mit "Uhr") */}
       <td className={cn(td, 'whitespace-nowrap font-mono text-[12.5px] text-muted')}>{fmtClockUhr(call.started_at)}</td>
 
-      {/* 9 — Dauer (ausgeschrieben: "2 Min 45 Sek") */}
-      <td className={cn(td, 'whitespace-nowrap')}>
+      {/* 9 — Dauer (ausgeschrieben: "2 Min 45 Sek") — extra left padding so it
+          isn't crammed against the Uhrzeit column. */}
+      <td className={cn(td, 'whitespace-nowrap pl-6')}>
         <span className="inline-flex items-center gap-1 text-[12px] text-faint">
           <Phone size={11} className="flex-shrink-0" />
           {fmtDurationLong(call.duration_seconds)}
         </span>
       </td>
-
-      {/* 10 — Filler: absorbs slack on wide screens so the real columns don't
-          spread apart and leave gaps (Luca: white space on large displays). */}
-      <td className="w-full p-0" aria-hidden />
     </tr>
   )
 }
@@ -223,13 +220,12 @@ export function LogTable({
             <th className={cn(th, 'border-l-2 border-transparent')}>Richtung</th>
             <th className={th}>Status</th>
             <th className={cn(th, 'text-center')}>Zuständig</th>
-            <th className={th}>Anrufer</th>
-            <th className={th}>Betreff</th>
+            <th className={cn(th, 'w-1/4')}>Anrufer</th>
+            <th className={cn(th, 'w-1/2')}>Betreff</th>
             <th className={th}>Fall / Anfrage</th>
             <th className={th}>Datum</th>
             <th className={th}>Uhrzeit</th>
-            <th className={th}>Dauer</th>
-            <th className="w-full p-0" aria-hidden />
+            <th className={cn(th, 'pl-6')}>Dauer</th>
           </tr>
         </thead>
         <tbody>
@@ -237,7 +233,7 @@ export function LogTable({
             <Fragment key={g.key}>
               <tr className="bg-bg">
                 <td
-                  colSpan={10}
+                  colSpan={9}
                   className="border-y border-border-faint px-3 py-2 text-[12.5px] font-extrabold capitalize tracking-wide text-muted"
                 >
                   <span className="inline-flex items-center gap-2">
