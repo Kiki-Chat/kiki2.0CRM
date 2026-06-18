@@ -185,10 +185,21 @@ export function avatarColorForEmployee(employeeId: string | null): { bg: string;
 export const fmtDuration = (s: number | null) =>
   s || s === 0 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '—'
 
+// Spelled-out duration — "2 Min 45 Sek" / "45 Sek" / "2 Min" (Luca: the bare "m"
+// abbreviation read as ambiguous; the call-log column shows the words in full).
+export const fmtDurationLong = (s: number | null) => {
+  if (s == null) return '—'
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  if (m === 0) return `${sec} Sek`
+  if (sec === 0) return `${m} Min`
+  return `${m} Min ${sec} Sek`
+}
+
 // Date/time formatters live in lib/datetime (pinned to Europe/Berlin so times don't
 // render in the viewer's browser tz). Re-exported here so the many call-log modules
 // that import them from './shared' keep working unchanged.
-export { fmtTime, fmtClock, relativeTimeDe, absoluteTimeDe } from '../../lib/datetime'
+export { fmtTime, fmtClock, fmtClockUhr, relativeTimeDe, absoluteTimeDe } from '../../lib/datetime'
 
 export const isMeaningful = (v?: string | null) =>
   !!v && !['unbekannt', 'keiner', 'anonymous'].includes(v.toLowerCase())

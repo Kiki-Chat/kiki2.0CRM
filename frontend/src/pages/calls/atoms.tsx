@@ -85,7 +85,21 @@ export function DirBadge({ dir, withLabel = false }: { dir: string | null; withL
 }
 
 // ─── Emergency badge — the ONLY blinking element ───────────────────────────
-export function NotdienstBadge({ small = false }: { small?: boolean }) {
+// `iconOnly` renders just the pulsing triangle (with a tooltip) so the badge no
+// longer eats the subject line's width in the dense call-log table — Luca asked
+// for the Betreff to stay readable next to the Notdienst marker.
+export function NotdienstBadge({ small = false, iconOnly = false }: { small?: boolean; iconOnly?: boolean }) {
+  if (iconOnly) {
+    return (
+      <span
+        title="Notdienst"
+        aria-label="Notdienst"
+        className="inline-flex h-5 w-5 flex-shrink-0 animate-pulse items-center justify-center rounded-md bg-error text-white"
+      >
+        <AlertTriangle size={12} />
+      </span>
+    )
+  }
   return (
     <span
       className={cn(
@@ -95,6 +109,67 @@ export function NotdienstBadge({ small = false }: { small?: boolean }) {
     >
       <AlertTriangle size={small ? 10 : 11} /> Notdienst
     </span>
+  )
+}
+
+// ─── Status select — change the Vorgang status inline (Offen/In Bearbeitung/Erledigt) ─
+const STATUS_ORDER = ['open', 'in_progress', 'completed'] as const
+
+export function StatusSelect({
+  status,
+  onChange,
+  disabled = false,
+  align = 'start',
+}: {
+  status: string | null
+  onChange: (status: string) => void
+  disabled?: boolean
+  align?: 'start' | 'end'
+}) {
+  const cur = status ? STATUS_CFG[status] : null
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild disabled={disabled}>
+        <button
+          type="button"
+          title="Status ändern"
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[13px] font-bold transition disabled:cursor-default disabled:opacity-50',
+            cur ? cn('border-transparent', cur.bg, cur.text) : 'border-border bg-surface text-body hover:bg-alt',
+          )}
+        >
+          {cur ? <cur.Icon size={14} /> : <CircleDot size={14} />}
+          <span>{cur ? cur.label : 'Status'}</span>
+          <ChevronDown size={13} className="flex-shrink-0 opacity-70" />
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align={align}
+          sideOffset={6}
+          onClick={(e) => e.stopPropagation()}
+          className="z-[70] w-52 rounded-xl border border-border bg-surface p-1.5 shadow-e3"
+        >
+          <div className="px-2 pb-1.5 pt-1 text-[10px] font-extrabold uppercase tracking-wider text-faint">
+            Status setzen
+          </div>
+          {STATUS_ORDER.map((key) => {
+            const s = STATUS_CFG[key]
+            return (
+              <DropdownMenu.Item
+                key={key}
+                onSelect={() => onChange(key)}
+                className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium text-body outline-none data-[highlighted]:bg-alt"
+              >
+                <s.Icon size={15} className={s.text} />
+                <span className="flex-1">{s.label}</span>
+                {status === key && <Check size={14} className="text-green-deep" />}
+              </DropdownMenu.Item>
+            )
+          })}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   )
 }
 
