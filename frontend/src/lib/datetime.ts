@@ -31,6 +31,13 @@ export const fmtClock = (iso: string | null): string =>
       })
     : '—'
 
+// "14:30 Uhr" — time only with the German "Uhr" suffix so it reads unmistakably
+// as a clock time (call-log Uhrzeit column). Falls back to "—" when there's no value.
+export const fmtClockUhr = (iso: string | null): string => {
+  const t = fmtClock(iso)
+  return t === '—' ? t : `${t} Uhr`
+}
+
 // "08.06.2026" — date only.
 export const fmtDate = (iso: string | null): string =>
   iso

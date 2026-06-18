@@ -27,7 +27,7 @@ import { apiBlobUrl, apiFetch } from '../../../lib/api'
 import { cn } from '../../../lib/utils'
 import { AppointmentCard, type PendingAppointment, usePendingAppointment } from '../AppointmentCard'
 import { CreateAppointmentModal } from '../Modals'
-import { AssignDropdown, Avatar, DirBadge, MoodPill, NotdienstBadge, StatusPill } from '../atoms'
+import { AssignDropdown, Avatar, DirBadge, MoodPill, NotdienstBadge, StatusPill, StatusSelect } from '../atoms'
 import { fmtDuration, fmtTime, type CallDetailData, type CallListItem, type Employee } from '../shared'
 import { callerTitle, caseLink, projectLink, sentimentOf } from './util'
 
@@ -241,6 +241,21 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [summaryOpen, setSummaryOpen] = useState(true)
 
+  // Change the linked Vorgang's status (Offen / In Bearbeitung / Erledigt) straight
+  // from the drawer — Luca wanted status editable here, not just on the case page.
+  const setStatus = useMutation({
+    mutationFn: (status: string) =>
+      apiFetch(`/api/inquiries/${call?.inquiry_id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      }),
+    onSuccess: () => {
+      refresh()
+      flash('Status aktualisiert.')
+    },
+    onError: () => flash('Status konnte nicht geändert werden.'),
+  })
+
   // Assign the call's Vorgang to an employee (the "Zuständig" shown on the row).
   const assignEmp = useMutation({
     mutationFn: (employeeId: string | null) =>
@@ -368,6 +383,13 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                 )}
 
                 <div className="flex flex-wrap gap-1.5">
+                  {call.inquiry_id && (
+                    <StatusSelect
+                      status={call.inquiry_status}
+                      onChange={(s) => setStatus.mutate(s)}
+                      disabled={setStatus.isPending}
+                    />
+                  )}
                   <ActionBtn variant="secondary" icon={<CalendarPlus size={15} />} onClick={() => setModal('appointment')}>
                     Termin
                   </ActionBtn>
