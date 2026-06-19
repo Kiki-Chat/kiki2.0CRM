@@ -262,6 +262,7 @@ export function JobLinkPage() {
               onChange={(e) => void uploadPhotos(e.target.files)}
             />
             <button
+              type="button"
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
               className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-border bg-alt py-3 text-sm font-medium text-body hover:bg-border/30 disabled:opacity-60"

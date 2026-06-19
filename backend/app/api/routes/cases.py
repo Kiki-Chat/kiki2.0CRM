@@ -19,6 +19,7 @@ from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.services.cases.grouper import propose_cases_for_customer
 from app.services.common import gen_case_number, validate_fk_in_org
+from app.services.scope import resolve_scope
 
 router = APIRouter(prefix="/api", tags=["cases"])
 
@@ -50,10 +51,15 @@ async def list_cases(user: CurrentUser = Depends(require_org)) -> list[dict]:
     def _run():
         client = get_service_client()
         org_id = user.org_id
+        # Employee portal: a plain employee sees only the Fälle they're assigned
+        # to (case_employees / their inquiries); admins see all (no-op for admins).
+        scope = resolve_scope(client, user)
         cases = (
-            client.table("cases")
-            .select("id, number, title, status, customer_id, created_at, updated_at, project_id")
-            .eq("org_id", org_id).order("created_at", desc=True).execute().data or []
+            scope.filter_cases(
+                client.table("cases")
+                .select("id, number, title, status, customer_id, created_at, updated_at, project_id")
+                .eq("org_id", org_id)
+            ).order("created_at", desc=True).execute().data or []
         )
         if not cases:
             return []

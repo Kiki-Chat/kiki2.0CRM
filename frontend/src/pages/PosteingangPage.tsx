@@ -6,6 +6,7 @@ import { Check, Folder, Inbox } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { initials } from '../lib/utils'
+import { useMe } from '../lib/useMe'
 import { Avatar } from './calls/atoms'
 import { AssigneeDot, Btn, ProgressMeter, SectionHead, TypeTag } from './posteingang/parts'
 import { type DecisionVM, usePosteingang, usePosteingangActions } from './posteingang/api'
@@ -80,8 +81,17 @@ function DecisionCard({
 }
 
 export function PosteingangPage() {
+  const { isAdmin } = useMe()
   const { loading, error, employees, decisions, vorgaenge, callsCount } = usePosteingang()
   const actions = usePosteingangActions()
+  // Employee portal: this is the person's personal to-do list ("Meine Aufgaben"),
+  // scoped server-side to their own work. The admin login sees the org Posteingang.
+  const eyebrow = isAdmin ? 'Posteingang' : 'Meine Aufgaben'
+  const taskNoun = isAdmin ? 'Entscheidung' : 'Aufgabe'
+  const taskNounPl = isAdmin ? 'Entscheidungen' : 'Aufgaben'
+  const introCopy = isAdmin
+    ? 'Kiki hat Ihre Anrufe bearbeitet und in Fälle sortiert. Hier treffen Sie die offenen Entscheidungen — die Fälle selbst finden Sie unter „Fälle".'
+    : 'Das sind Ihre offenen Aufgaben — was Kiki für Sie vorbereitet hat und worauf Sie reagieren müssen. Die Fälle selbst finden Sie unter „Fälle".'
   const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
   // Optimistic assignee overrides per inquiry: assigneeId on a decision is derived
   // from the windowed calls list, so a fresh assignment may not be reflected by the
@@ -116,11 +126,11 @@ export function PosteingangPage() {
     <div style={{ maxWidth: 740, margin: '0 auto', width: '100%', padding: '38px 26px 90px' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 18, marginBottom: 30, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 260 }}>
-          <div style={{ fontFamily: 'var(--font-poster)', fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--green-primary)', marginBottom: 9 }}>Posteingang</div>
+          <div style={{ fontFamily: 'var(--font-poster)', fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--green-primary)', marginBottom: 9 }}>{eyebrow}</div>
           <h1 style={{ margin: '0 0 8px', fontFamily: 'var(--font-poster)', fontWeight: 800, fontSize: 31, letterSpacing: '-0.025em', color: 'var(--text)', lineHeight: 1.08 }}>
-            {loading ? 'Lädt…' : allDone ? 'Alles erledigt — gut gemacht.' : `${liveDecisions.length} ${liveDecisions.length === 1 ? 'Entscheidung wartet' : 'Entscheidungen warten'} auf Sie`}
+            {loading ? 'Lädt…' : allDone ? 'Alles erledigt — gut gemacht.' : `${liveDecisions.length} ${liveDecisions.length === 1 ? `${taskNoun} wartet` : `${taskNounPl} warten`} auf Sie`}
           </h1>
-          <p style={{ margin: 0, fontSize: 14.5, color: 'var(--muted)', lineHeight: 1.5, maxWidth: 460 }}>Kiki hat Ihre Anrufe bearbeitet und in Fälle sortiert. Hier treffen Sie die offenen Entscheidungen — die Fälle selbst finden Sie unter „Fälle".</p>
+          <p style={{ margin: 0, fontSize: 14.5, color: 'var(--muted)', lineHeight: 1.5, maxWidth: 460 }}>{introCopy}</p>
         </div>
         <div style={{ display: 'flex', gap: 0, background: 'var(--surface)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--ring)', overflow: 'hidden', flexShrink: 0 }}>
           {[
@@ -148,7 +158,7 @@ export function PosteingangPage() {
         </div>
       ) : (
         <>
-          <SectionHead icon={Inbox} color="var(--error)" label="Jetzt entscheiden" trailing={<ProgressMeter done={doneCount} total={total} />} />
+          <SectionHead icon={Inbox} color="var(--error)" label={isAdmin ? 'Jetzt entscheiden' : 'Zu erledigen'} trailing={<ProgressMeter done={doneCount} total={total} />} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {liveDecisions.map((d) => (
               <DecisionCard key={d.actionKey} d={d} employees={employees} onAssign={onAssign} onResolve={(c) => resolve(d, c)} />

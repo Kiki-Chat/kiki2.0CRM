@@ -46,13 +46,16 @@ function greetingFor(hour: number): string {
 
 export function DashboardPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('overview')
-  const { me } = useMe()
-  // Per Amber: the prominent greeting name = the real COMPANY name (org_name),
-  // not a hardcoded person. Falls back to the user's own name, then a generic.
+  const { me, isAdmin } = useMe()
+  // Admin login REPRESENTS the company → the headline is the company name (the
+  // greeting may add the admin's own first name). Employee login is a PERSON →
+  // the headline is THEIR name and the company name is intentionally NOT shown
+  // here (the employee portal is personal, not company-branded).
   const company = me?.org_name ?? me?.full_name ?? 'Willkommen'
-  // Greeting is personalised to the logged-in user (their own name); the company
-  // name stays the prominent identity below it. Falls back to no name if unset.
-  const person = me?.full_name?.trim() || null
+  const fullName = me?.full_name?.trim() || null
+  const firstName = fullName?.split(/\s+/)[0] ?? null
+  const headline = isAdmin ? company : (fullName ?? 'Willkommen')
+  const greetName = isAdmin ? (firstName && firstName !== company ? firstName : null) : firstName
   const now = new Date()
   const greeting = greetingFor(berlinHour(now))
   const today = now.toLocaleDateString('de-DE', {
@@ -66,8 +69,8 @@ export function DashboardPage() {
   return (
     <div className="p-8 font-poster">
       <div className="mb-6">
-        <p className="text-[15px] font-semibold text-muted">{greeting}{person && person !== company ? `, ${person}` : ','}</p>
-        <h1 className="text-3xl font-extrabold tracking-tight text-text">{company}</h1>
+        <p className="text-[15px] font-semibold text-muted">{greeting}{greetName ? `, ${greetName}` : ','}</p>
+        <h1 className="text-3xl font-extrabold tracking-tight text-text">{headline}</h1>
         <p className="mt-1 text-sm text-muted">{today}</p>
       </div>
 
@@ -132,7 +135,12 @@ const TYPE_ICON: Record<string, typeof Phone> = {
 // count is only a subheading so it never crowds the slogan or the 3D model.
 function HeroDeck() {
   const navigate = useNavigate()
+  const { isAdmin } = useMe()
   const { decisions, callsCount, loading } = usePosteingang()
+  // Employee portal: frame the deck as the person's own to-do list ("Aufgaben");
+  // for the admin/company login it stays the org decision queue ("Entscheidungen").
+  const taskNoun = isAdmin ? 'Entscheidung' : 'Aufgabe'
+  const taskNounPl = isAdmin ? 'Entscheidungen' : 'Aufgaben'
   const { resolve } = usePosteingangActions()
   const { data: cases } = useQuery({
     queryKey: ['cases'],
@@ -179,7 +187,7 @@ function HeroDeck() {
             <p className="text-sm font-bold text-text">
               {total === 0
                 ? 'Alles erledigt 🎉'
-                : `${total} ${total === 1 ? 'Entscheidung wartet' : 'Entscheidungen warten'} auf Sie`}
+                : `${total} ${total === 1 ? `${taskNoun} wartet` : `${taskNounPl} warten`} auf Sie`}
             </p>
             <p className="mt-0.5 text-[11px] font-medium text-muted">
               {callsCount} Anrufe · {casesCount} Fälle · {total} offen
