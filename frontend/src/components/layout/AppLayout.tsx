@@ -87,17 +87,9 @@ export function AppLayout() {
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>
-        {(contactLine || me?.org_email) && (
+        {contactLine && (
           <footer className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-t border-border bg-surface px-8 py-4 text-center text-xs text-muted">
-            {contactLine && <span>{contactLine}</span>}
-            {me?.org_email && (
-              <>
-                {contactLine && <span className="text-faint">·</span>}
-                <a href={`mailto:${me.org_email}`} className="font-medium text-green-deep hover:underline">
-                  {me.org_email}
-                </a>
-              </>
-            )}
+            <span>{contactLine}</span>
           </footer>
         )}
       </div>

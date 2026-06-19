@@ -50,7 +50,14 @@ export function PersonalSettingsModal({ open, onClose }: { open: boolean; onClos
 
   const saveProfile = useMutation({
     mutationFn: () => apiFetch('/api/users/me', { method: 'PATCH', body: JSON.stringify({ full_name: name }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users-me'] }); onClose() },
+    onSuccess: () => {
+      // Refresh BOTH caches: ['users-me'] backs this modal, ['me'] backs the
+      // sidebar badge + dashboard greeting — so the new name shows everywhere
+      // immediately, no reload.
+      qc.invalidateQueries({ queryKey: ['users-me'] })
+      qc.invalidateQueries({ queryKey: ['me'] })
+      onClose()
+    },
   })
   const changePw = useMutation({
     mutationFn: () => apiFetch('/api/users/me/change-password', { method: 'POST', body: JSON.stringify({ current_password: cur, new_password: nw }) }),

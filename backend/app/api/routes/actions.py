@@ -38,6 +38,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
+from app.services.scope import resolve_scope
 
 router = APIRouter(prefix="/api/actions", tags=["actions"])
 
@@ -504,7 +505,30 @@ def _apply_task_states(client, org_id: str, items: list[dict]) -> list[dict]:
     return out
 
 
-def _aggregate(org_id: str) -> list[dict[str, Any]]:
+# Action kinds whose `id` is an appointment id (used for employee scoping).
+_APPT_KINDS = {"termin_anfrage", "alt_time_proposal", "appointment_cancelled"}
+
+
+def _scope_items(items: list[dict], scope) -> list[dict]:
+    """Limit the worklist to a plain employee's own work (no-op for admins).
+
+    Keep an action when it hangs off an inquiry assigned to the employee (or one
+    of their cases' inquiries) or off an appointment assigned to them. Items with
+    no such link (e.g. org-wide missed-call callbacks) drop out of the employee
+    view — they remain visible to admins."""
+    if scope is None or scope.is_admin:
+        return items
+    out: list[dict] = []
+    for it in items:
+        inq = it.get("inquiry_id")
+        if inq and inq in scope.inquiry_ids:
+            out.append(it)
+        elif it.get("kind") in _APPT_KINDS and it.get("id") in scope.appointment_ids:
+            out.append(it)
+    return out
+
+
+def _aggregate(org_id: str, scope=None) -> list[dict[str, Any]]:
     client = get_service_client()
     items: list[dict[str, Any]] = []
     items.extend(_termin_anfrage(client, org_id))
@@ -513,6 +537,9 @@ def _aggregate(org_id: str) -> list[dict[str, Any]]:
     items.extend(_callback_owed(client, org_id))
     items.extend(_alt_time_proposal(client, org_id))
     items.extend(_appointment_cancelled(client, org_id))
+
+    # Employee portal: restrict to the caller's own work before any further work.
+    items = _scope_items(items, scope)
 
     # Stable per-action key so the manual to-do state (claim/done/dismiss) sticks.
     for it in items:
@@ -537,12 +564,18 @@ def _aggregate(org_id: str) -> list[dict[str, Any]]:
 async def list_pending_actions(
     user: CurrentUser = Depends(require_org),
 ) -> list[dict[str, Any]]:
-    """Aggregated open decisions for the current org.
+    """Aggregated open decisions for the caller.
 
-    Returns a list of ActionItem dicts (see module docstring). Empty list when
-    the org has nothing pending. Org-scoped via require_org.
+    Returns a list of ActionItem dicts (see module docstring). Admins see the
+    whole org; a plain employee sees only the decisions tied to their own work.
+    Empty list when there is nothing pending.
     """
-    return await run_in_threadpool(_aggregate, user.org_id)
+    def _run() -> list[dict[str, Any]]:
+        client = get_service_client()
+        scope = resolve_scope(client, user)
+        return _aggregate(user.org_id, scope)
+
+    return await run_in_threadpool(_run)
 
 
 class ActionStateRequest(BaseModel):

@@ -49,6 +49,15 @@ async def update_me(payload: MeUpdate, user: CurrentUser = Depends(get_current_u
         client = get_service_client()
         if fields:
             client.table("users").update(fields).eq("id", user.id).execute()
+        # Keep the Supabase Auth user_metadata in sync so anything still reading
+        # the session metadata (rather than the ['me'] cache) reflects the new name.
+        if "full_name" in fields:
+            try:
+                client.auth.admin.update_user_by_id(
+                    user.id, {"user_metadata": {"full_name": fields["full_name"]}}
+                )
+            except Exception:  # noqa: BLE001 — display sync is best-effort
+                pass
         return _me(user.id)
 
     row = await run_in_threadpool(_update)
