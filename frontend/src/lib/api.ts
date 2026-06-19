@@ -62,7 +62,18 @@ export function createApiFetch(client: SupabaseClient | null): ApiBundle {
     const token = await authToken()
     if (token) headers.set('Authorization', `Bearer ${token}`)
     const res = await fetch(`${env.apiUrl}${path}`, { method: 'POST', headers, body: formData })
-    if (!res.ok) throw new Error(`Upload failed (${res.status})`)
+    if (!res.ok) {
+      // Surface the backend's German detail (e.g. "Nur Bilder…", "zu groß") rather
+      // than a bare status — the technician photo upload shows this verbatim.
+      let detail = `Upload fehlgeschlagen (${res.status})`
+      try {
+        const body = await res.json()
+        detail = body.detail ?? detail
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail)
+    }
     return res.json() as Promise<T>
   }
 
