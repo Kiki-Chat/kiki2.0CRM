@@ -196,6 +196,18 @@ function EmptyHint({ text }: { text: string }) {
   return <p className="rounded-xl border border-dashed border-border px-3 py-5 text-center text-sm text-muted">{text}</p>
 }
 
+// Workload badge for the assignment picker: how many OPEN Fälle the employee
+// already has. Goes amber → red as the count climbs so an admin can avoid
+// overloading one person while assigning a ticket.
+function TicketLoad({ n }: { n: number }) {
+  const tone = n >= 5 ? 'bg-error-bg text-error' : n >= 3 ? 'bg-warning-bg text-warning' : 'bg-alt text-muted'
+  return (
+    <span className={cn('ml-auto shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold', tone)} title={`${n} offene Fälle`}>
+      {n} offen
+    </span>
+  )
+}
+
 function GroupedTable({ columns, children }: { columns: string[]; children: React.ReactNode }) {
   return (
     <div className="scroll overflow-x-auto rounded-xl border border-border">
@@ -292,6 +304,13 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
     },
     onError: () => flash('Beauftragung fehlgeschlagen.'),
   })
+  // "Erneut senden" — re-dispatch an already-sent job link (revokes the old one,
+  // emails a fresh link). Disabled once the technician submitted the report.
+  const resendJob = useMutation({
+    mutationFn: (j: CaseJob) => apiFetch(`/api/appointments/${j.appointment_id}/dispatch-technician`, { method: 'POST', body: JSON.stringify({ employee_id: j.employee_id }) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['caseJobs', caseId] }); flash('Link erneut gesendet ✓') },
+    onError: () => flash('Erneut senden fehlgeschlagen.'),
+  })
 
   if (!caseId) return <div className="grid flex-1 place-items-center bg-bg text-[17px] text-muted">Tippen Sie links auf einen Fall.</div>
   if (isLoading || !data) return <div className="grid flex-1 place-items-center bg-bg text-muted">Lädt…</div>
@@ -301,6 +320,10 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
   const assignedIds = new Set(data.employees.map((e) => e.id))
   const freeEmployees = employees.filter((e) => !assignedIds.has(e.id) && e.is_active !== false)
   const technicians = employees.filter((e) => e.is_technician && e.is_active !== false)
+  // Send-order is gated to CONFIRMED appointments only — a technician link is sent
+  // once the appointment is assigned + confirmed (from the calendar), not while a
+  // still-pending slot is being created.
+  const confirmedAppts = data.appointments.filter((a) => a.status === 'confirmed')
   const currentProject = projects.find((p) => p.id === cs.project_id) ?? null
   const customerProjects = projects.filter((p) => !customerId || p.customer_id === customerId)
   const moveTargets: MoveTarget[] = allCases.filter((c) => customerId && c.customer_id === customerId).map((c) => ({ id: c.id, label: c.title, number: c.number }))
@@ -420,7 +443,12 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setEmpOpen(false)} />
                 <div className="absolute right-0 z-50 mt-1 max-h-64 w-60 overflow-auto rounded-xl border border-border bg-surface p-1.5 shadow-e3">
-                  {freeEmployees.length ? freeEmployees.map((e) => <button key={e.id} onClick={() => { assignEmp.mutate(e); setEmpOpen(false) }} className="block w-full truncate rounded-lg px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">{e.display_name ?? 'Mitarbeiter'}{e.is_technician ? ' · Techniker' : ''}</button>) : <p className="px-2.5 py-2 text-xs text-muted">Alle zugewiesen.</p>}
+                  {freeEmployees.length ? freeEmployees.map((e) => (
+                    <button key={e.id} onClick={() => { assignEmp.mutate(e); setEmpOpen(false) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
+                      <span className="truncate">{e.display_name ?? 'Mitarbeiter'}{e.is_technician ? ' · Techniker' : ''}</span>
+                      <TicketLoad n={e.open_tickets ?? 0} />
+                    </button>
+                  )) : <p className="px-2.5 py-2 text-xs text-muted">Alle zugewiesen.</p>}
                 </div>
               </>
             )}
@@ -516,7 +544,9 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
           {techForm && (
             <div className="mb-3 rounded-xl border border-border bg-alt p-3">
               {data.appointments.length === 0 ? (
-                <p className="text-sm text-muted">Erst einen Termin anlegen — der Techniker-Link gehört zu einem Termin.</p>
+                <p className="text-sm text-muted">Erst einen Termin anlegen — der Techniker-Link gehört zu einem bestätigten Termin.</p>
+              ) : confirmedAppts.length === 0 ? (
+                <p className="text-sm text-muted">Der Termin muss erst im Kalender bestätigt werden — danach können Sie den Techniker-Link senden.</p>
               ) : technicians.length === 0 ? (
                 <p className="text-sm text-muted">Keine Techniker hinterlegt (Mitarbeiter mit Technikerrolle).</p>
               ) : (
@@ -524,7 +554,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                   <label className="flex flex-col gap-1 text-xs font-bold text-muted">Termin
                     <select value={techAppt} onChange={(e) => setTechAppt(e.target.value)} className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-text">
                       <option value="">wählen…</option>
-                      {data.appointments.map((a) => <option key={a.id} value={a.id}>{(a.title ?? 'Termin') + (a.scheduled_at ? ` · ${fmtDateTime(a.scheduled_at)}` : '')}</option>)}
+                      {confirmedAppts.map((a) => <option key={a.id} value={a.id}>{(a.title ?? 'Termin') + (a.scheduled_at ? ` · ${fmtDateTime(a.scheduled_at)}` : '')}</option>)}
                     </select>
                   </label>
                   <label className="flex flex-col gap-1 text-xs font-bold text-muted">Techniker
@@ -533,7 +563,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                       {technicians.map((e) => <option key={e.id} value={e.id}>{e.display_name ?? 'Techniker'}</option>)}
                     </select>
                   </label>
-                  <button disabled={!techAppt || !techEmp || dispatchTech.isPending || !data.appointments.some((a) => a.id === techAppt)} onClick={() => { if (data.appointments.some((a) => a.id === techAppt)) dispatchTech.mutate() }} className="inline-flex items-center gap-1.5 rounded-lg bg-green-primary px-3 py-2 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-50">
+                  <button disabled={!techAppt || !techEmp || dispatchTech.isPending || !confirmedAppts.some((a) => a.id === techAppt)} onClick={() => { if (confirmedAppts.some((a) => a.id === techAppt)) dispatchTech.mutate() }} className="inline-flex items-center gap-1.5 rounded-lg bg-green-primary px-3 py-2 text-sm font-bold text-white transition hover:brightness-105 disabled:opacity-50">
                     <Send size={14} /> Link senden
                   </button>
                 </div>
@@ -558,7 +588,10 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                           ) : <span className="text-faint">noch offen</span>}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-right">
-                          <button onClick={() => copyLink(j.url)} title="Techniker-Link kopieren" className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-bold text-body hover:bg-alt"><Copy size={12} /> Link</button>
+                          <div className="inline-flex items-center gap-1.5">
+                            <button onClick={() => resendJob.mutate(j)} disabled={!j.appointment_id || !j.employee_id || !!j.submitted_at || resendJob.isPending} title="Link erneut an den Techniker senden" className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-bold text-body hover:bg-alt disabled:opacity-50"><Send size={12} /> Erneut senden</button>
+                            <button onClick={() => copyLink(j.url)} title="Techniker-Link kopieren" className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-bold text-body hover:bg-alt"><Copy size={12} /> Link</button>
+                          </div>
                         </td>
                       </tr>
                     )

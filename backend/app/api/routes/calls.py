@@ -9,6 +9,7 @@ from app.api.deps import CurrentUser, require_org
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.services.common import fetch_all_rows, run_parallel
+from app.services.scope import resolve_scope
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
 
@@ -169,8 +170,12 @@ def _enrich_calls_with_inquiries(client, org_id: str, calls: list[dict]) -> list
     return calls
 
 
-def _list(org_id: str, limit: int, offset: int, customer_id: str | None) -> dict:
+def _list(user: CurrentUser, limit: int, offset: int, customer_id: str | None) -> dict:
     client = get_service_client()
+    org_id = user.org_id
+    # Employee portal: a plain employee sees only the calls tied to their own
+    # inquiries/cases; admins see all (filter_calls is a no-op for admins).
+    scope = resolve_scope(client, user)
     query = (
         client.table("calls")
         .select(_LIST_SELECT, count="exact")
@@ -179,6 +184,7 @@ def _list(org_id: str, limit: int, offset: int, customer_id: str | None) -> dict
     )
     if customer_id:
         query = query.eq("customer_id", customer_id)
+    query = scope.filter_calls(query)
     res = (
         query.order("started_at", desc=True)
         .range(offset, offset + limit - 1)
@@ -216,7 +222,7 @@ async def list_calls(
     user: CurrentUser = Depends(require_org),
 ) -> dict:
     # Bound limit/offset so a hand-crafted ?limit=99999 can't force a huge scan.
-    return await run_in_threadpool(_list, user.org_id, limit, offset, customer_id)
+    return await run_in_threadpool(_list, user, limit, offset, customer_id)
 
 
 @router.get("/{call_id}")

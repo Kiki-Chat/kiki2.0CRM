@@ -96,11 +96,18 @@ export function Sidebar({
   })
 
   const email = session?.user.email ?? 'Setup pending'
-  const userName = (session?.user.user_metadata?.full_name as string) ?? companyName ?? 'Konto'
+  // Employee badge name comes from the primed ['me'] cache (full_name) — that is
+  // the live value right after the user edits their name; the auth-session
+  // metadata can be stale (it is not refreshed on a name change). Fall back to
+  // the session metadata, then the email, so it never reverts to "Konto".
+  const personName =
+    me?.full_name?.trim() ||
+    (session?.user.user_metadata?.full_name as string | undefined) ||
+    email
   // White-label bottom badge. The admin login REPRESENTS the company (no personal
   // identity) → show company name + contact email + logo. An employee login is a
-  // person → show their own name + email (logo stays company-level, top header only).
-  const badgeName = isAdmin ? (companyName ?? 'Unternehmen') : userName
+  // person → show their own NAME + email (logo stays company-level, top header only).
+  const badgeName = isAdmin ? (companyName ?? 'Unternehmen') : personName
   const badgeEmail = isAdmin ? (companyEmail ?? email) : email
   const badgeLogo = isAdmin ? companyLogo : null
 
