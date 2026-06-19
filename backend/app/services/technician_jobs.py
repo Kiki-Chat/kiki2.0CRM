@@ -62,12 +62,12 @@ def create_job_link(*, org_id: str, appointment_id: str, employee_id: str) -> di
 
 
 def job_link_url(token: str) -> str:
-    base = (settings.frontend_public_url or "").rstrip("/") or "http://localhost:5173"
+    base = settings.public_app_url
     return f"{base}/job/{token}"
 
 
 def technician_portal_url(token: str) -> str:
-    base = (settings.frontend_public_url or "").rstrip("/") or "http://localhost:5173"
+    base = settings.public_app_url
     return f"{base}/techniker/{token}"
 
 

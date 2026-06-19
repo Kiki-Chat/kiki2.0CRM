@@ -119,7 +119,7 @@ def create_checkout_session(
     if trial_days and trial_days > 0:
         sub_data["trial_period_days"] = trial_days
 
-    base = (settings.billing_portal_return_url or settings.frontend_public_url.rstrip("/") + "/settings/abrechnung").split("?")[0]
+    base = (settings.billing_portal_return_url or settings.public_app_url + "/settings/abrechnung").split("?")[0]
     success_url = f"{base}?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{base}?checkout=cancel"
 

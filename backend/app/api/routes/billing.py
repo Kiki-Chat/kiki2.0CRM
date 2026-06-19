@@ -212,7 +212,7 @@ def _portal_session(org_id: str, actor_id: str) -> PortalSessionResponse:
             detail="Für diese Organisation ist noch keine Abrechnung eingerichtet.",
         )
     return_url = settings.billing_portal_return_url or (
-        settings.frontend_public_url.rstrip("/") + "/settings/abrechnung"
+        settings.public_app_url + "/settings/abrechnung"
     )
     # Pass our own configuration (self-service cancellation disabled) — this also
     # removes Stripe's 'default configuration not created' error, the most common
