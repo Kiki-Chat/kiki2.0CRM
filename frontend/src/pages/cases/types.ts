@@ -87,6 +87,9 @@ export interface Employee {
   is_active?: boolean
   is_absent?: boolean
   is_technician?: boolean
+  // Count of OPEN Fälle currently assigned to this employee — shown as a workload
+  // badge in the assignment picker so an overloaded colleague is obvious.
+  open_tickets?: number
 }
 export interface ProjectRow { id: string; number: string | null; title: string; status: string; customer_id: string | null }
 

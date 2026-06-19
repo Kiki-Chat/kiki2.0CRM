@@ -24,6 +24,30 @@ PHOTO_BUCKET = "customer-files"
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 MAX_PHOTOS = 30
 
+# A technician uploads from their phone, where the browser often sends an empty
+# or "application/octet-stream" content-type (especially for HEIC photos). Fall
+# back to the file extension so valid camera uploads aren't wrongly rejected.
+_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "bmp", "tiff"}
+_EXT_CONTENT_TYPE = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
+    "heic": "image/heic", "heif": "image/heif", "webp": "image/webp", "bmp": "image/bmp",
+    "tiff": "image/tiff",
+}
+
+
+def _file_ext(filename: str | None) -> str:
+    return (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+
+
+def _looks_like_image(filename: str | None, mime: str | None) -> bool:
+    return (mime or "").startswith("image/") or _file_ext(filename) in _IMAGE_EXTS
+
+
+def _content_type_for(filename: str | None, mime: str | None) -> str:
+    if (mime or "").startswith("image/"):
+        return mime
+    return _EXT_CONTENT_TYPE.get(_file_ext(filename), "image/jpeg")
+
 
 class JobLinkError(ValueError):
     """User-facing German message (404/410-style failures resolved by caller)."""
@@ -257,7 +281,7 @@ def add_photo(token: str, *, filename: str, content: bytes, mime_type: str) -> d
     ctx = _load_context(link)
     if link.get("submitted_at"):
         raise JobLinkError("Dieser Auftrag wurde bereits abgeschlossen.")
-    if not (mime_type or "").startswith("image/"):
+    if not _looks_like_image(filename, mime_type):
         raise JobLinkError("Nur Bilder können hochgeladen werden.")
     if len(content) > MAX_PHOTO_BYTES:
         raise JobLinkError("Das Foto ist zu groß (max. 10 MB).")
@@ -267,8 +291,9 @@ def add_photo(token: str, *, filename: str, content: bytes, mime_type: str) -> d
     client = get_service_client()
     safe_name = (filename or "foto.jpg").replace("/", "_")[-80:]
     path = f"{link['org_id']}/jobs/{link['id']}/{uuid_mod.uuid4().hex}_{safe_name}"
+    content_type = _content_type_for(filename, mime_type)
     client.storage.from_(PHOTO_BUCKET).upload(
-        path, content, {"content-type": mime_type or "image/jpeg"}
+        path, content, {"content-type": content_type}
     )
     paths.append(path)
     client.table("technician_job_links").update({"photo_paths": paths}).eq(
@@ -297,7 +322,7 @@ def add_photo(token: str, *, filename: str, content: bytes, mime_type: str) -> d
                 "name": safe_name,
                 "path": path,
                 "category": "Einsatzbericht",
-                "mime_type": mime_type or "image/jpeg",
+                "mime_type": content_type,
                 "is_image": True,
                 "size_bytes": len(content),
                 "uploaded_by_name": f"Techniker: {technician}" if technician else None,
