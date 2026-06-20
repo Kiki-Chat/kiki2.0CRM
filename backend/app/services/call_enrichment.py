@@ -36,7 +36,9 @@ _SYSTEM_PROMPT = (
     "zurück (Deutsch). Schema:\n"
     "{\n"
     '  "summary_bullets": [string],   // 3-6 KURZE Stichpunkte, je eine Zeile, '
-    "Telegrammstil, das Wichtigste zuerst (Anliegen, Details, Ergebnis, nächster Schritt)\n"
+    "Telegrammstil, das Wichtigste zuerst (Anliegen, Details, Ergebnis). DAS ist der Hauptinhalt.\n"
+    '  "next_steps": [string],        // 0-3 KURZE, imperative Folge-Schritte fürs Team '
+    '(z.B. "Termin am Dienstag bestätigen", "Anna Bauer zuweisen"); leer wenn nichts zu tun ist\n'
     '  "intent": {\n'
     '    "wants_kva": boolean,         // Kunde fragt nach Preis/Angebot/Kostenvoranschlag\n'
     '    "wants_invoice": boolean,     // Kunde fragt nach Rechnung/Bezahlung/Abrechnung\n'
@@ -82,6 +84,11 @@ def _coerce(raw: dict) -> dict:
         bullets = []
     bullets = [str(b).strip() for b in bullets if str(b).strip()][:6]
 
+    steps = raw.get("next_steps")
+    if not isinstance(steps, list):
+        steps = []
+    steps = [str(s).strip() for s in steps if str(s).strip()][:3]
+
     intent_in = raw.get("intent") or {}
     intent = {
         "wants_kva": bool(intent_in.get("wants_kva")),
@@ -105,6 +112,7 @@ def _coerce(raw: dict) -> dict:
         "version": ENRICHMENT_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "summary_bullets": bullets,
+        "next_steps": steps,
         "intent": intent,
         "prefill": prefill,
     }

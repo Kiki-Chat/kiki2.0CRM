@@ -20,7 +20,7 @@ export interface CallListItem {
   started_at: string | null
   // phantom_capture: backend post-call detector — the agent claimed the concern
   // was recorded but no write tool ran; the badge tells staff to re-check.
-  data_collection: (Record<string, string> & { phantom_capture?: boolean }) | null
+  data_collection: (Record<string, string> & { phantom_capture?: boolean; next_steps?: string[] }) | null
   customer_id: string | null
   read_at: string | null
   created_at: string | null
@@ -47,6 +47,8 @@ export interface CallEnrichment {
   version?: number
   generated_at?: string
   summary_bullets: string[]
+  // 0-3 short imperative German follow-up steps (own compartment under the summary).
+  next_steps?: string[]
   intent: {
     wants_kva: boolean
     wants_invoice: boolean

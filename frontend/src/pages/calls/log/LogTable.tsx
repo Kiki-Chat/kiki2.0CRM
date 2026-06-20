@@ -8,7 +8,7 @@ import { ChevronRight, Folder, Layers, Phone } from 'lucide-react'
 import { Fragment } from 'react'
 
 import { cn } from '../../../lib/utils'
-import { Avatar, DirBadge, NotdienstBadge, StatusPill } from '../atoms'
+import { Avatar, DirBadge, StatusPill } from '../atoms'
 import { fmtClockUhr, fmtDurationLong, type CallListItem } from '../shared'
 import { callerTitle, caseLink, fmtDayDate, projectLink, subjectEmoji } from './util'
 
@@ -74,8 +74,14 @@ function LogTableRow({
         active ? 'bg-alt' : 'hover:bg-alt',
       )}
     >
-      {/* 1 — Richtung (inbound/outbound) */}
-      <td className={cn(td, 'border-l-2', unread ? 'border-green-primary' : 'border-transparent')}>
+      {/* 1 — Richtung (inbound/outbound) — emergency red line wins over unread green */}
+      <td
+        className={cn(
+          td,
+          'border-l-2',
+          call.emergency_flag ? 'border-error' : unread ? 'border-green-primary' : 'border-transparent',
+        )}
+      >
         <span
           className="flex h-9 w-9 items-center justify-center rounded-full"
           style={{ background: `color-mix(in srgb, var(--${out ? 'outbound' : 'inbound'}) 14%, transparent)` }}
@@ -113,17 +119,34 @@ function LogTableRow({
         </div>
       </td>
 
-      {/* 5 — Betreff (subject) — emergency shows as a compact icon so the subject
-          text stays readable; the full "Notdienst" label lives in the drawer. */}
+      {/* 5 — Betreff (subject) — for emergencies the emoji+title sit in a red-outlined
+          highlight (the 🚨 emoji + red boundary ARE the signal; no extra badge/label). */}
       <td className={td}>
         <div className="flex min-w-0 items-center gap-1.5">
-          {call.emergency_flag && <NotdienstBadge small iconOnly />}
-          <span className="flex-shrink-0 text-[15px] leading-none" aria-hidden>
-            {subjectEmoji(call)}
-          </span>
-          <span className={cn('truncate text-[13.5px]', unread ? 'font-extrabold text-text' : 'font-semibold text-body')}>
-            {call.summary_title || 'Ohne Betreff'}
-          </span>
+          {call.emergency_flag ? (
+            <span className="emrg-glow inline-flex min-w-0 items-center gap-1.5 rounded-lg border border-error/55 bg-error-bg px-2 py-[3px]">
+              <span className="flex-shrink-0 text-[15px] leading-none" aria-hidden>
+                {subjectEmoji(call)}
+              </span>
+              <span className="truncate text-[13.5px] font-extrabold text-error">
+                {call.summary_title || 'Ohne Betreff'}
+              </span>
+            </span>
+          ) : (
+            <>
+              <span className="flex-shrink-0 text-[15px] leading-none" aria-hidden>
+                {subjectEmoji(call)}
+              </span>
+              <span
+                className={cn(
+                  'truncate text-[13.5px]',
+                  unread ? 'font-extrabold text-text' : 'font-semibold text-body',
+                )}
+              >
+                {call.summary_title || 'Ohne Betreff'}
+              </span>
+            </>
+          )}
           {unread && (
             <span className="flex-shrink-0 rounded-full bg-green-tint-100 px-1.5 py-px text-[9.5px] font-extrabold uppercase tracking-wide text-green-deep">
               Neu

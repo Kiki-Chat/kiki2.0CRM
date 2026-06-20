@@ -12,6 +12,7 @@ import {
   Folder,
   Inbox,
   Layers,
+  ListChecks,
   Phone,
   Play,
   Plus,
@@ -40,6 +41,7 @@ function ActionBtn({
   onClick,
   disabled,
   title,
+  className,
 }: {
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
   icon?: ReactNode
@@ -47,6 +49,7 @@ function ActionBtn({
   onClick?: () => void
   disabled?: boolean
   title?: string
+  className?: string
 }) {
   const styles: Record<string, string> = {
     primary: 'bg-green-primary text-white hover:brightness-105',
@@ -63,6 +66,7 @@ function ActionBtn({
       className={cn(
         'inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-bold transition disabled:cursor-default disabled:opacity-50',
         styles[variant],
+        className,
       )}
     >
       {icon}
@@ -293,6 +297,16 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
   const proj = call ? projectLink(call) : null
   const sentiment = call ? sentimentOf(call) : null
   const nextAction = call?.data_collection?.next_action ?? null
+  // Short follow-up steps for the separated "Nächste Schritte" compartment.
+  // Prefer the AI enrichment array, then a backend data_collection array, then the
+  // single legacy next_action sentence (so it works before/after the AI change).
+  const nextSteps: string[] = call?.enrichment?.next_steps?.length
+    ? call.enrichment.next_steps
+    : call?.data_collection?.next_steps?.length
+      ? call.data_collection.next_steps
+      : nextAction
+        ? [nextAction]
+        : []
 
   // Appointment card state (kept on screen after confirm/reject via the snapshot).
   const livePending = pendingAppt.data?.appointment ?? null
@@ -350,6 +364,8 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                   <div className="truncate text-[17px] font-extrabold tracking-tight text-text">{callerTitle(call)}</div>
                   <div className="font-mono text-[12.5px] text-muted">{call.caller_number ?? '—'}</div>
                 </div>
+                {/* Emergency marker lives in the header (right of the name, before ✕). */}
+                {call.emergency_flag && <NotdienstBadge small />}
                 <button
                   type="button"
                   onClick={onClose}
@@ -368,7 +384,6 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                   <DirBadge dir={call.direction} withLabel />
                 </span>
                 {sentiment && <MoodPill mood={sentiment} />}
-                {call.emergency_flag && <NotdienstBadge small />}
               </div>
 
               {/* ─── Actions (appointment card + create + Zuständig) ─────────── */}
@@ -422,45 +437,65 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                   </button>
                 )}
 
-                <div className="flex flex-wrap gap-1.5">
-                  {call.inquiry_id && (
-                    <StatusSelect
-                      status={call.inquiry_status}
-                      onChange={(s) => setStatus.mutate(s)}
-                      disabled={setStatus.isPending}
-                    />
+                {/* One tidy frame: labeled Status + Zuständig on top (no wrapping),
+                    a divider, then equal-width create-actions. */}
+                <div className="rounded-xl border border-border bg-surface p-3">
+                  {(call.inquiry_id || canAssign) && (
+                    <div className="flex flex-wrap gap-3.5">
+                      {call.inquiry_id && (
+                        <div className="flex min-w-[150px] flex-col gap-1.5">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Status</span>
+                          <StatusSelect
+                            status={call.inquiry_status}
+                            onChange={(s) => setStatus.mutate(s)}
+                            disabled={setStatus.isPending}
+                          />
+                        </div>
+                      )}
+                      {canAssign && (
+                        <div className="flex min-w-[150px] flex-col gap-1.5">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Zuständig</span>
+                          <AssignDropdown
+                            current={call.assigned_employee_id}
+                            employees={employees}
+                            onAssign={(id) => assignEmp.mutate(id)}
+                            disabled={assignEmp.isPending}
+                          >
+                            <button
+                              type="button"
+                              title={assigneeName ? `Zuständig: ${assigneeName}` : 'Mitarbeiter zuweisen'}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-bold text-body transition hover:bg-alt"
+                            >
+                              {call.assigned_employee_id ? (
+                                <Avatar employeeId={call.assigned_employee_id} text={call.assigned_employee_initials || '?'} size={18} />
+                              ) : (
+                                <UserPlus size={15} />
+                              )}
+                              <span className="max-w-[110px] truncate">{assigneeName ?? 'Zuständig'}</span>
+                              <ChevronDown size={13} className="flex-shrink-0 text-faint" />
+                            </button>
+                          </AssignDropdown>
+                        </div>
+                      )}
+                    </div>
                   )}
-                  <ActionBtn variant="secondary" icon={<CalendarPlus size={15} />} onClick={() => setModal('appointment')}>
-                    Termin
-                  </ActionBtn>
-                  <ActionBtn variant="secondary" icon={<FileText size={15} />} disabled={!call.customer_id} onClick={goKva}>
-                    KVA
-                  </ActionBtn>
-                  <ActionBtn variant="secondary" icon={<Receipt size={15} />} disabled={!call.customer_id} onClick={goInvoice}>
-                    Rechnung
-                  </ActionBtn>
-                  {canAssign && (
-                    <AssignDropdown
-                      current={call.assigned_employee_id}
-                      employees={employees}
-                      onAssign={(id) => assignEmp.mutate(id)}
-                      disabled={assignEmp.isPending}
-                    >
-                      <button
-                        type="button"
-                        title={assigneeName ? `Zuständig: ${assigneeName}` : 'Mitarbeiter zuweisen'}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-bold text-body transition hover:bg-alt"
-                      >
-                        {call.assigned_employee_id ? (
-                          <Avatar employeeId={call.assigned_employee_id} text={call.assigned_employee_initials || '?'} size={18} />
-                        ) : (
-                          <UserPlus size={15} />
-                        )}
-                        <span className="max-w-[110px] truncate">{assigneeName ?? 'Zuständig'}</span>
-                        <ChevronDown size={13} className="flex-shrink-0 text-faint" />
-                      </button>
-                    </AssignDropdown>
-                  )}
+
+                  {(call.inquiry_id || canAssign) && <div className="my-3 h-px bg-border-faint" />}
+
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Erstellen</span>
+                    <div className="flex gap-1.5">
+                      <ActionBtn variant="secondary" className="flex-1" icon={<CalendarPlus size={15} />} onClick={() => setModal('appointment')}>
+                        Termin
+                      </ActionBtn>
+                      <ActionBtn variant="secondary" className="flex-1" icon={<FileText size={15} />} disabled={!call.customer_id} onClick={goKva}>
+                        KVA
+                      </ActionBtn>
+                      <ActionBtn variant="secondary" className="flex-1" icon={<Receipt size={15} />} disabled={!call.customer_id} onClick={goInvoice}>
+                        Rechnung
+                      </ActionBtn>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -603,10 +638,19 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                         {call.summary || 'Keine Zusammenfassung verfügbar.'}
                       </p>
                     )}
-                    {nextAction && (
-                      <div className="mt-3 flex items-start gap-2 rounded-xl bg-surface/60 p-3 text-[13px] text-text">
-                        <span className="whitespace-nowrap font-bold text-ai">Nächste Aktion:</span>
-                        <span>{nextAction}</span>
+                    {nextSteps.length > 0 && (
+                      <div className="mt-3.5 rounded-xl border border-ai/25 bg-surface/60 p-3">
+                        <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-extrabold uppercase tracking-wider text-ai">
+                          <ListChecks size={13} /> Nächste Schritte
+                        </div>
+                        <ul className="flex flex-col gap-1.5">
+                          {nextSteps.map((s, i) => (
+                            <li key={i} className="flex items-start gap-2 text-[13.5px] leading-snug text-text">
+                              <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-ai" />
+                              <span>{s}</span>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
                   </div>
