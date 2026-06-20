@@ -311,10 +311,16 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
     navigate(
       `/cost-estimates/new?customer_id=${call.customer_id ?? ''}` +
         (call.case_id ? `&case_id=${call.case_id}` : '') +
-        (call.inquiry_id ? `&inquiry_id=${call.inquiry_id}` : ''),
+        (call.inquiry_id ? `&inquiry_id=${call.inquiry_id}` : '') +
+        `&call_id=${call.id}`,
     )
   const goInvoice = () =>
-    call && navigate(`/invoices/new?customer_id=${call.customer_id ?? ''}${call.case_id ? `&case_id=${call.case_id}` : ''}`)
+    call &&
+    navigate(
+      `/invoices/new?customer_id=${call.customer_id ?? ''}` +
+        (call.case_id ? `&case_id=${call.case_id}` : '') +
+        `&call_id=${call.id}`,
+    )
 
   return (
     <div className="fixed inset-0 z-[30]">
@@ -380,6 +386,40 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                       onRemove={() => setDismissedApptIds((p) => new Set(p).add(shownAppt.id))}
                     />
                   </div>
+                )}
+
+                {/* AI-suggested follow-ups: the caller asked about a KVA / Rechnung
+                    (detected by the enrichment pass). Mirrors the appointment card —
+                    one click opens the pre-filled form. */}
+                {call.enrichment?.intent?.wants_kva && (
+                  <button
+                    type="button"
+                    onClick={goKva}
+                    disabled={!call.customer_id}
+                    className="mb-2.5 flex w-full items-center gap-3 rounded-xl border border-ai/30 bg-ai-bg px-3.5 py-2.5 text-left transition hover:brightness-95 disabled:cursor-default disabled:opacity-50"
+                  >
+                    <FileText size={16} className="flex-shrink-0 text-ai" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-bold text-ai">Kostenvoranschlag erwähnt</div>
+                      <div className="text-[11.5px] text-muted">Im Anruf nach einem KVA gefragt — vorausgefüllt erstellen.</div>
+                    </div>
+                    <span className="flex-shrink-0 rounded-lg bg-ai px-2.5 py-1 text-[12px] font-bold text-white">KVA erstellen</span>
+                  </button>
+                )}
+                {call.enrichment?.intent?.wants_invoice && (
+                  <button
+                    type="button"
+                    onClick={goInvoice}
+                    disabled={!call.customer_id}
+                    className="mb-2.5 flex w-full items-center gap-3 rounded-xl border border-ai/30 bg-ai-bg px-3.5 py-2.5 text-left transition hover:brightness-95 disabled:cursor-default disabled:opacity-50"
+                  >
+                    <Receipt size={16} className="flex-shrink-0 text-ai" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-bold text-ai">Rechnung erwähnt</div>
+                      <div className="text-[11.5px] text-muted">Im Anruf nach einer Rechnung gefragt — vorausgefüllt erstellen.</div>
+                    </div>
+                    <span className="flex-shrink-0 rounded-lg bg-ai px-2.5 py-1 text-[12px] font-bold text-white">Rechnung erstellen</span>
+                  </button>
                 )}
 
                 <div className="flex flex-wrap gap-1.5">
@@ -549,7 +589,20 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                 </button>
                 {summaryOpen && (
                   <div className="px-4 pb-4">
-                    <p className="text-[14px] leading-relaxed text-body">{call.summary || 'Keine Zusammenfassung verfügbar.'}</p>
+                    {call.enrichment?.summary_bullets && call.enrichment.summary_bullets.length > 0 ? (
+                      <ul className="space-y-1.5">
+                        {call.enrichment.summary_bullets.map((b, i) => (
+                          <li key={i} className="flex gap-2 text-[13.5px] leading-relaxed text-body">
+                            <span className="mt-[7px] h-1.5 w-1.5 flex-shrink-0 rounded-full bg-ai" aria-hidden />
+                            <span>{b}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-[14px] leading-relaxed text-body">
+                        {call.summary || 'Keine Zusammenfassung verfügbar.'}
+                      </p>
+                    )}
                     {nextAction && (
                       <div className="mt-3 flex items-start gap-2 rounded-xl bg-surface/60 p-3 text-[13px] text-text">
                         <span className="whitespace-nowrap font-bold text-ai">Nächste Aktion:</span>

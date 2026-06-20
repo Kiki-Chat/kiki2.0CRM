@@ -41,9 +41,29 @@ export interface CallListItem {
   assigned_employee_initials: string | null
 }
 
+// Our-AI-over-transcript output (calls.enrichment, migration 0077). Best-effort:
+// null when AI is disabled or the pass hasn't run — callers fall back to `summary`.
+export interface CallEnrichment {
+  version?: number
+  generated_at?: string
+  summary_bullets: string[]
+  intent: {
+    wants_kva: boolean
+    wants_invoice: boolean
+    wants_appointment: boolean
+  }
+  prefill: {
+    service_description: string | null
+    address: string | null
+    problem: string | null
+    preferred_time: string | null
+  }
+}
+
 export interface CallDetailData extends CallListItem {
   summary: string | null
   transcript: TranscriptTurn[] | null
+  enrichment: CallEnrichment | null
   customers: {
     full_name: string | null
     phone: string | null
@@ -72,8 +92,12 @@ export interface Employee {
 export interface ActionItem {
   kind:
     | 'termin_anfrage'
+    | 'kva_suggested'
     | 'kva_to_send'
     | 'kva_pending_acceptance'
+    | 'invoice_suggested'
+    | 'invoice_to_send'
+    | 'invoice_pending_payment'
     | 'callback_owed'
     | 'alt_time_proposal'
     | 'appointment_cancelled'
@@ -143,8 +167,12 @@ export const COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#
 // stays language-neutral.
 export const ACTION_KIND_LABEL: Record<ActionItem['kind'], string> = {
   termin_anfrage: 'Terminbestätigung',
+  kva_suggested: 'KVA erstellen',
   kva_to_send: 'KVA senden',
   kva_pending_acceptance: 'KVA-Antwort offen',
+  invoice_suggested: 'Rechnung erstellen',
+  invoice_to_send: 'Rechnung senden',
+  invoice_pending_payment: 'Zahlung offen',
   callback_owed: 'Rückruf',
   alt_time_proposal: 'Alternativtermin',
   appointment_cancelled: 'Termin storniert',

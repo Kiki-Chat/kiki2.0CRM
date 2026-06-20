@@ -47,8 +47,12 @@ router = APIRouter(prefix="/api/actions", tags=["actions"])
 # updated in lockstep.
 ActionKind = Literal[
     "termin_anfrage",
+    "kva_suggested",
     "kva_to_send",
     "kva_pending_acceptance",
+    "invoice_suggested",
+    "invoice_to_send",
+    "invoice_pending_payment",
     "callback_owed",
     "alt_time_proposal",
     "appointment_cancelled",
@@ -252,6 +256,199 @@ def _kva_pending_acceptance(client, org_id: str) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def _intent_calls(client, org_id: str, intent_key: str) -> list[dict[str, Any]]:
+    """Recent, non-deleted calls whose AI enrichment flagged the given intent
+    (wants_kva / wants_invoice) and that are tied to a Vorgang. The action surfaces
+    'when discussed', mirroring how a booked appointment surfaces termin_anfrage."""
+    cutoff = _iso_minus_days(30)
+    rows = (
+        client.table("calls")
+        .select("id, inquiry_id, customer_id, created_at")
+        .eq("org_id", org_id)
+        .is_("deleted_at", "null")
+        .gte("created_at", cutoff)
+        .filter(f"enrichment->intent->>{intent_key}", "eq", "true")
+        .order("created_at", desc=True)
+        .limit(100)
+        .execute()
+        .data
+        or []
+    )
+    return [r for r in rows if r.get("inquiry_id")]
+
+
+def _open_inquiry_status(client, org_id: str, inq_ids: list[str]) -> dict[str, str]:
+    if not inq_ids:
+        return {}
+    rows = (
+        client.table("inquiries").select("id, status")
+        .eq("org_id", org_id).in_("id", inq_ids).execute().data
+        or []
+    )
+    return {r["id"]: r.get("status") for r in rows}
+
+
+def _kva_suggested(client, org_id: str) -> list[dict[str, Any]]:
+    """Caller asked about a Kostenvoranschlag but no KVA exists yet for that Vorgang.
+    Action id = the CALL id, so it deep-links to the call (call_id set) and clicking
+    opens the pre-filled KVA form."""
+    calls = _intent_calls(client, org_id, "wants_kva")
+    if not calls:
+        return []
+    inq_ids = list({c["inquiry_id"] for c in calls})
+    have = {
+        r.get("inquiry_id")
+        for r in (
+            client.table("cost_estimates").select("inquiry_id")
+            .eq("org_id", org_id).in_("inquiry_id", inq_ids).execute().data or []
+        )
+        if r.get("inquiry_id")
+    }
+    status_by = _open_inquiry_status(client, org_id, inq_ids)
+    name_by = _customer_name_map(client, org_id, [c.get("customer_id") for c in calls])
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for c in calls:
+        inq = c["inquiry_id"]
+        if inq in have or inq in seen or status_by.get(inq) in ("completed", "deleted"):
+            continue
+        seen.add(inq)
+        out.append(
+            {
+                "kind": "kva_suggested",
+                "id": c["id"],
+                "inquiry_id": inq,
+                "call_id": c["id"],
+                "customer_name": name_by.get(c.get("customer_id")) or "Unbekannter Kunde",
+                "customer_id": c.get("customer_id"),
+                "summary": "Kunde hat nach einem Kostenvoranschlag gefragt",
+                "created_at": c.get("created_at"),
+                "due_at": None,
+                "priority": "normal",
+            }
+        )
+    return out
+
+
+def _invoice_suggested(client, org_id: str) -> list[dict[str, Any]]:
+    """Caller asked about a Rechnung but no invoice exists yet for that Vorgang's
+    Fall. Action id = the CALL id (deep-links to the call); click opens the
+    pre-filled invoice form."""
+    calls = _intent_calls(client, org_id, "wants_invoice")
+    if not calls:
+        return []
+    inq_ids = list({c["inquiry_id"] for c in calls})
+    inq_rows = (
+        client.table("inquiries").select("id, case_id, status")
+        .eq("org_id", org_id).in_("id", inq_ids).execute().data
+        or []
+    )
+    case_by_inq = {r["id"]: r.get("case_id") for r in inq_rows}
+    status_by = {r["id"]: r.get("status") for r in inq_rows}
+    case_ids = [c for c in case_by_inq.values() if c]
+    have_inv_cases: set[str] = set()
+    if case_ids:
+        have_inv_cases = {
+            r.get("case_id")
+            for r in (
+                client.table("invoices").select("case_id")
+                .eq("org_id", org_id).in_("case_id", case_ids).execute().data or []
+            )
+            if r.get("case_id")
+        }
+    name_by = _customer_name_map(client, org_id, [c.get("customer_id") for c in calls])
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for c in calls:
+        inq = c["inquiry_id"]
+        case = case_by_inq.get(inq)
+        if inq in seen or status_by.get(inq) in ("completed", "deleted"):
+            continue
+        if case and case in have_inv_cases:
+            continue
+        seen.add(inq)
+        out.append(
+            {
+                "kind": "invoice_suggested",
+                "id": c["id"],
+                "inquiry_id": inq,
+                "call_id": c["id"],
+                "customer_name": name_by.get(c.get("customer_id")) or "Unbekannter Kunde",
+                "customer_id": c.get("customer_id"),
+                "summary": "Kunde hat nach einer Rechnung gefragt",
+                "created_at": c.get("created_at"),
+                "due_at": None,
+                "priority": "normal",
+            }
+        )
+    return out
+
+
+def _invoice_to_send(client, org_id: str) -> list[dict[str, Any]]:
+    """Draft invoices older than 24h — assumed ready to send (mirrors kva_to_send)."""
+    cutoff = _iso_minus_hours(24)
+    rows = (
+        client.table("invoices")
+        .select("id, customer_id, number, total, created_at, status")
+        .eq("org_id", org_id)
+        .eq("status", "draft")
+        .lte("created_at", cutoff)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    name_by = _customer_name_map(client, org_id, [r.get("customer_id") for r in rows])
+    return [
+        {
+            "kind": "invoice_to_send",
+            "id": r["id"],
+            "inquiry_id": None,
+            "call_id": None,
+            "customer_name": name_by.get(r.get("customer_id")) or "Unbekannter Kunde",
+            "customer_id": r.get("customer_id"),
+            "summary": f"{r.get('number') or 'Rechnung'} bereit zum Versand",
+            "created_at": r.get("created_at"),
+            "due_at": None,
+            "priority": "normal",
+        }
+        for r in rows
+    ]
+
+
+def _invoice_pending_payment(client, org_id: str) -> list[dict[str, Any]]:
+    """Sent invoices from the last 60 days with no payment recorded yet."""
+    cutoff = _iso_minus_days(60)
+    rows = (
+        client.table("invoices")
+        .select("id, customer_id, number, total, sent_at, paid_at, status, created_at")
+        .eq("org_id", org_id)
+        .eq("status", "sent")
+        .gte("sent_at", cutoff)
+        .order("sent_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    rows = [r for r in rows if not r.get("paid_at")]
+    name_by = _customer_name_map(client, org_id, [r.get("customer_id") for r in rows])
+    return [
+        {
+            "kind": "invoice_pending_payment",
+            "id": r["id"],
+            "inquiry_id": None,
+            "call_id": None,
+            "customer_name": name_by.get(r.get("customer_id")) or "Unbekannter Kunde",
+            "customer_id": r.get("customer_id"),
+            "summary": f"{r.get('number') or 'Rechnung'} versendet — Zahlung ausstehend",
+            "created_at": r.get("created_at"),
+            "due_at": None,
+            "priority": "normal",
+        }
+        for r in rows
+    ]
 
 
 def _callback_owed(client, org_id: str) -> list[dict[str, Any]]:
@@ -582,8 +779,12 @@ def _aggregate(org_id: str, scope=None) -> list[dict[str, Any]]:
     client = get_service_client()
     items: list[dict[str, Any]] = []
     items.extend(_termin_anfrage(client, org_id))
+    items.extend(_kva_suggested(client, org_id))
     items.extend(_kva_to_send(client, org_id))
     items.extend(_kva_pending_acceptance(client, org_id))
+    items.extend(_invoice_suggested(client, org_id))
+    items.extend(_invoice_to_send(client, org_id))
+    items.extend(_invoice_pending_payment(client, org_id))
     items.extend(_callback_owed(client, org_id))
     items.extend(_alt_time_proposal(client, org_id))
     items.extend(_unmatched_reschedule(client, org_id))
