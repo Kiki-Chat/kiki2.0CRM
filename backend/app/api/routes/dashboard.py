@@ -10,6 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.services.common import fetch_all_rows, run_parallel
+from app.services.scope import EmployeeScope, resolve_scope
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -86,16 +87,21 @@ def _customer_names(client, org_id: str, ids: list) -> dict:
     return {r["id"]: r.get("full_name") for r in rows}
 
 
-def _fetch_calls(client, org_id: str, since_iso: str) -> list:
+def _fetch_calls(client, org_id: str, since_iso: str, scope=None) -> list:
     # Paged: these rows are aggregated into KPIs/series. A busy org's window could
     # exceed 1000 calls, and a plain .execute() would silently cap there → wrong
-    # totals. fetch_all_rows pages past the cap.
-    return fetch_all_rows(
-        lambda: client.table("calls")
-        .select("id, customer_id, direction, started_at, duration_seconds, status, created_at")
-        .eq("org_id", org_id)
-        .gte("created_at", since_iso)
-    )
+    # totals. fetch_all_rows pages past the cap. ``scope`` (a plain employee)
+    # limits the calls to the ones tied to their own work; no-op for admins.
+    def _q():
+        q = (
+            client.table("calls")
+            .select("id, customer_id, direction, started_at, duration_seconds, status, created_at")
+            .eq("org_id", org_id)
+            .gte("created_at", since_iso)
+        )
+        return scope.filter_calls(q) if scope is not None else q
+
+    return fetch_all_rows(_q)
 
 
 def _split_calls(rows: list, cur_start: datetime, prev_start: datetime):
@@ -116,6 +122,9 @@ def _split_calls(rows: list, cur_start: datetime, prev_start: datetime):
 async def overview(user: CurrentUser = Depends(require_org)) -> dict:
     client = get_service_client()
     org_id = user.org_id
+    # Employee portal: a plain employee sees only THEIR assigned work; admins see
+    # the whole org. resolve_scope walks the assignment graph once (no-op for admins).
+    scope = await run_in_threadpool(resolve_scope, client, user)
 
     # Hero bubble — "heute X Anrufe und Y Anfragen empfangen". Today = Berlin-local
     # midnight, converted to UTC for the (UTC-stored) created_at comparison.
@@ -135,50 +144,50 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
     # is safe across threads: httpx.Client is thread-safe and postgrest builds a
     # fresh request per .table() call.
     def _q_open_inquiries():
-        return _count(client, "inquiries", org_id, status="open")
+        q = (client.table("inquiries").select("id", count="exact")
+             .eq("org_id", org_id).eq("status", "open"))
+        return scope.filter_inquiries(q).execute().count or 0
 
     def _q_total_customers():
-        return _count(client, "customers", org_id)
+        q = client.table("customers").select("id", count="exact").eq("org_id", org_id)
+        return scope.filter_customers(q).execute().count or 0
 
     def _q_unread_calls():
-        # `_count` only does `.eq()`; we need `read_at is null` (sidebar badge).
-        return (
-            client.table("calls").select("id", count="exact")
-            .eq("org_id", org_id).is_("read_at", "null").execute().count or 0
-        )
+        # `read_at is null` (sidebar badge), scoped to the employee's own calls.
+        q = (client.table("calls").select("id", count="exact")
+             .eq("org_id", org_id).is_("read_at", "null"))
+        return scope.filter_calls(q).execute().count or 0
 
     def _q_calls_today():
-        return (
-            client.table("calls").select("id", count="exact")
-            .eq("org_id", org_id).eq("direction", "inbound")
-            .gte("created_at", today_start_iso).execute().count or 0
-        )
+        q = (client.table("calls").select("id", count="exact")
+             .eq("org_id", org_id).eq("direction", "inbound")
+             .gte("created_at", today_start_iso))
+        return scope.filter_calls(q).execute().count or 0
 
     def _q_inquiries_today():
-        return (
-            client.table("inquiries").select("id", count="exact")
-            .eq("org_id", org_id).gte("created_at", today_start_iso).execute().count or 0
-        )
+        q = (client.table("inquiries").select("id", count="exact")
+             .eq("org_id", org_id).gte("created_at", today_start_iso))
+        return scope.filter_inquiries(q).execute().count or 0
 
     def _q_kva_pending():
         # Mirrors /finanzen's kvas_pending definition: status == "sent".
-        return _count(client, "cost_estimates", org_id, status="sent")
+        q = (client.table("cost_estimates").select("id", count="exact")
+             .eq("org_id", org_id).eq("status", "sent"))
+        return scope.filter_cases(q, col="case_id").execute().count or 0
 
     def _q_upcoming():
-        return (
-            client.table("appointments")
-            .select("id, title, scheduled_at, status, customer_id")
-            .eq("org_id", org_id).gte("scheduled_at", now_iso)
-            .order("scheduled_at").limit(5).execute().data or []
-        )
+        q = (client.table("appointments")
+             .select("id, title, scheduled_at, status, customer_id")
+             .eq("org_id", org_id).gte("scheduled_at", now_iso))
+        return (scope.filter_appointments(q)
+                .order("scheduled_at").limit(5).execute().data or [])
 
     def _q_open_tasks():
-        return (
-            client.table("inquiries")
-            .select("id, title, type, status, created_at, customer_id")
-            .eq("org_id", org_id).eq("status", "open")
-            .order("created_at", desc=True).limit(5).execute().data or []
-        )
+        q = (client.table("inquiries")
+             .select("id, title, type, status, created_at, customer_id")
+             .eq("org_id", org_id).eq("status", "open"))
+        return (scope.filter_inquiries(q)
+                .order("created_at", desc=True).limit(5).execute().data or [])
 
     def _q_pending_actions():
         # The SAME aggregate the call-log "Aktionen" tab shows — the hero count must
@@ -186,7 +195,7 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
         # avoid a route↔route import cycle at module load.
         from app.api.routes.actions import _aggregate
 
-        return len(_aggregate(org_id))
+        return len(_aggregate(org_id, scope))
 
     (
         open_inquiries,
@@ -228,13 +237,14 @@ async def overview(user: CurrentUser = Depends(require_org)) -> dict:
 
 
 # ─── Anrufe (Tag/Woche/Monat/Zeitraum filter, rolling windows) ───────────────
-def _anrufe(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None) -> dict:
+def _anrufe(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None, scope=None) -> dict:
     client = get_service_client()
+    scope = scope or EmployeeScope(is_admin=True, org_id=org_id)
     now = _now()
     start, end, prev_start, prev_end, label, x_label, by_hour = _period_window(period, from_date, to_date, now)
     is_range = bool(from_date and to_date)
 
-    rows = _fetch_calls(client, org_id, prev_start.isoformat())
+    rows = _fetch_calls(client, org_id, prev_start.isoformat(), scope)
     cur, prev = [], []
     for r in rows:
         eff = _parse(r.get("started_at") or r.get("created_at"))
@@ -313,12 +323,17 @@ async def anrufe(
     if period not in ("day", "week", "month", "range"):
         period = "month"
     _validate_date_params(from_date, to_date)
-    return await run_in_threadpool(_anrufe, user.org_id, period, from_date, to_date)
+    def _run() -> dict:
+        scope = resolve_scope(get_service_client(), user)
+        return _anrufe(user.org_id, period, from_date, to_date, scope)
+
+    return await run_in_threadpool(_run)
 
 
 # ─── Finanzen ────────────────────────────────────────────────────────────────
-def _finanzen(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None) -> dict:
+def _finanzen(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None, scope=None) -> dict:
     client = get_service_client()
+    scope = scope or EmployeeScope(is_admin=True, org_id=org_id)
     now = _now()
     # Same rolling window as the other tabs. The flow KPIs (Umsatz/Bezahlt) +
     # Top-Kunden are scoped to it, with the preceding window for the delta.
@@ -332,13 +347,19 @@ def _finanzen(org_id: str, period: str = "month", from_date: str | None = None, 
     # parallel (they don't depend on each other).
     invoices, estimates = run_parallel(
         lambda: fetch_all_rows(
-            lambda: client.table("invoices")
-            .select("id, number, total, status, due_date, paid_at, created_at, customer_id")
-            .eq("org_id", org_id)
+            lambda: scope.filter_cases(
+                client.table("invoices")
+                .select("id, number, total, status, due_date, paid_at, created_at, customer_id")
+                .eq("org_id", org_id),
+                col="case_id",
+            )
         ),
         lambda: fetch_all_rows(
-            lambda: client.table("cost_estimates")
-            .select("id, total, status, created_at").eq("org_id", org_id)
+            lambda: scope.filter_cases(
+                client.table("cost_estimates")
+                .select("id, total, status, created_at").eq("org_id", org_id),
+                col="case_id",
+            )
         ),
     )
 
@@ -435,7 +456,11 @@ async def finanzen(
     if period not in ("day", "week", "month", "range"):
         period = "month"
     _validate_date_params(from_date, to_date)
-    return await run_in_threadpool(_finanzen, user.org_id, period, from_date, to_date)
+    def _run() -> dict:
+        scope = resolve_scope(get_service_client(), user)
+        return _finanzen(user.org_id, period, from_date, to_date, scope)
+
+    return await run_in_threadpool(_run)
 
 
 # ─── KI-Nutzung (AI quota transparency + Tag/Woche/Monat/Zeitraum filter) ─────
@@ -463,8 +488,9 @@ def _period_window(period: str, from_date: str | None, to_date: str | None, now:
     return start, tomorrow, start - timedelta(days=30), start, "Letzte 30 Tage", "Datum", False
 
 
-def _ki_nutzung(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None) -> dict:
+def _ki_nutzung(org_id: str, period: str = "month", from_date: str | None = None, to_date: str | None = None, scope=None) -> dict:
     client = get_service_client()
+    scope = scope or EmployeeScope(is_admin=True, org_id=org_id)
     now = _now()
     start, end, prev_start, prev_end, label, x_label, by_hour = _period_window(period, from_date, to_date, now)
     is_range = bool(from_date and to_date)
@@ -476,7 +502,7 @@ def _ki_nutzung(org_id: str, period: str = "month", from_date: str | None = None
     # AND the (always-monthly) quota context all have data. created_at >= started_at
     # always, so filtering the fetch by created_at never drops an in-window call.
     month_start = _month_start(now)
-    rows = _fetch_calls(client, org_id, min(prev_start, month_start).isoformat())
+    rows = _fetch_calls(client, org_id, min(prev_start, month_start).isoformat(), scope)
 
     cur, prev, month_rows = [], [], []
     for r in rows:
@@ -581,12 +607,17 @@ async def ki_nutzung(
     if period not in ("day", "week", "month", "range"):
         period = "month"
     _validate_date_params(from_date, to_date)
-    return await run_in_threadpool(_ki_nutzung, user.org_id, period, from_date, to_date)
+    def _run() -> dict:
+        scope = resolve_scope(get_service_client(), user)
+        return _ki_nutzung(user.org_id, period, from_date, to_date, scope)
+
+    return await run_in_threadpool(_run)
 
 
 # ─── KI-Insights ─────────────────────────────────────────────────────────────
-def _ai_insights(org_id: str) -> dict:
+def _ai_insights(org_id: str, scope=None) -> dict:
     client = get_service_client()
+    scope = scope or EmployeeScope(is_admin=True, org_id=org_id)
     now = _now()
     today = now.date()
 
@@ -613,7 +644,7 @@ def _ai_insights(org_id: str) -> dict:
     suggestions = []
     cust_ids = []
 
-    ce = client.table("cost_estimates").select("id, number, total, sent_at, customer_id").eq("org_id", org_id).eq("status", "sent").execute().data or []
+    ce = scope.filter_cases(client.table("cost_estimates").select("id, number, total, sent_at, customer_id").eq("org_id", org_id).eq("status", "sent"), col="case_id").execute().data or []
     for e in ce:
         sent = _parse(e.get("sent_at"))
         if sent and (now - sent).days >= kva_days:
@@ -628,7 +659,7 @@ def _ai_insights(org_id: str) -> dict:
                 "customer_id": e.get("customer_id"), "created_at": e.get("sent_at"),
             })
 
-    inv = client.table("invoices").select("id, number, total, due_date, customer_id").eq("org_id", org_id).in_("status", ["sent", "overdue"]).execute().data or []
+    inv = scope.filter_cases(client.table("invoices").select("id, number, total, due_date, customer_id").eq("org_id", org_id).in_("status", ["sent", "overdue"]), col="case_id").execute().data or []
     for i in inv:
         if not i.get("due_date"):
             continue
@@ -649,7 +680,7 @@ def _ai_insights(org_id: str) -> dict:
             })
 
     six = now - timedelta(days=182)
-    custs = client.table("customers").select("id, full_name, updated_at, created_at").eq("org_id", org_id).execute().data or []
+    custs = scope.filter_customers(client.table("customers").select("id, full_name, updated_at, created_at").eq("org_id", org_id)).execute().data or []
     for c in custs:
         last = _parse(c.get("updated_at") or c.get("created_at"))
         if last and last < six:
@@ -686,7 +717,11 @@ def _ai_insights(org_id: str) -> dict:
 
 @router.get("/ai-insights")
 async def ai_insights(user: CurrentUser = Depends(require_org)) -> dict:
-    return await run_in_threadpool(_ai_insights, user.org_id)
+    def _run() -> dict:
+        scope = resolve_scope(get_service_client(), user)
+        return _ai_insights(user.org_id, scope)
+
+    return await run_in_threadpool(_run)
 
 
 class SuggestionAction(BaseModel):

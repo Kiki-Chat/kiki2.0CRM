@@ -305,15 +305,32 @@ def test_configure_agent_adds_only_missing_audio(monkeypatch):
     assert ac.CLIENT_EVENTS_PATH in audio_call["merge_arrays"]
 
 
-def test_configure_agent_zero_phones_raises(monkeypatch):
-    cfg = _build_current_cfg()
-    _wire_configure_agent(monkeypatch, current_cfg=cfg, phones=[])
+def test_configure_agent_zero_phones_is_graceful(monkeypatch):
+    # 2.3 — a missing phone no longer aborts the provision. configure_agent
+    # records phone_bound=false + the actionable German message and continues
+    # with the other steps (B.2-B.6) instead of raising. (Was: raised 400.)
+    cfg = _build_current_cfg(
+        tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
+        client_events=["audio"],
+        webhook_url="http://localhost:8000/api/elevenlabs/conversation-init",
+        webhook_enabled=True,
+        override_flags=True,
+    )
+    rec = _wire_configure_agent(
+        monkeypatch, current_cfg=cfg, provisioned=True, phones=[]
+    )
 
-    with pytest.raises(HTTPException) as exc:
-        ac.configure_agent(
-            org_id=ORG_ID, agent_id=AGENT_ID, org_name=ORG_NAME,
-        )
-    assert exc.value.status_code == 400
+    summary = ac.configure_agent(
+        org_id=ORG_ID, agent_id=AGENT_ID, org_name=ORG_NAME,
+    )
+
+    assert summary["phone_bound"] is False
+    assert summary["phone_number"] is None
+    assert summary["phone_message"] == ac.NO_PHONE_MESSAGE
+    # The rest of the configuration still completed (no abort).
+    assert summary["webhook_enabled"] is True
+    assert summary["audio_ok"] is True
+    assert summary["overrides_whitelist_enabled"] is True
 
 
 def test_configure_agent_missing_tool_raises(monkeypatch):

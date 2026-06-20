@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, require_super_admin
@@ -97,10 +97,13 @@ def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str, seq: int =
         # system tool (the actual call-bridge mechanism), not just the prompt.
         if endpoint_label in ("kz_emergency", "kz_phone", "kz_retry"):
             tool_result = ac.sync_transfer_tool_for_org(org_id)
-            if not tool_result.get("updated") and tool_result.get("reason") not in (
-                "no_agent", None
-            ):
-                ok, reason = False, f"transfer_tool: {tool_result.get('reason')}"
+            tool_reason = tool_result.get("reason")
+            # 1.4: a categorized verify_failed/el_error means the transfer tool
+            # diverged from the saved config — surface it as a real failure (the
+            # prompt may have pushed fine, but the call-bridge did NOT). 'no_agent'
+            # / None stay benign no-ops.
+            if not tool_result.get("updated") and tool_reason not in ("no_agent", None):
+                ok, reason = False, f"transfer_tool: {tool_reason}"
         ac.finish_sync(org_id, seq, ok=ok, reason=reason)
     except Exception as exc:  # noqa: BLE001 — never let a background push crash
         logger.warning(
@@ -179,10 +182,40 @@ class ContextUpdate(BaseModel):
     knowledge_text: str | None = None
     model_config = {"extra": "ignore"}
 
+    @field_validator("trade", mode="before")
+    @classmethod
+    def _validate_trade(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 120:
+            raise ValueError("Das Gewerk/die Branche darf höchstens 120 Zeichen lang sein.")
+        return v
+
+    @field_validator("knowledge_text", mode="before")
+    @classmethod
+    def _validate_knowledge_text(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 2000:
+            raise ValueError("Der Kontext-/Wissenstext darf höchstens 2000 Zeichen lang sein.")
+        return v
+
 
 class ProblemDescriptionUpdate(BaseModel):
     problem_description: str | None = None
     model_config = {"extra": "ignore"}
+
+    @field_validator("problem_description", mode="before")
+    @classmethod
+    def _validate_problem_description(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 2000:
+            raise ValueError("Die Problembeschreibung darf höchstens 2000 Zeichen lang sein.")
+        return v
 
 
 class KnowledgeUrlCreate(BaseModel):
@@ -197,6 +230,24 @@ class CategoryCreate(BaseModel):
     default_employee_id: str | None = None
     model_config = {"extra": "ignore"}
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) > 80:
+            raise ValueError("Der Kategoriename darf höchstens 80 Zeichen lang sein.")
+        return v
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _validate_description(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 500:
+            raise ValueError("Die Kategoriebeschreibung darf höchstens 500 Zeichen lang sein.")
+        return v
+
 
 class CategoryUpdate(BaseModel):
     name: str | None = None
@@ -205,6 +256,26 @@ class CategoryUpdate(BaseModel):
     default_employee_id: str | None = None
     sort_order: int | None = None
     model_config = {"extra": "ignore"}
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _validate_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 80:
+            raise ValueError("Der Kategoriename darf höchstens 80 Zeichen lang sein.")
+        return v
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _validate_description(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 500:
+            raise ValueError("Die Kategoriebeschreibung darf höchstens 500 Zeichen lang sein.")
+        return v
 
 
 class ServiceCreate(BaseModel):
@@ -433,6 +504,22 @@ def _get_sync_status(org_id: str) -> dict:
                 status, error = "failed", "timeout"
         except ValueError:
             pass
+    # 1.4: derive a tools_synced signal from the most recent system_tools_sync
+    # audit row. False ⇒ the last transfer-tool push diverged (verify_failed /
+    # el_error or an auto-rollback) — the call-bridge may not reflect the saved
+    # config even though the prompt did. None ⇒ no such write recorded yet.
+    tools_synced: bool | None = None
+    last_tool_audit = (
+        client.table("agent_writes_audit")
+        .select("rolled_back, elevenlabs_response_status")
+        .eq("org_id", org_id).eq("endpoint_label", "system_tools_sync")
+        .order("created_at", desc=True).limit(1).execute().data or []
+    )
+    if last_tool_audit:
+        a = last_tool_audit[0]
+        tools_synced = (not a.get("rolled_back")) and int(
+            a.get("elevenlabs_response_status") or 0
+        ) < 300
     return {
         "status": status,
         "label": row.get("agent_sync_label"),
@@ -440,6 +527,7 @@ def _get_sync_status(org_id: str) -> dict:
         "seq": row.get("agent_sync_seq") or 0,
         "requested_at": requested_at,
         "finished_at": row.get("agent_sync_finished_at"),
+        "tools_synced": tools_synced,
     }
 
 
@@ -1478,5 +1566,114 @@ async def rollback(snapshot_id: str, user: CurrentUser = Depends(require_org)) -
             raise HTTPException(status_code=404, detail="Snapshot nicht gefunden.")
         ea.rollback_to_snapshot(snapshot_id=snapshot_id, actor_id=user.id, org_id=user.org_id)
         return {"success": True}
+
+    return await run_in_threadpool(_do)
+
+
+# ─── 1.2a — Snapshots list (true undo/rewind surface) ────────────────────────
+@router.get("/snapshots")
+async def list_snapshots(
+    label: str | None = None, user: CurrentUser = Depends(require_org)
+) -> list[dict]:
+    """Org-scoped snapshot list, newest first, max 50. Each row carries a
+    resolved actor_name (same users-name block as /audit) and a derived
+    rolled_back flag (any agent_writes_audit row for this snapshot that is
+    rolled_back). Optional ?label= filters by endpoint_label."""
+
+    def _do() -> list[dict]:
+        client = get_service_client()
+        q = (
+            client.table("agent_config_snapshots")
+            .select("id, endpoint_label, actor_id, created_at")
+            .eq("org_id", user.org_id)
+        )
+        if label:
+            q = q.eq("endpoint_label", label)
+        snaps = q.order("created_at", desc=True).limit(50).execute().data or []
+        # Resolve actor names (same block as list_audit).
+        users = (
+            client.table("users").select("id, full_name")
+            .eq("org_id", user.org_id).execute().data or []
+        )
+        names = {u["id"]: u.get("full_name") for u in users}
+        # Derive rolled_back per snapshot from the audit table (one query).
+        snap_ids = [s["id"] for s in snaps]
+        rolled: set[str] = set()
+        if snap_ids:
+            audit_rows = (
+                client.table("agent_writes_audit").select("snapshot_id, rolled_back")
+                .eq("org_id", user.org_id).in_("snapshot_id", snap_ids)
+                .eq("rolled_back", True).execute().data or []
+            )
+            rolled = {r["snapshot_id"] for r in audit_rows if r.get("snapshot_id")}
+        out = []
+        for s in snaps:
+            out.append(
+                {
+                    "id": s["id"],
+                    "endpoint_label": s.get("endpoint_label"),
+                    "actor_id": s.get("actor_id"),
+                    "actor_name": names.get(s.get("actor_id")),
+                    "created_at": s.get("created_at"),
+                    "rolled_back": s["id"] in rolled,
+                }
+            )
+        return out
+
+    return await run_in_threadpool(_do)
+
+
+# ─── 1.3 — Drift detection ───────────────────────────────────────────────────
+@router.get("/drift")
+async def get_drift(user: CurrentUser = Depends(require_org)) -> dict:
+    """Is the live agent prompt out of step with the saved config?
+
+    {drift, dirty_since, manual_override, last_repush_at}. drift=True means a
+    config change couldn't be pushed (org sits behind a manual prompt override)."""
+    return await run_in_threadpool(ac.compute_drift, user.org_id)
+
+
+@router.post("/drift/force-resync")
+async def force_resync(background: BackgroundTasks, user: CurrentUser = Depends(require_org)) -> dict:
+    """Admin: force a re-render+push that BYPASSES the manual_override gate for
+    this single call (still snapshot/verify/audit). Scheduled via the normal
+    repush path so the sync banner resolves the same way."""
+    _require_admin(user)
+    seq = await run_in_threadpool(ac.begin_sync, user.org_id, "kz_force_resync")
+    background.add_task(_force_resync_bg, user.org_id, user.id, seq)
+    return {"scheduled": True}
+
+
+def _force_resync_bg(org_id: str, user_id: str | None, seq: int) -> None:
+    """Background force-resync (mirrors _repush_bg, but force=True bypasses the
+    manual-override gate). Never raises — finish_sync resolves the banner."""
+    try:
+        result = ac.rerender_and_push_for_org(
+            org_id=org_id, actor_id=user_id, endpoint_label="kz_force_resync",
+            expected_seq=seq, force=True,
+        )
+        reason = result.get("reason")
+        ok = bool(result.get("updated")) or reason in ("no_agent", "superseded")
+        ac.finish_sync(org_id, seq, ok=ok, reason=reason)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "force-resync failed (org=%s): %s", org_id, str(exc)[:200]
+        )
+        ac.finish_sync(org_id, seq, ok=False, reason=str(exc)[:300])
+
+
+# ─── 1.5 — Reconcile hk_ tool_ids (SUPER-ADMIN only, high risk) ──────────────
+@router.post("/reconcile-tools")
+async def reconcile_tools(user: CurrentUser = Depends(require_super_admin)) -> dict:
+    """Reconcile the agent's prompt.tool_ids to the exact desired hk_* set.
+    SUPER-ADMIN only (mirrors /prompt). Aborts without writing if any desired
+    tool fails to resolve; never drops a non-hk_ (custom) id. Returns
+    {removed, kept, desired}."""
+
+    def _do() -> dict:
+        agent_id = ea.get_org_agent_id(user.org_id)
+        return ac.reconcile_hk_tool_ids(
+            org_id=user.org_id, agent_id=agent_id, actor_id=user.id
+        )
 
     return await run_in_threadpool(_do)

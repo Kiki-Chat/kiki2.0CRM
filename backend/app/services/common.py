@@ -7,7 +7,7 @@ language). All times are handled in Europe/Berlin.
 
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
@@ -168,6 +168,22 @@ _DAYPART_HOURS = {
 
 def now_berlin() -> datetime:
     return datetime.now(BERLIN)
+
+
+def month_start_utc_iso() -> str:
+    """Berlin-local first-of-month midnight expressed as a tz-aware UTC ISO string.
+
+    The NULL-fallback period start for usage metering. A bare date like
+    '2026-06-01' fed to Postgres (UTC session) coerces to UTC midnight, dropping
+    the first ~2 Berlin hours in summer DST. This function returns the correct
+    tz-aware instant, e.g. '2026-05-31T22:00:00+00:00' for June in CEST (UTC+2).
+    """
+    return (
+        now_berlin()
+        .replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        .astimezone(timezone.utc)
+        .isoformat()
+    )
 
 
 def format_address(addr) -> str | None:
@@ -525,6 +541,11 @@ def gen_case_number(client, org_id: str) -> str:
 CUSTOMER_NUMBER_PREFIX = "KI-"
 
 
+def format_ki_number(seq: int) -> str:
+    """Format an integer sequence as a canonical ``KI-NNNNNN`` customer number."""
+    return f"{CUSTOMER_NUMBER_PREFIX}{seq:06d}"
+
+
 def ki_customer_seq(value: str | None) -> int | None:
     """Return the integer sequence of a ``KI-NNNNNN`` customer number, else None.
 
@@ -552,4 +573,4 @@ def gen_customer_number(client, org_id: str) -> str:
         lambda: client.table("customers").select("customer_number").eq("org_id", org_id)
     )
     seqs = [s for r in rows if (s := ki_customer_seq(r.get("customer_number"))) is not None]
-    return f"{CUSTOMER_NUMBER_PREFIX}{(max(seqs) + 1 if seqs else 1):06d}"
+    return format_ki_number(max(seqs) + 1 if seqs else 1)

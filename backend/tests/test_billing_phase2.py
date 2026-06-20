@@ -1,12 +1,24 @@
 """Hermetic unit tests for Phase 2 — provisioning/checkout, notifications, and the
-new webhook handlers (checkout.session.completed, trial_will_end, payment_failed)."""
+new webhook handlers (checkout.session.completed, trial_will_end, payment_failed).
+
+7.3 additions:
+  - test_month_start_utc_iso_berlin_midnight: month_start_utc_iso() correctness
+  - test_quota_warning_80pct_fires_once: 80% warning inserts exactly one row
+  - test_quota_warning_no_double_fire: dedup prevents second row on re-check
+"""
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.services import billing_notifications as bn
 from app.services import stripe_provisioning as sp
 from app.services import stripe_webhook as sw
+from app.services.common import month_start_utc_iso
 from tests.billing_fakes import FakeDB
+
+BERLIN = ZoneInfo("Europe/Berlin")
 
 
 # ─── Provisioning + checkout ─────────────────────────────────────────────────
@@ -42,10 +54,10 @@ def test_checkout_session_builds_and_records(monkeypatch):
         return {"id": "cs_1", "url": "https://checkout.stripe.com/x"}
 
     monkeypatch.setattr(sp, "stripe_call_safely", fake_safe)
-    res = sp.create_checkout_session("o1", "Kiki Solo", "month", trial_days=14)
+    res = sp.create_checkout_session("o1", "Kiki Solo", "month")
     assert res == {"url": "https://checkout.stripe.com/x", "session_id": "cs_1"}
     assert captured["request_payload"]["plan"] == "Kiki Solo"
-    assert captured["request_payload"]["trial_days"] == 14
+    assert "trial_days" not in captured["request_payload"]
     assert any(t == "billing_checkout_sessions" for t, _ in db.inserts)
 
 
@@ -142,3 +154,97 @@ def test_payment_failed_sets_past_due_and_notifies(monkeypatch):
     sw._handle_invoice_failed(db, {"customer": "cus_1"})
     assert db.updates_to("organizations")[-1]["billing_status"] == "past_due"
     assert any(i["type"] == "payment_failed" for i in db.inserts_to("billing_notifications"))
+
+
+# ─── 7.3: month_start_utc_iso + 80 % quota-warning ──────────────────────────
+
+def test_month_start_utc_iso_berlin_midnight(monkeypatch):
+    """month_start_utc_iso() must return the Berlin-local first-of-month midnight
+    expressed as a tz-aware UTC ISO string.
+
+    In summer (CEST = UTC+2) 'June 1 00:00 Berlin' = 'May 31 22:00 UTC'.
+    The returned string must end with '+00:00' and parse to a datetime that is
+    exactly 2 hours before UTC calendar midnight on the 1st.
+    """
+    from datetime import timezone
+    import app.services.common as _c
+
+    fixed_berlin = datetime(2026, 6, 17, 14, 30, 0, tzinfo=BERLIN)
+    monkeypatch.setattr(_c, "now_berlin", lambda: fixed_berlin)
+
+    result = month_start_utc_iso()
+
+    # Must be a tz-aware UTC string
+    assert result.endswith("+00:00"), f"Expected UTC offset +00:00, got: {result!r}"
+
+    from datetime import datetime as _dt, timezone as _tz
+    parsed = _dt.fromisoformat(result)
+    assert parsed.tzinfo is not None
+
+    # June 1 00:00 Berlin (CEST = UTC+2) = May 31 22:00:00 UTC
+    expected_utc = _dt(2026, 5, 31, 22, 0, 0, tzinfo=_tz.utc)
+    assert parsed == expected_utc, (
+        f"Expected {expected_utc.isoformat()!r}, got {result!r}"
+    )
+
+
+def test_quota_warning_80pct_fires_once(monkeypatch):
+    """80% warning fires at exactly >=80% usage and inserts exactly one row.
+
+    quota=100 min, 1 call of 4800 s = 80 min (exactly 80 %).
+    Expect exactly one billing_notifications row of type 'quota_warning'.
+    """
+    # 4800 s / 60 = 80 min, quota = 100 → 80 % exactly → warning threshold
+    db = FakeDB(
+        canned={
+            "organizations": [
+                {
+                    "id": "o1",
+                    "billing_quota_minutes": 100,
+                    "billing_period_start": "2026-06-01T00:00:00+00:00",
+                }
+            ],
+            "calls": [
+                {"id": "c1", "org_id": "o1", "duration_seconds": 4800, "created_at": "2026-06-10T10:00:00Z"},
+            ],
+        },
+        unique={"billing_notifications": "dedup_key"},
+    )
+    monkeypatch.setattr(bn, "get_service_client", lambda: db)
+
+    bn.check_and_notify_over_quota("o1")
+
+    ins = db.inserts_to("billing_notifications")
+    warnings = [i for i in ins if i["type"] == "quota_warning"]
+    assert len(warnings) == 1, f"Expected exactly 1 quota_warning, got {len(warnings)}: {ins}"
+    assert warnings[0]["meta"]["used"] == 80
+    assert warnings[0]["meta"]["quota"] == 100
+
+
+def test_quota_warning_no_double_fire(monkeypatch):
+    """Calling check_and_notify_over_quota twice with the same period must not
+    insert a second quota_warning row (dedup on dedup_key)."""
+    db = FakeDB(
+        canned={
+            "organizations": [
+                {
+                    "id": "o1",
+                    "billing_quota_minutes": 100,
+                    "billing_period_start": "2026-06-01T00:00:00+00:00",
+                }
+            ],
+            "calls": [
+                {"id": "c1", "org_id": "o1", "duration_seconds": 4800, "created_at": "2026-06-10T10:00:00Z"},
+            ],
+        },
+        unique={"billing_notifications": "dedup_key"},
+    )
+    monkeypatch.setattr(bn, "get_service_client", lambda: db)
+
+    bn.check_and_notify_over_quota("o1")
+    bn.check_and_notify_over_quota("o1")
+
+    warnings = [i for i in db.inserts_to("billing_notifications") if i["type"] == "quota_warning"]
+    assert len(warnings) == 1, (
+        f"Dedup failed: expected 1 quota_warning row, got {len(warnings)}"
+    )

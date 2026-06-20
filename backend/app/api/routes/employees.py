@@ -67,6 +67,10 @@ router = APIRouter(prefix="/api/employees", tags=["employees"])
 
 _OWNER_ROLES = {"org_admin", "super_admin"}
 
+# Case statuses that count as CLOSED — everything else is an "open ticket" for the
+# per-employee workload badge shown while an admin assigns a Fall.
+_CLOSED_CASE = {"completed", "done", "closed", "archived", "cancelled"}
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -117,7 +121,34 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
             .execute().data or []
         )
 
-    user_rows, absence_rows = run_parallel(_fetch_users, _fetch_absences)
+    def _fetch_open_tickets() -> dict[str, int]:
+        # Per-employee count of OPEN Fälle they're assigned to (case_employees ⨝
+        # cases), shown while an admin assigns a ticket so an overloaded colleague
+        # is obvious. One membership read + one status read, counted in Python.
+        if not emp_ids:
+            return {}
+        ce = (
+            client.table("case_employees").select("case_id, employee_id")
+            .in_("employee_id", emp_ids).execute().data or []
+        )
+        c_ids = list({r["case_id"] for r in ce if r.get("case_id")})
+        open_ids: set[str] = set()
+        if c_ids:
+            for c in (
+                client.table("cases").select("id, status")
+                .eq("org_id", org_id).in_("id", c_ids).execute().data or []
+            ):
+                if (c.get("status") or "") not in _CLOSED_CASE:
+                    open_ids.add(c["id"])
+        counts: dict[str, int] = {}
+        for r in ce:
+            if r.get("case_id") in open_ids:
+                counts[r["employee_id"]] = counts.get(r["employee_id"], 0) + 1
+        return counts
+
+    user_rows, absence_rows, ticket_counts = run_parallel(
+        _fetch_users, _fetch_absences, _fetch_open_tickets
+    )
     users: dict[str, dict] = {u["id"]: u for u in user_rows}
     absent_ids = set()
     absence_type: dict[str, str] = {}
@@ -155,6 +186,7 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
                 "is_technician": e.get("is_technician", False),
                 "present": e["id"] not in absent_ids,
                 "absence_type": absence_type.get(e["id"]),
+                "open_tickets": ticket_counts.get(e["id"], 0),
             }
         )
     # Non-admins may read the roster (needed for assignment dropdowns, calendars,
@@ -496,6 +528,30 @@ async def resend_invite(
             detail="Einladungs-E-Mail konnte nicht gesendet werden. Bitte später erneut versuchen.",
         )
     return {"success": True}
+
+
+def _rotate_technician_token(org_id: str, employee_id: str) -> dict:
+    """Re-mint the technician's standing portal token (AUTH-029). Old
+    /techniker/<token> link dies immediately; the technician is e-mailed the new
+    one via the existing welcome-email path. JobLinkError → 404 in the route."""
+    return technician_jobs.rotate_portal_token(
+        org_id, employee_id, notify=_send_technician_welcome
+    )
+
+
+@router.post("/{employee_id}/rotate-technician-token")
+async def rotate_technician_token(
+    employee_id: str, user: CurrentUser = Depends(require_org_admin)
+) -> dict:
+    """Admin-only: invalidate a technician's portal link and issue a fresh one
+    (e.g. lost phone, shared link, departed technician). Returns the new portal
+    URL + whether the technician was e-mailed — never the raw token."""
+    try:
+        return await run_in_threadpool(
+            _rotate_technician_token, user.org_id, employee_id
+        )
+    except technician_jobs.JobLinkError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 def _set_password(org_id: str, employee_id: str, password: str) -> str:

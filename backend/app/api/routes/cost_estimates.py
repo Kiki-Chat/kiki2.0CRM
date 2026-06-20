@@ -19,7 +19,7 @@ from app.services.cost_estimates import (
     valid_until_for,
 )
 from app.services import email_templates
-from app.services.common import run_parallel, validate_fk_in_org
+from app.services.common import now_berlin, run_parallel, validate_fk_in_org
 from app.services.email_send import Attachment, send_email
 
 router = APIRouter(prefix="/api/cost-estimates", tags=["cost-estimates"])
@@ -480,6 +480,30 @@ async def set_status(
     stamp = _STAMP.get(payload.status)
     if stamp:
         fields[stamp] = _now()
+
+    # INV-012: don't let an EXPIRED estimate be accepted/invoiced. valid_until is
+    # the offer's Gültigkeit; once it's in the past the estimate is no longer
+    # binding, so we soft-block these transitions (Europe/Berlin "today"). The
+    # user can extend the validity and retry. Other transitions (sent, rejected,
+    # draft) are unaffected.
+    if payload.status in {"accepted", "invoiced"}:
+        def _load_valid_until() -> dict | None:
+            client = get_service_client()
+            rows = (
+                client.table("cost_estimates").select("valid_until").eq("org_id", user.org_id)
+                .eq("id", ce_id).limit(1).execute().data
+            )
+            return rows[0] if rows else None
+
+        existing = await run_in_threadpool(_load_valid_until)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Cost estimate not found")
+        valid_until = existing.get("valid_until")
+        if valid_until and str(valid_until)[:10] < now_berlin().date().isoformat():
+            raise HTTPException(
+                status_code=409,
+                detail="Der Kostenvoranschlag ist abgelaufen. Bitte zuerst die Gültigkeit verlängern.",
+            )
 
     def _set() -> dict | None:
         client = get_service_client()

@@ -9,7 +9,7 @@ from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.core import cache
 from app.core.crypto import encrypt
 from app.db.supabase_client import get_service_client
-from app.services.common import now_berlin
+from app.services.common import month_start_utc_iso, now_berlin
 from app.services import email_templates
 from app.services.email_send import send_email
 
@@ -113,7 +113,7 @@ def _clean_pds(pc: dict | None) -> dict | None:
 
 
 def _usage(client, org_id: str, org: dict) -> dict:
-    month_start = now_berlin().replace(day=1).date().isoformat()
+    month_start = month_start_utc_iso()
     calls = (
         client.table("calls").select("duration_seconds")
         .eq("org_id", org_id).gte("created_at", month_start).execute().data or []

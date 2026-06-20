@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.db.supabase_client import get_service_client
-from app.services.common import now_berlin
+from app.services.common import month_start_utc_iso, now_berlin
 
 log = logging.getLogger(__name__)
 
@@ -193,13 +193,15 @@ def check_and_notify_over_quota(org_id: str) -> None:
     quota = org.get("billing_quota_minutes") or org.get("ai_minutes_quota") or 0
     if not quota:
         return
-    start = org.get("billing_period_start") or now_berlin().replace(day=1).date().isoformat()
+    start = org.get("billing_period_start") or month_start_utc_iso()
     calls = (
         db.table("calls").select("duration_seconds").eq("org_id", str(org_id)).gte("created_at", start).execute().data
         or []
     )
     used = round(sum((c.get("duration_seconds") or 0) for c in calls) / 60)
-    period_key = str(start)[:10]
+    # Dedup key uses the Berlin-local date so it stays intuitive across the tz
+    # boundary (the stored start may be UTC-shifted to the previous calendar day).
+    period_key = now_berlin().date().isoformat()
     if used > quota:
         notify_over_quota(org_id, period_key, used, int(quota))
     elif used >= quota * QUOTA_WARNING_PCT:

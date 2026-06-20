@@ -199,3 +199,121 @@ def test_set_inquiry_status_validation():
     assert "error" in t.run(_user(), {"inquiry_id": "not-a-uuid", "status": "open"})
     good = "11111111-1111-1111-1111-111111111111"
     assert "error" in t.run(_user(), {"inquiry_id": good, "status": "bogus"})
+
+
+# ─── COP-023: monthly AI cost cap ────────────────────────────────────────────
+#
+# Route handlers are called directly (not via TestClient) because the copilot
+# router only mounts when COPILOT_ENABLED=1 (default False in tests), which
+# would otherwise make every HTTP request return 404.
+#
+# within_cap is patched at app.services.ai.usage (the module the route imports
+# lazily): `from app.services.ai import usage as ai_usage` — patching the
+# module attribute is the correct intercept point.
+#
+# asyncio.run() executes the async route coroutines synchronously.
+
+import asyncio
+import pytest
+from fastapi import HTTPException
+import app.services.ai.usage as _usage_mod
+
+
+@pytest.fixture
+def no_rate_limit(monkeypatch):
+    from app.services import ratelimit
+    monkeypatch.setattr(ratelimit, "enforce_rate_limit", lambda *a, **kw: None)
+
+
+@pytest.fixture
+def ai_configured(monkeypatch):
+    from app.services.ai import client as _ai
+    monkeypatch.setattr(_ai, "is_configured", lambda: True)
+
+
+def test_chat_429_when_over_cap(monkeypatch, no_rate_limit, ai_configured):
+    """chat() → 429 when within_cap returns False."""
+    import app.api.routes.copilot as route
+
+    monkeypatch.setattr(_usage_mod, "within_cap", lambda org_id: False)
+
+    payload = route.ChatRequest(message="hallo")
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(route.chat(payload, user=_user()))
+
+    assert exc_info.value.status_code == 429
+    assert "KI-Budget" in exc_info.value.detail
+    assert "Monatswechsel" in exc_info.value.detail
+
+
+def test_chat_proceeds_under_cap(monkeypatch, no_usage, no_rate_limit, ai_configured):
+    """chat() completes normally when within_cap returns True."""
+    import app.api.routes.copilot as route
+
+    monkeypatch.setattr(_usage_mod, "within_cap", lambda org_id: True)
+    # Patch run_turn where the route module imported it (the bound name in the
+    # route module, not in the orchestrator — from … import creates a new ref).
+    monkeypatch.setattr(
+        route, "run_turn",
+        lambda user, msg, **kw: {"content": "Hallo!", "actions": [], "client_actions": []},
+    )
+    monkeypatch.setattr(route, "_persist_turn", lambda *a, **kw: None)
+
+    payload = route.ChatRequest(message="hallo")
+    result = asyncio.run(route.chat(payload, user=_user()))
+    assert result["content"] == "Hallo!"
+
+
+def test_confirm_429_over_cap(monkeypatch, ai_configured):
+    """confirm() → 429 when within_cap returns False (after role + needs_confirm pass)."""
+    import app.api.routes.copilot as route
+
+    monkeypatch.setattr(_usage_mod, "within_cap", lambda org_id: False)
+
+    # create_customer: valid tool for employee, needs_confirm=True
+    payload = route.ConfirmRequest(tool="create_customer", args={"name": "Test"})
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(route.confirm(payload, user=_user()))
+
+    assert exc_info.value.status_code == 429
+    assert "KI-Budget" in exc_info.value.detail
+
+
+def test_confirm_403_before_cap_check(monkeypatch, ai_configured):
+    """Role/tool guard (403) fires BEFORE cap check — unknown tool → 403, not 429."""
+    import app.api.routes.copilot as route
+
+    # Cap is over — but the 403 for unknown tool must fire first.
+    monkeypatch.setattr(_usage_mod, "within_cap", lambda org_id: False)
+
+    payload = route.ConfirmRequest(tool="does_not_exist", args={})
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(route.confirm(payload, user=_user()))
+
+    assert exc_info.value.status_code == 403
+
+
+def test_confirm_400_no_confirm_before_cap_check(monkeypatch, ai_configured):
+    """needs_confirm=False guard (400) fires BEFORE cap check — read-only tool → 400, not 429."""
+    import app.api.routes.copilot as route
+
+    # Cap is over — but the 400 for non-confirmable tool must fire first.
+    monkeypatch.setattr(_usage_mod, "within_cap", lambda org_id: False)
+
+    # search_customers is a read tool with needs_confirm=False
+    payload = route.ConfirmRequest(tool="search_customers", args={})
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(route.confirm(payload, user=_user()))
+
+    assert exc_info.value.status_code == 400
+
+
+def test_cap_disabled_no_429(monkeypatch):
+    """When cap=0 (disabled), within_cap returns True regardless of spend."""
+    from app.core.config import settings
+    original_cap = settings.copilot_monthly_cost_cap_usd
+    settings.copilot_monthly_cost_cap_usd = 0.0
+    try:
+        assert _usage_mod.within_cap("any-org") is True
+    finally:
+        settings.copilot_monthly_cost_cap_usd = original_cap

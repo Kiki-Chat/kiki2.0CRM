@@ -328,6 +328,10 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
     business_hours = normalize_business_hours(rules["business_hours"])
     emp = _first_employee(client, org_id)
     slots: list[dict] = []
+    # The "Frühester Termin (Uhrzeit)" floor applies on the first day we actually
+    # offer slots — NOT on earliest_dt.date(), which can be a skipped weekend/holiday
+    # (that would silently bypass earliest_clock on the real first bookable day).
+    first_open_day = None
     for offset in range(days):
         day = start_date + timedelta(days=offset)
         bh = business_hours[WEEKDAY_KEYS[day.weekday()]]
@@ -335,6 +339,8 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
             continue
         if max_per_day and per_day.get(day, 0) >= max_per_day:
             continue  # day already at capacity
+        if first_open_day is None:
+            first_open_day = day
         open_hour = _hour(bh["start"], 8)
         close_hour = _hour(bh["end"], 17)
         brk_start = _hour(bh["break_start"], -1) if bh.get("break_start") else -1
@@ -345,7 +351,7 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
             dt = datetime(day.year, day.month, day.day, hour, 0, tzinfo=BERLIN)
             if dt <= now or dt < earliest_dt:
                 continue
-            if day == earliest_date and earliest_clock is not None and hour < earliest_clock:
+            if day == first_open_day and earliest_clock is not None and hour < earliest_clock:
                 continue  # "Frühester Termin (Uhrzeit)" on the first bookable day
             if _slot_conflicts(intervals, dt, dur, buffer_min) >= parallel:
                 continue  # at capacity incl. Pufferzeit
@@ -439,6 +445,21 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
     emp = None
     if category:
         emp = _employee_by_id(client, org_id, category.get("default_employee_id"))
+    # EMP-030 (ADDITIVE): when no explicit category default applies, try to match
+    # an auto-assign employee by Tätigkeitsbereich before the generic first-employee
+    # fallback. Never raises and only fires when the category-default path came up
+    # empty, so the existing default_employee_id behaviour is unchanged.
+    if not emp:
+        from app.services.dispatch import resolve_auto_assignee
+
+        auto = resolve_auto_assignee(
+            client,
+            org_id,
+            category_name=category["name"] if category else payload.category,
+            summary=payload.description,
+        )
+        if auto:
+            emp = auto
     if not emp:
         emp = _first_employee(client, org_id)
 
@@ -923,17 +944,34 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
         hours=_reschedule_timeout_hours(client, org_id)
     )
     try:
-        client.table("appointments").update(
-            {
-                "customer_proposed_start_time": new_dt.isoformat(),
-                "customer_proposed_at": now_berlin().isoformat(),
-                "customer_proposal_source": "agent_call",
-                "reschedule_expires_at": expires_at.isoformat(),
-                "reschedule_replace_intent": bool(payload.replace_original),
-            }
-        ).eq("org_id", org_id).eq("id", appt["id"]).execute()
-    except Exception:  # pragma: no cover — never break the live change flow
-        pass
+        stamp_res = (
+            client.table("appointments")
+            .update(
+                {
+                    "customer_proposed_start_time": new_dt.isoformat(),
+                    "customer_proposed_at": now_berlin().isoformat(),
+                    "customer_proposal_source": "agent_call",
+                    "reschedule_expires_at": expires_at.isoformat(),
+                    "reschedule_replace_intent": bool(payload.replace_original),
+                }
+            )
+            .eq("org_id", org_id)
+            .eq("id", appt["id"])
+            .execute()
+        )
+        if not (stamp_res.data):
+            logger.warning(
+                "change_appointment: customer_proposed stamp updated 0 rows for appt %s (org %s)",
+                appt["id"],
+                org_id,
+            )
+    except Exception as exc:  # pragma: no cover — never break the live change flow
+        logger.warning(
+            "change_appointment: customer_proposed stamp failed for appt %s (org %s): %s",
+            appt["id"],
+            org_id,
+            exc,
+        )
     return {
         "success": True,
         "changeRequestId": change["id"],

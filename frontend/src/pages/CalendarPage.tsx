@@ -47,6 +47,8 @@ interface Appointment {
 interface Employee {
   id: string
   display_name: string
+  is_active?: boolean
+  is_technician?: boolean
 }
 interface CustomerOption {
   id: string
@@ -760,8 +762,8 @@ function AppointmentDetailModal({
                 onChange={(e) => setDispatchEmp(e.target.value)}
                 className="min-w-0 flex-1 rounded-md border border-border bg-alt px-3 py-2 text-sm text-text outline-none focus:border-green-primary"
               >
-                <option value="">Mitarbeiter wählen…</option>
-                {employees.map((e) => (
+                <option value="">Techniker wählen…</option>
+                {employees.filter((e) => e.is_technician && e.is_active !== false).map((e) => (
                   <option key={e.id} value={e.id}>{e.display_name}</option>
                 ))}
               </select>

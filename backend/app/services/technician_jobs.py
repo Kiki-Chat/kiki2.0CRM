@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import secrets
 import uuid as uuid_mod
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
@@ -23,14 +23,60 @@ log = logging.getLogger(__name__)
 PHOTO_BUCKET = "customer-files"
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 MAX_PHOTOS = 30
+# Hard expiry for a per-job capability link (AUTH-029). The token IS the
+# credential, so a stale link must die on its own even if the case never closes.
+LINK_TTL_DAYS = 30
+
+# A technician uploads from their phone, where the browser often sends an empty
+# or "application/octet-stream" content-type (especially for HEIC photos). Fall
+# back to the file extension so valid camera uploads aren't wrongly rejected.
+_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "bmp", "tiff"}
+_EXT_CONTENT_TYPE = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
+    "heic": "image/heic", "heif": "image/heif", "webp": "image/webp", "bmp": "image/bmp",
+    "tiff": "image/tiff",
+}
+
+
+def _file_ext(filename: str | None) -> str:
+    return (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+
+
+def _looks_like_image(filename: str | None, mime: str | None) -> bool:
+    return (mime or "").startswith("image/") or _file_ext(filename) in _IMAGE_EXTS
+
+
+def _content_type_for(filename: str | None, mime: str | None) -> str:
+    if (mime or "").startswith("image/"):
+        return mime
+    return _EXT_CONTENT_TYPE.get(_file_ext(filename), "image/jpeg")
 
 
 class JobLinkError(ValueError):
     """User-facing German message (404/410-style failures resolved by caller)."""
 
 
+def _now_dt() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return _now_dt().isoformat()
+
+
+def _is_expired(expires_at) -> bool:
+    """True when a link's expires_at is set and already in the past. Tolerant of
+    the timestamptz coming back as an ISO string (Supabase) or a datetime."""
+    if not expires_at:
+        return False
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at < _now_dt()
 
 
 def create_job_link(*, org_id: str, appointment_id: str, employee_id: str) -> dict:
@@ -51,12 +97,18 @@ def create_job_link(*, org_id: str, appointment_id: str, employee_id: str) -> di
     ).eq("appointment_id", appointment_id).is_("submitted_at", "null").is_(
         "revoked_at", "null"
     ).execute()
+    created = _now_dt()
     row = {
         "org_id": org_id,
         "appointment_id": appointment_id,
         "inquiry_id": appt_rows[0].get("inquiry_id"),
         "employee_id": employee_id,
         "token": secrets.token_urlsafe(32),
+        # Hard expiry: created_at + 30 days (AUTH-029). created_at also defaults
+        # to now() server-side; we set it explicitly so expires_at is exactly
+        # +TTL and never depends on clock skew between insert and default.
+        "created_at": created.isoformat(),
+        "expires_at": (created + timedelta(days=LINK_TTL_DAYS)).isoformat(),
     }
     return client.table("technician_job_links").insert(row).execute().data[0]
 
@@ -69,6 +121,52 @@ def job_link_url(token: str) -> str:
 def technician_portal_url(token: str) -> str:
     base = (settings.frontend_public_url or "").rstrip("/") or "http://localhost:5173"
     return f"{base}/techniker/{token}"
+
+
+def rotate_portal_token(org_id: str, employee_id: str, *, notify=None) -> dict:
+    """Re-mint a technician's standing portal token (AUTH-029): the OLD
+    /techniker/<token> link instantly stops working and a fresh one is issued.
+    Used when a token may be compromised (lost phone, ex-technician, shared link).
+
+    Pinned to the org; the employee must be a non-deleted technician. Triggers the
+    existing welcome-email path (so the technician gets their new link) via the
+    optional ``notify`` callback — the route passes the real sender; tests pass a
+    mock. Never leaks the raw token in the return value.
+    """
+    client = get_service_client()
+    rows = (
+        client.table("employees")
+        .select("id, org_id, display_name, email, is_technician, deleted, technician_portal_token")
+        .eq("org_id", org_id).eq("id", employee_id).limit(1).execute().data
+    )
+    if not rows or rows[0].get("deleted"):
+        raise JobLinkError("Mitarbeiter nicht gefunden.")
+    emp = rows[0]
+    if not emp.get("is_technician"):
+        raise JobLinkError("Dieser Mitarbeiter ist kein Techniker.")
+    new_token = secrets.token_urlsafe(32)
+    client.table("employees").update(
+        {"technician_portal_token": new_token}
+    ).eq("org_id", org_id).eq("id", employee_id).execute()
+    portal_url = technician_portal_url(new_token)
+    email_sent = False
+    if emp.get("email") and notify is not None:
+        try:
+            org_name = None
+            org = client.table("organizations").select("name").eq("id", org_id).limit(1).execute().data
+            org_name = org[0].get("name") if org else None
+            notify(org_id, org_name, emp.get("display_name"), emp["email"], portal_url)
+            email_sent = True
+        except Exception as exc:  # noqa: BLE001 — email must never block the rotate
+            log.warning("rotate_portal_token: welcome email failed (org=%s emp=%s): %s",
+                        org_id, employee_id, exc)
+    # NEVER return the raw token (matches the list/create pattern — only the URL,
+    # which the admin sees, plus whether the technician was notified).
+    return {
+        "id": employee_id,
+        "technician_portal_url": portal_url,
+        "email_sent": email_sent,
+    }
 
 
 def get_technician_portal(token: str) -> dict:
@@ -89,7 +187,7 @@ def get_technician_portal(token: str) -> dict:
     org = client.table("organizations").select("name").eq("id", org_id).limit(1).execute().data
     links = (
         client.table("technician_job_links")
-        .select("token, appointment_id, started_at, finished_at, submitted_at, revoked_at, photo_paths, created_at")
+        .select("token, appointment_id, started_at, finished_at, submitted_at, revoked_at, expires_at, photo_paths, created_at")
         .eq("org_id", org_id).eq("employee_id", emp["id"])
         .order("created_at", desc=True).limit(100).execute().data
         or []
@@ -114,9 +212,11 @@ def get_technician_portal(token: str) -> dict:
 
     jobs: list[dict] = []
     for l in links:
-        # Hide superseded/cancelled links that never produced a report; keep every
-        # SUBMITTED one forever — that's the technician's track record.
+        # Hide superseded/cancelled/expired links that never produced a report;
+        # keep every SUBMITTED one forever — that's the technician's track record.
         if l.get("revoked_at") and not l.get("submitted_at"):
+            continue
+        if _is_expired(l.get("expires_at")) and not l.get("submitted_at"):
             continue
         a = appts.get(l.get("appointment_id")) or {}
         if a.get("status") == "cancelled" and not l.get("submitted_at"):
@@ -160,6 +260,8 @@ def _load_link(token: str) -> dict:
     link = rows[0]
     if link.get("revoked_at"):
         raise JobLinkError("Dieser Auftrags-Link wurde ersetzt — bitte den neuesten Link aus Ihrer E-Mail verwenden.")
+    if _is_expired(link.get("expires_at")):
+        raise JobLinkError("Dieser Link ist abgelaufen.")
     return link
 
 
@@ -212,6 +314,17 @@ def _load_context(link: dict) -> dict:
 def get_job_for_token(token: str) -> dict:
     link = _load_link(token)
     ctx = _load_context(link)
+    # Stamp the first time the technician actually opens the link (AUTH-029
+    # audit signal — was the dispatch link ever seen?). Once only.
+    if not link.get("first_viewed_at"):
+        ts = _now()
+        try:
+            get_service_client().table("technician_job_links").update(
+                {"first_viewed_at": ts}
+            ).eq("id", link["id"]).is_("first_viewed_at", "null").execute()
+            link["first_viewed_at"] = ts
+        except Exception as exc:  # noqa: BLE001 — audit stamp must never block the view
+            log.warning("technician_jobs: first_viewed_at stamp failed: %s", exc)
     appt, cust = ctx["appointment"], ctx["customer"]
     loc = appt.get("location")
     return {
@@ -257,7 +370,7 @@ def add_photo(token: str, *, filename: str, content: bytes, mime_type: str) -> d
     ctx = _load_context(link)
     if link.get("submitted_at"):
         raise JobLinkError("Dieser Auftrag wurde bereits abgeschlossen.")
-    if not (mime_type or "").startswith("image/"):
+    if not _looks_like_image(filename, mime_type):
         raise JobLinkError("Nur Bilder können hochgeladen werden.")
     if len(content) > MAX_PHOTO_BYTES:
         raise JobLinkError("Das Foto ist zu groß (max. 10 MB).")
@@ -267,8 +380,9 @@ def add_photo(token: str, *, filename: str, content: bytes, mime_type: str) -> d
     client = get_service_client()
     safe_name = (filename or "foto.jpg").replace("/", "_")[-80:]
     path = f"{link['org_id']}/jobs/{link['id']}/{uuid_mod.uuid4().hex}_{safe_name}"
+    content_type = _content_type_for(filename, mime_type)
     client.storage.from_(PHOTO_BUCKET).upload(
-        path, content, {"content-type": mime_type or "image/jpeg"}
+        path, content, {"content-type": content_type}
     )
     paths.append(path)
     client.table("technician_job_links").update({"photo_paths": paths}).eq(
@@ -297,20 +411,37 @@ def add_photo(token: str, *, filename: str, content: bytes, mime_type: str) -> d
                 "name": safe_name,
                 "path": path,
                 "category": "Einsatzbericht",
-                "mime_type": mime_type or "image/jpeg",
+                "mime_type": content_type,
                 "is_image": True,
                 "size_bytes": len(content),
                 "uploaded_by_name": f"Techniker: {technician}" if technician else None,
             }).execute()
         except Exception as exc:  # noqa: BLE001 — photo stays in the report either way
-            log.warning("technician_jobs: documents mirror failed: %s", exc)
+            # DO NOT swallow silently: the photo is already in photo_paths, so a
+            # failed documents insert means the report and the customer's Dokumente
+            # tab have diverged. Log loudly with the exact link + path so it can be
+            # reconciled (AUTH-029).
+            log.warning(
+                "technician_jobs: documents mirror FAILED — photo_paths/documents "
+                "diverged for link=%s org=%s path=%s: %s",
+                link.get("id"), link.get("org_id"), path, exc,
+            )
     return {"photo_count": len(paths)}
 
 
-def submit_job(token: str, report: dict) -> dict:
+def submit_job(
+    token: str,
+    report: dict,
+    *,
+    submitted_ip: str | None = None,
+    submitted_user_agent: str | None = None,
+) -> dict:
     """Final submit — requires an end-of-job description and ≥1 photo (always,
     not only when finished). The report threads into the Vorgang timeline via
-    build_case_thread (read side), nothing else to write."""
+    build_case_thread (read side), nothing else to write.
+
+    submitted_ip / submitted_user_agent are forensic audit fields (AUTH-029):
+    who actually filed this report, from where. Passed by the route."""
     link = _load_link(token)
     _load_context(link)
     if link.get("submitted_at"):
@@ -332,6 +463,10 @@ def submit_job(token: str, report: dict) -> dict:
     }
     ts = _now()
     fields = {"report": clean, "submitted_at": ts}
+    if submitted_ip:
+        fields["submitted_ip"] = submitted_ip[:64]
+    if submitted_user_agent:
+        fields["submitted_user_agent"] = submitted_user_agent[:512]
     if not link.get("started_at"):
         fields["started_at"] = ts
     if finished and not link.get("finished_at"):

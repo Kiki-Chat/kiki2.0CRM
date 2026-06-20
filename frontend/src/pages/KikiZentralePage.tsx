@@ -8,7 +8,7 @@ import { useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
 
 import { AusgehendeSection, BrancheKontextSection, LeistungsangebotSection, NotdienstSection, PflichtfelderSection, PreisauskunftSection, TelefonSection, TerminkategorienSection, TerminregelnSection } from '../components/kiki/ConfigSections'
-import { AgentSyncBanner } from '../components/kiki/AgentSyncBanner'
+import { AgentDriftBanner, AgentSyncBanner } from '../components/kiki/AgentSyncBanner'
 import { AutonomieSection } from '../components/kiki/AutonomieSection'
 import { GespraechslogikSection } from '../components/kiki/GespraechslogikSection'
 import { ConfirmDialog } from '../components/kiki/shared'
@@ -129,6 +129,7 @@ export function KikiZentralePage() {
       </div>
 
       <AgentSyncBanner />
+      <AgentDriftBanner />
 
       {toast && <div className="mb-4 rounded-md bg-green-tint-50 px-3 py-2 text-sm font-medium text-green-deep">{toast}</div>}
 

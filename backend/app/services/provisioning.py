@@ -1,8 +1,10 @@
 from fastapi import HTTPException, status
 
+from datetime import datetime, timezone
+
 from app.db.supabase_client import get_service_client
 from app.schemas.provision import ProvisionRequest, ProvisionResponse
-from app.services.agent_config import configure_agent
+from app.services.agent_config import configure_agent, verify_agent_health
 
 DEFAULT_AGENT_CONFIG = {
     "autonomy_level": 1,
@@ -92,6 +94,22 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
     Failures in that step trigger a compensating rollback of all four
     Supabase rows + the auth user, so a retry can succeed cleanly.
 
+    n8n BIND-ONLY seam (additive): when ``payload.agent_externally_managed``
+    is True, the ElevenLabs agent (prompt + tools + webhook + bound number)
+    has already been BUILT EXTERNALLY by n8n. In that case provision_org
+    BINDS the agent instead of (re)configuring it: it stores
+    ``elevenlabs_agent_id`` + ``phone_number`` + ``elevenlabs_phone_number_id``
+    on the org row, stamps ``agent_provisioned_at=now()``, and runs the
+    READ-ONLY ``verify_agent_health`` — but does NOT call ``configure_agent``
+    (which would clobber n8n's prompt/tools/webhook). The verify report is
+    returned on ``ProvisionResponse.agent_health``. When the flag is False the
+    behavior is unchanged (configure_agent is called as before).
+
+    Assumptions for the bind-only path (per n8n contract): n8n sets the EL
+    conversation-init webhook to the prod backend URL with the
+    ``X-HeyKiki-Secret`` header (the CRM only VERIFIES it, never writes it),
+    and n8n passes ``elevenlabs_phone_number_id`` (required for outbound).
+
     Step B.6 (2026-05-27): no longer generates / persists an org_secret.
     The per-org secret was misleading (used for the post-call webhook hop,
     not per-customer auth). Lookup is via agent_id + caller phone_number.
@@ -155,20 +173,37 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
         )
     user_id = auth_user.id
 
+    # n8n BIND-ONLY: when the agent is externally managed we persist the
+    # phone fields + the agent-provisioned stamp on the org row at insert time
+    # (n8n already bound the number + built the agent), and we skip the
+    # configure_agent step below. Default path leaves these unset.
+    bind_only = bool(payload.agent_externally_managed)
+
     # Inserts that may need to be undone on a later failure.
     org_id: str | None = None
+    agent_health: dict | None = None  # populated only on the bind-only path
     try:
+        org_row: dict = {
+            "heykiki_org_id": payload.heykiki_org_id,
+            "name": payload.org_name,
+            "slug": payload.heykiki_org_id,
+            "elevenlabs_agent_id": payload.elevenlabs_agent_id,
+            "email": payload.contact_email,
+        }
+        if bind_only:
+            # Store the n8n-bound number + its EL phone_number_id (needed for
+            # outbound) and stamp provisioned now — the agent is already live.
+            if payload.phone_number is not None:
+                org_row["phone_number"] = payload.phone_number
+            if payload.elevenlabs_phone_number_id is not None:
+                org_row["elevenlabs_phone_number_id"] = (
+                    payload.elevenlabs_phone_number_id
+                )
+            org_row["agent_provisioned_at"] = datetime.now(timezone.utc).isoformat()
+
         org_res = (
             client.table("organizations")
-            .insert(
-                {
-                    "heykiki_org_id": payload.heykiki_org_id,
-                    "name": payload.org_name,
-                    "slug": payload.heykiki_org_id,
-                    "elevenlabs_agent_id": payload.elevenlabs_agent_id,
-                    "email": payload.contact_email,
-                }
-            )
+            .insert(org_row)
             .execute()
         )
         org_id = org_res.data[0]["id"]
@@ -193,14 +228,24 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
         _seed_required_fields(client, org_id)
 
         # ─── Step B — finalize the ElevenLabs agent ──────────────────────────
-        # Runs synchronously inside provision_org so a hard failure (e.g.
-        # zero phones bound) rolls back the org as part of the same HTTP
-        # request, instead of leaving a half-provisioned org behind.
-        configure_agent(
-            org_id=org_id,
-            agent_id=payload.elevenlabs_agent_id,
-            org_name=payload.org_name,
-        )
+        if bind_only:
+            # n8n BIND-ONLY: the agent (prompt + tools + webhook + number) was
+            # built externally by n8n. Do NOT call configure_agent — it would
+            # clobber n8n's prompt/tools/webhook. Just run the READ-ONLY
+            # verify gate and surface the report. A red verify does NOT roll
+            # the org back (the agent is n8n's to fix); it's reported so the
+            # operator can see ok/red, mirroring the configure path's behavior
+            # of never silently claiming a red agent is provisioned.
+            agent_health = verify_agent_health(org_id, payload.elevenlabs_agent_id)
+        else:
+            # Runs synchronously inside provision_org so a hard failure (e.g.
+            # zero phones bound) rolls back the org as part of the same HTTP
+            # request, instead of leaving a half-provisioned org behind.
+            configure_agent(
+                org_id=org_id,
+                agent_id=payload.elevenlabs_agent_id,
+                org_name=payload.org_name,
+            )
     except Exception:
         # Compensating rollback: undo DB rows so a retry can succeed.
         if org_id:
@@ -222,4 +267,5 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
         user_id=user_id,
         heykiki_org_id=payload.heykiki_org_id,
         org_secret=None,  # B.6 — no longer generated
+        agent_health=agent_health,  # bind-only verify report, else None
     )

@@ -38,6 +38,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
+from app.services.scope import resolve_scope
 
 router = APIRouter(prefix="/api/actions", tags=["actions"])
 
@@ -51,6 +52,7 @@ ActionKind = Literal[
     "callback_owed",
     "alt_time_proposal",
     "appointment_cancelled",
+    "reschedule_unmatched",
 ]
 
 
@@ -380,6 +382,55 @@ def _alt_time_proposal(client, org_id: str) -> list[dict[str, Any]]:
     return out
 
 
+def _unmatched_reschedule(client, org_id: str) -> list[dict[str, Any]]:
+    """Reschedule requests the agent could NOT link to an appointment.
+
+    `_record_unmatched_change_request` (services/appointments.py) inserts an
+    inquiry of type='appointment_change', status='open', notes prefixed
+    'NICHT ZUGEORDNET …' with NO appointment row — so without this aggregator the
+    request is invisible (no appointment-derived Open Action surfaces). The
+    'NICHT ZUGEORDNET%' marker is what EXCLUDES the matched change_appointment
+    path (also appointment_change/open, but it surfaces via the customer_proposed_*
+    / alternative_proposed_* appointment rows in `_alt_time_proposal`) — so we
+    never double-list a request that already has a proposal card."""
+    rows = (
+        client.table("inquiries")
+        .select("id, customer_id, created_at, notes, status, type")
+        .eq("org_id", org_id)
+        .eq("type", "appointment_change")
+        .eq("status", "open")
+        .ilike("notes", "NICHT ZUGEORDNET%")
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        return []
+    name_by_cust = _customer_name_map(
+        client, org_id, [r.get("customer_id") for r in rows]
+    )
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
+        out.append(
+            {
+                "kind": "reschedule_unmatched",
+                "id": r["id"],
+                "inquiry_id": r["id"],
+                "call_id": None,
+                "customer_name": nm,
+                "customer_id": r.get("customer_id"),
+                "summary": "Terminänderung konnte nicht zugeordnet werden — "
+                "bitte manuell zuordnen",
+                "created_at": r.get("created_at"),
+                "due_at": None,
+                "priority": "high",
+            }
+        )
+    return out
+
+
 def _appointment_cancelled(client, org_id: str) -> list[dict[str, Any]]:
     """Recently-cancelled appointments — kept visible so the team is INFORMED instead
     of the worklist item silently vanishing on cancel. Windowed to the last 14 days
@@ -504,7 +555,30 @@ def _apply_task_states(client, org_id: str, items: list[dict]) -> list[dict]:
     return out
 
 
-def _aggregate(org_id: str) -> list[dict[str, Any]]:
+# Action kinds whose `id` is an appointment id (used for employee scoping).
+_APPT_KINDS = {"termin_anfrage", "alt_time_proposal", "appointment_cancelled"}
+
+
+def _scope_items(items: list[dict], scope) -> list[dict]:
+    """Limit the worklist to a plain employee's own work (no-op for admins).
+
+    Keep an action when it hangs off an inquiry assigned to the employee (or one
+    of their cases' inquiries) or off an appointment assigned to them. Items with
+    no such link (e.g. org-wide missed-call callbacks) drop out of the employee
+    view — they remain visible to admins."""
+    if scope is None or scope.is_admin:
+        return items
+    out: list[dict] = []
+    for it in items:
+        inq = it.get("inquiry_id")
+        if inq and inq in scope.inquiry_ids:
+            out.append(it)
+        elif it.get("kind") in _APPT_KINDS and it.get("id") in scope.appointment_ids:
+            out.append(it)
+    return out
+
+
+def _aggregate(org_id: str, scope=None) -> list[dict[str, Any]]:
     client = get_service_client()
     items: list[dict[str, Any]] = []
     items.extend(_termin_anfrage(client, org_id))
@@ -512,7 +586,11 @@ def _aggregate(org_id: str) -> list[dict[str, Any]]:
     items.extend(_kva_pending_acceptance(client, org_id))
     items.extend(_callback_owed(client, org_id))
     items.extend(_alt_time_proposal(client, org_id))
+    items.extend(_unmatched_reschedule(client, org_id))
     items.extend(_appointment_cancelled(client, org_id))
+
+    # Employee portal: restrict to the caller's own work before any further work.
+    items = _scope_items(items, scope)
 
     # Stable per-action key so the manual to-do state (claim/done/dismiss) sticks.
     for it in items:
@@ -537,12 +615,18 @@ def _aggregate(org_id: str) -> list[dict[str, Any]]:
 async def list_pending_actions(
     user: CurrentUser = Depends(require_org),
 ) -> list[dict[str, Any]]:
-    """Aggregated open decisions for the current org.
+    """Aggregated open decisions for the caller.
 
-    Returns a list of ActionItem dicts (see module docstring). Empty list when
-    the org has nothing pending. Org-scoped via require_org.
+    Returns a list of ActionItem dicts (see module docstring). Admins see the
+    whole org; a plain employee sees only the decisions tied to their own work.
+    Empty list when there is nothing pending.
     """
-    return await run_in_threadpool(_aggregate, user.org_id)
+    def _run() -> list[dict[str, Any]]:
+        client = get_service_client()
+        scope = resolve_scope(client, user)
+        return _aggregate(user.org_id, scope)
+
+    return await run_in_threadpool(_run)
 
 
 class ActionStateRequest(BaseModel):

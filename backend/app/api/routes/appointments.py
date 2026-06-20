@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -14,6 +15,8 @@ from app.services.common import enforce_self_assignment, format_address, validat
 from app.services.projects import maybe_create_case_for_appointment
 
 router = APIRouter(prefix="/api/appointments", tags=["appointments"])
+
+log = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -232,6 +235,13 @@ async def update_appointment(
     if "scheduled_at" in changed and appt.get("status") == "confirmed":
         appt["_outbound"] = await run_in_threadpool(
             notify_appointment_outcome, user.org_id, appointment_id, "reschedule"
+        )
+    # If the time changed and a technician was ALREADY dispatched for this
+    # appointment, send them an updated job link automatically (no-op otherwise).
+    if "scheduled_at" in changed and appt.get("assigned_employee_id"):
+        await run_in_threadpool(
+            _maybe_resend_technician_link,
+            user.org_id, appointment_id, appt.get("assigned_employee_id"),
         )
     return appt
 
@@ -766,33 +776,8 @@ class DispatchTechnicianPayload(BaseModel):
     employee_id: str
 
 
-def _dispatch_technician(user: CurrentUser, appointment_id: str, employee_id: str) -> dict:
-    from app.services import technician_jobs
-    from app.services.email_send import send_email
-
-    client = get_service_client()
-    # Assign via the normal patch path: FK hardening + self-assignment rules.
-    appt = _patch(user, appointment_id, AppointmentPatch(assigned_employee_id=employee_id))
-    if not appt:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-    emp_rows = (
-        client.table("employees").select("id, display_name, email")
-        .eq("org_id", user.org_id).eq("id", employee_id).limit(1).execute().data
-    )
-    emp = emp_rows[0] if emp_rows else None
-    if not emp or not (emp.get("email") or "").strip():
-        raise HTTPException(
-            status_code=422,
-            detail="Dieser Mitarbeiter hat keine E-Mail-Adresse hinterlegt — bitte zuerst unter Mitarbeiter ergänzen.",
-        )
-    try:
-        link = technician_jobs.create_job_link(
-            org_id=user.org_id, appointment_id=appointment_id, employee_id=employee_id
-        )
-    except technician_jobs.JobLinkError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    url = technician_jobs.job_link_url(link["token"])
-    job = technician_jobs.get_job_for_token(link["token"])
+def _build_job_email(url: str, emp: dict, job: dict) -> tuple[str, str]:
+    """German plain-text + HTML body for a technician job-link email."""
     a, c = job["appointment"], job["customer"]
     when = (a.get("scheduled_at") or "").replace("T", " ")[:16]
     lines = [
@@ -818,10 +803,30 @@ def _dispatch_technician(user: CurrentUser, appointment_id: str, employee_id: st
     body_html = "<p>" + "<br>".join(
         line.replace(url, f'<a href="{url}">{url}</a>') for line in lines
     ) + "</p>"
+    return body_text, body_html
+
+
+def _send_technician_job(client, org_id: str, appointment_id: str, emp: dict) -> dict:
+    """Create a fresh tokenized job link for ``emp`` on this appointment and email
+    it — ``create_job_link`` revokes any prior un-submitted link for the same
+    appointment. Shared by the manual dispatch AND the auto-resend on reschedule.
+    Returns ``{url, email_status}``; raises ``technician_jobs.JobLinkError`` if the
+    link can't be created."""
+    from app.services import technician_jobs
+    from app.services.email_send import send_email
+
+    link = technician_jobs.create_job_link(
+        org_id=org_id, appointment_id=appointment_id, employee_id=emp["id"]
+    )
+    url = technician_jobs.job_link_url(link["token"])
+    job = technician_jobs.get_job_for_token(link["token"])
+    a = job["appointment"]
+    when = (a.get("scheduled_at") or "").replace("T", " ")[:16]
+    body_text, body_html = _build_job_email(url, emp, job)
     email_status = "sent"
     try:
         send_email(
-            org_id=user.org_id, to_email=emp["email"].strip(),
+            org_id=org_id, to_email=emp["email"].strip(),
             subject=f"Neuer Einsatz: {a.get('title') or 'Termin'} — {when}",
             body_html=body_html, body_text=body_text,
         )
@@ -830,7 +835,73 @@ def _dispatch_technician(user: CurrentUser, appointment_id: str, employee_id: st
     client.table("technician_job_links").update({"email_status": email_status}).eq(
         "id", link["id"]
     ).execute()
-    return {"success": True, "link_url": url, "email_status": email_status, "appointment": appt}
+    return {"url": url, "email_status": email_status}
+
+
+def _dispatch_technician(user: CurrentUser, appointment_id: str, employee_id: str) -> dict:
+    from app.services import technician_jobs
+
+    client = get_service_client()
+    emp_rows = (
+        client.table("employees").select("id, display_name, email, is_technician")
+        .eq("org_id", user.org_id).eq("id", employee_id).limit(1).execute().data
+    )
+    emp = emp_rows[0] if emp_rows else None
+    # Dispatch is technician-only (AUTH-029): guard BEFORE we assign so a
+    # non-technician is never even pinned to the appointment.
+    if not emp or not emp.get("is_technician"):
+        raise HTTPException(
+            status_code=422,
+            detail="Dieser Mitarbeiter ist nicht als Techniker hinterlegt.",
+        )
+    # Assign via the normal patch path: FK hardening + self-assignment rules.
+    appt = _patch(user, appointment_id, AppointmentPatch(assigned_employee_id=employee_id))
+    if not appt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if not (emp.get("email") or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="Dieser Mitarbeiter hat keine E-Mail-Adresse hinterlegt — bitte zuerst unter Mitarbeiter ergänzen.",
+        )
+    try:
+        res = _send_technician_job(client, user.org_id, appointment_id, emp)
+    except technician_jobs.JobLinkError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {
+        "success": True,
+        "link_url": res["url"],
+        "email_status": res["email_status"],
+        "appointment": appt,
+    }
+
+
+def _maybe_resend_technician_link(org_id: str, appointment_id: str, employee_id: str | None) -> None:
+    """After a reschedule/edit, auto-send an UPDATED job link to the technician —
+    but ONLY if one was already dispatched for this appointment (a non-revoked link
+    exists). Best-effort: a resend failure must never fail the reschedule itself."""
+    if not employee_id:
+        return
+    try:
+        from app.services import technician_jobs  # noqa: F401 — JobLinkError surface
+
+        client = get_service_client()
+        rows = (
+            client.table("employees").select("id, display_name, email, is_technician")
+            .eq("org_id", org_id).eq("id", employee_id).limit(1).execute().data
+        )
+        emp = rows[0] if rows else None
+        if not emp or not emp.get("is_technician") or not (emp.get("email") or "").strip():
+            return
+        prior = (
+            client.table("technician_job_links").select("id")
+            .eq("org_id", org_id).eq("appointment_id", appointment_id)
+            .is_("revoked_at", "null").limit(1).execute().data
+        )
+        if not prior:
+            return  # technician never dispatched for this appointment → nothing to resend
+        _send_technician_job(client, org_id, appointment_id, emp)
+    except Exception as exc:  # noqa: BLE001 — reschedule must never fail on a resend
+        log.warning("technician link auto-resend failed (appt=%s): %s", appointment_id, exc)
 
 
 @router.post("/{appointment_id}/dispatch-technician")
