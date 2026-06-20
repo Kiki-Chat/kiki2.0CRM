@@ -12,10 +12,16 @@ class BillingSummary(BaseModel):
     status: str | None = None              # active|trialing|past_due|unpaid|canceled|…
     period_start: str | None = None
     period_end: str | None = None
-    quota_minutes: int = 0
+    quota_minutes: int = 0                 # included minutes for the plan
     used_minutes: int = 0
     used_percent: int = 0
     over_quota: bool = False               # soft stop: overage is billed, agent stays online
+    # Extra-usage (overage) breakdown — minutes beyond quota_minutes bill at the
+    # plan's metered tier (overage_cents_per_min). projected_overage_cents is the
+    # running extra charge for the current period (minutes_over × tariff, NET).
+    overage_cents_per_min: int | None = None
+    minutes_over: int = 0
+    projected_overage_cents: int | None = None
     next_invoice_amount_cents: int | None = None
     currency: str = "eur"
 
@@ -62,6 +68,10 @@ class CheckoutRequest(BaseModel):
 class CheckoutResponse(BaseModel):
     url: str
     session_id: str
+
+
+class ChangePlanRequest(BaseModel):
+    plan_title: str                        # target plan; must be a strict upgrade
 
 
 class PlanOption(BaseModel):

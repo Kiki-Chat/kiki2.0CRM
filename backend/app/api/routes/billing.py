@@ -17,6 +17,7 @@ from app.db.supabase_client import get_service_client
 from app.schemas.billing import (
     BillingInvoice,
     BillingSummary,
+    ChangePlanRequest,
     CheckoutRequest,
     CheckoutResponse,
     PaymentMethod,
@@ -89,6 +90,15 @@ def _summary(org_id: str) -> BillingSummary:
     used = _used_minutes(client, org_id, period_start)
     used_percent = round(used / quota * 100) if quota else 0
 
+    # Extra-usage breakdown: minutes past the included quota bill at the plan's
+    # metered tariff. Computed here (not at request-time from Stripe) so the panel
+    # renders deterministically regardless of the usage-reporting flag.
+    from app.services.stripe_catalog import overage_cents_for
+
+    minutes_over = max(0, int(used) - int(quota)) if quota else 0
+    overage_cents = overage_cents_for(org.get("billing_plan_title"))
+    projected_overage = (minutes_over * overage_cents) if overage_cents is not None else None
+
     next_amount: int | None = None
     if customer_id and is_configured():
         # 'No upcoming invoice' is an EXPECTED state (unsubscribed customer) — handle
@@ -112,6 +122,9 @@ def _summary(org_id: str) -> BillingSummary:
         used_minutes=int(used),
         used_percent=int(used_percent),
         over_quota=bool(quota and used > quota),
+        overage_cents_per_min=overage_cents,
+        minutes_over=minutes_over,
+        projected_overage_cents=projected_overage,
         next_invoice_amount_cents=next_amount,
     )
 
@@ -290,6 +303,47 @@ async def billing_checkout(
     body: CheckoutRequest, user: CurrentUser = Depends(require_org)
 ) -> CheckoutResponse:
     return await run_in_threadpool(_checkout, user.org_id, user.id, body)
+
+
+# ─── POST /api/billing/change-plan (in-CRM upgrade) ──────────────────────────
+def _change_plan(org_id: str, actor_id: str, body: ChangePlanRequest) -> BillingSummary:
+    """Upgrade the org's live subscription in place, then re-sync + return summary.
+
+    UPGRADE-ONLY: a same/lower-tier change is rejected (downgrade/cancellation goes
+    through support — Amber's policy). The swap keeps the current interval + cycle
+    anchor and prorates immediately; ``_sync`` re-derives plan/quota from the new
+    base-item metadata so the UI reflects the change without waiting on a webhook."""
+    from app.services.stripe_catalog import PLANS, plan_rank
+    from app.services.stripe_provisioning import change_subscription_plan
+
+    client = get_service_client()
+    org = _org(client, org_id)
+    if not org.get("stripe_customer_id") or not is_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Für diese Organisation ist noch keine Abrechnung eingerichtet.",
+        )
+    target = body.plan_title
+    if target not in PLANS:
+        raise HTTPException(status_code=400, detail=f"Unbekannter Tarif: {target}")
+    if plan_rank(target) <= plan_rank(org.get("billing_plan_title")):
+        raise HTTPException(
+            status_code=400,
+            detail="Ein Tarifwechsel ist nur als Upgrade möglich. Für ein Downgrade "
+            "oder eine Kündigung wenden Sie sich bitte an info@kikichat.de.",
+        )
+    try:
+        change_subscription_plan(org_id, target, actor_id=actor_id)
+    except StripeBillingError as exc:
+        raise HTTPException(status_code=502, detail=f"Tarifwechsel fehlgeschlagen: {exc}") from exc
+    return _sync(org_id)
+
+
+@router.post("/change-plan", response_model=BillingSummary)
+async def billing_change_plan(
+    body: ChangePlanRequest, user: CurrentUser = Depends(require_org)
+) -> BillingSummary:
+    return await run_in_threadpool(_change_plan, user.org_id, user.id, body)
 
 
 # ─── POST /api/billing/sync (webhook fallback) ───────────────────────────────
