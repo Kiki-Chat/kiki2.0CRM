@@ -68,9 +68,7 @@ export function LoginPage() {
     <div className="flex h-screen items-center justify-center bg-bg px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-brand to-green-primary text-xl font-extrabold text-white">
-            K
-          </div>
+          <img src="/kiki-logo.jpg" alt="HeyKiki" className="h-12 w-12 rounded-xl object-cover" />
           <div className="text-center">
             <h1 className="text-xl font-bold text-text">HeyKiki Portal</h1>
             <p className="text-sm text-muted">Sign in to your account</p>
