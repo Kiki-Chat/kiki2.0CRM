@@ -51,7 +51,10 @@ _SYSTEM_PROMPT = (
     '    "preferred_time": string|null       // genannter Wunschtermin/-zeit als Freitext\n'
     "  }\n"
     "}\n"
-    "Nutze nur Informationen aus dem Transkript. Unbekanntes => null bzw. false. "
+    "WICHTIG zur Genauigkeit: Fasse AUSSCHLIESSLICH zusammen, was im Transkript "
+    "tatsächlich gesagt wurde. Erfinde KEINE Namen, Termine, Preise, Adressen oder "
+    "Zusagen, die nicht im Transkript stehen. Jeder Stichpunkt muss durch das "
+    "Transkript belegt sein; im Zweifel weglassen. Unbekanntes => null bzw. false. "
     "Keine Erklärungen, nur das JSON."
 )
 

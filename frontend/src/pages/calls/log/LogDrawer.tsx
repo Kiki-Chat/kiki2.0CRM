@@ -639,19 +639,25 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                       </p>
                     )}
                     {nextSteps.length > 0 && (
-                      <div className="mt-3.5 rounded-xl border border-ai/25 bg-surface/60 p-3">
-                        <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-extrabold uppercase tracking-wider text-ai">
-                          <ListChecks size={13} /> Nächste Schritte
+                      <>
+                        {/* clear separation from the summary above */}
+                        <div className="mt-4 mb-3 h-px bg-ai/25" />
+                        {/* own compartment — opaque surface + stronger border so it
+                            reads as a distinct block, not blended into the purple card */}
+                        <div className="rounded-xl border-2 border-ai/45 bg-surface p-3 shadow-e1">
+                          <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-extrabold uppercase tracking-wider text-ai">
+                            <ListChecks size={13} /> Nächste Schritte
+                          </div>
+                          <ul className="flex flex-col gap-1.5">
+                            {nextSteps.map((s, i) => (
+                              <li key={i} className="flex items-start gap-2 text-[13.5px] leading-snug text-text">
+                                <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-ai" />
+                                <span>{s}</span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
-                        <ul className="flex flex-col gap-1.5">
-                          {nextSteps.map((s, i) => (
-                            <li key={i} className="flex items-start gap-2 text-[13.5px] leading-snug text-text">
-                              <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-ai" />
-                              <span>{s}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                      </>
                     )}
                   </div>
                 )}
