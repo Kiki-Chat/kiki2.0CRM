@@ -39,6 +39,25 @@ PLANS: dict[str, dict] = {
 ANNUAL_MONTHS = 10  # annual = 10× monthly (2 months free)
 INTERVALS = ("month", "year")
 
+# Upgrade ladder (low → high). In-CRM plan changes are gated to UPGRADES only
+# (a downgrade/cancellation goes through support per Amber's policy), so callers
+# compare ranks before allowing a change.
+PLAN_ORDER: tuple[str, ...] = ("Kiki Solo", "Kiki Team", "Kiki Premium")
+
+
+def plan_rank(title: str | None) -> int:
+    """Position in the upgrade ladder; -1 for an unknown/custom plan."""
+    try:
+        return PLAN_ORDER.index(title or "")
+    except ValueError:
+        return -1
+
+
+def overage_cents_for(title: str | None) -> int | None:
+    """Per-minute overage tariff (cents) for a plan, or None for unknown plans."""
+    spec = PLANS.get(title or "")
+    return spec["overage_cents"] if spec else None
+
 
 def _slug(title: str) -> str:
     return title.lower().replace(" ", "_")

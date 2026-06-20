@@ -164,6 +164,81 @@ def create_checkout_session(
     return {"url": session.get("url"), "session_id": session["id"]}
 
 
+def change_subscription_plan(
+    org_id: str, plan_title: str, *, actor_id: str | None = None
+) -> dict:
+    """Upgrade the org's live subscription to ``plan_title`` IN PLACE.
+
+    Swaps the base + metered subscription items to the target plan's prices,
+    keeping the current billing interval and cycle anchor, and prorates the change
+    immediately. Returns the modified subscription. The caller re-syncs org state
+    (POST /sync → _handle_subscription) afterwards. UPGRADE-only enforcement lives
+    in the route; this fn just performs the swap. Routed through stripe_call_safely
+    so the Connect-attribution block + cross-org guard + audit row all apply."""
+    db = get_service_client()
+    org = _org(db, org_id)
+    customer_id = org.get("stripe_customer_id")
+    if not customer_id:
+        raise StripeBillingError(f"org {org_id} has no Stripe customer")
+
+    s = get_stripe()
+    # Prefer the stored subscription id; fall back to the customer's active sub.
+    sub = None
+    stored_id = org.get("billing_subscription_id")
+    if stored_id:
+        try:
+            sub = s.Subscription.retrieve(stored_id, expand=["items.data.price"])
+        except stripe.error.StripeError:  # type: ignore[attr-defined]
+            sub = None
+    if sub is None or sub.get("status") in (None, "canceled", "incomplete_expired"):
+        subs = (
+            s.Subscription.list(
+                customer=customer_id, status="active", expand=["data.items.data.price"]
+            ).get("data")
+            or []
+        )
+        sub = subs[0] if subs else None
+    if sub is None:
+        raise StripeBillingError("no active subscription to upgrade")
+
+    base_item = metered_item = None
+    interval = "month"
+    for it in (sub.get("items") or {}).get("data") or []:
+        recurring = (it.get("price") or {}).get("recurring") or {}
+        if recurring.get("usage_type") == "metered":
+            metered_item = it
+        else:
+            base_item = it
+            interval = recurring.get("interval") or "month"
+    if not base_item:
+        raise StripeBillingError("subscription has no base item to change")
+
+    prices = find_plan_prices(plan_title, interval)
+    if not prices["base_price"] or not prices["metered_price"]:
+        raise StripeBillingError(f"no catalog prices for {plan_title!r}/{interval!r}")
+
+    items = [{"id": base_item["id"], "price": prices["base_price"]}]
+    if metered_item:
+        items.append({"id": metered_item["id"], "price": prices["metered_price"]})
+
+    sub_id = sub["id"]
+    return stripe_call_safely(
+        op="subscription.change_plan",
+        org_id=org_id,
+        actor_id=actor_id,
+        subscription_id=sub_id,
+        stripe_object=sub_id,
+        request_payload={"plan": plan_title, "interval": interval},
+        idempotency_payload={"plan": plan_title, "interval": interval, "sub": sub_id},
+        builder=lambda idem, meta: get_stripe().Subscription.modify(
+            sub_id,
+            items=items,
+            proration_behavior="create_prorations",
+            idempotency_key=idem,
+        ),
+    )
+
+
 # ─── Billing-portal configuration ─────────────────────────────────────────────
 # Bump when the portal feature set changes (forces a fresh Configuration to be made).
 _PORTAL_CONFIG_MARKER = "v1"

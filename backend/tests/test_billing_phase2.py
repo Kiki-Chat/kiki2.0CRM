@@ -98,6 +98,34 @@ def test_check_over_quota_silent_when_under(monkeypatch):
     assert db.inserts_to("billing_notifications") == []
 
 
+def test_check_over_quota_first_warning_at_80(monkeypatch):
+    db = FakeDB(
+        canned={
+            "organizations": [{"id": "o1", "billing_quota_minutes": 100, "billing_period_start": "2026-06-01T00:00:00Z"}],
+            "calls": [{"id": "c", "org_id": "o1", "duration_seconds": 5100, "created_at": "2026-06-05"}],  # 85 min → 85 %
+        },
+        unique={"billing_notifications": "dedup_key"},
+    )
+    monkeypatch.setattr(bn, "get_service_client", lambda: db)
+    bn.check_and_notify_over_quota("o1")
+    ins = db.inserts_to("billing_notifications")
+    assert ins and ins[0]["type"] == "quota_warning"  # first warning, not the 95 % one
+
+
+def test_check_over_quota_final_warning_at_95(monkeypatch):
+    db = FakeDB(
+        canned={
+            "organizations": [{"id": "o1", "billing_quota_minutes": 100, "billing_period_start": "2026-06-01T00:00:00Z"}],
+            "calls": [{"id": "c", "org_id": "o1", "duration_seconds": 5820, "created_at": "2026-06-05"}],  # 97 min → 97 %
+        },
+        unique={"billing_notifications": "dedup_key"},
+    )
+    monkeypatch.setattr(bn, "get_service_client", lambda: db)
+    bn.check_and_notify_over_quota("o1")
+    ins = db.inserts_to("billing_notifications")
+    assert ins and ins[0]["type"] == "quota_warning_2"  # second/final pre-overage warning
+
+
 # ─── New webhook handlers ────────────────────────────────────────────────────
 def _sub(status="trialing", customer="cus_1"):
     return {

@@ -20,10 +20,12 @@ import {
   Plug,
   Receipt,
   Star,
+  TrendingUp,
   Upload,
   UploadCloud,
   Users,
   Wrench,
+  Zap,
   type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -557,14 +559,26 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
     queryKey: ['billing', 'plans'],
     queryFn: () => apiFetch<PlanOption[]>('/api/billing/plans'),
     retry: false,
-    enabled: !configured,
     staleTime: STALE,
   })
   const [planInterval, setPlanInterval] = useState<'month' | 'year'>('month')
+  const [showUpgrade, setShowUpgrade] = useState(false)
   const subscribe = useMutation({
     mutationFn: (vars: { plan_title: string; interval: string }) =>
       apiFetch<{ url: string }>('/api/billing/checkout-session', { method: 'POST', body: JSON.stringify(vars) }),
     onSuccess: (r) => { window.location.href = r.url },
+  })
+  // In-CRM upgrade: swap the live subscription to a higher plan (no Stripe redirect),
+  // then reflect the synced summary the endpoint returns. Downgrades are 400'd server-side.
+  const changePlan = useMutation({
+    mutationFn: (vars: { plan_title: string }) =>
+      apiFetch<BillingSummary>('/api/billing/change-plan', { method: 'POST', body: JSON.stringify(vars) }),
+    onSuccess: (next) => {
+      qc.setQueryData(['billing', 'summary'], next)
+      qc.invalidateQueries({ queryKey: ['billing'] })
+      setShowUpgrade(false)
+      flash(`Tarif geändert: ${next.plan_title ?? 'aktualisiert'}.`)
+    },
   })
 
   // Webhook fallback: Stripe redirects back to ?checkout=success after a self-serve
@@ -601,6 +615,10 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
   const size = usage.document_size_bytes > 1e6 ? `${(usage.document_size_bytes / 1e6).toFixed(1)} MB` : `${Math.round(usage.document_size_bytes / 1024)} KB`
   const invoices = invoicesQ.data ?? []
   const plans = plansQ.data ?? []
+  // Upgrade targets = plans with more included minutes than the current quota
+  // (the 3-tier ladder is strictly ordered by included minutes). Server enforces
+  // upgrade-only too; this just hides downgrades/the current plan from the picker.
+  const upgradePlans = plans.filter((p) => p.included_minutes > quota)
   const trialing = s?.status === 'trialing'
   const paymentDue = s?.status === 'past_due' || s?.status === 'unpaid'
 
@@ -641,6 +659,14 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                   <div className="text-sm font-semibold text-text">{fmtCents(s.next_invoice_amount_cents, s.currency)}</div>
                 </div>
               )}
+              {upgradePlans.length > 0 && (
+                <button
+                  onClick={() => setShowUpgrade((v) => !v)}
+                  className="flex items-center gap-2 rounded-md border border-green-primary px-4 py-2 text-sm font-semibold text-green-deep hover:bg-green-tint-100"
+                >
+                  <TrendingUp size={15} /> {showUpgrade ? 'Abbrechen' : 'Tarif upgraden'}
+                </button>
+              )}
               <button
                 onClick={() => portal.mutate()}
                 disabled={portal.isPending}
@@ -651,6 +677,30 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
             </div>
           </div>
           {portal.isError && <div className="mt-3 text-sm text-error">{(portal.error as Error).message}</div>}
+
+          {showUpgrade && upgradePlans.length > 0 && (
+            <div className="mt-4 border-t border-border pt-4">
+              <div className="mb-3 text-sm font-bold text-text">Upgrade auf einen höheren Tarif</div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {upgradePlans.map((p) => (
+                  <div key={p.plan_title} className="flex flex-col rounded-xl border border-border p-4">
+                    <div className="text-sm font-bold text-text">{p.plan_title}</div>
+                    <div className="mt-1 text-2xl font-bold text-text">{fmtCents(p.monthly_cents)}<span className="text-xs font-normal text-muted">/Mon.</span></div>
+                    <div className="mt-1 text-xs text-muted">{p.included_minutes} Min. inkl. · dann {fmtCents(p.overage_cents_per_min)}/Min.</div>
+                    <button
+                      onClick={() => changePlan.mutate({ plan_title: p.plan_title })}
+                      disabled={changePlan.isPending}
+                      className="mt-4 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+                    >
+                      {changePlan.isPending ? 'Wird gewechselt…' : `Auf ${p.plan_title} wechseln`}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-xs text-muted">Der Wechsel gilt sofort; die Differenz wird anteilig auf Ihrer nächsten Rechnung verrechnet. Alle Preise zzgl. 19 % MwSt.</div>
+              {changePlan.isError && <div className="mt-2 text-sm text-error">{(changePlan.error as Error).message}</div>}
+            </div>
+          )}
         </Card>
       )}
 
@@ -671,10 +721,18 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
         <KpiCard label="Gespeicherte Dokumente" value={usage.document_count} sub={size} icon={FileText} />
       </div>
 
-      {!over && quota > 0 && pct >= 80 && (
+      {/* Two pre-overage warnings (80 % → first, 95 % → final), mirroring the two
+          warning e-mails the backend sends before any extra usage is charged. */}
+      {!over && quota > 0 && pct >= 80 && pct < 95 && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-bg/40 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
           <span><strong>{Math.round(pct)} % Ihres Minutenkontingents verbraucht.</strong> Ab {quota} Min. wird jede weitere Minute nach Tarif berechnet.</span>
+        </div>
+      )}
+      {!over && quota > 0 && pct >= 95 && (
+        <div className="flex items-start gap-3 rounded-xl border border-warning/50 bg-warning-bg/60 p-4 text-sm text-body">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
+          <span><strong>Letzte Warnung: {Math.round(pct)} % verbraucht.</strong> Ihr Kontingent ist fast aufgebraucht. Ab {quota} Min. wird jede weitere Minute{s?.overage_cents_per_min != null ? ` mit ${fmtCents(s.overage_cents_per_min)}/Min.` : ''} berechnet.</span>
         </div>
       )}
       {over && (
@@ -682,6 +740,39 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
           <span>Ihr Minutenkontingent ist aufgebraucht. Ihre KI bleibt erreichbar — der <strong>Mehrverbrauch wird nach Tarif berechnet</strong>.</span>
         </div>
+      )}
+
+      {/* Explicit extra-usage breakdown — included vs used, minutes over, the
+          per-minute tariff, and the running projected extra charge for the period. */}
+      {over && configured && s && s.minutes_over > 0 && (
+        <Card>
+          <div className="mb-3 flex items-center gap-2 text-sm font-bold text-text"><Zap size={16} className="text-warning" /> Mehrverbrauch (Extra-Nutzung)</div>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wide text-muted">Inklusive</div>
+              <div className="text-lg font-bold leading-tight text-text">{s.quota_minutes} Min.</div>
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wide text-muted">Verbraucht</div>
+              <div className="text-lg font-bold leading-tight text-text">{s.used_minutes} Min.</div>
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wide text-muted">Darüber</div>
+              <div className="text-lg font-bold leading-tight text-warning">+{s.minutes_over} Min.</div>
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wide text-muted">Tarif</div>
+              <div className="text-lg font-bold leading-tight text-text">{s.overage_cents_per_min != null ? `${fmtCents(s.overage_cents_per_min)}/Min.` : '—'}</div>
+            </div>
+          </div>
+          {s.projected_overage_cents != null && (
+            <div className="mt-3 flex items-center justify-between rounded-lg bg-warning-bg/40 px-4 py-3">
+              <span className="text-sm font-semibold text-text">Voraussichtlicher Mehrverbrauch (zzgl. 19 % MwSt.)</span>
+              <span className="text-lg font-bold text-text">{fmtCents(s.projected_overage_cents)}</span>
+            </div>
+          )}
+          <div className="mt-2 text-xs text-muted">Der Mehrverbrauch wird zusätzlich zur Grundgebühr über Ihre nächste Rechnung abgerechnet.</div>
+        </Card>
       )}
 
       {configured && invoices.length > 0 && (

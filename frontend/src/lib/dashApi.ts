@@ -68,6 +68,9 @@ export interface BillingSummary {
   used_minutes: number
   used_percent: number
   over_quota: boolean
+  overage_cents_per_min: number | null
+  minutes_over: number
+  projected_overage_cents: number | null
   next_invoice_amount_cents: number | null
   currency: string
 }

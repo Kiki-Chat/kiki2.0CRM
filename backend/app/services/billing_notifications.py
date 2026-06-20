@@ -161,7 +161,7 @@ def notify_over_quota(org_id: str, period_key: str, used: int, quota: int) -> No
 
 
 def notify_quota_warning(org_id: str, period_key: str, used: int, quota: int) -> None:
-    """80%-Schwelle: einmal pro Periode vorwarnen, bevor Mehrkosten anfallen."""
+    """80%-Schwelle: erste Vorwarnung pro Periode, bevor Mehrkosten anfallen."""
     record_notification(
         org_id, "quota_warning",
         title="80 % des Minutenkontingents verbraucht",
@@ -172,12 +172,27 @@ def notify_quota_warning(org_id: str, period_key: str, used: int, quota: int) ->
     )
 
 
+def notify_quota_warning_2(org_id: str, period_key: str, used: int, quota: int) -> None:
+    """95%-Schwelle: zweite (letzte) Vorwarnung pro Periode vor dem Mehrverbrauch."""
+    record_notification(
+        org_id, "quota_warning_2",
+        title="95 % des Minutenkontingents verbraucht",
+        body=f"Sie haben {used} von {quota} inkludierten Minuten genutzt – Ihr Kontingent "
+        "ist fast aufgebraucht. Ab dem Erreichen wird jede weitere Minute nach Ihrem "
+        "Tarif berechnet (Mehrverbrauch).",
+        dedup_key=f"quota_warning_2:{org_id}:{period_key}",
+        meta={"used": used, "quota": quota},
+    )
+
+
 QUOTA_WARNING_PCT = 0.8
+QUOTA_WARNING_2_PCT = 0.95
 
 
 def check_and_notify_over_quota(org_id: str) -> None:
-    """Best-effort: warn once at 80 % of the included minutes and once more when
-    the quota is crossed (each deduped per billing period)."""
+    """Best-effort: TWO pre-overage warnings (80 % and 95 % of the included minutes)
+    plus one alert when the quota is crossed — each deduped per billing period, so a
+    customer gets at most one of each per period before any extra charge."""
     db = get_service_client()
     rows = (
         db.table("organizations")
@@ -202,5 +217,7 @@ def check_and_notify_over_quota(org_id: str) -> None:
     period_key = str(start)[:10]
     if used > quota:
         notify_over_quota(org_id, period_key, used, int(quota))
+    elif used >= quota * QUOTA_WARNING_2_PCT:
+        notify_quota_warning_2(org_id, period_key, used, int(quota))
     elif used >= quota * QUOTA_WARNING_PCT:
         notify_quota_warning(org_id, period_key, used, int(quota))
