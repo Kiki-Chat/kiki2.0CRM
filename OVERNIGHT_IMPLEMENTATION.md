@@ -47,4 +47,32 @@ The disabled-feature blocks (emergency/price/autonomy/staff-transfer) currently 
 - Verified by rendering all 3 states (off → base unchanged; on+number → transfer_to_number; on+no-number → urgent inquiry). Full backend suite: **968 passed, 0 failed**.
 - **Deferred D-autonomy** (make outbound respect L1/L3 autonomy wording): needs a per-occasion design decision (e.g. should an L1 "don't book" org's reminder be allowed to book at all?) + reconciling the hardcoded L2 Leitplanken line + avoiding contradictions with non-booking occasion task blocks (kva_followup etc.). Spec in `DEFERRED_SPECS.md` — needs your product call, NOT shipped unattended.
 
-_(further batches appended below as completed)_
+---
+
+## ☀️ Morning summary
+
+**Shipped on this branch (4 commits, all behind your review — nothing is live; merge + deploy are still gated):**
+1. **Onboarding/sync (your #1 concern):** provisioning now attaches the system tools (`transfer_to_number`/`transfer_to_agent`/`voicemail_detection`) at account creation, and Force-Resync re-syncs them. Every newly-onboarded org (super-admin manual OR API) gets the full agent surface pushed at once.
+2. **Inbound dedup:** emergency + business-hours blocks were each rendered twice — removed the duplicates (~480+ tok off every inbound prompt, and every outbound→handoff leg).
+3. **Outbound cuts:** redundant prose tool-list → 1-line pointer + compressed mailbox heuristic (~208 tok off every outbound call).
+4. **Outbound emergency escalation (additive):** if a real emergency surfaces during any outbound call, the agent now escalates (gated on `emergency_enabled`; zero change for orgs without Notdienst).
+
+**Verification:** full backend suite **968 passed / 0 failed** (6 live tests skipped). Each prompt change verified by rendering. Pure-win/additive only — no behaviour change for the inbound conversation flow.
+
+**Waiting for your decision (specs ready in `DEFERRED_SPECS.md` / `TRANSFER_VERIFICATION_TESTPLAN.md`):**
+- B2 inbound conditional-render (esp. the **safety-critical emergency region** — needs transcript A/B).
+- B4 cross-section dedup (behaviour-sensitive).
+- D-autonomy outbound (needs your product call: may an L1 "don't book" org's reminder book at all?).
+- F tool-cards → verbose EL tool descriptions (live EL write + eval).
+- G `transfer_to_agent` live handoff check (one controlled live call — confirms the override drops + `dynamic_variables` survive).
+- Tools: keep 11 / merge none; optional `hk_searchCustomerProjects` + `hk_sendKVA` (your go).
+
+**How to review:** `git log --oneline main..feature/prompt-engine-optimization` then `git diff main...feature/prompt-engine-optimization`. Each commit is independently revertible.
+
+**How to run the suite yourself:**
+```
+cp "/Users/iamber/Code Jamming/KikiJarvis/backend/.env" backend/.env   # gitignored; needed for settings
+/Users/iamber/Code\ Jamming/KikiJarvis/backend/.venv/bin/python -m pytest backend/tests -m "not live" -q
+```
+
+**Not done (by design):** no deploys, no live ElevenLabs writes, no live calls. Merge to main + deploy remain yours to trigger.
