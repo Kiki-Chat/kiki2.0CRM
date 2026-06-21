@@ -920,12 +920,6 @@ frage explizit nach seiner Telefonnummer BEVOR du hk_createInquiry aufrufst.
   # Einsatzgebiet
 {{SERVICE_AREA}}
 
-  # Erreichbarkeit
-{{BUSINESS_HOURS}}
-
-  # Notdienst & Notfälle
-{{KZ_EMERGENCY}}
-
   # Preise
 {{KZ_PRICE_INFO}}
 

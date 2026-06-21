@@ -29,4 +29,11 @@ This file is the morning report. Each batch is committed separately so you can r
 - `backend/app/api/routes/kiki_zentrale.py` `_force_resync_bg`: now also calls `sync_system_tools_for_org` so the "Force Resync" drift-recovery button repairs the call-bridge tools, not just the prompt.
 - Result: onboarding (super-admin manual OR API) now pushes the FULL agent surface — prompt + hk_ tools + system tools + webhook + audio + overrides whitelist — in one provision. Closes the two sync gaps.
 
+### Batch B1 — inbound prompt: dedup double-rendered tokens ✅
+- `agent_prompt_template.txt`: `render_prompt_for_org` fills **every** occurrence of a token (`text.replace`), so `{{KZ_EMERGENCY}}` (lines 120 + 927) and `{{BUSINESS_HOURS}}` (45 + 924) were each emitting their full rendered block **twice**. Removed the duplicate copies from the `# Wissensbasis` footer (the operative copies under `## Notfall-Definition` and `=== Geschäftszeiten ===` remain). Pure win, zero behavior change — verified the template still renders with no orphaned tokens and each block now renders once.
+- Emergency block when enabled is ~480 tok; this alone removes ~480 + the rendered hours from every inbound prompt (and therefore from every outbound→handoff leg).
+
+### NOTE on inbound conditional-rendering (disabled-feature blocks) — deliberately conservative
+The disabled-feature blocks (emergency/price/autonomy/staff-transfer) currently emit "you don't do X" prose instead of `""`. Making them render nothing is real token savings BUT touches the **safety-critical** inbound prompt (esp. the emergency procedure region, which is fixed template text around the token, not just the token). Per the project's own guardrail ("change one lever at a time, A/B against transcripts"), I am NOT restructuring the emergency region unattended. The dedup above is the safe inbound win; the conditional-render rework is documented as a reviewed follow-up in this file's "Deferred" notes.
+
 _(further batches appended below as completed)_
