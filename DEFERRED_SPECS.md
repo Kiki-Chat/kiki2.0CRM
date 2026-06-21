@@ -62,10 +62,12 @@ Each is behaviour-sensitive → apply one at a time, A/B against transcripts.
 Today outbound hardcodes L2 reservation phrasing (`_BASE_OUTBOUND` Leitplanken). To make
 it respect the org's autonomy:
 
-1. **Product decision (yours):** should an **L1 ("don't book") org's** outbound
-   appointment-reminder be allowed to book/reschedule at all, or only capture intent via
-   `hk_createInquiry`? (Inbound L1 = don't book. Consistency says outbound L1 shouldn't
-   either — but that changes what a reminder call can do.)
+1. **Product decision — RESOLVED 2026-06-22 (Amber): L1 outbound = DON'T BOOK, match
+   inbound.** An L1 org's outbound reminder only confirms / captures intent via
+   `hk_createInquiry`; it must NOT call `hk_bookAppointment` / `hk_changeAppointment` /
+   `hk_getAvailableAppointments`. The injected Termine line for L1 must say exactly that
+   (reuse `render_autonomy_block`'s L1 branch, which already does). L2 = reserve (current
+   wording), L3 = book directly.
 2. **Occasion-aware injection:** inject the **Termine** autonomy line only for
    booking-capable occasions (appointment_reminder, maintenance_due, missed_callback, the
    3 click occasions). Do **not** inject the **KVA** autonomy line — no outbound occasion
