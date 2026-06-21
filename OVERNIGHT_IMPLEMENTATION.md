@@ -41,4 +41,10 @@ The disabled-feature blocks (emergency/price/autonomy/staff-transfer) currently 
 - Base outbound prompt: ~1,277 → ~1,069 tokens (~16%); `{company}/{kunden_name}/{task_block}` slots verified intact.
 - **Deferred C2** (task-block tail trimming): only one task block ships per call, so the cross-occasion boilerplate saving is ~15–25 tok/call — not worth the per-occasion regression risk unattended. Documented for review.
 
+### Batch D (partial) — outbound emergency escalation (ADDITIVE, gated) ✅
+- `outbound_occasions.py`: added a `{anlass_regeln}` slot to `_BASE_OUTBOUND` + `assemble_system_prompt`, and `_render_outbound_emergency(cfg)`. `build_call_content` now injects a concise emergency-escalation note **only when the org has the Notdienst enabled** (`emergency_enabled`), using the org's configured keywords + Notdienst number; falls back to an urgent `hk_createInquiry` when no number is set. Defensive: any config-fetch failure (or no DB, e.g. unit tests) → empty block → unchanged base behaviour.
+- **Why:** closes a real safety gap — previously an emergency surfacing DURING any outbound call (reminder/payment/review) was not escalated, even though `transfer_to_number` is attached on the outbound leg. Worded conservatively (confirm once, escalate only on clear emergency).
+- Verified by rendering all 3 states (off → base unchanged; on+number → transfer_to_number; on+no-number → urgent inquiry). Full backend suite: **968 passed, 0 failed**.
+- **Deferred D-autonomy** (make outbound respect L1/L3 autonomy wording): needs a per-occasion design decision (e.g. should an L1 "don't book" org's reminder be allowed to book at all?) + reconciling the hardcoded L2 Leitplanken line + avoiding contradictions with non-booking occasion task blocks (kva_followup etc.). Spec in `DEFERRED_SPECS.md` — needs your product call, NOT shipped unattended.
+
 _(further batches appended below as completed)_
