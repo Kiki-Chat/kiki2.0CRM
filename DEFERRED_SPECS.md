@@ -36,6 +36,18 @@ mock all-enabled cfg; assert no orphaned headings and the existing `{{…}}` gua
 passes. **Do emergency last and only with a transcript A/B** (it's what every inbound
 call + every outbound handoff runs).
 
+> **⚠️ 2026-06-22 — reassessed; B2 is NOT a quick change, do NOT ship partial.** Two
+> blockers found on inspection: (1) most "disabled" branches are **active instructions**,
+> not dead prose — price-off = "don't quote prices", autonomy-L1 = "don't book",
+> scheduling-off = "don't book". Removing them *changes behaviour*. The genuinely-dead
+> ones are only: the appointment-categories section when booking is off, and the emergency
+> procedure when emergency is off. (2) Sections **cross-reference** each other: the Schritt-3
+> booking pre-gate says *"siehe Abschnitt ## Termin-Kategorien"* (template:411), so removing
+> the categories section leaves a **dangling reference**. → B2 done right needs a
+> **region-conditional template engine** (honour the existing `<!-- MARKER -->…<!-- /MARKER -->`
+> comments to strip a whole feature region + its cross-refs when off) + transcript A/B. That's
+> a feature, not a token tweak. **B1 dedup stays the shipped safe inbound win.**
+
 ---
 
 ## B4 — Inbound: dedupe cross-section repeats (regression-sensitive)
@@ -99,6 +111,43 @@ guidance, plus tighter wording. Order (do NOT delete cards first):
    + the cross-tool sequencing rules (EL guidance: don't rely on descriptions alone).
 
 This is the Phase-3 structural win; it touches the live agent so it can't run unattended.
+
+### Paste-ready description text (the two highest-value ones)
+
+**`hk_identifyCustomer` → Description field (EL workspace):**
+> Identifiziert den Anrufer. PFLICHT als allererste Aktion jedes Gesprächs — ohne Parameter
+> (nutzt die Caller-ID). ERNEUT aufrufen, sobald der Anrufer im Gespräch weitere Hinweise
+> nennt: mit `telefonnummer` bei einem weitergeleiteten Anruf, sobald er seine eigene Nummer
+> nennt; mit `kundennummer`, wenn er eine Kundennummer nennt; mit `adresse` (+ `nachname` bei
+> mehreren Treffern) zur Adress-Identifikation, wenn Telefon/Kundennummer nicht greifen; mit
+> nur `nachname` bei Rückruf auf einen offenen Gegenvorschlag. Liefert Name, Adresse, E-Mail,
+> kommende Termine und offene Vorgänge des Bestandskunden.
+
+**`hk_draftCostEstimate` → `positions` parameter description (EL workspace):**
+> Liste der besprochenen Positionen. Leite sie SELBST aus dem Anliegen ab — frage den Anrufer
+> NICHT "Wofür genau?". Jede `artikel`-/`description`-Position MUSS mindestens ein inhaltliches
+> Vollwort enthalten (Gewerk oder Bauteil, z. B. "Heizung", "Dach", "Rohr", "Fenster") — rein
+> generische Begriffe ("Reparatur", "Wartung", "Arbeitsstunde") matchen serverseitig NICHT.
+> GUT: "Heizung Fehlerdiagnose vor Ort"; SCHLECHT: "Reparatur". Erfinde KEINE Preise.
+
+(Author in English or German — the LLM handles both; German keeps it consistent with the rest.
+Do NOT delete the matching prompt cards until an A/B confirms tool-calling holds.)
+
+---
+
+## Test calls / G — how to trigger (and the number caveat)
+
+- **Number flag:** you wrote `+91787997839` (9 digits after +91); a valid IN mobile is 10
+  digits and the established runtime-test target is **`+917879997839`**. Confirm the exact
+  digits before any real dial.
+- **Offline eye-test (safe, ready now):** `python backend/scripts/preview_outbound.py` prints
+  the assembled outbound prompt for baseline / emergency-on / autonomy-L1 / both — so you can
+  read exactly what each call would send, including the new blocks. No DB, no EL, no call.
+- **Real call (your trigger, after confirming the number + a running backend):** dispatch one
+  outbound occasion to the test number with dummy data via the existing pipeline
+  (`send_single_outbound` → `place_outbound_call`). I did not place a live call: outbound is
+  LIVE telephony and the number looked malformed. The `transfer_to_agent` handoff checks are in
+  `TRANSFER_VERIFICATION_TESTPLAN.md`.
 
 ---
 

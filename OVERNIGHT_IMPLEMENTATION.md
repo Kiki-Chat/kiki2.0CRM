@@ -56,8 +56,12 @@ The disabled-feature blocks (emergency/price/autonomy/staff-transfer) currently 
 2. **Inbound dedup:** emergency + business-hours blocks were each rendered twice — removed the duplicates (~480+ tok off every inbound prompt, and every outbound→handoff leg).
 3. **Outbound cuts:** redundant prose tool-list → 1-line pointer + compressed mailbox heuristic (~208 tok off every outbound call).
 4. **Outbound emergency escalation (additive):** if a real emergency surfaces during any outbound call, the agent now escalates (gated on `emergency_enabled`; zero change for orgs without Notdienst).
+5. **Outbound autonomy L1 (your decision):** on the auto-swept booking occasions (reminder/maintenance/missed-callback), an L1 "don't book" org now routes any new/reschedule/cancel wish to `hk_createInquiry` instead of booking; L2/L3 and the human-initiated click occasions unchanged.
+6. **Eye-test tool:** `backend/scripts/preview_outbound.py` prints the assembled outbound prompt for baseline / emergency-on / autonomy-L1 / both (offline, no DB/EL/calls).
 
-**Verification:** full backend suite **968 passed / 0 failed** (6 live tests skipped). Each prompt change verified by rendering. Pure-win/additive only — no behaviour change for the inbound conversation flow.
+**Verification:** full backend suite **968 passed / 0 failed** (6 live tests skipped). Each prompt change verified by rendering, incl. the preview tool above. Pure-win/additive/config-gated only — no behaviour change for the default inbound flow or for orgs at L2/L3 without Notdienst.
+
+**Reassessed and deliberately NOT shipped (would change behaviour / break refs):** B2 inbound conditional-render — most "disabled" branches are *active* instructions, and sections cross-reference each other (the Schritt-3 pre-gate cites `## Termin-Kategorien`), so it needs a region-conditional template engine + transcript A/B, not a token tweak. Details in `DEFERRED_SPECS.md`.
 
 **Waiting for your decision (specs ready in `DEFERRED_SPECS.md` / `TRANSFER_VERIFICATION_TESTPLAN.md`):**
 - B2 inbound conditional-render (esp. the **safety-critical emergency region** — needs transcript A/B).
