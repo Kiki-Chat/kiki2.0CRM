@@ -36,4 +36,9 @@ This file is the morning report. Each batch is committed separately so you can r
 ### NOTE on inbound conditional-rendering (disabled-feature blocks) — deliberately conservative
 The disabled-feature blocks (emergency/price/autonomy/staff-transfer) currently emit "you don't do X" prose instead of `""`. Making them render nothing is real token savings BUT touches the **safety-critical** inbound prompt (esp. the emergency procedure region, which is fixed template text around the token, not just the token). Per the project's own guardrail ("change one lever at a time, A/B against transcripts"), I am NOT restructuring the emergency region unattended. The dedup above is the safe inbound win; the conditional-render rework is documented as a reviewed follow-up in this file's "Deferred" notes.
 
+### Batch C — outbound prompt cuts ✅
+- `outbound_occasions.py` `_BASE_OUTBOUND`: replaced the 8-line "## Verfügbare Werkzeuge" prose tool list with a 1-line pointer (it never actually whitelisted — no `tool_ids` override is sent, and ElevenLabs already injects each attached tool's schema; kept the two real outbound steers: `transfer_to_agent` for off-topic, don't re-identify). Compressed the verbose Mailbox heuristic (the platform enforces voicemail detection).
+- Base outbound prompt: ~1,277 → ~1,069 tokens (~16%); `{company}/{kunden_name}/{task_block}` slots verified intact.
+- **Deferred C2** (task-block tail trimming): only one task block ships per call, so the cross-occasion boilerplate saving is ~15–25 tok/call — not worth the per-occasion regression risk unattended. Documented for review.
+
 _(further batches appended below as completed)_
