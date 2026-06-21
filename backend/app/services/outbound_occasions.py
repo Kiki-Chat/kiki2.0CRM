@@ -173,6 +173,49 @@ def _render_outbound_emergency(cfg: dict) -> str:
     )
 
 
+def _appt_autonomy_level(cfg: dict) -> int:
+    """Org's appointments autonomy level (1/2/3), mirroring render_autonomy_block's
+    logic: appointments disabled OR level 1 ⇒ 1 (don't book); else the configured
+    per-capability level, falling back to the legacy kiki_level (default 2)."""
+    enabled = cfg.get("appointments_enabled")
+    enabled = True if enabled is None else bool(enabled)
+    if not enabled:
+        return 1
+    v = cfg.get("appointments_level")
+    if v is None:
+        try:
+            return int(cfg.get("kiki_level", 2) or 2)
+        except (TypeError, ValueError):
+            return 2
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 2
+
+
+def _render_outbound_autonomy(cfg: dict, *, books: bool) -> str:
+    """Outbound autonomy directive for the ``{anlass_regeln}`` slot.
+
+    Decision (Amber, 2026-06-22): an autonomy **level-1** org ("don't book, only
+    capture inquiries") must NOT book/reschedule on outbound either — match inbound.
+    Only emitted for AUTONOMOUS booking occasions (``books=True``: reminder,
+    maintenance, missed_callback) at level 1; the human-initiated CLICK occasions and
+    levels 2/3 keep their existing behaviour, so this is purely additive and never
+    contradicts the task block — it redirects the reschedule/cancel branches the task
+    block discusses to ``hk_createInquiry`` instead of leaving them to the agent."""
+    if not books or _appt_autonomy_level(cfg) != 1:
+        return ""
+    return (
+        "\n## Terminvergabe (Autonomie-Stufe 1)\n"
+        "Dieser Betrieb vergibt Termine NICHT automatisch. Du buchst, änderst oder "
+        "stornierst in diesem Anruf KEINEN Termin selbst — rufe hk_bookAppointment / "
+        "hk_changeAppointment / hk_cancelAppointment NICHT auf. Das Bestätigen eines "
+        "bereits bestehenden Termins ist in Ordnung. JEDEN Wunsch nach einem neuen "
+        "Termin, einer Verschiebung oder einer Absage nimmst du nur mit hk_createInquiry "
+        "(`rueckrufGewuenscht=true`) auf — das Team kümmert sich darum.\n"
+    )
+
+
 def assemble_system_prompt(
     *, company: str, kunden_name: str, task_block: str, anlass_regeln: str = ""
 ) -> str:
@@ -729,6 +772,11 @@ class OccasionSpec:
                                                  # OUTBOUND_OCCASION_EMAILS_ENABLED flag (the 3
                                                  # appointment occasions). The existing 7 stay
                                                  # flag-gated, so they ship INERT.
+    books: bool = False                          # True ⇒ the agent may AUTONOMOUSLY offer to
+                                                 # book/reschedule on this occasion → subject to
+                                                 # the org's appointments autonomy level (L1 =
+                                                 # don't book). The CLICK occasions are human-
+                                                 # initiated, so they stay False (always proceed).
 
 
 _APPT_COLUMNS = "id, customer_id, scheduled_at, title, status"
@@ -750,6 +798,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         select=_select_appointment_reminder,
         render=_render_appointment_reminder,
         email_render=_occ_email("appointment_reminder"),
+        books=True,
     ),
     "kva_followup": OccasionSpec(
         key="kva_followup",
@@ -816,6 +865,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         cooldown_days=_DEFAULT_MAINT_COOLDOWN_DAYS,
         cooldown_config_key="maintenance_reminder_days",
         max_cycles=_MAINT_MAX_CYCLES,
+        books=True,
     ),
     "missed_callback": OccasionSpec(
         key="missed_callback",
@@ -829,6 +879,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
         case_gate="ignore",          # missed calls have no case
         # dial the caller's number (a missed call may have no linked customer/phone)
         to_number_of=lambda rec, cust: rec.get("caller_number") or (cust or {}).get("phone"),
+        books=True,
     ),
     # ── Appointment epic — CLICK-triggered occasions (never auto-swept) ──────
     # Fired by a human click in the call-log action tab (Confirm / Cancel /
@@ -903,7 +954,11 @@ def build_call_content(
     try:
         if org.get("id"):
             from app.services.agent_config import _fetch_kz_config
-            anlass_regeln = _render_outbound_emergency(_fetch_kz_config(org["id"]) or {})
+            cfg = _fetch_kz_config(org["id"]) or {}
+            anlass_regeln = (
+                _render_outbound_autonomy(cfg, books=spec.books)
+                + _render_outbound_emergency(cfg)
+            )
     except Exception:  # noqa: BLE001 — never let config rendering break a dispatch
         anlass_regeln = ""
     system_prompt = assemble_system_prompt(
