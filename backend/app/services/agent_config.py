@@ -1175,6 +1175,8 @@ def configure_agent(
         "webhook_enabled": False,
         "audio_ok": False,
         "overrides_whitelist_enabled": False,
+        "system_tools_synced": False,
+        "system_tools_reason": None,
     }
     is_first_run = not _is_agent_already_provisioned(org_id)
 
@@ -1344,6 +1346,23 @@ def configure_agent(
             endpoint_label="provision_overrides_whitelist",
         )
     summary["overrides_whitelist_enabled"] = True
+
+    # ─── B.7 System tools (transfer_to_number / voicemail_detection /
+    #         transfer_to_agent) ───────────────────────────────────────────────
+    # Onboarding gap fix (2026-06-22): previously the native system tools were
+    # attached ONLY on a later Notdienst/Telefon save (sync_system_tools_for_org
+    # had a single caller in kiki_zentrale._repush_bg). A freshly-provisioned org
+    # therefore had NO transfer_to_number/transfer_to_agent/voicemail_detection on
+    # its agent until someone re-saved a Kiki-Zentrale screen — so the prompt could
+    # already say "leite weiter" with no bridge behind it, and outbound→inbound
+    # handoff (transfer_to_agent) was unavailable. Attaching them here means every
+    # org that comes through provisioning has the full system-tool set from day one,
+    # built from whatever Kiki-Zentrale defaults/numbers exist at provision time.
+    # sync_system_tools_for_org is best-effort (never raises) and idempotent, so it
+    # is safe to call on first run AND re-runs; it returns a categorized result.
+    sys_tools_result = sync_system_tools_for_org(org_id)
+    summary["system_tools_synced"] = bool(sys_tools_result.get("updated"))
+    summary["system_tools_reason"] = sys_tools_result.get("reason")
 
     # ─── Stamp the org so re-runs skip the prompt step. ──────────────────────
     if is_first_run:
