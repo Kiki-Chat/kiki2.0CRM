@@ -14,6 +14,7 @@ time — so the greeting changes by time of day. No variant matches → no overr
 
 import logging
 
+from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.services.common import format_address, now_berlin
 
@@ -121,6 +122,12 @@ def conversation_init(org_id: str, caller_id: str | None) -> dict:
 
     result: dict = {
         "type": "conversation_initiation_client_data",
+        # Tells ElevenLabs which ENVIRONMENT this call runs in, so a SHARED tool whose
+        # URL host is {{system__env_api_host}} resolves to THIS backend (uat → UAT
+        # host, production → prod host). One tool, attached to every agent, routed by
+        # environment — no per-environment tool duplication. settings.el_environment
+        # is set per deployment (EL_ENVIRONMENT=uat|production).
+        "environment": settings.el_environment,
         "dynamic_variables": variables,
     }
     greeting = _pick_welcome_message(client, org_id)
