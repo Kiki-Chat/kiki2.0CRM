@@ -404,3 +404,137 @@ def test_route_emergency_save_survives_push_failure(monkeypatch):
     body = r.json()
     assert body["emergency_enabled"] is True
     assert body["emergency_number"] == "+4925100000000"
+
+
+# ─── D. send_cost_estimate (hk_sendKVA) — L3-gated re-send ────────────────────
+class _SendClient:
+    """Routes agent_configs read → cfg, cost_estimates select → kva_row (or none)."""
+
+    def __init__(self, cfg: dict, kva_row: dict | None):
+        self._cfg = cfg
+        self._kva = kva_row
+
+    def table(self, name: str):
+        cfg, kva = self._cfg, self._kva
+
+        class _T:
+            def select(self, *a, **k):
+                return self
+
+            def eq(self, *a, **k):
+                return self
+
+            def order(self, *a, **k):
+                return self
+
+            def limit(self, *a, **k):
+                return self
+
+            def execute(self):
+                if name == "agent_configs":
+                    return MagicMock(data=[cfg] if cfg else [])
+                return MagicMock(data=[kva] if kva else [])
+
+        return _T()
+
+
+def _send_payload(**kw):
+    from app.schemas.tools import SendCostEstimateRequest
+
+    return SendCostEstimateRequest(**kw)
+
+
+def test_send_kva_gated_below_l3(monkeypatch):
+    """DELIBERATELY GATED (Amber: send only at the fully-automatic level): KVA
+    level 2 → no send, success=False with the German 'Team versendet' note."""
+    client = _SendClient({"kva_enabled": True, "kva_level": 2}, dict(_ROW))
+    monkeypatch.setattr(ce, "get_service_client", lambda: client)
+    monkeypatch.setattr(ce, "_send_draft_kva", lambda *a, **k: pytest.fail("must not send below L3"))
+
+    res = ce.send_cost_estimate("org-1", _send_payload(costEstimateId="ce-1"))
+
+    assert res["success"] is False and "Team" in res["message"]
+
+
+def test_send_kva_l3_not_found(monkeypatch):
+    """L3 but no matching KVA → success=False, never reaches the send path."""
+    client = _SendClient({"kva_enabled": True, "kva_level": 3}, None)
+    monkeypatch.setattr(ce, "get_service_client", lambda: client)
+    monkeypatch.setattr(ce, "_send_draft_kva", lambda *a, **k: pytest.fail("nothing to send"))
+
+    res = ce.send_cost_estimate("org-1", _send_payload(number="KVA-NOPE"))
+
+    assert res["success"] is False and "nicht finden" in res["message"]
+
+
+def test_send_kva_l3_no_email_asks_for_it(monkeypatch):
+    """L3, KVA found, but the customer has only a @temp.local placeholder →
+    success=False with needsEmail=True so the agent asks for an address."""
+    client = _SendClient({"kva_enabled": True, "kva_level": 3}, dict(_ROW))
+    monkeypatch.setattr(ce, "get_service_client", lambda: client)
+    monkeypatch.setattr(ce, "fetch_customer", lambda *a, **k: {"email": "x@temp.local"})
+    monkeypatch.setattr(ce, "_send_draft_kva", lambda *a, **k: pytest.fail("no real email"))
+
+    res = ce.send_cost_estimate("org-1", _send_payload(customerId="cust-1"))
+
+    assert res["success"] is False and res.get("needsEmail") is True
+
+
+def test_send_kva_l3_sends(monkeypatch):
+    """FIRES: L3 + found + real email → _send_draft_kva is invoked with the row,
+    status flips to 'sent'."""
+    client = _SendClient({"kva_enabled": True, "kva_level": 3}, dict(_ROW))
+    monkeypatch.setattr(ce, "get_service_client", lambda: client)
+    monkeypatch.setattr(ce, "fetch_customer", lambda *a, **k: {"email": "max@example.de"})
+    sent_args: list = []
+    monkeypatch.setattr(
+        ce, "_send_draft_kva",
+        lambda c, o, row: (sent_args.append((o, row.get("id"))), True)[1],
+    )
+
+    res = ce.send_cost_estimate("org-1", _send_payload(costEstimateId="ce-1"))
+
+    assert res["success"] is True and res["status"] == "sent" and "versendet" in res["message"]
+    assert sent_args == [("org-1", "ce-1")]
+
+
+def test_send_kva_l3_send_fails_safely(monkeypatch):
+    """FAILS SAFELY: L3 + found + email, but the send path returns False →
+    success=False with the 'Team' fallback (never raises)."""
+    client = _SendClient({"kva_enabled": True, "kva_level": 3}, dict(_ROW))
+    monkeypatch.setattr(ce, "get_service_client", lambda: client)
+    monkeypatch.setattr(ce, "fetch_customer", lambda *a, **k: {"email": "max@example.de"})
+    monkeypatch.setattr(ce, "_send_draft_kva", lambda *a, **k: False)
+
+    res = ce.send_cost_estimate("org-1", _send_payload(costEstimateId="ce-1"))
+
+    assert res["success"] is False and "Team" in res["message"]
+
+
+def test_route_send_cost_estimate_returns_service_dict(monkeypatch):
+    """POST /api/elevenlabs/tools/send-cost-estimate returns the service dict 1:1."""
+    canned = {
+        "success": True, "id": "ce-1", "number": "KVA-2026-00001",
+        "status": "sent", "message": "Der Kostenvoranschlag wurde per E-Mail versendet.",
+    }
+    seen: dict = {}
+
+    def _fake_send(org_id, payload):
+        seen["org_id"] = org_id
+        seen["cid"] = payload.cost_estimate_id
+        return canned
+
+    from app.api.routes.tools import send_cost_estimate as route_mod
+    monkeypatch.setattr(route_mod, "send_cost_estimate", _fake_send)
+    app.dependency_overrides[deps.resolve_tool_org] = lambda: deps.ToolOrg(org_id="org-xyz")
+    try:
+        r = client.post(
+            "/api/elevenlabs/tools/send-cost-estimate",
+            json={"costEstimateId": "ce-1"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 200, r.text
+    assert r.json() == canned
+    assert seen == {"org_id": "org-xyz", "cid": "ce-1"}
