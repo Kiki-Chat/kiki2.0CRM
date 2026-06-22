@@ -115,10 +115,16 @@ export function CreateAppointmentModal({
 
   useEffect(() => {
     if (open) {
+      const pf = call.enrichment?.prefill
       setApptType('customer')
       setPrivateTitle('')
-      setLocation(dc.customer_address ?? call.customers?.phone ?? '')
-      setDescription(call.summary ?? dc.ultimate_summary ?? '')
+      setLocation(pf?.address ?? dc.customer_address ?? call.customers?.phone ?? '')
+      const baseDesc = pf?.problem ?? call.summary ?? dc.ultimate_summary ?? ''
+      // Surface the caller's preferred time (the AI can't reliably set the date
+      // field, but staff should see it) as the first note line.
+      setDescription(
+        pf?.preferred_time ? `Wunschtermin laut Anruf: ${pf.preferred_time}\n\n${baseDesc}`.trim() : baseDesc,
+      )
       setError(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

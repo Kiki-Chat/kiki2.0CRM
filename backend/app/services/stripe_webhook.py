@@ -21,6 +21,7 @@ import stripe
 
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
+from app.services.identify import _to_e164
 from app.services.stripe_billing import StripeConfigError, _client, _to_jsonable
 
 
@@ -119,6 +120,39 @@ def _org_by_customer(db, customer_id: str | None) -> dict | None:
         .data
     )
     return rows[0] if rows else None
+
+
+def _org_by_email_phone(db, email: str | None, phone: str | None) -> dict | None:
+    """High-confidence email+phone → org lookup for the pay-up-front tie.
+
+    Returns an org ONLY when BOTH organizations.email matches (case-insensitive)
+    AND organizations.phone_number matches the E.164-normalized phone. A match on
+    email alone (or phone alone) returns None — the caller treats that as a
+    proposal for super-admin review, NEVER an auto-link, so a wrong org can never
+    be activated. Org emails are stored as-entered (mixed case possible), so the
+    server-side filter is a case-insensitive ilike; the Python re-check on the
+    lower-cased / E.164-normalized values is the authoritative gate (and keeps the
+    test fake — where ilike is a no-op — correct).
+    """
+    norm_email = (email or "").strip().lower()
+    norm_phone = _to_e164(phone)
+    if not norm_email or not norm_phone:
+        return None
+    rows = (
+        db.table("organizations")
+        .select("id, email, phone_number")
+        .ilike("email", norm_email)
+        .limit(20)
+        .execute()
+        .data
+        or []
+    )
+    for row in rows:
+        if (row.get("email") or "").strip().lower() != norm_email:
+            continue
+        if _to_e164(row.get("phone_number")) == norm_phone:
+            return {"id": row["id"]}
+    return None
 
 
 def _derive_plan(sub: dict) -> tuple[str | None, int | None]:
@@ -235,10 +269,114 @@ def _handle_trial_will_end(db, sub: dict) -> str:
     return f"trial will end → {note}"
 
 
+def _session_email_phone(session: dict) -> tuple[str | None, str | None]:
+    """Pull the payer's email + phone from a Checkout session. Prefers Stripe's
+    collected customer_details; falls back to our own metadata (email_hint /
+    phone_hint) if the marketing site forwarded them on the session."""
+    details = session.get("customer_details") or {}
+    meta = session.get("metadata") or {}
+    email = details.get("email") or meta.get("email") or meta.get("email_hint")
+    phone = details.get("phone") or meta.get("phone") or meta.get("phone_hint")
+    return email, phone
+
+
+def _try_payupfront_link(db, session: dict) -> str | None:
+    """Tie a marketing-site payer (paid BEFORE being linked) to an org.
+
+    Only called when the session's stripe_customer_id resolves to NO org. On a
+    high-confidence BOTH-match (email AND phone), store stripe_customer_id on that
+    org so future webhooks resolve directly, record the match method, and return
+    the org_id so the caller proceeds with the normal subscription sync. On an
+    email-only / ambiguous / no match, write a proposal to billing_migration_log
+    for super-admin review (never auto-link a wrong org) and return None.
+    """
+    customer_id = session.get("customer")
+    if not customer_id:
+        return None  # nothing to link a future webhook to
+    email, phone = _session_email_phone(session)
+
+    org = _org_by_email_phone(db, email, phone)
+    if org:
+        # High-confidence: link the customer so future events resolve by id.
+        db.table("organizations").update(
+            {"stripe_customer_id": customer_id, "billing_last_sync_at": _now()}
+        ).eq("id", org["id"]).execute()
+        # Record HOW we linked it (additive; column/table may predate this change).
+        try:
+            db.table("billing_checkout_sessions").update(
+                {"match_method": "email_phone_exact", "matched_org_id": str(org["id"])}
+            ).eq("stripe_session_id", session.get("id")).execute()
+        except Exception:  # noqa: BLE001 — column may not exist; never block linking
+            pass
+        return org["id"]
+
+    # Not a BOTH-match → do NOT auto-link. Record a proposal for review only when
+    # we have at least an email to anchor it (mirrors the matcher's proposal shape).
+    norm_email = (email or "").strip().lower()
+    if not norm_email:
+        return None
+    try:
+        rows = (
+            db.table("organizations")
+            .select("id, email")
+            .ilike("email", norm_email)
+            .limit(20)
+            .execute()
+            .data
+            or []
+        )
+        candidates = [r for r in rows if (r.get("email") or "").strip().lower() == norm_email]
+        if not candidates:
+            return None  # no email anchor either → silent no-op
+        proposal_org = candidates[0]["id"] if len(candidates) == 1 else None
+        existing = (
+            db.table("billing_migration_log")
+            .select("id")
+            .eq("stripe_customer_id", customer_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if existing:
+            return None  # already proposed for this customer — don't duplicate
+        db.table("billing_migration_log").insert(
+            {
+                "org_id": proposal_org,
+                "stripe_customer_id": customer_id,
+                "match_method": "email_only_payupfront",
+                "match_confidence": 0.5,
+                "candidate_payload": {
+                    "source": "checkout.session.completed",
+                    "session_id": session.get("id"),
+                    "email": email,
+                    "phone": phone,
+                    "ambiguous": len(candidates) > 1,
+                },
+                "status": "proposed",
+            }
+        ).execute()
+    except Exception:  # noqa: BLE001 — proposal logging must never break the webhook
+        pass
+    return None
+
+
 def _handle_checkout_completed(db, session: dict) -> str:
     """A subscribe Checkout finished → link the new subscription to the org."""
     sub_id = session.get("subscription")
     note = "no subscription on session"
+
+    # Pay-up-front tie: a marketing-site customer may have paid BEFORE being linked,
+    # so the session's customer isn't on any org yet. If so, try a high-confidence
+    # email+phone link FIRST (writes stripe_customer_id), so the subscription sync
+    # below — which resolves the org by stripe_customer_id — then succeeds.
+    if session.get("customer") and not _org_by_customer(db, session.get("customer")):
+        try:
+            linked = _try_payupfront_link(db, session)
+            if linked:
+                note = f"pay-up-front linked org {linked}"
+        except Exception:  # noqa: BLE001 — linking must never break checkout handling
+            pass
+
     if sub_id:
         try:
             sub = stripe.Subscription.retrieve(sub_id, expand=["items.data.price"])

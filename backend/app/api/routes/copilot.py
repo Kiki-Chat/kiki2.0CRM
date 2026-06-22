@@ -160,6 +160,15 @@ async def chat(payload: ChatRequest, user: CurrentUser = Depends(require_org)) -
     enforce_rate_limit("copilot_chat", user.org_id, max_calls=20, per_seconds=60)
     if not (payload.message or "").strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nachricht ist leer.")
+    # Monthly AI cost cap — mirrors cases.propose (COP-023).
+    from app.services.ai import usage as ai_usage  # noqa: PLC0415 — lazy import mirrors pattern
+
+    if not ai_usage.within_cap(user.org_id):
+        raise HTTPException(
+            status_code=429,
+            detail="Das monatliche KI-Budget Ihrer Organisation ist erreicht — "
+            "der KI-Assistent ist bis zum Monatswechsel pausiert.",
+        )
     result = await run_in_threadpool(run_turn, user, payload.message, history=payload.history)
     cid = await run_in_threadpool(_persist_turn, user, payload.conversation_id, payload.message, result)
     return {**result, "conversation_id": cid}
@@ -257,6 +266,15 @@ async def confirm(payload: ConfirmRequest, user: CurrentUser = Depends(require_o
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Diese Aktion erfordert keine Bestätigung.",
+        )
+    # Monthly AI cost cap — role/validation guards run first (precedence).
+    from app.services.ai import usage as ai_usage  # noqa: PLC0415 — lazy import mirrors pattern
+
+    if not ai_usage.within_cap(user.org_id):
+        raise HTTPException(
+            status_code=429,
+            detail="Das monatliche KI-Budget Ihrer Organisation ist erreicht — "
+            "der KI-Assistent ist bis zum Monatswechsel pausiert.",
         )
     result = await run_in_threadpool(tool.run, user, payload.args or {})
     _audit(user, tool.name, payload.args or {}, result, conversation_id=payload.conversation_id)

@@ -42,6 +42,8 @@ class _FakeChain:
     def gte(self, *a, **k): return self._rec("gte", *a, **k)
     def lte(self, *a, **k): return self._rec("lte", *a, **k)
     def order(self, *a, **k): return self._rec("order", *a, **k)
+    def filter(self, *a, **k): return self._rec("filter", *a, **k)
+    def limit(self, *a, **k): return self._rec("limit", *a, **k)
 
     @property
     def not_(self):  # postgrest exposes `.not_.is_(col, val)`
@@ -331,6 +333,7 @@ def test_aggregate_sort_priority_desc_due_asc_nulls_last_created_desc(monkeypatc
     monkeypatch.setattr(ax, "_kva_pending_acceptance", lambda *_: [])
     monkeypatch.setattr(ax, "_callback_owed", lambda *_: [])
     monkeypatch.setattr(ax, "_alt_time_proposal", lambda *_: [])
+    monkeypatch.setattr(ax, "_unmatched_reschedule", lambda *_: [])
 
     out = ax._aggregate(ORG)
 
@@ -359,5 +362,6 @@ def test_aggregate_with_empty_db_returns_empty_list(monkeypatch):
     monkeypatch.setattr(ax, "_kva_pending_acceptance", lambda *_: [])
     monkeypatch.setattr(ax, "_callback_owed", lambda *_: [])
     monkeypatch.setattr(ax, "_alt_time_proposal", lambda *_: [])
+    monkeypatch.setattr(ax, "_unmatched_reschedule", lambda *_: [])
 
     assert ax._aggregate(ORG) == []

@@ -578,3 +578,15 @@ body {
   opacity: 0.75;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
+
+/* Emergency subject highlight in the call log — a SOFT red glow pulse (not a hard
+   blink), and fully static for reduced-motion users. The only hard blink in the
+   app remains the legacy NotdienstBadge pulse used elsewhere. */
+@keyframes emrgGlow {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 16%, transparent); }
+}
+.emrg-glow { animation: emrgGlow 2.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .emrg-glow { animation: none; }
+}

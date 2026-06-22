@@ -40,6 +40,7 @@ interface Position {
   is_labor: boolean
 }
 interface CustomerOption { id: string; full_name: string | null }
+interface CustomerDetail { id: string; full_name: string | null; customer_number: string | null; vat_id: string | null; address?: { street?: string | null; city?: string | null; zip?: string | null } | null }
 interface CatalogItem { id: string; name: string; description: string | null; unit_price: number; unit: string | null }
 interface Estimate { id: string; number: string | null; subject: string | null; status: string; customer_id: string | null; total: number | null }
 
@@ -100,6 +101,8 @@ export function InvoiceFormPage() {
   const [discountPct, setDiscountPct] = useState(0)
   const [loadedNumber, setLoadedNumber] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Hydrated customer info shown as read-only block under the customer select
+  const [hydratedCustomer, setHydratedCustomer] = useState<CustomerDetail | null>(null)
 
   const { data: customerData } = useQuery({
     queryKey: ['customers-options'],
@@ -114,12 +117,22 @@ export function InvoiceFormPage() {
   const selectableKvas = estimates.filter((e) => e.customer_id === customerId && e.status !== 'rejected')
 
   // Import positions/subject/customer from a cost estimate (KVA → Rechnung).
+  // Copies every field shared with invoices; does NOT overwrite fields the user already edited.
   const importKva = useCallback(async (estimateId: string) => {
     try {
       const ce = await apiFetch<Record<string, unknown>>(`/api/cost-estimates/${estimateId}`)
       setKvaId(estimateId)
       if (ce.customer_id) setCustomerId(ce.customer_id as string)
       if (ce.subject) setSubject(ce.subject as string)
+      // reference_number → reference (only if user hasn't typed one yet)
+      if (ce.reference_number) setReference((prev) => prev || (ce.reference_number as string))
+      // payment_terms → payment_terms_text
+      if (ce.payment_terms) setPaymentTermsText((prev) => prev || (ce.payment_terms as string))
+      // surcharge
+      if (ce.surcharge != null) setSurcharge((prev) => prev || (ce.surcharge as number))
+      if (ce.surcharge_description) setSurchargeDesc((prev) => prev || (ce.surcharge_description as string))
+      // total_discount_pct (Gesamtrabatt — distinct from skonto)
+      if (ce.total_discount_pct != null) setDiscountPct((prev) => prev || (ce.total_discount_pct as number))
       const li = (ce.line_items as Position[]) || []
       setPositions(li.length ? li.map((p) => ({ ...newPos(), ...p, _id: uid() })) : [newPos()])
     } catch {
@@ -137,6 +150,74 @@ export function InvoiceFormPage() {
       importKva(kp)
     }
   }, [isEdit, params, importKva])
+
+  // ── One-shot query-string hydration (new invoice only, no kva_id, no live-fill) ──
+  // Reads customer_id, case_id, kva_id, project_id from query string.
+  // Fetches customer detail for the read-only Kunde block.
+  // Derives subject from case if no explicit subject.
+  // If project_id is present without customer_id, resolves project's customer.
+  const hydrationHandled = useRef(false)
+  useEffect(() => {
+    if (isEdit || hydrationHandled.current || liveFillRef.current) return
+    const kp = params.get('kva_id')
+    if (kp) return // importKva handles this path
+    hydrationHandled.current = true
+
+    const qCustomerId = params.get('customer_id') || ''
+    const qCaseId = params.get('case_id') || ''
+    const qProjectId = params.get('project_id') || ''
+
+    const run = async () => {
+      try {
+        // Resolve customer_id from project if not given directly
+        let resolvedCustomerId = qCustomerId
+        if (!resolvedCustomerId && qProjectId) {
+          const proj = await apiFetch<{ customer_id?: string | null }>(`/api/projects/${qProjectId}`)
+          if (proj.customer_id) {
+            resolvedCustomerId = proj.customer_id
+            setCustomerId(resolvedCustomerId)
+          }
+        }
+
+        // Fetch full customer detail for the read-only block
+        if (resolvedCustomerId) {
+          const cust = await apiFetch<CustomerDetail>(`/api/customers/${resolvedCustomerId}`)
+          setHydratedCustomer(cust)
+        }
+
+        // Derive subject from case (only if no explicit subject yet)
+        if (qCaseId) {
+          const cs = await apiFetch<{ title?: string | null; number?: string | null }>(`/api/cases/${qCaseId}`)
+          const derived = [cs.number, cs.title].filter(Boolean).join(' – ')
+          if (derived) setSubject((prev) => prev || derived)
+        }
+
+        // AI pre-fill from the originating call (?call_id=): subject + first position
+        // from the extracted service / problem, so the invoice isn't empty.
+        const qCallId = params.get('call_id') || ''
+        if (qCallId) {
+          const c = await apiFetch<{
+            summary_title?: string | null
+            data_collection?: Record<string, string> | null
+            enrichment?: { prefill?: { service_description?: string | null; problem?: string | null } } | null
+          }>(`/api/calls/${qCallId}`)
+          const pf = c.enrichment?.prefill
+          const dc = c.data_collection || {}
+          const svc = pf?.service_description || dc.issue_summary || c.summary_title || ''
+          const descr = svc || pf?.problem || dc.ultimate_summary || ''
+          if (svc) setSubject((prev) => prev || svc)
+          if (descr)
+            setPositions((rows) =>
+              rows.length === 1 && !rows[0].description ? [{ ...rows[0], description: descr }] : rows,
+            )
+        }
+      } catch {
+        // Non-fatal: form still usable without prefill
+      }
+    }
+    void run()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit, params])
 
   // ── Hey-Kiki live fill ("takeover"): a confirmed copilot create_invoice lands
   // here via lib/liveFill — Kiki visibly fills the real form (customer →
@@ -423,6 +504,18 @@ export function InvoiceFormPage() {
                 {customers.map((c) => <option key={c.id} value={c.id}>{c.full_name ?? 'Unbenannt'}</option>)}
               </select>
             </div>
+            {hydratedCustomer && hydratedCustomer.id === customerId && (
+              <div className="mt-2 rounded-md border border-border bg-alt px-3 py-2 text-xs text-body space-y-0.5">
+                <div className="font-semibold text-text">{hydratedCustomer.full_name ?? '—'}</div>
+                {hydratedCustomer.customer_number && <div className="text-muted">Kundennr.: {hydratedCustomer.customer_number}</div>}
+                {hydratedCustomer.vat_id && <div className="text-muted">USt-IdNr.: {hydratedCustomer.vat_id}</div>}
+                {hydratedCustomer.address && (
+                  <div className="text-muted">
+                    {[hydratedCustomer.address.street, [hydratedCustomer.address.zip, hydratedCustomer.address.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')}
+                  </div>
+                )}
+              </div>
+            )}
             {!!customerId && (
               <div className="mt-3"><div className={labelCls}>Aus KVA übernehmen (optional)</div>
                 <select value="" onChange={(e) => { if (e.target.value) importKva(e.target.value); e.currentTarget.value = '' }} className={inputCls}>
@@ -506,6 +599,16 @@ export function InvoiceFormPage() {
               <div className="flex justify-between"><span className="text-muted">Netto</span><span className="text-text">{money(totals.net)}</span></div>
               <div className="flex justify-between"><span className="text-muted">MwSt</span><span className="text-text">{money(totals.vat)}</span></div>
               <div className="flex justify-between text-base font-bold"><span className="text-text">Brutto</span><span className="text-green-deep">{money(totals.gross)}</span></div>
+              {skontoPct > 0 && (() => {
+                const skontoAmt = Math.round(totals.gross * skontoPct / 100 * 100) / 100
+                const zahlbetrag = Math.round((totals.gross - skontoAmt) * 100) / 100
+                return (
+                  <div className="mt-2 space-y-0.5 border-t border-border pt-2 text-xs text-muted">
+                    <div className="flex justify-between"><span>- {skontoPct}% Skonto</span><span>{money(skontoAmt)}</span></div>
+                    <div className="flex justify-between font-medium text-body"><span>Zahlbetrag bei Skonto ({skontoDays} Tage)</span><span>{money(zahlbetrag)}</span></div>
+                  </div>
+                )
+              })()}
             </div>
           </Card>
         </div>

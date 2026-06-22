@@ -27,8 +27,6 @@ from app.services.stripe_catalog import find_plan_prices
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TRIAL_DAYS = 14  # ⚠️ confirm with Amber before go-live
-
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -98,7 +96,6 @@ def create_checkout_session(
     plan_title: str,
     interval: str,
     *,
-    trial_days: int | None = DEFAULT_TRIAL_DAYS,
     actor_id: str | None = None,
 ) -> dict:
     """Create a hosted Stripe Checkout session to subscribe the org. Returns {url, session_id}."""
@@ -116,8 +113,6 @@ def create_checkout_session(
         {"price": prices["metered_price"]},  # metered → no quantity
     ]
     sub_data: dict = {"metadata": {"heykiki_org_id": _org(db, org_id).get("heykiki_org_id"), "org_id": str(org_id)}}
-    if trial_days and trial_days > 0:
-        sub_data["trial_period_days"] = trial_days
 
     base = (settings.billing_portal_return_url or settings.public_app_url + "/settings/abrechnung").split("?")[0]
     success_url = f"{base}?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
@@ -128,7 +123,7 @@ def create_checkout_session(
         org_id=org_id,
         actor_id=actor_id,
         stripe_object=customer_id,
-        request_payload={"plan": plan_title, "interval": interval, "trial_days": trial_days},
+        request_payload={"plan": plan_title, "interval": interval},
         builder=lambda idem, meta: get_stripe().checkout.Session.create(
             mode="subscription",
             customer=customer_id,
@@ -155,7 +150,6 @@ def create_checkout_session(
                 "stripe_session_id": session["id"],
                 "plan_title": plan_title,
                 "interval": interval,
-                "trial_days": trial_days,
                 "status": "created",
             }
         ).execute()

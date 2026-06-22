@@ -42,6 +42,9 @@ def _invoice_for_pdf(row: dict) -> dict:
         "surcharge": row.get("surcharge") or 0,
         "surcharge_description": row.get("surcharge_description"),
         "total_discount_pct": row.get("total_discount_pct") or 0,
+        # Skonto (display-only early-payment discount) — 6.1
+        "skonto_pct": row.get("discount_pct") or 0,
+        "skonto_days": row.get("discount_days") or 0,
     }
 
 
@@ -126,6 +129,21 @@ def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
     validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Kostenvoranschlag")
     validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
+
+    # INV-009: a KVA may be converted into a Rechnung exactly once. If the source
+    # estimate is already invoiced (or carries a back-link to an invoice), block
+    # the second conversion instead of silently creating a duplicate invoice and
+    # clobbering the existing back-link.
+    if payload.kva_id:
+        existing = (
+            client.table("cost_estimates").select("status, invoice_id")
+            .eq("org_id", org_id).eq("id", payload.kva_id).limit(1).execute().data
+        )
+        if existing and (existing[0].get("status") == "invoiced" or existing[0].get("invoice_id")):
+            raise HTTPException(
+                status_code=409,
+                detail="Dieser Kostenvoranschlag wurde bereits in eine Rechnung umgewandelt.",
+            )
 
     row = _build_row(org_id, payload, user_id)
     # Case grouping: an invoice built from a KVA belongs to that KVA's
@@ -313,6 +331,9 @@ def _preview_pdf(org_id: str, payload: InvoiceUpsert) -> bytes:
         "surcharge": payload.surcharge,
         "surcharge_description": payload.surcharge_description,
         "total_discount_pct": payload.total_discount_pct,
+        # Skonto (display-only early-payment discount) — 6.1
+        "skonto_pct": payload.discount_pct or 0,
+        "skonto_days": payload.discount_days or 0,
     }
     return build_pdf(org, customer, ce, totals)
 

@@ -19,6 +19,9 @@ DOC_TITLES = {
 
 
 def gen_number(client, org_id: str, doc_type: str = "kva") -> str:
+    # INV-002: scope the per-year sequence by doc-type so KVA/ANG/AB/RG numbers
+    # are contiguous *per type* (KVA-2026-00001, KVA-2026-00002, …) instead of
+    # sharing one cross-type counter (which left gaps in each type's series).
     year = now_berlin().year
     prefix = {"kva": "KVA", "offer": "ANG", "order_confirmation": "AB", "invoice": "RE"}.get(
         doc_type, "KVA"
@@ -27,10 +30,28 @@ def gen_number(client, org_id: str, doc_type: str = "kva") -> str:
         client.table("cost_estimates")
         .select("id", count="exact")
         .eq("org_id", org_id)
+        .eq("type", doc_type)
         .gte("created_at", f"{year}-01-01")
         .execute()
     )
     return f"{prefix}-{year}-{(res.count or 0) + 1:05d}"
+
+
+def insert_with_number_retry(client, org_id: str, row: dict, doc_type: str = "kva") -> dict:
+    """Insert a cost_estimates row, retrying once on a unique-violation of the
+    generated ``number`` (INV-002). The count-based ``gen_number`` is not atomic,
+    so two near-simultaneous drafts of the same doc-type could compute the same
+    number; if the DB rejects the duplicate we recompute and retry a single time.
+    No DB unique constraint is assumed — if there isn't one this is simply a
+    pass-through, and any non-duplicate error is re-raised unchanged."""
+    try:
+        return client.table("cost_estimates").insert(row).execute().data[0]
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc).lower()
+        if "duplicate" in msg or "unique" in msg or "23505" in msg:
+            row = {**row, "number": gen_number(client, org_id, doc_type)}
+            return client.table("cost_estimates").insert(row).execute().data[0]
+        raise
 
 
 def _line_net(p: dict) -> float:
@@ -335,6 +356,22 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
     total_row("zzgl. MwSt:", totals["vat"])
     total_row("Gesamtbetrag:", totals["gross"], bold=True)
 
+    # ── Skonto (invoices only, DISPLAY-ONLY) — 6.1 ──
+    # Per the Skonto contract: skonto NEVER reduces the amount due. Gesamtbetrag
+    # above stays the amount owed; we only *display* the early-payment discount
+    # and the resulting reduced figure. Guarded so KVA/Angebot/AB and invoices
+    # without a skonto% are completely unchanged.
+    skonto_pct = float(ce.get("skonto_pct") or 0)
+    skonto_days = ce.get("skonto_days") or 0
+    show_skonto = doc_type == "invoice" and skonto_pct > 0
+    if show_skonto:
+        gross = float(totals["gross"] or 0)
+        skonto_amt = round(gross * skonto_pct / 100, 2)
+        zahlbetrag_skonto = round(gross - skonto_amt, 2)
+        days_str = f"{skonto_days:g}" if isinstance(skonto_days, (int, float)) else str(skonto_days)
+        total_row(f"abzgl. {skonto_pct:g}% Skonto:", skonto_amt)
+        total_row(f"Zahlbetrag bei Zahlung in {days_str} Tagen:", zahlbetrag_skonto, bold=True)
+
     closing = ce.get("closing_text")
     if closing:
         pdf.ln(4)
@@ -345,6 +382,17 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
         pdf.set_font("DejaVu", "", 8)
         pdf.set_text_color(90)
         pdf.multi_cell(0, 4, ce["payment_terms"])
+        pdf.set_text_color(0)
+    # One-line Skonto note near the payment terms (invoices with skonto only).
+    if show_skonto:
+        pdf.ln(1)
+        pdf.set_font("DejaVu", "", 8)
+        pdf.set_text_color(90)
+        pdf.multi_cell(
+            0, 4,
+            f"Bei Zahlung innerhalb von {days_str} Tagen gewähren wir "
+            f"{skonto_pct:g}% Skonto ({_fmt_eur(zahlbetrag_skonto)}).",
+        )
         pdf.set_text_color(0)
 
     out = pdf.output()
@@ -369,7 +417,7 @@ def fetch_customer(client, org_id: str, customer_id: str | None) -> dict | None:
         return None
     rows = (
         client.table("customers")
-        .select("full_name, address, customer_number, email")
+        .select("full_name, address, customer_number, email, vat_id")
         .eq("org_id", org_id).eq("id", customer_id).limit(1).execute().data
     )
     return rows[0] if rows else None
@@ -539,7 +587,7 @@ def draft_cost_estimate(org_id: str, payload) -> dict:
         "total": totals["gross"],
         "number": gen_number(client, org_id, "kva"),
     }
-    created = client.table("cost_estimates").insert(row).execute().data[0]
+    created = insert_with_number_retry(client, org_id, row, "kva")
 
     # KVA level 3: try to send immediately; otherwise leave as a draft.
     level = cfg_row.get("kva_level")

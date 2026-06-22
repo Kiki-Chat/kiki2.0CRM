@@ -294,6 +294,15 @@ def test_sync_agent_config_happy_path_returns_summary(monkeypatch):
 
     monkeypatch.setattr(sa, "configure_agent", _fake_configure)
 
+    # 2.1 — sync_agent_config now runs the read-only verify gate; stub it so the
+    # test stays hermetic and assert the report is surfaced in the response.
+    fake_report = {
+        "ok": True,
+        "provisioned_at": "2026-06-17T10:00:00+00:00",
+        "checks": [{"name": "phone_bound", "ok": True, "detail": "Telefonnummer: +4925197593899"}],
+    }
+    monkeypatch.setattr(sa, "verify_agent_health", lambda _oid, _aid: fake_report)
+
     result = asyncio.run(
         sa.sync_agent_config(
             org_id=org_id,
@@ -311,6 +320,9 @@ def test_sync_agent_config_happy_path_returns_summary(monkeypatch):
     assert result.prompt_skipped_reason is None
     assert result.webhook_enabled is True
     assert result.audio_ok is True
+    # The verify report is echoed back so the operator sees ok/red.
+    assert result.verify.ok is True
+    assert result.verify.checks[0].name == "phone_bound"
 
     # configure_agent received the right args from the route.
     assert captured["org_id"] == org_id
@@ -435,6 +447,12 @@ def test_sync_agent_config_force_clears_provisioned_stamp(monkeypatch):
             "webhook_enabled": True,
             "audio_ok": True,
         },
+    )
+    # Stub the read-only verify gate (2.1) so this stays hermetic.
+    monkeypatch.setattr(
+        sa,
+        "verify_agent_health",
+        lambda _oid, _aid: {"ok": True, "provisioned_at": None, "checks": []},
     )
 
     asyncio.run(

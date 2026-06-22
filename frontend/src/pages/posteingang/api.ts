@@ -9,11 +9,16 @@ import { relativeTimeDe } from '../../lib/datetime'
 
 export type ActionKind =
   | 'termin_anfrage'
+  | 'kva_suggested'
   | 'kva_to_send'
   | 'kva_pending_acceptance'
+  | 'invoice_suggested'
+  | 'invoice_to_send'
+  | 'invoice_pending_payment'
   | 'callback_owed'
   | 'alt_time_proposal'
   | 'appointment_cancelled'
+  | 'reschedule_unmatched'
 
 export type DecisionType = 'termin' | 'rueckruf' | 'storno' | 'kva' | 'reschedule'
 export type VStatus = 'open' | 'in_progress' | 'completed'
@@ -94,6 +99,10 @@ export interface DecisionVM {
   secondary: string | null
   tertiary: string | null
   assignable: boolean
+  // For the AI-suggested KVA/Rechnung actions: the pre-filled create-form to open
+  // on "primary" (the action references a call, not a document, so it navigates
+  // rather than POSTs). Null for all document-lifecycle actions.
+  route: string | null
 }
 
 export interface CallEntry {
@@ -142,11 +151,16 @@ const KIND_CFG: Record<
   { type: DecisionType; accent: string; label: string; variant: TagVariant; title: (a: RawAction) => string; primary: string; secondary: string | null; tertiary: string | null; reco: (name: string, cust: string) => string; assignable: boolean }
 > = {
   termin_anfrage: { type: 'termin', accent: 'var(--info)', label: 'Termin', variant: 'info', title: () => 'Termin bestätigen?', primary: 'Bestätigen', secondary: 'Verschieben', tertiary: 'Ablehnen', reco: (n) => `${n} zuweisen und Termin bestätigen`, assignable: true },
+  kva_suggested: { type: 'kva', accent: 'var(--ai)', label: 'KVA', variant: 'ai', title: (a) => `Kostenvoranschlag für ${a.customer_name || 'Kunde'}?`, primary: 'KVA erstellen', secondary: null, tertiary: 'Später', reco: (_n, c) => `Im Anruf erwähnt — KVA für ${c} vorausgefüllt erstellen`, assignable: false },
+  invoice_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: (a) => `Rechnung für ${a.customer_name || 'Kunde'}?`, primary: 'Rechnung erstellen', secondary: null, tertiary: 'Später', reco: (_n, c) => `Im Anruf erwähnt — Rechnung für ${c} vorausgefüllt erstellen`, assignable: false },
+  invoice_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: (a) => `Rechnung an ${a.customer_name || 'Kunde'} senden?`, primary: 'Rechnung senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `Rechnung jetzt an ${c} senden`, assignable: false },
+  invoice_pending_payment: { type: 'kva', accent: 'var(--warning)', label: 'Zahlung', variant: 'warning', title: () => 'Zahlung eingegangen?', primary: 'Als bezahlt', secondary: null, tertiary: null, reco: (_n, c) => `Zahlungseingang für ${c} prüfen`, assignable: false },
   alt_time_proposal: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschieben', variant: 'warning', title: () => 'Neuen Termin annehmen?', primary: 'Annehmen', secondary: null, tertiary: 'Ablehnen', reco: () => 'Vorgeschlagenen Termin annehmen', assignable: false },
-  appointment_cancelled: { type: 'storno', accent: 'var(--error)', label: 'Storno', variant: 'error', title: () => 'Stornierung bestätigen?', primary: 'Bestätigen', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
+  appointment_cancelled: { type: 'storno', accent: 'var(--error)', label: 'Storno', variant: 'error', title: () => 'Termin storniert', primary: 'Zur Kenntnis', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
   callback_owed: { type: 'rueckruf', accent: 'var(--green-primary)', label: 'Rückruf', variant: 'green', title: (a) => `Rückruf an ${a.customer_name || 'Kunde'}?`, primary: 'Erledigt', secondary: 'Zuweisen', tertiary: null, reco: (n) => `${n} den Rückruf zuweisen`, assignable: true },
   kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'KVA', variant: 'ai', title: (a) => `KVA an ${a.customer_name || 'Kunde'} senden?`, primary: 'KVA senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `KVA jetzt an ${c} senden`, assignable: false },
   kva_pending_acceptance: { type: 'kva', accent: 'var(--ai)', label: 'KVA-Antwort', variant: 'ai', title: () => 'Kundenantwort erfassen', primary: 'Angenommen', secondary: null, tertiary: 'Abgelehnt', reco: () => 'Antwort des Kunden eintragen', assignable: false },
+  reschedule_unmatched: { type: 'reschedule', accent: 'var(--warning)', label: 'Zuordnen', variant: 'warning', title: () => 'Terminänderung zuordnen', primary: 'Zuordnen', secondary: null, tertiary: 'Erledigt', reco: () => 'Terminänderung manuell einem Termin zuordnen', assignable: false },
 }
 
 function pickSuggested(employees: Employee[]): Employee | null {
@@ -191,6 +205,14 @@ export function buildDecisions(actions: RawAction[], employees: Employee[], meta
     const cust = a.customer_name || 'Unbekannter Kunde'
     const name = firstName(suggested?.display_name)
     const info = a.inquiry_id ? meta.get(a.inquiry_id) : undefined
+    const route =
+      a.kind === 'kva_suggested'
+        ? `/cost-estimates/new?customer_id=${a.customer_id ?? ''}` +
+          (a.inquiry_id ? `&inquiry_id=${a.inquiry_id}` : '') +
+          (a.call_id ? `&call_id=${a.call_id}` : '')
+        : a.kind === 'invoice_suggested'
+          ? `/invoices/new?customer_id=${a.customer_id ?? ''}` + (a.call_id ? `&call_id=${a.call_id}` : '')
+          : null
     return {
       actionKey: a.action_key,
       kind: a.kind,
@@ -213,6 +235,7 @@ export function buildDecisions(actions: RawAction[], employees: Employee[], meta
       secondary: cfg.secondary,
       tertiary: cfg.tertiary,
       assignable: cfg.assignable,
+      route,
     }
   })
 }
@@ -413,8 +436,12 @@ export function usePosteingangActions() {
     } else if (d.kind === 'alt_time_proposal') {
       await apiFetch(`/api/appointments/${id}/${choice === 'primary' ? 'approve-proposal' : 'decline-proposal'}`, { method: 'POST' })
     } else if (d.kind === 'appointment_cancelled') {
-      if (choice === 'primary') await apiFetch(`/api/appointments/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason: 'Kunde hat storniert' }) })
-      else await done()
+      // Informational card: the cancellation already happened (status='cancelled').
+      // 'Zur Kenntnis' just acknowledges it — DON'T POST /reject (requires
+      // status='pending' → always 409; would also double-fire a customer cancel).
+      await done()
+    } else if (d.kind === 'reschedule_unmatched') {
+      await done()
     } else if (d.kind === 'callback_owed') {
       await done()
     } else if (d.kind === 'kva_to_send') {
@@ -422,6 +449,16 @@ export function usePosteingangActions() {
       else await done()
     } else if (d.kind === 'kva_pending_acceptance') {
       await apiFetch(`/api/cost-estimates/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: choice === 'primary' ? 'accepted' : 'rejected' }) })
+    } else if (d.kind === 'invoice_to_send') {
+      if (choice === 'primary') await apiFetch(`/api/invoices/${id}/send`, { method: 'POST', body: JSON.stringify({}) })
+      else await done()
+    } else if (d.kind === 'invoice_pending_payment') {
+      if (choice === 'primary') await apiFetch(`/api/invoices/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'paid' }) })
+      else await done()
+    } else if (d.kind === 'kva_suggested' || d.kind === 'invoice_suggested') {
+      // 'primary' navigates to the pre-filled form (handled by the card via d.route);
+      // reaching here means 'Später' — just dismiss for now.
+      await done()
     }
   }
 

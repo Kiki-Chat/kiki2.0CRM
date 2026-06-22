@@ -172,6 +172,102 @@ def _data_collection_values(analysis: dict) -> dict:
     return {k: v.get("value") for k, v in results.items() if isinstance(v, dict)}
 
 
+# ─── missed-call detection + writer (CALL-039) ───────────────────────────────
+# The missed_calls table feeds BOTH the `missed_callback` outbound occasion
+# (services/outbound_occasions.py) AND the `callback_owed` Open Action
+# (routes/actions.py:_callback_owed reads status='pending'). Both consumers were
+# fully wired but NOTHING wrote the table, so a genuinely-abandoned inbound call
+# left no callback trail. This writer closes that gap.
+#
+# A post-call webhook DOES fire for an inbound leg the caller abandoned almost
+# immediately (connected, agent greeted, caller hung up before stating a concern).
+# We treat such a call as "missed" so the team rings back. Deliberately
+# CONSERVATIVE — a call that captured ANYTHING actionable must never be flagged:
+_MISSED_MAX_SECONDS = 15  # abandoned within the greeting window
+
+
+def _is_missed_inbound(
+    direction: str | None,
+    *,
+    caller_number: str | None,
+    duration_seconds,
+    trimmed: list[dict],
+    summary: str | None,
+    customer_concern: bool,
+    call_successful,
+) -> bool:
+    """True when an INBOUND call looks abandoned before any concern was captured.
+
+    Requires a usable caller number (we have to be able to ring back). Flags only
+    when NOTHING actionable came out of the call: no caller turn in the transcript,
+    no transcript summary, and no captured customer concern. A very short duration
+    OR an explicit ``analysis.call_successful == 'failure'`` confirms abandonment.
+    """
+    if direction != "inbound":
+        return False
+    if not caller_number or not str(caller_number).strip():
+        return False
+    if customer_concern:
+        return False  # a concern was captured → it's a real, handled call
+    # Any substantive caller turn means the caller actually engaged.
+    if any((t.get("role") == "user" and (t.get("message") or "").strip()) for t in trimmed):
+        return False
+    if (summary or "").strip():
+        return False
+    try:
+        dur = float(duration_seconds) if duration_seconds is not None else None
+    except (TypeError, ValueError):
+        dur = None
+    short = dur is not None and dur <= _MISSED_MAX_SECONDS
+    failed = str(call_successful or "").lower() == "failure"
+    return short or failed
+
+
+def record_missed_call(
+    client,
+    org_id: str,
+    *,
+    caller_number: str,
+    customer_id: str | None = None,
+    missed_at: str | None = None,
+) -> str | None:
+    """Insert a `missed_calls` row (status='pending') so the team owes a callback.
+
+    Idempotent on (org_id, caller_number): if a still-pending row already exists
+    for this caller we DON'T stack a second one (avoids N callback actions for one
+    repeat-dialer). Returns the row id (existing or new), or None on failure.
+    Best-effort — never raises into post-call ingest.
+    """
+    try:
+        existing = (
+            client.table("missed_calls")
+            .select("id")
+            .eq("org_id", org_id)
+            .eq("caller_number", caller_number)
+            .eq("status", "pending")
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        if existing:
+            return existing[0]["id"]
+        row = {
+            "org_id": org_id,
+            "caller_number": caller_number,
+            "status": "pending",
+        }
+        if customer_id:
+            row["customer_id"] = customer_id
+        if missed_at:
+            row["missed_at"] = missed_at
+        inserted = client.table("missed_calls").insert(row).execute().data or []
+        return inserted[0]["id"] if inserted else None
+    except Exception:  # noqa: BLE001 — never break post-call ingest over a callback row
+        logger.warning("record_missed_call failed (org %s, caller %s)", org_id, caller_number)
+        return None
+
+
 # ─── phantom-capture detector (eval 2026-06-11: 3/23 real calls promised
 # "Anliegen aufgenommen" with NO write-tool call — the request silently
 # evaporated). Conservative claim patterns on purpose: generic reassurances
@@ -405,6 +501,40 @@ def _process_one(data: dict | None, fmt: str) -> dict:
     )
     call_log_id = upserted[0]["id"] if upserted else None
 
+    # ─── Missed-call writer (CALL-039) ───────────────────────────────────────
+    # An INBOUND call the caller abandoned before stating a concern leaves no
+    # actionable trail otherwise. Record it in missed_calls so the team owes a
+    # callback: that single row drives BOTH the `callback_owed` Open Action
+    # (routes/actions.py) and the `missed_callback` outbound occasion. Conservative
+    # detection (see _is_missed_inbound) so a real, handled call is never flagged.
+    # Best-effort — never breaks ingest.
+    if direction == "inbound":
+        try:
+            concern_captured = bool(
+                dc.get("issue_summary")
+                or dc.get("ultimate_summary")
+                or dc.get("next_action")
+                or dc.get("customer_concern")
+            )
+            if _is_missed_inbound(
+                direction,
+                caller_number=caller_number,
+                duration_seconds=metadata.get("call_duration_secs"),
+                trimmed=trimmed,
+                summary=analysis.get("transcript_summary"),
+                customer_concern=concern_captured,
+                call_successful=analysis.get("call_successful"),
+            ):
+                record_missed_call(
+                    client,
+                    org_id,
+                    caller_number=caller_number,
+                    customer_id=customer_id,
+                    missed_at=started_at,
+                )
+        except Exception:  # noqa: BLE001 — never break post-call ingest
+            logger.warning("missed-call recording failed (conv %s)", conversation_id)
+
     # Every INBOUND call becomes an actionable request in Call Logs.
     # OUTBOUND calls do NOT spawn their own inquiry — they are already linked to
     # the triggering case via outbound_calls.inquiry_id (set at dispatch). Letting
@@ -432,6 +562,15 @@ def _process_one(data: dict | None, fmt: str) -> dict:
         from app.services.pds import safe_auto_log_call
 
         safe_auto_log_call(client, org_id, upserted[0])
+
+    # AI enrichment (our-LLM-over-transcript): structured bullet summary + intent
+    # flags (KVA/Rechnung/Termin) + pre-fill fields. Powers the bullet summary,
+    # smarter form pre-fill, and the kva_suggested/invoice_suggested Open Actions.
+    # Best-effort, no-op without OPENAI_API_KEY — never breaks ingest.
+    if call_log_id:
+        from app.services.call_enrichment import safe_enrich
+
+        safe_enrich(client, org_id, upserted[0])
 
     # Category back-fill: when the agent booked without (or with an unknown)
     # `kategorie`, classify the call summary against the org's Terminkategorien

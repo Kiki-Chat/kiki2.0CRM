@@ -1,5 +1,7 @@
 // Types + constants for the Kiki-Zentrale module.
 
+import { apiFetch } from './api'
+
 export const KZ = '/api/kiki-zentrale'
 export const KZ_STALE = 5 * 60 * 1000
 
@@ -72,6 +74,9 @@ export interface KzSnapshot {
   id: string
   endpoint_label: string
   created_at: string
+  actor_id?: string | null
+  actor_name?: string | null
+  rolled_back?: boolean
 }
 
 export interface KzOverview {
@@ -177,4 +182,74 @@ export const SECTION_ENDPOINT_LABEL: Record<string, string> = {
 
 export function minutesAgo(iso: string): number {
   return Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+}
+
+// Friendly German labels for the raw `endpoint_label` values the safety layer
+// stamps on every snapshot/audit row. Covers all current write paths; unknown
+// keys fall back to a humanised form (see `kzLabel`).
+export const KZ_LABELS: Record<string, string> = {
+  rollback: 'Wiederherstellung',
+  live_name_test: 'Namens-Test',
+  knowledge_resource_push: 'Wissens-Quelle hinzugefügt',
+  knowledge_resource_remove: 'Wissens-Quelle entfernt',
+  kz_required_fields: 'Pflichtfelder',
+  kz_categories: 'Terminkategorien',
+  provision_tools: 'Tools eingerichtet',
+  provision_prompt: 'Prompt eingerichtet',
+  provision_webhook: 'Webhook eingerichtet',
+  verhalten: 'Verhalten',
+  kz_verhalten: 'Verhalten',
+  kz_emergency: 'Notdienst',
+  kz_conversation_logic: 'Gesprächslogik',
+  system_tools_sync: 'System-Tools synchronisiert',
+  transfer_tool_sync: 'Weiterleitungs-Tool synchronisiert',
+  'prompt-editor': 'Prompt-Editor',
+  kz_scheduling: 'Terminregeln',
+  kz_retry: 'Wiederanruf-Regeln',
+  price_list_kb_create: 'Preisliste hinzugefügt',
+  price_list_kb_remove: 'Preisliste entfernt',
+  kz_price_info: 'Preisauskunft',
+  kz_identity: 'Identität',
+  kz_leitfaden: 'Gesprächsleitfaden',
+}
+
+// Humanise an unknown endpoint_label: strip a leading `kz_` and turn
+// snake/kebab-case into Title-Cased words ("foo_bar-baz" → "Foo Bar Baz").
+export function kzLabel(label: string): string {
+  const known = KZ_LABELS[label]
+  if (known) return known
+  return label
+    .replace(/^kz_/, '')
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+export interface KzDrift {
+  drift: boolean
+  dirty_since: string | null
+  manual_override: boolean
+  last_repush_at: string | null
+}
+
+// GET /api/kiki-zentrale/snapshots — org-scoped, newest first. EVERY snapshot
+// is revertable (not only audit rows that carry a snapshot_id).
+export function fetchSnapshots(opts?: { label?: string; limit?: number }): Promise<KzSnapshot[]> {
+  const params = new URLSearchParams()
+  if (opts?.label) params.set('label', opts.label)
+  params.set('limit', String(opts?.limit ?? 50))
+  return apiFetch<KzSnapshot[]>(`${KZ}/snapshots?${params.toString()}`)
+}
+
+// GET /api/kiki-zentrale/drift — whether the live prompt was manually edited and
+// no longer follows the saved settings.
+export function fetchDrift(): Promise<KzDrift> {
+  return apiFetch<KzDrift>(`${KZ}/drift`)
+}
+
+// POST /api/kiki-zentrale/drift/force-resync (admin) — re-render the prompt,
+// bypassing the manual_override gate for THIS call, via the normal repush path.
+export function forceResync(): Promise<{ scheduled: true }> {
+  return apiFetch<{ scheduled: true }>(`${KZ}/drift/force-resync`, { method: 'POST' })
 }
