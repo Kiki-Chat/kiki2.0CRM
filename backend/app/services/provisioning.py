@@ -190,6 +190,10 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
             "elevenlabs_agent_id": payload.elevenlabs_agent_id,
             "email": payload.contact_email,
         }
+        # Onboarding-form company address → organizations.address (JSONB {raw}),
+        # so the prompt's company profile reflects it. Optional.
+        if payload.address and payload.address.strip():
+            org_row["address"] = {"raw": payload.address.strip()}
         if bind_only:
             # Store the n8n-bound number + its EL phone_number_id (needed for
             # outbound) and stamp provisioned now — the agent is already live.
@@ -218,9 +222,12 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
             }
         ).execute()
 
-        client.table("agent_configs").insert(
-            {"org_id": org_id, **DEFAULT_AGENT_CONFIG}
-        ).execute()
+        agent_cfg_row = {"org_id": org_id, **DEFAULT_AGENT_CONFIG}
+        # Onboarding-form trade/genre → agent_configs.trade. Drives the universal
+        # trade profile in the prompt; editable later in Kiki-Zentrale (/context).
+        if payload.trade and payload.trade.strip():
+            agent_cfg_row["trade"] = payload.trade.strip()
+        client.table("agent_configs").insert(agent_cfg_row).execute()
 
         # Seed the 3 mandatory identification fields so every newly-provisioned
         # org has its required-field set from day one (migration 0015 only seeded
