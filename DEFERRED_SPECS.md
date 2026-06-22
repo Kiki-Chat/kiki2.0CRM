@@ -48,6 +48,24 @@ call + every outbound handoff runs).
 > comments to strip a whole feature region + its cross-refs when off) + transcript A/B. That's
 > a feature, not a token tweak. **B1 dedup stays the shipped safe inbound win.**
 
+> **✅ 2026-06-22 — region engine now BUILT.** `_apply_feature_regions` +
+> `<!-- FEAT:name -->` markers (agent_config.py), with the **byte-identical-when-ON**
+> guarantee + a regression test. First region: **Notdienst** (emergency). Extending to the
+> next features is now mechanical *where the region is cleanly separable*, plus a small
+> reword where it's woven:
+> - **Notdienst (within-hours sentence):** lines ~100-104 mix the core "normal flow" sentence
+>   with the emergency nuance in one paragraph. Reword into two sentences, wrap the emergency
+>   one in `FEAT:notdienst`. (The standalone procedure + outside-hours exception are already
+>   gated.)
+> - **Booking off:** wrap the Schritt-3 booking choreography + `## Termin-Kategorien` **together**
+>   in `FEAT:booking` (gated on `appointments_enabled`/`scheduling_enabled`) so the pre-gate's
+>   cross-reference goes with it; `render_scheduling_rules_block` already emits the authoritative
+>   "don't book, take inquiry" instruction, so nothing is lost. Update the `# Ziel` step-5
+>   reference to Schritt 3 in the same pass.
+> - Each new region: add markers + one entry to the `features` map; the byte-identical-ON test
+>   pattern (`tests/test_dynamic_prompt.py::test_notdienst_region_gated_in_real_template`)
+>   protects it. Do one region per commit, eyeball the OFF render, A/B if behaviourally risky.
+
 ---
 
 ## B4 — Inbound: dedupe cross-section repeats (regression-sensitive)
@@ -155,11 +173,17 @@ Do NOT delete the matching prompt cards until an A/B confirms tool-calling holds
 
 - **Decided:** keep the 11 `hk_` tools, **merge none** (cancel+change merge would risk an
   enum mis-pick HARD-cancelling a real appointment vs the reversible proposal `change` does).
-- **Optional net-new (your go):**
-  - `hk_searchCustomerProjects` over the PR- layer — customers asking "wie läuft mein
-    Bauvorhaben?" currently can't be answered (`hk_searchCustomerInquiries` only sees
-    inquiries). Backend: a thin service + route (code-only) + an EL tool def (live write).
-  - `hk_sendKVA` — let the agent send an existing estimate mid-call (today only autonomy
-    sends). Backend exists (`cost_estimates` send); needs a tool wrapper + EL tool def.
+- **`hk_searchCustomerProjects` — DECLINED (Amber):** projects are internal/tradesman-facing,
+  not for clients. Not building it.
+- **`hk_sendKVA` — BUILT (backend, branch, 6 tests).** Emails an existing KVA; **gated to the
+  fully-automatic KVA level (L3)** per Amber. Route `POST /api/elevenlabs/tools/send-cost-estimate`
+  → `cost_estimates.send_cost_estimate`. **Remaining LIVE step (do with Amber):**
+  1. Create the tool in the EL workspace, name `hk_sendKVA`, webhook → that route, params
+     `costEstimateId` / `number` / `customerId` (all optional). Suggested description:
+     *"Versendet einen bestehenden Kostenvoranschlag per E-Mail an den Kunden. Nutze dies, wenn
+     der Anrufer ausdrücklich um Zusendung per E-Mail bittet. Sage NIE, du hättest etwas
+     gesendet, ohne dieses Tool aufgerufen zu haben."*
+  2. Add `"hk_sendKVA"` to `HK_TOOL_NAMES` (agent_config.py) so provisioning/repush attach it.
+  3. Add a one-line prompt pointer in the KVA/Werkzeuge section (only meaningful at L3).
 - **Build-first (not just a tool):** dunning (Mahnung) + maintenance-status — need backend
   capability before a tool makes sense.
