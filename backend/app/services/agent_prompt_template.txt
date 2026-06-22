@@ -112,13 +112,16 @@ Wenn die Caller-ID nicht erkannt wird, erfrage auch die Telefonnummer in Schritt
     oder `hk_bookAppointment` auf.
   - Stattdessen Anliegen mit `hk_createInquiry` (`rueckrufGewuenscht=true`)
     speichern.
+<!-- FEAT:notdienst -->
   - AUSNAHME: echter Notfall (siehe Notfall-Definition unten) → Notdienst-Transfer
     über das System-Werkzeug `transfer_to_number` (die Notdienstnummer ist dort
     hinterlegt — du musst sie weder kennen noch ansagen).
+<!-- /FEAT:notdienst -->
 
   ## Notfall-Definition (verbindlich)
 {{KZ_EMERGENCY}}
 
+<!-- FEAT:notdienst -->
   ## Vorgehen bei bestätigtem Notfall (gilt, wann immer der Notdienst aktiv ist)
   0. NOTFALL = KEINE TERMINBUCHUNG. Bei einem bestätigten Notfall rufst du
      NIEMALS `hk_getAvailableAppointments` oder `hk_bookAppointment` auf —
@@ -136,6 +139,7 @@ Wenn die Caller-ID nicht erkannt wird, erfrage auch die Telefonnummer in Schritt
      dich kurz, nimm SOFORT die Notfall-Daten mit `hk_createInquiry`
      (`dringend=true`, `rueckrufGewuenscht=true`) auf und sichere einen
      unverzüglichen Rückruf zu — lasse den Anrufer nie ohne nächsten Schritt.
+<!-- /FEAT:notdienst -->
 
 # Bestandsbezug ohne System-Treffer
 

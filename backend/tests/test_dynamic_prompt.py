@@ -221,3 +221,55 @@ def test_rerender_pushes_via_patch_agent_safely(monkeypatch):
         calls["field_patches"]["conversation_config"]["agent"]["prompt"]["prompt"]
         == "RENDERED PROMPT"
     )
+
+
+# ─── feature-region conditional rendering (region engine) ────────────────────
+def test_feature_regions_on_strips_markers_keeps_content():
+    """ON: the two marker lines are removed, the wrapped content stays — and the
+    result is byte-identical to the same template written WITHOUT markers."""
+    tpl = "A\n<!-- FEAT:x -->\nBODY\n<!-- /FEAT:x -->\nB\n"
+    out = ac._apply_feature_regions(tpl, {"x": True})
+    assert out == "A\nBODY\nB\n"
+    assert "<!-- FEAT" not in out
+
+
+def test_feature_regions_off_removes_whole_region():
+    """OFF: the entire region (markers + content) is removed; siblings untouched."""
+    tpl = "A\n<!-- FEAT:x -->\nBODY\n<!-- /FEAT:x -->\nB\n"
+    out = ac._apply_feature_regions(tpl, {"x": False})
+    assert out == "A\nB\n"
+
+
+def test_feature_regions_unregistered_marker_raises():
+    """A marker whose feature name is never registered must NOT leak into the
+    prompt — it raises instead."""
+    tpl = "A\n<!-- FEAT:ghost -->\nx\n<!-- /FEAT:ghost -->\n"
+    try:
+        ac._apply_feature_regions(tpl, {})
+        assert False, "expected RuntimeError for unprocessed marker"
+    except RuntimeError as exc:
+        assert "ghost" in str(exc)
+
+
+def test_notdienst_region_gated_in_real_template():
+    """In the REAL template: notdienst ON keeps the escalation procedure; OFF
+    removes it but keeps the {{KZ_EMERGENCY}} fallback + the core outside-hours
+    flow. ON must be byte-identical to the template with the 4 marker lines gone."""
+    tpl = ac._load_prompt_template()
+    on = ac._apply_feature_regions(tpl, {"notdienst": True})
+    off = ac._apply_feature_regions(tpl, {"notdienst": False})
+
+    # ON keeps everything, no marker leakage, and equals the marker-stripped template.
+    assert "## Vorgehen bei bestätigtem Notfall" in on
+    assert "AUSNAHME: echter Notfall" in on
+    assert "<!-- FEAT" not in on
+    assert on == tpl.replace("<!-- FEAT:notdienst -->\n", "").replace(
+        "<!-- /FEAT:notdienst -->\n", ""
+    )
+
+    # OFF removes both Notdienst regions but keeps the fallback + core flow.
+    assert "## Vorgehen bei bestätigtem Notfall" not in off
+    assert "AUSNAHME: echter Notfall" not in off
+    assert "{{KZ_EMERGENCY}}" in off
+    assert "## Außerhalb der Geschäftszeiten" in off
+    assert "<!-- FEAT" not in off

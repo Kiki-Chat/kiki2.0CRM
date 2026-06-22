@@ -985,6 +985,36 @@ def _emergency_windows_str(windows: Any) -> str:
     return ", ".join(parts)
 
 
+# ─── Feature-region conditional rendering ────────────────────────────────────
+# The template can wrap a whole feature's prose in HTML-comment markers:
+#   <!-- FEAT:notdienst -->  …emitted only when the feature is ON…  <!-- /FEAT:notdienst -->
+# render_prompt_for_org strips the markers when the feature is ON — leaving the
+# content BYTE-IDENTICAL to the pre-marker template, so any org that currently has
+# the feature on sees zero change — and removes the ENTIRE region when the feature is
+# OFF, so a disabled capability leaves no footprint and cannot interfere with the rest
+# of the prompt. Each feature is independent (its own marker name). To gate a new
+# region: wrap it in the template + add one entry to the map in render_prompt_for_org.
+def _apply_feature_regions(text: str, features: dict[str, bool]) -> str:
+    """Strip ``<!-- FEAT:name -->…<!-- /FEAT:name -->`` regions per ``features``.
+
+    ON  → drop just the two marker lines (content kept, byte-identical to no-marker).
+    OFF → drop the whole region between and including the markers.
+    Raises if any ``<!-- FEAT: -->`` marker survives unprocessed (its feature name was
+    never registered) — that would otherwise leak a raw comment into the live prompt."""
+    for name, enabled in features.items():
+        open_m = re.escape(f"<!-- FEAT:{name} -->")
+        close_m = re.escape(f"<!-- /FEAT:{name} -->")
+        if enabled:
+            text = re.sub(open_m + r"\n?", "", text)
+            text = re.sub(close_m + r"\n?", "", text)
+        else:
+            text = re.sub(open_m + r".*?" + close_m + r"\n?", "", text, flags=re.DOTALL)
+    leftover = sorted(set(re.findall(r"<!-- /?FEAT:[^>]+-->", text)))
+    if leftover:
+        raise RuntimeError(f"unprocessed feature-region marker(s): {leftover}")
+    return text
+
+
 def render_prompt_for_org(
     org_name: str, org: dict | None = None, org_id: str | UUID | None = None
 ) -> str:
@@ -1050,6 +1080,15 @@ def render_prompt_for_org(
         "KZ_AUTONOMY": render_autonomy_block(kz_cfg),
         "KZ_PRICE_INFO": render_price_info_block(kz_cfg),
     }
+    # Conditionally render feature regions BEFORE token substitution, so a disabled
+    # feature's region (and anything inside it) leaves no trace. Byte-identical when
+    # ON. Currently gated: Notdienst (the emergency-transfer procedure) — when no
+    # emergency service is configured, the agent isn't told to transfer to a Notdienst
+    # number that doesn't exist; the {{KZ_EMERGENCY}} block still renders its short
+    # "kein Notdienst aktiv → Anliegen aufnehmen" fallback.
+    text = _apply_feature_regions(
+        text, {"notdienst": bool(kz_cfg.get("emergency_enabled"))}
+    )
     for key, value in tokens.items():
         text = text.replace("{{" + key + "}}", value)
 
