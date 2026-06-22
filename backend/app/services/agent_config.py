@@ -66,6 +66,11 @@ from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.services.common import format_address
 from app.services.scheduling import WEEKDAY_KEYS, normalize_business_hours
+from app.services.trade_profiles import (
+    default_emergency_keywords,
+    render_trade_diagnostics,
+    render_trade_selfhelp,
+)
 from app.services.elevenlabs_agent import (
     CLIENT_EVENTS_PATH,
     OVERRIDES_WHITELIST_AGENT_PATH,
@@ -764,13 +769,15 @@ def render_emergency_block(cfg: dict) -> str:
     kws = cfg.get("emergency_keywords")
     kws = [str(k).strip() for k in kws if str(k).strip()] if isinstance(kws, list) else []
     if not kws:
-        kws = list(_DEFAULT_EMERGENCY_KEYWORDS)
+        # Trade-aware fallback (generic for unrecognised trades) instead of the old
+        # SHK-only default list — so each genre gets sensible emergency keywords until
+        # the org configures its own.
+        kws = default_emergency_keywords(cfg.get("trade"))
 
     lines = ["  Ein NOTFALL liegt nur bei einem dieser Fälle vor:"]
     lines += [f"  - {k}" for k in kws]
     lines.append(
-        "  Tropfender Wasserhahn, gelegentliches Gluckern, geplante Wartung oder "
-        "Beratung"
+        "  Kleinere, nicht akute Probleme, geplante Wartung oder Beratung"
     )
     lines.append(
         "  sind KEINE Notfälle — auch wenn der Anrufer es so nennt. Bei "
@@ -789,7 +796,7 @@ def render_emergency_block(cfg: dict) -> str:
     else:
         active = (
             "  Der Notdienst greift bei einem bestätigten Notfall JEDERZEIT — auch "
-            "INNERHALB der Geschäftszeiten (z. B. Gasgeruch, Rohrbruch). Ein per "
+            "INNERHALB der Geschäftszeiten. Ein per "
             "Notfall-Stichwort bestätigter Notfall wird also unabhängig von der "
             "Uhrzeit sofort weitergeleitet."
         )
@@ -1061,6 +1068,12 @@ def render_prompt_for_org(
             org_name, trade, address, phone, mgmt_name
         ),
         "SERVICE_AREA": _render_service_area(),
+        # Trade-aware intake examples (universal across crafts/genres): the org's
+        # trade selects an appropriate diagnostic + self-help set, generic fallback
+        # for anything unrecognised — so a car mechanic / locksmith / IT firm is
+        # never shown plumbing examples. See app/services/trade_profiles.py.
+        "TRADE_DIAGNOSTIC_EXAMPLES": render_trade_diagnostics(trade),
+        "TRADE_SELFHELP_EXAMPLES": render_trade_selfhelp(trade),
         "BUSINESS_HOURS": _render_business_hours(kz_cfg.get("scheduling")),
         "KZ_REQUIRED_FIELDS": render_required_fields_block(required_fields, kz_cfg),
         # The problem detail is now a reorderable required field (field_key

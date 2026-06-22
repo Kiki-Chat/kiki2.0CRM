@@ -273,3 +273,49 @@ def test_notdienst_region_gated_in_real_template():
     assert "{{KZ_EMERGENCY}}" in off
     assert "## Außerhalb der Geschäftszeiten" in off
     assert "<!-- FEAT" not in off
+
+
+# ─── trade profiles: universal across crafts/genres ──────────────────────────
+from app.services import trade_profiles as tps  # noqa: E402
+
+
+def test_trade_resolution_maps_to_canonical_or_generic():
+    assert tps.resolve_trade("Sanitär- und Heizungsbau") == "shk"
+    assert tps.resolve_trade("Kfz-Werkstatt") == "kfz"
+    assert tps.resolve_trade("Schlüsseldienst") == "schluessel"
+    assert tps.resolve_trade("Catering") == "generic"
+    assert tps.resolve_trade("") == "generic"
+
+
+def test_full_prompt_generic_trade_has_no_building_examples():
+    """A trade-less org renders the GENERIC intake — no plumbing/electrical
+    examples, and every token (incl. the new trade ones) is filled."""
+    p = ac.render_prompt_for_org("Test GmbH")  # org_id=None → generic
+    assert not _leftover(p)
+    assert "Manometer" not in p and "Heizkörper" not in p
+    assert "genauer beschreiben" in p
+
+
+def test_full_prompt_car_mechanic_is_trade_appropriate():
+    """A Kfz org gets car diagnostics, never plumbing self-help."""
+    p = ac.render_prompt_for_org("Auto Müller", org={"trade": "Autowerkstatt"})
+    assert not _leftover(p)
+    assert ("Warnleuchte" in p) or ("Fahrzeug" in p)
+    assert "Manometer" not in p and "Heizkörper" not in p
+
+
+def test_full_prompt_shk_keeps_heating_examples():
+    """The SHK launch customer's quality is preserved (heating examples remain)."""
+    p = ac.render_prompt_for_org("SHK Meier", org={"trade": "Sanitär Heizung"})
+    assert not _leftover(p)
+    assert "Heizung" in p and ("Manometer" in p or "Heizkörper" in p)
+
+
+def test_emergency_keywords_are_trade_aware():
+    """When the org hasn't set its own keywords, the fallback is trade-specific."""
+    car = ac.render_emergency_block({"emergency_enabled": True, "trade": "Autowerkstatt"})
+    assert "Panne" in car and "Rohrbruch" not in car
+    shk = ac.render_emergency_block({"emergency_enabled": True, "trade": "Sanitär"})
+    assert "Rohrbruch" in shk or "Gasgeruch" in shk
+    generic = ac.render_emergency_block({"emergency_enabled": True})  # no trade
+    assert "Akute Gefahr für Personen" in generic
