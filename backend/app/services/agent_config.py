@@ -66,6 +66,11 @@ from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.services.common import format_address
 from app.services.scheduling import WEEKDAY_KEYS, normalize_business_hours
+from app.services.trade_profiles import (
+    default_emergency_keywords,
+    render_trade_diagnostics,
+    render_trade_selfhelp,
+)
 from app.services.elevenlabs_agent import (
     CLIENT_EVENTS_PATH,
     OVERRIDES_WHITELIST_AGENT_PATH,
@@ -764,13 +769,15 @@ def render_emergency_block(cfg: dict) -> str:
     kws = cfg.get("emergency_keywords")
     kws = [str(k).strip() for k in kws if str(k).strip()] if isinstance(kws, list) else []
     if not kws:
-        kws = list(_DEFAULT_EMERGENCY_KEYWORDS)
+        # Trade-aware fallback (generic for unrecognised trades) instead of the old
+        # SHK-only default list — so each genre gets sensible emergency keywords until
+        # the org configures its own.
+        kws = default_emergency_keywords(cfg.get("trade"))
 
     lines = ["  Ein NOTFALL liegt nur bei einem dieser Fälle vor:"]
     lines += [f"  - {k}" for k in kws]
     lines.append(
-        "  Tropfender Wasserhahn, gelegentliches Gluckern, geplante Wartung oder "
-        "Beratung"
+        "  Kleinere, nicht akute Probleme, geplante Wartung oder Beratung"
     )
     lines.append(
         "  sind KEINE Notfälle — auch wenn der Anrufer es so nennt. Bei "
@@ -789,7 +796,7 @@ def render_emergency_block(cfg: dict) -> str:
     else:
         active = (
             "  Der Notdienst greift bei einem bestätigten Notfall JEDERZEIT — auch "
-            "INNERHALB der Geschäftszeiten (z. B. Gasgeruch, Rohrbruch). Ein per "
+            "INNERHALB der Geschäftszeiten. Ein per "
             "Notfall-Stichwort bestätigter Notfall wird also unabhängig von der "
             "Uhrzeit sofort weitergeleitet."
         )
@@ -985,6 +992,36 @@ def _emergency_windows_str(windows: Any) -> str:
     return ", ".join(parts)
 
 
+# ─── Feature-region conditional rendering ────────────────────────────────────
+# The template can wrap a whole feature's prose in HTML-comment markers:
+#   <!-- FEAT:notdienst -->  …emitted only when the feature is ON…  <!-- /FEAT:notdienst -->
+# render_prompt_for_org strips the markers when the feature is ON — leaving the
+# content BYTE-IDENTICAL to the pre-marker template, so any org that currently has
+# the feature on sees zero change — and removes the ENTIRE region when the feature is
+# OFF, so a disabled capability leaves no footprint and cannot interfere with the rest
+# of the prompt. Each feature is independent (its own marker name). To gate a new
+# region: wrap it in the template + add one entry to the map in render_prompt_for_org.
+def _apply_feature_regions(text: str, features: dict[str, bool]) -> str:
+    """Strip ``<!-- FEAT:name -->…<!-- /FEAT:name -->`` regions per ``features``.
+
+    ON  → drop just the two marker lines (content kept, byte-identical to no-marker).
+    OFF → drop the whole region between and including the markers.
+    Raises if any ``<!-- FEAT: -->`` marker survives unprocessed (its feature name was
+    never registered) — that would otherwise leak a raw comment into the live prompt."""
+    for name, enabled in features.items():
+        open_m = re.escape(f"<!-- FEAT:{name} -->")
+        close_m = re.escape(f"<!-- /FEAT:{name} -->")
+        if enabled:
+            text = re.sub(open_m + r"\n?", "", text)
+            text = re.sub(close_m + r"\n?", "", text)
+        else:
+            text = re.sub(open_m + r".*?" + close_m + r"\n?", "", text, flags=re.DOTALL)
+    leftover = sorted(set(re.findall(r"<!-- /?FEAT:[^>]+-->", text)))
+    if leftover:
+        raise RuntimeError(f"unprocessed feature-region marker(s): {leftover}")
+    return text
+
+
 def render_prompt_for_org(
     org_name: str, org: dict | None = None, org_id: str | UUID | None = None
 ) -> str:
@@ -1031,6 +1068,12 @@ def render_prompt_for_org(
             org_name, trade, address, phone, mgmt_name
         ),
         "SERVICE_AREA": _render_service_area(),
+        # Trade-aware intake examples (universal across crafts/genres): the org's
+        # trade selects an appropriate diagnostic + self-help set, generic fallback
+        # for anything unrecognised — so a car mechanic / locksmith / IT firm is
+        # never shown plumbing examples. See app/services/trade_profiles.py.
+        "TRADE_DIAGNOSTIC_EXAMPLES": render_trade_diagnostics(trade),
+        "TRADE_SELFHELP_EXAMPLES": render_trade_selfhelp(trade),
         "BUSINESS_HOURS": _render_business_hours(kz_cfg.get("scheduling")),
         "KZ_REQUIRED_FIELDS": render_required_fields_block(required_fields, kz_cfg),
         # The problem detail is now a reorderable required field (field_key
@@ -1050,6 +1093,15 @@ def render_prompt_for_org(
         "KZ_AUTONOMY": render_autonomy_block(kz_cfg),
         "KZ_PRICE_INFO": render_price_info_block(kz_cfg),
     }
+    # Conditionally render feature regions BEFORE token substitution, so a disabled
+    # feature's region (and anything inside it) leaves no trace. Byte-identical when
+    # ON. Currently gated: Notdienst (the emergency-transfer procedure) — when no
+    # emergency service is configured, the agent isn't told to transfer to a Notdienst
+    # number that doesn't exist; the {{KZ_EMERGENCY}} block still renders its short
+    # "kein Notdienst aktiv → Anliegen aufnehmen" fallback.
+    text = _apply_feature_regions(
+        text, {"notdienst": bool(kz_cfg.get("emergency_enabled"))}
+    )
     for key, value in tokens.items():
         text = text.replace("{{" + key + "}}", value)
 
@@ -1175,6 +1227,8 @@ def configure_agent(
         "webhook_enabled": False,
         "audio_ok": False,
         "overrides_whitelist_enabled": False,
+        "system_tools_synced": False,
+        "system_tools_reason": None,
     }
     is_first_run = not _is_agent_already_provisioned(org_id)
 
@@ -1344,6 +1398,23 @@ def configure_agent(
             endpoint_label="provision_overrides_whitelist",
         )
     summary["overrides_whitelist_enabled"] = True
+
+    # ─── B.7 System tools (transfer_to_number / voicemail_detection /
+    #         transfer_to_agent) ───────────────────────────────────────────────
+    # Onboarding gap fix (2026-06-22): previously the native system tools were
+    # attached ONLY on a later Notdienst/Telefon save (sync_system_tools_for_org
+    # had a single caller in kiki_zentrale._repush_bg). A freshly-provisioned org
+    # therefore had NO transfer_to_number/transfer_to_agent/voicemail_detection on
+    # its agent until someone re-saved a Kiki-Zentrale screen — so the prompt could
+    # already say "leite weiter" with no bridge behind it, and outbound→inbound
+    # handoff (transfer_to_agent) was unavailable. Attaching them here means every
+    # org that comes through provisioning has the full system-tool set from day one,
+    # built from whatever Kiki-Zentrale defaults/numbers exist at provision time.
+    # sync_system_tools_for_org is best-effort (never raises) and idempotent, so it
+    # is safe to call on first run AND re-runs; it returns a categorized result.
+    sys_tools_result = sync_system_tools_for_org(org_id)
+    summary["system_tools_synced"] = bool(sys_tools_result.get("updated"))
+    summary["system_tools_reason"] = sys_tools_result.get("reason")
 
     # ─── Stamp the org so re-runs skip the prompt step. ──────────────────────
     if is_first_run:

@@ -305,3 +305,40 @@ def test_bind_agent_endpoint_404_when_org_missing(monkeypatch):
         )
     # FastAPI HTTPException with 404.
     assert getattr(exc.value, "status_code", None) == 404
+
+
+# ─── onboarding-form trade + address capture (universal-genre support) ────────
+def _agentconfig_inserts(client: FakeClient) -> list[dict]:
+    return [
+        r
+        for (t, rows) in client.store["inserts"]
+        if t == "agent_configs"
+        for r in rows
+    ]
+
+
+def test_onboarding_trade_and_address_are_stored(monkeypatch):
+    """The onboarding-form trade lands on agent_configs.trade (→ drives the
+    universal prompt profile) and the address on organizations.address (→ the
+    prompt's company profile)."""
+    client, _ = _wire_provisioning(monkeypatch)
+    payload = _base_payload(trade="Kfz-Werkstatt", address="Hauptstr. 1, 12345 Köln")
+
+    prov.provision_org(payload)
+
+    cfg = _agentconfig_inserts(client)[0]
+    assert cfg["trade"] == "Kfz-Werkstatt"
+    org = _org_inserts(client)[0]
+    assert org["address"] == {"raw": "Hauptstr. 1, 12345 Köln"}
+
+
+def test_onboarding_without_trade_omits_keys(monkeypatch):
+    """Legacy path (no trade/address) is unchanged → keys not forced; the prompt
+    falls back to the generic trade profile."""
+    client, _ = _wire_provisioning(monkeypatch)
+    prov.provision_org(_base_payload())
+
+    cfg = _agentconfig_inserts(client)[0]
+    assert "trade" not in cfg
+    org = _org_inserts(client)[0]
+    assert "address" not in org

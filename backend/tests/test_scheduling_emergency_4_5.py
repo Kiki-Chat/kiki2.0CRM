@@ -409,8 +409,14 @@ class TestRenderEmergencyBlock:
         assert "außerhalb" in out
 
     def test_enabled_contains_default_keywords_when_none_configured(self):
-        out = ac.render_emergency_block({"emergency_enabled": True})
-        assert "Rohrbruch" in out or "Gasgeruch" in out
+        # Defaults are now TRADE-AWARE: a trade-less org gets the generic fallback,
+        # an SHK org gets the plumbing/heating keywords (universal-trade change).
+        generic = ac.render_emergency_block({"emergency_enabled": True})
+        assert "Akute Gefahr für Personen" in generic
+        shk = ac.render_emergency_block(
+            {"emergency_enabled": True, "trade": "Sanitär Heizung"}
+        )
+        assert "Rohrbruch" in shk or "Gasgeruch" in shk
 
     def test_enabled_custom_keywords_override_defaults(self):
         cfg = {
@@ -420,9 +426,7 @@ class TestRenderEmergencyBlock:
         out = ac.render_emergency_block(cfg)
         assert "Überschwemmung" in out
         assert "Stromausfall" in out
-        # Default keyword "Kompletter Heizungsausfall" must NOT appear in the list.
-        # Note: "Rohrbruch" also appears in the hardcoded active-hours explanation
-        # text ("z. B. Gasgeruch, Rohrbruch"), so we check a different default keyword.
+        # Default keywords must NOT appear when the org set its own list.
         assert "Kompletter Heizungsausfall" not in out
         assert "Kompletter Warmwasserausfall" not in out
 

@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     # Used to build OAuth redirect URIs at runtime. Must match the value
     # registered with Google + Azure (see §1.4 / §2.1 of P1.8_OAUTH_SETUP.md).
     backend_public_url: str = "http://localhost:8000"
+    # Which ElevenLabs ENVIRONMENT this backend represents. Each deployment sets
+    # its own: the UAT Railway service sets EL_ENVIRONMENT=uat, the prod service
+    # sets EL_ENVIRONMENT=production. Returned by the conversation-init webhook so
+    # ElevenLabs resolves {{system__env_api_host}} (a shared tool's URL host) to
+    # THIS backend. Default 'uat' is the safe choice — a mis-set backend routes to
+    # UAT, never accidentally to prod. The `production` env always exists in EL; a
+    # `uat` environment must be created in the EL workspace.
+    el_environment: str = "uat"
     # Public base URL of the customer CRM frontend — used for EVERY link emailed
     # to a human (employee set-password/login link, technician job link, Stripe
     # billing return). Env-overridable via FRONTEND_PUBLIC_URL; set it in Railway
