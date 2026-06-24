@@ -529,11 +529,12 @@ def gen_inquiry_number(client, org_id: str) -> str:
 
 
 def gen_case_number(client, org_id: str) -> str:
-    """Next case (Fall) number: ``FL-{TOKEN}-{NNNN}`` (e.g. FL-KC007-0001). The
-    case is the bundled grouping ticket; numbers run over the ``cases`` table,
+    """Next Vorgang (case) number: ``VG-{TOKEN}-{NNNN}`` (e.g. VG-KC007-0001). The
+    Vorgang is the bundled grouping ticket; numbers run over the ``cases`` table,
     continuous per org. (The top-layer Project has its own ``PR-`` sequence — see
-    ``services.projects.gen_project_number`` — so the two never collide.)"""
-    prefix = f"FL-{get_org_token(client, org_id)}-"
+    ``services.projects.gen_project_number`` — so the two never collide.)
+    Prefix changed FL-→VG- (migration 0077) to match the 'Vorgang' UI wording."""
+    prefix = f"VG-{get_org_token(client, org_id)}-"
     seq = _max_seq_for_token(client, "cases", org_id, prefix) + 1
     return f"{prefix}{seq:04d}"
 

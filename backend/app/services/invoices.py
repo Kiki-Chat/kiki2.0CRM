@@ -113,7 +113,7 @@ def maybe_create_invoice_for_project(
             "customer_id": kva.get("customer_id") or case.get("customer_id"),
             "cost_estimate_id": kva["id"],
             "case_id": case_id,
-            "subject": f"Rechnung zu Fall {case.get('number') or ''}".strip(),
+            "subject": f"Rechnung zu Vorgang {case.get('number') or ''}".strip(),
             "invoice_date": inv_date,
             "payment_terms_days": 14,
             "due_date": add_days(inv_date, 14),

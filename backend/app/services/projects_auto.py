@@ -108,7 +108,7 @@ def _create_case_for_inquiry(client, org_id: str, inquiry: dict) -> dict:
         "case_id": case["id"],
         "case_source": "ai",
         "case_confidence": 1.0,
-        "case_reason": "automatisch: neuer Fall",
+        "case_reason": "automatisch: neuer Vorgang",
     }).eq("org_id", org_id).eq("id", inquiry["id"]).execute()
     return case
 

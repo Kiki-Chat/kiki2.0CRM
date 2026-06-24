@@ -47,7 +47,7 @@ _CLOSED_INQ = {"completed", "closed", "done", "resolved", "deleted"}
 @router.get("/cases")
 async def list_cases(user: CurrentUser = Depends(require_org)) -> list[dict]:
     """All Fälle for the org with per-case rollup stats (powers the Cases page).
-    A Fall is a ticket: customer + the call(s) and the five linked things
+    A Vorgang is a ticket: customer + the call(s) and the five linked things
     (Anfragen/Anrufe · Termine · KVA · Rechnungen · Mitarbeiter). Batched (no N+1)."""
     def _run():
         client = get_service_client()
@@ -163,7 +163,7 @@ async def propose_cases(customer_id: str, user: CurrentUser = Depends(require_or
             raise HTTPException(
                 status_code=429,
                 detail="Das monatliche KI-Budget Ihrer Organisation ist erreicht — "
-                "die automatische Fall-Gruppierung ist bis zum Monatswechsel pausiert.",
+                "die automatische Vorgangs-Gruppierung ist bis zum Monatswechsel pausiert.",
             )
         client = get_service_client()
         validate_fk_in_org(client, table="customers", fk_id=customer_id, org_id=user.org_id, label="Kunde")
@@ -216,7 +216,7 @@ async def apply_cases(payload: ApplyIn, user: CurrentUser = Depends(require_org)
                 continue
             case = client.table("cases").insert({
                 "org_id": org_id, "customer_id": payload.customer_id,
-                "title": (g.label or "Fall")[:120], "created_by": _uid(user),
+                "title": (g.label or "Vorgang")[:120], "created_by": _uid(user),
                 "number": gen_case_number(client, org_id),
                 "status": "active",
                 "description": "Aus KI-Gruppierung erstellt.",
@@ -274,12 +274,12 @@ async def move_inquiry_case(
                 .eq("org_id", org_id).eq("id", target).limit(1).execute().data or []
             )
             if not tgt:
-                raise HTTPException(status_code=422, detail="Fall nicht gefunden.")
+                raise HTTPException(status_code=422, detail="Vorgang nicht gefunden.")
             if tgt[0].get("customer_id") and tgt[0].get("customer_id") != inq[0].get("customer_id"):
                 raise HTTPException(
                     status_code=422,
-                    detail="Dieser Fall gehört zu einem anderen Kunden — eine "
-                    "Anfrage kann nur einem Fall desselben Kunden zugeordnet werden.",
+                    detail="Dieser Vorgang gehört zu einem anderen Kunden — eine "
+                    "Anfrage kann nur einem Vorgang desselben Kunden zugeordnet werden.",
                 )
         client.table("inquiries").update({
             "case_id": target, "case_source": "human",
@@ -302,7 +302,7 @@ async def get_case(case_id: str, user: CurrentUser = Depends(require_org)) -> di
 
     bundle = await run_in_threadpool(build_case_umbrella, user.org_id, case_id)
     if bundle is None:
-        raise HTTPException(status_code=404, detail="Fall not found")
+        raise HTTPException(status_code=404, detail="Vorgang nicht gefunden")
     return bundle
 
 
@@ -325,7 +325,7 @@ async def list_case_jobs(case_id: str, user: CurrentUser = Depends(require_org))
     def _run():
         client = get_service_client()
         org_id = user.org_id
-        validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Fall")
+        validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Vorgang")
         inq_ids = [
             r["id"] for r in (
                 client.table("inquiries").select("id")
@@ -383,7 +383,7 @@ async def create_case(
         validate_fk_in_org(client, table="customers", fk_id=customer_id, org_id=user.org_id, label="Kunde")
         return client.table("cases").insert({
             "org_id": user.org_id, "customer_id": customer_id,
-            "title": (payload.label or "Neuer Fall")[:120], "created_by": _uid(user),
+            "title": (payload.label or "Neuer Vorgang")[:120], "created_by": _uid(user),
             "number": gen_case_number(client, user.org_id),
             "status": "active",
         }).execute().data[0]
@@ -407,7 +407,7 @@ async def update_case(case_id: str, payload: CaseUpdateIn, user: CurrentUser = D
         org_id = user.org_id
         cur = client.table("cases").select("id").eq("org_id", org_id).eq("id", case_id).limit(1).execute().data
         if not cur:
-            raise HTTPException(status_code=404, detail="Fall nicht gefunden.")
+            raise HTTPException(status_code=404, detail="Vorgang nicht gefunden.")
         fields: dict = {}
         if payload.status is not None:
             fields["status"] = payload.status
@@ -452,7 +452,7 @@ async def add_case_employee(case_id: str, payload: CaseEmployeeIn, user: Current
     def _run():
         client = get_service_client()
         org_id = user.org_id
-        validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Fall")
+        validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Vorgang")
         validate_fk_in_org(client, table="employees", fk_id=payload.employee_id, org_id=org_id, label="Mitarbeiter", require_active=True)
         dup = (
             client.table("case_employees").select("id")
@@ -471,7 +471,7 @@ async def remove_case_employee(case_id: str, employee_id: str, user: CurrentUser
     def _run():
         client = get_service_client()
         org_id = user.org_id
-        validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Fall")
+        validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Vorgang")
         client.table("case_employees").delete().eq("case_id", case_id).eq("employee_id", employee_id).execute()
         return {"success": True}
 

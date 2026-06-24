@@ -135,13 +135,13 @@ def _year():
 
 
 def test_gen_case_number_max_plus_one_skips_deleted_gap(monkeypatch):
-    # Cases are numbered FL-{token}-NNNN over the cases table. 5 existed, #3
-    # deleted → 4 rows remain, highest suffix 0005.
+    # Cases (Vorgänge) are numbered VG-{token}-NNNN over the cases table. 5 existed,
+    # #3 deleted → 4 rows remain, highest suffix 0005.
     db = _DB({
-        "cases": [[{"number": "FL-KC007-0005"}, {"number": "FL-KC007-0004"}]],
+        "cases": [[{"number": "VG-KC007-0005"}, {"number": "VG-KC007-0004"}]],
         "organizations": [[{"id": "o1", "code": "K01", "case_prefix": "KC007"}]],
     })
-    assert common.gen_case_number(db, "o1") == "FL-KC007-0006"  # COUNT+1 would re-issue 0005
+    assert common.gen_case_number(db, "o1") == "VG-KC007-0006"  # COUNT+1 would re-issue 0005
 
 
 def test_gen_inquiry_number_max_plus_one(monkeypatch):
@@ -157,4 +157,4 @@ def test_gen_case_number_first(monkeypatch):
         "cases": [[]],
         "organizations": [[{"id": "o1", "code": "K02", "case_prefix": "KC007"}]],
     })
-    assert common.gen_case_number(db, "o1") == "FL-KC007-0001"
+    assert common.gen_case_number(db, "o1") == "VG-KC007-0001"
