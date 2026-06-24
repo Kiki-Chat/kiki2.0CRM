@@ -18,7 +18,7 @@ from app.services.outbound_occasions import de_eur, de_long_date, de_short_date,
 
 
 def _shell(org: dict, body: str) -> str:
-    company = org.get("name") or "Ihr Dienstleister"
+    company = org.get("name") or "Dein Dienstleister"
     return render_message_email(
         company_name=company,
         message_text=body,
@@ -29,7 +29,7 @@ def _shell(org: dict, body: str) -> str:
 
 def render_occasion_email(occasion: str, record: dict, customer: dict | None, org: dict) -> tuple[str, str]:
     """Return ``(subject, body_html)`` for one of the existing 7 occasions."""
-    company = org.get("name") or "Ihr Dienstleister"
+    company = org.get("name") or "Dein Dienstleister"
     name = (customer or {}).get("full_name") or ""
     greet = f"Sehr geehrte/r {name}," if name else "Guten Tag,"
     sign = f"Mit freundlichen Grüßen\n{company}"
@@ -41,8 +41,8 @@ def render_occasion_email(occasion: str, record: dict, customer: dict | None, or
         tc = f" ({titel})" if titel else ""
         subject = f"Terminerinnerung – {datum} um {uhr} Uhr"
         body = (
-            f"{greet}\n\nwir möchten Sie an Ihren Termin am {datum} um {uhr} Uhr{tc} erinnern.\n\n"
-            "Falls Sie den Termin verschieben oder absagen möchten, melden Sie sich bitte kurz "
+            f"{greet}\n\nwir möchten dich an deinen Termin am {datum} um {uhr} Uhr{tc} erinnern.\n\n"
+            "Falls du den Termin verschieben oder absagen möchtest, melde dich bitte kurz "
             f"bei uns.\n\n{sign}"
         )
     elif occasion == "kva_followup":
@@ -51,11 +51,11 @@ def render_occasion_email(occasion: str, record: dict, customer: dict | None, or
         ref = f"Angebot {nr}" if nr else "Angebot"
         bc = f" zum Thema „{betreff}“" if betreff else ""
         summe = f" über {de_eur(r['total'])} Euro" if r.get("total") is not None else ""
-        subject = f"Nachfrage zu Ihrem {ref}"
+        subject = f"Nachfrage zu deinem {ref}"
         body = (
-            f"{greet}\n\nwir möchten kurz zu Ihrem {ref}{bc}{summe} nachfragen, ob dazu noch "
-            "Fragen offen sind oder wie Sie verfahren möchten.\n\nFür Rückfragen stehen wir "
-            f"Ihnen gerne zur Verfügung.\n\n{sign}"
+            f"{greet}\n\nwir möchten kurz zu deinem {ref}{bc}{summe} nachfragen, ob dazu noch "
+            "Fragen offen sind oder wie du verfahren möchtest.\n\nFür Rückfragen stehen wir "
+            f"dir gerne zur Verfügung.\n\n{sign}"
         )
     elif occasion == "payment_reminder":
         nr = (r.get("number") or "").strip()
@@ -64,39 +64,39 @@ def render_occasion_email(occasion: str, record: dict, customer: dict | None, or
         faellig = f" (fällig seit dem {de_short_date(r['due_date'])})" if r.get("due_date") else ""
         subject = f"Freundliche Zahlungserinnerung – {ref}"
         body = (
-            f"{greet}\n\ndürfen wir Sie freundlich an unsere offene {ref}{summe}{faellig} "
-            "erinnern? Falls Ihre Zahlung bereits unterwegs ist, betrachten Sie diese "
+            f"{greet}\n\ndürfen wir dich freundlich an unsere offene {ref}{summe}{faellig} "
+            "erinnern? Falls deine Zahlung bereits unterwegs ist, betrachte diese "
             f"Erinnerung selbstverständlich als gegenstandslos.\n\n{sign}"
         )
     elif occasion == "satisfaction_survey":
         titel = (r.get("title") or "").strip()
         bc = f" „{titel}“" if titel else ""
-        subject = "War alles zu Ihrer Zufriedenheit?"
+        subject = "War alles zu deiner Zufriedenheit?"
         body = (
-            f"{greet}\n\nwir haben kürzlich Ihren Auftrag{bc} abgeschlossen und möchten gerne "
-            "wissen: War alles zu Ihrer Zufriedenheit? Über eine kurze Rückmeldung freuen wir "
+            f"{greet}\n\nwir haben kürzlich deinen Auftrag{bc} abgeschlossen und möchten gerne "
+            "wissen: War alles zu deiner Zufriedenheit? Über eine kurze Rückmeldung freuen wir "
             f"uns sehr.\n\n{sign}"
         )
     elif occasion == "review_request":
         titel = (r.get("title") or "").strip()
         bc = f" „{titel}“" if titel else ""
-        subject = "Ihre Bewertung würde uns sehr freuen"
+        subject = "deine Bewertung würde uns sehr freuen"
         body = (
-            f"{greet}\n\nvielen Dank, dass wir Ihren Auftrag{bc} für Sie erledigen durften. "
-            "Wenn Sie zufrieden waren, würden wir uns sehr über eine kurze Online-Bewertung "
+            f"{greet}\n\nvielen Dank, dass wir deinen Auftrag{bc} für dich erledigen durften. "
+            "Wenn du zufrieden warst, würden wir uns sehr über eine kurze Online-Bewertung "
             f"freuen.\n\n{sign}"
         )
     elif occasion == "maintenance_due":
-        subject = "Ihre nächste Wartung steht an"
+        subject = "deine nächste Wartung steht an"
         body = (
-            f"{greet}\n\nbei Ihnen steht die nächste regelmäßige Wartung an. Gerne vereinbaren "
-            f"wir dafür einen Termin – melden Sie sich einfach bei uns.\n\n{sign}"
+            f"{greet}\n\nbei dir steht die nächste regelmäßige Wartung an. Gerne vereinbaren "
+            f"wir dafür einen Termin – melde dich einfach bei uns.\n\n{sign}"
         )
     elif occasion == "missed_callback":
-        subject = "Wir haben Ihren Anruf verpasst"
+        subject = "Wir haben deinen Anruf verpasst"
         body = (
-            f"{greet}\n\nwir haben Ihren Anruf leider verpasst und möchten uns gerne bei Ihnen "
-            "zurückmelden. Rufen Sie uns gerne wieder an oder antworten Sie kurz auf diese "
+            f"{greet}\n\nwir haben deinen Anruf leider verpasst und möchten uns gerne bei dir "
+            "zurückmelden. Ruf uns gerne wieder an oder antworte kurz auf diese "
             f"E-Mail.\n\n{sign}"
         )
     else:

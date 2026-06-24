@@ -143,7 +143,7 @@ export function AgentDriftBanner() {
         open={confirmOpen}
         onOpenChange={(v) => !v && setConfirmOpen(false)}
         title="Mit Einstellungen synchronisieren?"
-        message="Die manuelle Bearbeitung des Prompts wird verworfen und durch den aus Ihren Einstellungen erzeugten Prompt ERSETZT. Dieser Schritt kann nicht rückgängig gemacht werden."
+        message="Die manuelle Bearbeitung des Prompts wird verworfen und durch den aus deinen Einstellungen erzeugten Prompt ERSETZT. Dieser Schritt kann nicht rückgängig gemacht werden."
         confirmLabel="Synchronisieren"
         danger
         busy={resync.isPending}

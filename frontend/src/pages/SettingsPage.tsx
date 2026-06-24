@@ -627,7 +627,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       {paymentDue && (
         <div className="flex items-start gap-3 rounded-xl border border-error/40 bg-error-bg/40 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-error" />
-          <span><strong>Zahlung erforderlich.</strong> Ihre letzte Zahlung ist fehlgeschlagen. Bitte aktualisieren Sie Ihre Zahlungsdetails, um eine Unterbrechung zu vermeiden.{' '}
+          <span><strong>Zahlung erforderlich.</strong> Deine letzte Zahlung ist fehlgeschlagen. Bitte aktualisiere deine Zahlungsdetails, um eine Unterbrechung zu vermeiden.{' '}
             <button onClick={() => portal.mutate()} className="font-semibold text-green-deep underline">Jetzt aktualisieren</button>
           </span>
         </div>
@@ -635,7 +635,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       {trialing && (
         <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
           <Info size={16} className="mt-0.5 shrink-0 text-info" />
-          <span><strong>Testphase aktiv</strong>{s?.period_end ? ` – endet am ${new Date(s.period_end).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' })}` : ''}. Hinterlegen Sie eine Zahlungsmethode, damit Ihre KI nahtlos weiterläuft.</span>
+          <span><strong>Testphase aktiv</strong>{s?.period_end ? ` – endet am ${new Date(s.period_end).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' })}` : ''}. Hinterlege eine Zahlungsmethode, damit deine KI nahtlos weiterläuft.</span>
         </div>
       )}
       {configured && s && (
@@ -732,7 +732,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       {!over && quota > 0 && pct >= 95 && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/50 bg-warning-bg/60 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
-          <span><strong>Letzte Warnung: {Math.round(pct)} % verbraucht.</strong> Ihr Kontingent ist fast aufgebraucht. Ab {quota} Min. wird jede weitere Minute{s?.overage_cents_per_min != null ? ` mit ${fmtCents(s.overage_cents_per_min)}/Min.` : ''} berechnet.</span>
+          <span><strong>Letzte Warnung: {Math.round(pct)} % verbraucht.</strong> Dein Kontingent ist fast aufgebraucht. Ab {quota} Min. wird jede weitere Minute{s?.overage_cents_per_min != null ? ` mit ${fmtCents(s.overage_cents_per_min)}/Min.` : ''} berechnet.</span>
         </div>
       )}
       {over && (

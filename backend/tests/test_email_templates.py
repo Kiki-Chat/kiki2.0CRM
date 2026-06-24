@@ -38,7 +38,7 @@ def test_company_name_is_dynamic_per_org():
 def test_company_name_falls_back_when_missing():
     out = et.render_message_email(company_name=None, message_text="Hallo")
     # White-label: a NEUTRAL fallback, never HeyKiki/Kiki-Chat branding.
-    assert "Ihr Dienstleister" in out
+    assert "Dein Dienstleister" in out  # du-form product-wide
     assert "Heykiki" not in out and "Kiki-Chat" not in out and "kikichat.de" not in out
 
 

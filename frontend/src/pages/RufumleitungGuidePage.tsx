@@ -89,7 +89,7 @@ export function RufumleitungGuidePage() {
       <div className="space-y-4">
         <p className="text-sm text-muted">
           Am einfachsten richten Sie die Rufumleitung direkt in den Einstellungen Ihres Telefons ein
-          („Immer weiterleiten"). Klappt das bei Ihrem Gerät nicht, nutzen Sie die Codes weiter unten.
+          („Immer weiterleiten"). Klappt das bei deinem Gerät nicht, nutze die Codes weiter unten.
         </p>
 
         <Card>
@@ -127,8 +127,8 @@ export function RufumleitungGuidePage() {
             Diese Tastenkombinationen funktionieren auf den meisten Mobiltelefonen direkt über die Telefon-App —
             eintippen und die Anruf-Taste drücken.{' '}
             {heyKiki
-              ? 'Die Codes sind bereits mit Ihrer HeyKiki-Nummer ausgefüllt.'
-              : 'Sobald Ihnen eine HeyKiki-Nummer zugewiesen ist, erscheint sie hier automatisch.'}
+              ? 'Die Codes sind bereits mit deiner HeyKiki-Nummer ausgefüllt.'
+              : 'Sobald dir eine HeyKiki-Nummer zugewiesen ist, erscheint sie hier automatisch.'}
           </p>
           <ul className="space-y-2 text-sm text-body">
             <li>

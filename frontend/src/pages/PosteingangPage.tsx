@@ -90,8 +90,8 @@ export function PosteingangPage() {
   const taskNoun = isAdmin ? 'Entscheidung' : 'Aufgabe'
   const taskNounPl = isAdmin ? 'Entscheidungen' : 'Aufgaben'
   const introCopy = isAdmin
-    ? 'Kiki hat Ihre Anrufe bearbeitet und in Vorgänge sortiert. Hier treffen Sie die offenen Entscheidungen — die Vorgänge selbst finden Sie unter „Vorgänge".'
-    : 'Das sind Ihre offenen Aufgaben — was Kiki für Sie vorbereitet hat und worauf Sie reagieren müssen. Die Vorgänge selbst finden Sie unter „Vorgänge".'
+    ? 'Kiki hat deine Anrufe bearbeitet und in Vorgänge sortiert. Hier triffst du die offenen Entscheidungen — die Vorgänge selbst findest du unter „Vorgänge".'
+    : 'Das sind deine offenen Aufgaben — was Kiki für dich vorbereitet hat und worauf du reagieren musst. Die Vorgänge selbst findest du unter „Vorgänge".'
   const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
   // Optimistic assignee overrides per inquiry: assigneeId on a decision is derived
   // from the windowed calls list, so a fresh assignment may not be reflected by the
@@ -128,7 +128,7 @@ export function PosteingangPage() {
         <div style={{ flex: 1, minWidth: 260 }}>
           <div style={{ fontFamily: 'var(--font-poster)', fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--green-primary)', marginBottom: 9 }}>{eyebrow}</div>
           <h1 style={{ margin: '0 0 8px', fontFamily: 'var(--font-poster)', fontWeight: 800, fontSize: 31, letterSpacing: '-0.025em', color: 'var(--text)', lineHeight: 1.08 }}>
-            {loading ? 'Wird geladen…' : allDone ? 'Alles erledigt — gut gemacht.' : `${liveDecisions.length} ${liveDecisions.length === 1 ? `${taskNoun} wartet` : `${taskNounPl} warten`} auf Sie`}
+            {loading ? 'Wird geladen…' : allDone ? 'Alles erledigt — gut gemacht.' : `${liveDecisions.length} ${liveDecisions.length === 1 ? `${taskNoun} wartet` : `${taskNounPl} warten`} auf dich`}
           </h1>
           <p style={{ margin: 0, fontSize: 14.5, color: 'var(--muted)', lineHeight: 1.5, maxWidth: 460 }}>{introCopy}</p>
         </div>

@@ -21,7 +21,7 @@ def render_appointment_email(
     occasion: str, appointment: dict, customer: dict | None, org: dict
 ) -> tuple[str, str]:
     """Return ``(subject, body_html)`` for an appointment-occasion email."""
-    company = org.get("name") or "Ihr Dienstleister"
+    company = org.get("name") or "Dein Dienstleister"
     name = (customer or {}).get("full_name") or ""
     sched = appointment.get("scheduled_at")
     datum = de_long_date(sched) if sched else ""
@@ -35,8 +35,8 @@ def render_appointment_email(
         subject = f"Terminbestätigung – {datum} um {uhr} Uhr"
         body = (
             f"{greet}\n\n"
-            f"hiermit bestätigen wir Ihren Termin am {datum} um {uhr} Uhr{titel_clause}.\n\n"
-            "Sollten Sie den Termin verschieben oder absagen müssen, melden Sie sich bitte "
+            f"hiermit bestätigen wir deinen Termin am {datum} um {uhr} Uhr{titel_clause}.\n\n"
+            "Solltest du den Termin verschieben oder absagen müssen, melde dich bitte "
             "kurz bei uns.\n\n"
             f"{sign}"
         )
@@ -44,9 +44,9 @@ def render_appointment_email(
         subject = f"Terminabsage – {datum} um {uhr} Uhr"
         body = (
             f"{greet}\n\n"
-            f"leider müssen wir Ihren Termin am {datum} um {uhr} Uhr{titel_clause} absagen. "
-            "Wir bitten um Ihr Verständnis.\n\n"
-            "Gerne vereinbaren wir einen neuen Termin – melden Sie sich einfach bei uns.\n\n"
+            f"leider müssen wir deinen Termin am {datum} um {uhr} Uhr{titel_clause} absagen. "
+            "Wir bitten um dein Verständnis.\n\n"
+            "Gerne vereinbaren wir einen neuen Termin – melde dich einfach bei uns.\n\n"
             f"{sign}"
         )
     elif occasion == "appointment_reschedule":
@@ -56,9 +56,9 @@ def render_appointment_email(
             subject = f"Terminverschiebung – neuer Vorschlag: {neu}"
             body = (
                 f"{greet}\n\n"
-                f"wir müssen Ihren Termin am {datum} um {uhr} Uhr{titel_clause} leider verschieben "
-                f"und schlagen Ihnen einen neuen Termin vor: {neu}.\n\n"
-                "Bitte geben Sie uns kurz Bescheid, ob Ihnen der neue Termin passt – alternativ "
+                f"wir müssen deinen Termin am {datum} um {uhr} Uhr{titel_clause} leider verschieben "
+                f"und schlagen dir einen neuen Termin vor: {neu}.\n\n"
+                "Bitte gib uns kurz Bescheid, ob dir der neue Termin passt – alternativ "
                 "finden wir gerne einen anderen Termin.\n\n"
                 f"{sign}"
             )
@@ -66,7 +66,7 @@ def render_appointment_email(
             subject = f"Terminverschiebung – {datum} um {uhr} Uhr"
             body = (
                 f"{greet}\n\n"
-                f"wir müssen Ihren Termin am {datum} um {uhr} Uhr{titel_clause} leider verschieben. "
+                f"wir müssen deinen Termin am {datum} um {uhr} Uhr{titel_clause} leider verschieben. "
                 "Wir melden uns in Kürze, um gemeinsam einen neuen Termin zu finden.\n\n"
                 f"{sign}"
             )

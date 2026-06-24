@@ -205,9 +205,9 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
         f"Dieses Angebot ist gemäß § 632 Abs. 3 BGB unverbindlich. "
         f"Der tatsächliche Preis kann nach Leistungserbringung um bis zu {tol}% von der "
         "Schätzung abweichen. Bei voraussichtlicher wesentlicher Überschreitung werden "
-        "wir Sie unverzüglich informieren (§ 650c BGB)."
+        "wir dich unverzüglich informieren (§ 650c BGB)."
         if doc_type == "kva" and not binding
-        else "Vielen Dank für Ihr Vertrauen."
+        else "Vielen Dank für dein Vertrauen."
     )
     valid_until = ce.get("valid_until")
     if valid_until:
@@ -301,12 +301,12 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
     subject = ce.get("subject") or ""
     if subject:
         pdf.set_font("DejaVu", "B", 9)
-        pdf.cell(0, 6, f"Zu Ihrer Anfrage: {subject[:70]}", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 6, f"Zu deiner Anfrage: {subject[:70]}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(1)
     if doc_type == "invoice":
-        default_intro = "Vielen Dank für Ihren Auftrag. Wir berechnen Ihnen wie folgt:"
+        default_intro = "Vielen Dank für deinen Auftrag. Wir berechnen dir wie folgt:"
     else:
-        default_intro = f'Für Ihre Anfrage erstellen wir Ihnen folgenden {title.title()}:'
+        default_intro = f'Für deine Anfrage erstellen wir dir folgenden {title.title()}:'
     intro = ce.get("intro_text") or default_intro
     pdf.set_font("DejaVu", size=9)
     pdf.multi_cell(0, 5, intro)
@@ -500,8 +500,8 @@ def _send_draft_kva(client, org_id: str, row: dict) -> bool:
         greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
         body_text = (
             f"{greeting}\n\n"
-            f"anbei senden wir Ihnen das Angebot {number}.\n\n"
-            f"Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.\n\n"
+            f"anbei senden wir dir das Angebot {number}.\n\n"
+            f"Bei Rückfragen stehen wir dir gerne zur Verfügung.\n\n"
             f"Mit freundlichen Grüßen\n{org_name}"
         )
         body_html = email_templates.render_message_email(

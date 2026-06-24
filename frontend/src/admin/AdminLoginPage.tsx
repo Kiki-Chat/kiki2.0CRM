@@ -45,7 +45,7 @@ export function AdminLoginPage() {
       if (meRes.role !== 'super_admin') {
         await signOut()
         setError(
-          'Dieser Login hat keinen Super-Admin-Zugang. Bitte verwenden Sie das Kunden-Portal.',
+          'Diese Anmeldung hat keinen Super-Admin-Zugang. Bitte verwende das Kunden-Portal.',
         )
       }
       // else: the Navigate above takes over on next render

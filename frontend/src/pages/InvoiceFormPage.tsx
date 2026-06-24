@@ -47,8 +47,8 @@ interface Estimate { id: string; number: string | null; subject: string | null; 
 const UNITS = ['Stk', 'm', 'm²', 'h', 'Std', 'pauschal', 'kg', 'l', 'Tag']
 const VATS = [19, 7, 0]
 const PAYMENT_TERMS = [7, 14, 21, 30, 45, 60]
-const INVOICE_INTRO = 'Vielen Dank für Ihren Auftrag. Wir berechnen Ihnen wie folgt:'
-const INVOICE_CLOSING = 'Bitte überweisen Sie den Betrag innerhalb der Zahlungsfrist auf unser Konto. Vielen Dank!'
+const INVOICE_INTRO = 'Vielen Dank für deinen Auftrag. Wir berechnen dir wie folgt:'
+const INVOICE_CLOSING = 'Bitte überweise den Betrag innerhalb der Zahlungsfrist auf unser Konto. Vielen Dank!'
 const inputCls = 'w-full rounded-md border border-border bg-alt px-3 py-2 text-sm text-text outline-none focus:border-green-primary'
 const labelCls = 'mb-1 block text-xs font-semibold text-body'
 const uid = () => Math.random().toString(36).slice(2)

@@ -118,8 +118,8 @@ def notify_trial_will_end(org_id: str) -> None:
     record_notification(
         org_id, "trial_will_end",
         title="Testphase endet bald",
-        body="Ihre kostenlose Testphase endet in Kürze. Bitte hinterlegen Sie eine "
-        "Zahlungsmethode, damit Ihre KI ohne Unterbrechung weiterläuft.",
+        body="deine kostenlose Testphase endet in Kürze. Bitte hinterlege eine "
+        "Zahlungsmethode, damit deine KI ohne Unterbrechung weiterläuft.",
         dedup_key=f"trial_will_end:{org_id}",
     )
 
@@ -128,12 +128,12 @@ def notify_subscription_activated(org_id: str, plan_title: str | None, subscript
     """Welcome / subscription-confirmation — OUR email (Brevo), distinct from
     Stripe's payment receipt + invoice. Deduped per subscription so a re-delivered
     checkout webhook can't double-send."""
-    plan = plan_title or "Ihr Tarif"
+    plan = plan_title or "Dein Tarif"
     record_notification(
         org_id, "subscription_activated",
         title="Abonnement aktiviert",
-        body=f"Ihr Abonnement „{plan}“ ist aktiv. Vielen Dank! Ihre KI-Sekretärin läuft "
-        "ohne Unterbrechung weiter. Rechnungen und Zahlungsbeleg finden Sie in Ihrem "
+        body=f"Dein Abonnement „{plan}“ ist aktiv. Vielen Dank! deine KI-Sekretärin läuft "
+        "ohne Unterbrechung weiter. Rechnungen und Zahlungsbeleg findest du in deinem "
         "Konto unter Einstellungen → Abrechnung. Eine Kündigung ist nur per E-Mail an "
         "info@kikichat.de oder telefonisch möglich.",
         dedup_key=f"subscription_activated:{subscription_id or org_id}",
@@ -144,7 +144,7 @@ def notify_payment_failed(org_id: str) -> None:
     record_notification(
         org_id, "payment_failed",
         title="Zahlung fehlgeschlagen",
-        body="Ihre letzte Zahlung ist fehlgeschlagen. Bitte aktualisieren Sie Ihre "
+        body="deine letzte Zahlung ist fehlgeschlagen. Bitte aktualisiere deine "
         "Zahlungsdetails, um eine Unterbrechung des Dienstes zu vermeiden.",
     )
 
@@ -153,7 +153,7 @@ def notify_over_quota(org_id: str, period_key: str, used: int, quota: int) -> No
     record_notification(
         org_id, "over_quota",
         title="Minutenkontingent aufgebraucht",
-        body=f"Sie haben Ihr Kontingent ({quota} Min.) überschritten ({used} Min. genutzt). "
+        body=f"Du hast dein Kontingent ({quota} Min.) überschritten ({used} Min. genutzt). "
         "Der Mehrverbrauch wird nach Tarif berechnet.",
         dedup_key=f"over_quota:{org_id}:{period_key}",
         meta={"used": used, "quota": quota},
@@ -165,8 +165,8 @@ def notify_quota_warning(org_id: str, period_key: str, used: int, quota: int) ->
     record_notification(
         org_id, "quota_warning",
         title="80 % des Minutenkontingents verbraucht",
-        body=f"Sie haben {used} von {quota} inkludierten Minuten genutzt. Ab {quota} Min. "
-        "wird jede weitere Minute nach Ihrem Tarif berechnet.",
+        body=f"Du hast {used} von {quota} inkludierten Minuten genutzt. Ab {quota} Min. "
+        "wird jede weitere Minute nach deinem Tarif berechnet.",
         dedup_key=f"quota_warning:{org_id}:{period_key}",
         meta={"used": used, "quota": quota},
     )
@@ -177,8 +177,8 @@ def notify_quota_warning_2(org_id: str, period_key: str, used: int, quota: int) 
     record_notification(
         org_id, "quota_warning_2",
         title="95 % des Minutenkontingents verbraucht",
-        body=f"Sie haben {used} von {quota} inkludierten Minuten genutzt – Ihr Kontingent "
-        "ist fast aufgebraucht. Ab dem Erreichen wird jede weitere Minute nach Ihrem "
+        body=f"Du hast {used} von {quota} inkludierten Minuten genutzt – dein Kontingent "
+        "ist fast aufgebraucht. Ab dem Erreichen wird jede weitere Minute nach deinem "
         "Tarif berechnet (Mehrverbrauch).",
         dedup_key=f"quota_warning_2:{org_id}:{period_key}",
         meta={"used": used, "quota": quota},

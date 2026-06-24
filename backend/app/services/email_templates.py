@@ -60,7 +60,7 @@ def _footer_html(company: str, contact_email: str | None, address: str | None) -
     if contact_email:
         em = _html.escape(contact_email)
         parts.append(f'<p style="margin: 0 0 8px 0;"><a href="mailto:{em}" style="color: #03423A; text-decoration: none; {_FF}">{em}</a></p>')
-    parts.append(f'<p class="footer-disclaimer" style="margin: 12px 0 0 0; color: #555555; font-size: 11px; {_FF}">Diese E-Mail wurde automatisch generiert. Bei Fragen antworten Sie bitte direkt auf diese E-Mail.</p>')
+    parts.append(f'<p class="footer-disclaimer" style="margin: 12px 0 0 0; color: #555555; font-size: 11px; {_FF}">Diese E-Mail wurde automatisch generiert. Bei Fragen antworte bitte direkt auf diese E-Mail.</p>')
     return "\n".join(parts)
 
 
@@ -70,7 +70,7 @@ def render_email(
 ) -> str:
     """Wrap pre-rendered body HTML in the branded shell. Header + footer carry the
     SENDING company's identity (name + contact), never HeyKiki/Kiki-Chat."""
-    company = _html.escape(company_name) if company_name and str(company_name).strip() else "Ihr Dienstleister"
+    company = _html.escape(company_name) if company_name and str(company_name).strip() else "Dein Dienstleister"
     footer = _footer_html(company, (contact_email or "").strip() or None, (address or "").strip() or None)
     return (
         _SHELL.replace("@@COMPANY@@", company)
