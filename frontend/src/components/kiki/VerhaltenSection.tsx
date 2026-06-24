@@ -122,7 +122,7 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
         <GroupLabel>Begrüßungstext (von HeyKiki vorgegeben)</GroupLabel>
         <textarea value={welcome} onChange={(e) => setWelcome(e.target.value)} className={cn(inputCls, 'min-h-[90px]')} />
         <p className="mt-1 text-xs text-muted">
-          Dieser Text wird zusätzlich zur Agenten-Begrüßung verwendet, um die Kontext-Initialisierung zu steuern.
+          Dieser Text wird zusätzlich zu Kikis Begrüßung verwendet, um den Gesprächseinstieg zu steuern.
         </p>
       </Card>
 
@@ -131,7 +131,7 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
         <GroupLabel>Zeitabhängige Begrüßung (optional)</GroupLabel>
         <p className="mb-3 text-xs text-muted">
           Unterschiedliche Begrüßungen je Tageszeit. Bei eingehenden Anrufen wählt Kiki automatisch die passende
-          Variante (sonst gilt die Standard-Begrüßung des Agenten oben).
+          Variante (sonst gilt die Standard-Begrüßung von Kiki oben).
         </p>
         <div className="space-y-2">
           {welcomeMsgs.length === 0 && <p className="text-sm text-faint">Keine zeitabhängigen Begrüßungen.</p>}

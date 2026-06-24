@@ -1466,7 +1466,7 @@ def verify_agent_health(org_id: str | UUID, agent_id: str) -> dict:
         has_audio,
         "'audio' ist in client_events."
         if has_audio
-        else "'audio' fehlt in client_events — der Agent bliebe im Anruf stumm.",
+        else "'audio' fehlt in client_events — Kiki bliebe im Anruf stumm.",
     ))
 
     # prompt_rendered — non-empty AND no unsubstituted '{{' template tokens.
