@@ -5,6 +5,8 @@ No network, no DB. ElevenLabs HTTP + Supabase access are monkeypatched.
 
 from __future__ import annotations
 
+import types
+
 import pytest
 from fastapi import HTTPException
 
@@ -114,6 +116,97 @@ def test_phone_fetch_handles_missing_assigned_agent(monkeypatch):
         ],
     )
     assert ac.fetch_phone_for_agent(AGENT_ID) == "+4925197593899"
+
+
+# ─── fetch_phone_meta_for_agent: environment surfacing ───────────────────────
+def test_phone_meta_surfaces_environment(monkeypatch):
+    """The phone's pinned environment (assigned_agent.environment) is returned."""
+    monkeypatch.setattr(
+        ac, "_list_phone_numbers",
+        lambda: [
+            {"phone_number": "+4925197593899", "phone_number_id": "phnum_1",
+             "assigned_agent": {"agent_id": AGENT_ID, "environment": "uat"}},
+        ],
+    )
+    meta = ac.fetch_phone_meta_for_agent(AGENT_ID)
+    assert meta["phone_number_id"] == "phnum_1"
+    assert meta["environment"] == "uat"
+
+
+def test_phone_meta_environment_none_when_unpinned(monkeypatch):
+    monkeypatch.setattr(
+        ac, "_list_phone_numbers",
+        lambda: [
+            {"phone_number": "+4925197593899", "phone_number_id": "phnum_1",
+             "assigned_agent": {"agent_id": AGENT_ID}},
+        ],
+    )
+    assert ac.fetch_phone_meta_for_agent(AGENT_ID)["environment"] is None
+
+
+# ─── set_phone_environment: PATCH the phone's environment pin ─────────────────
+class _FakeResp:
+    def __init__(self, status_code=200, text=""):
+        self.status_code = status_code
+        self.text = text
+
+
+class _FakePatchClient:
+    """Stand-in for httpx.Client capturing a single .patch() call."""
+
+    def __init__(self, rec, status_code, text):
+        self._rec, self._status, self._text = rec, status_code, text
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def patch(self, url, headers=None, json=None):
+        self._rec.append({"url": url, "headers": headers or {}, "json": json})
+        return _FakeResp(self._status, self._text)
+
+
+def _stub_patch_httpx(monkeypatch, rec, *, status_code=200, text=""):
+    """Replace ac.httpx with a namespace whose Client records .patch() calls."""
+    monkeypatch.setattr(ac.settings, "elevenlabs_api_key", "sk_test_key")
+    fake = types.SimpleNamespace(
+        Client=lambda *a, **k: _FakePatchClient(rec, status_code, text)
+    )
+    monkeypatch.setattr(ac, "httpx", fake)
+
+
+def test_set_phone_environment_patches_environment_and_carries_agent(monkeypatch):
+    rec: list = []
+    _stub_patch_httpx(monkeypatch, rec)
+    ac.set_phone_environment("phnum_123", "uat", "agent_abc")
+    assert len(rec) == 1
+    call = rec[0]
+    assert call["url"] == "/v1/convai/phone-numbers/phnum_123"
+    assert call["json"] == {"environment": "uat", "agent_id": "agent_abc"}
+    assert call["headers"]["xi-api-key"] == "sk_test_key"
+
+
+def test_set_phone_environment_minimal_body_without_agent(monkeypatch):
+    rec: list = []
+    _stub_patch_httpx(monkeypatch, rec)
+    ac.set_phone_environment("phnum_123", "uat")
+    assert rec[0]["json"] == {"environment": "uat"}
+
+
+def test_set_phone_environment_raises_on_non_2xx(monkeypatch):
+    rec: list = []
+    _stub_patch_httpx(monkeypatch, rec, status_code=422, text="nope")
+    with pytest.raises(ac.ElevenLabsWriteError):
+        ac.set_phone_environment("phnum_123", "uat")
+
+
+def test_set_phone_environment_requires_api_key(monkeypatch):
+    monkeypatch.setattr(ac.settings, "elevenlabs_api_key", "")
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+    with pytest.raises(ac.ElevenLabsWriteError):
+        ac.set_phone_environment("phnum_123", "uat")
 
 
 # ─── Prompt rendering ────────────────────────────────────────────────────────

@@ -258,6 +258,14 @@ def test_bind_agent_endpoint_writes_fields_and_verifies(monkeypatch):
 
     monkeypatch.setattr(sa, "verify_agent_health", _verify)
 
+    # UAT backend → the bind pins the phone to the 'uat' environment.
+    monkeypatch.setattr(sa.settings, "el_environment", "uat")
+    pins: list = []
+    monkeypatch.setattr(
+        sa, "set_phone_environment",
+        lambda pid, env, aid=None: pins.append((pid, env, aid)),
+    )
+
     payload = sa.BindAgentRequest(
         elevenlabsAgentId="agent_rebuilt_by_n8n",
         phoneNumber=PHONE,
@@ -273,6 +281,10 @@ def test_bind_agent_endpoint_writes_fields_and_verifies(monkeypatch):
     # verify ran against the newly-bound agent.
     assert verify_calls["n"] == 1
     assert verify_calls["args"] == ("org-existing", "agent_rebuilt_by_n8n")
+
+    # The phone (id supplied) was pinned to uat, carrying the bound agent id.
+    assert pins == [(PHONE_ID, "uat", "agent_rebuilt_by_n8n")]
+    assert result.environment == "uat"
 
     # The org row was UPDATED (not configured) with agent id + phone + stamp.
     org_updates = [v for (t, v) in client.store["updates"] if t == "organizations"]
@@ -291,6 +303,89 @@ def test_bind_agent_endpoint_writes_fields_and_verifies(monkeypatch):
     assert [c.name for c in result.verify.checks] == [
         c["name"] for c in _VERIFY_OK["checks"]
     ]
+
+
+def _wire_bind_endpoint(monkeypatch, *, el_environment):
+    """Shared scaffold for bind-agent endpoint tests: stub org + verify + env."""
+    existing_org = {"id": "org-existing", "name": "Bestehende GmbH"}
+    client = FakeClient(reads={"organizations": [existing_org]})
+    monkeypatch.setattr(sa, "get_service_client", lambda: client)
+    monkeypatch.setattr(sa, "_get_org", lambda oid: dict(existing_org))
+    monkeypatch.setattr(sa, "verify_agent_health", lambda *a, **k: dict(_VERIFY_OK))
+    monkeypatch.setattr(sa.settings, "el_environment", el_environment)
+    return client
+
+
+def test_bind_agent_production_does_not_pin(monkeypatch):
+    """On the prod backend (el_environment='production') the bind must NOT touch
+    the phone's environment — production keeps EL's default."""
+    _wire_bind_endpoint(monkeypatch, el_environment="production")
+    pins: list = []
+    monkeypatch.setattr(
+        sa, "set_phone_environment", lambda *a, **k: pins.append(a)
+    )
+
+    payload = sa.BindAgentRequest(
+        elevenlabsAgentId="agent_prod",
+        phoneNumber=PHONE,
+        elevenlabsPhoneNumberId=PHONE_ID,
+    )
+    result = asyncio.run(
+        sa.bind_agent(org_id="org-existing", payload=payload, _user=_super_admin_user())
+    )
+
+    assert pins == []  # never pinned on production
+    assert result.environment is None
+
+
+def test_bind_agent_pins_via_lookup_when_phone_id_missing(monkeypatch):
+    """n8n didn't pass elevenlabsPhoneNumberId → the bind resolves it from the
+    agent binding (fetch_phone_meta_for_agent) and still pins uat."""
+    _wire_bind_endpoint(monkeypatch, el_environment="uat")
+    monkeypatch.setattr(
+        sa, "fetch_phone_meta_for_agent",
+        lambda aid: {"phone_number": PHONE, "phone_number_id": "phnum_looked_up",
+                     "environment": None},
+    )
+    pins: list = []
+    monkeypatch.setattr(
+        sa, "set_phone_environment",
+        lambda pid, env, aid=None: pins.append((pid, env, aid)),
+    )
+
+    payload = sa.BindAgentRequest(elevenlabsAgentId="agent_no_phone_id")
+    result = asyncio.run(
+        sa.bind_agent(org_id="org-existing", payload=payload, _user=_super_admin_user())
+    )
+
+    assert pins == [("phnum_looked_up", "uat", "agent_no_phone_id")]
+    assert result.environment == "uat"
+
+
+def test_bind_agent_pin_failure_is_best_effort(monkeypatch):
+    """A pin failure must NOT fail the bind: the agent is already bound, verify
+    still runs, the org row is written, and environment is reported as None."""
+    client = _wire_bind_endpoint(monkeypatch, el_environment="uat")
+
+    def _boom(*a, **k):
+        raise RuntimeError("EL down")
+
+    monkeypatch.setattr(sa, "set_phone_environment", _boom)
+
+    payload = sa.BindAgentRequest(
+        elevenlabsAgentId="agent_pin_fails",
+        phoneNumber=PHONE,
+        elevenlabsPhoneNumberId=PHONE_ID,
+    )
+    result = asyncio.run(
+        sa.bind_agent(org_id="org-existing", payload=payload, _user=_super_admin_user())
+    )
+
+    assert result.elevenlabs_agent_id == "agent_pin_fails"
+    assert result.environment is None
+    # The org row was still written despite the pin failure.
+    org_updates = [v for (t, v) in client.store["updates"] if t == "organizations"]
+    assert len(org_updates) == 1
 
 
 def test_bind_agent_endpoint_404_when_org_missing(monkeypatch):

@@ -245,8 +245,8 @@ def _list_phone_numbers() -> list[dict]:
 
 
 def fetch_phone_meta_for_agent(agent_id: str) -> dict:
-    """Return ``{"phone_number", "phone_number_id"}`` for the Twilio number
-    bound to ``agent_id`` in ElevenLabs.
+    """Return ``{"phone_number", "phone_number_id", "environment"}`` for the
+    Twilio number bound to ``agent_id`` in ElevenLabs.
 
     ``phone_number_id`` is the ElevenLabs resource id — the
     ``agent_phone_number_id`` the outbound-call API requires, distinct from the
@@ -276,6 +276,9 @@ def fetch_phone_meta_for_agent(agent_id: str) -> dict:
     return {
         "phone_number": chosen.get("phone_number"),
         "phone_number_id": chosen.get("phone_number_id"),
+        # The environment this number is pinned to in ElevenLabs (drives
+        # {{system__env_api_host}} routing). ``None`` → EL default 'production'.
+        "environment": (chosen.get("assigned_agent") or {}).get("environment"),
     }
 
 
@@ -293,6 +296,42 @@ def _store_phone_on_org(
     if phone_number_id:
         patch["elevenlabs_phone_number_id"] = phone_number_id
     db.table("organizations").update(patch).eq("id", str(org_id)).execute()
+
+
+def set_phone_environment(
+    phone_number_id: str, environment: str, agent_id: str | None = None
+) -> None:
+    """Pin an ElevenLabs phone number to an ENVIRONMENT (env-var routing).
+
+    Sets the phone's ``environment`` via ``PATCH /v1/convai/phone-numbers/{id}``
+    so ElevenLabs resolves ``{{system__env_api_host}}`` (shared tools + the
+    conversation-init webhook) to the matching backend for every call on this
+    number. A phone *resource* write — distinct from agent config — so it goes
+    direct (like ``_list_phone_numbers``), NOT through ``patch_agent_safely``.
+
+    PATCH is partial; we carry the current ``agent_id`` when supplied as the
+    safe mirror of the webhook-PATCH lesson (EL has rejected sibling-less
+    patches). Raises ``ElevenLabsWriteError`` on a non-2xx response.
+    """
+    key = settings.elevenlabs_api_key or os.environ.get("ELEVENLABS_API_KEY", "")
+    if not key:
+        raise ElevenLabsWriteError(
+            "ELEVENLABS_API_KEY not configured; cannot set phone environment."
+        )
+    body: dict[str, Any] = {"environment": environment}
+    if agent_id:
+        body["agent_id"] = agent_id
+    with httpx.Client(base_url=EL_BASE, timeout=_TIMEOUT) as c:
+        r = c.patch(
+            f"/v1/convai/phone-numbers/{phone_number_id}",
+            headers={"xi-api-key": key},
+            json=body,
+        )
+    if r.status_code not in (200, 204):
+        raise ElevenLabsWriteError(
+            f"PATCH /v1/convai/phone-numbers/{phone_number_id} failed: "
+            f"{r.status_code} {r.text[:300]}"
+        )
 
 
 # ─── B.3 Prompt template ─────────────────────────────────────────────────────

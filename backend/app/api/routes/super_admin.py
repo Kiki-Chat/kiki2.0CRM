@@ -8,6 +8,7 @@ The CREATE endpoint is a thin wrapper around app.services.provisioning.provision
 — the same code path the existing POST /api/heykiki/provision uses with the
 master secret. Super-admin auth replaces the master-secret check.
 """
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -16,11 +17,19 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_super_admin
+from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.schemas.provision import ProvisionRequest
-from app.services.agent_config import configure_agent, verify_agent_health
+from app.services.agent_config import (
+    configure_agent,
+    fetch_phone_meta_for_agent,
+    set_phone_environment,
+    verify_agent_health,
+)
 from app.services.history_import import import_agent_history
 from app.services.provisioning import provision_org
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/super-admin", tags=["super-admin"])
 
@@ -537,6 +546,10 @@ class BindAgentResponse(BaseModel):
     elevenlabs_agent_id: str
     phone_number: str | None
     elevenlabs_phone_number_id: str | None
+    # The ElevenLabs environment this number was pinned to during the bind
+    # (``"uat"`` on the UAT backend, ``None`` otherwise — prod keeps EL's
+    # default 'production'). Lets the super-admin UI confirm the pin took.
+    environment: str | None = None
     verify: AgentHealthReport
 
 
@@ -584,6 +597,39 @@ async def bind_agent(
 
     await run_in_threadpool(_bind)
 
+    # Pin the phone to the UAT environment so ElevenLabs resolves
+    # {{system__env_api_host}} (shared tools + the conversation-init webhook) to
+    # the UAT backend for every call on this number. UAT-ONLY: the prod backend
+    # (el_environment='production') leaves the phone at EL's default 'production',
+    # and n8n / the /provision path are untouched — "production remains the same".
+    # Best-effort: a pin failure must NOT fail the bind (the agent is already
+    # bound); it's logged and surfaced as environment=None.
+    pinned_environment: str | None = None
+    if settings.el_environment == "uat":
+        def _pin() -> str | None:
+            phone_id = (payload.elevenlabs_phone_number_id or "").strip()
+            if not phone_id:
+                # n8n didn't pass the id — resolve it from the agent binding.
+                phone_id = (
+                    fetch_phone_meta_for_agent(agent_id).get("phone_number_id") or ""
+                )
+            if not phone_id:
+                logger.warning(
+                    "bind-agent: no phone_number_id for org %s agent %s; "
+                    "skipped environment pin.", org_id, agent_id,
+                )
+                return None
+            set_phone_environment(phone_id, "uat", agent_id)
+            return "uat"
+
+        try:
+            pinned_environment = await run_in_threadpool(_pin)
+        except Exception:  # noqa: BLE001 — never fail the bind over the pin
+            logger.warning(
+                "bind-agent: environment pin failed for org %s agent %s",
+                org_id, agent_id, exc_info=True,
+            )
+
     # Read-only verify gate — never writes to the agent.
     report = await run_in_threadpool(verify_agent_health, org_id, agent_id)
 
@@ -592,6 +638,7 @@ async def bind_agent(
         elevenlabs_agent_id=agent_id,
         phone_number=payload.phone_number,
         elevenlabs_phone_number_id=payload.elevenlabs_phone_number_id,
+        environment=pinned_environment,
         verify=AgentHealthReport(**report),
     )
 
