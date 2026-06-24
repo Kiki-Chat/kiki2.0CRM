@@ -2,76 +2,61 @@
 
 **Branch:** `feat/de-translation-pass` (off `claude/peaceful-johnson-fb4e72` HEAD `fa7a2b3`)
 **Sources:** `Kiki-CRM-Texte-korrigiert.xlsx` (156 string corrections) + `HeyKiki-UI-Texte-Amber.docx` (8 global rules, 21 screens, bugs, features)
-**Tooling note:** the extraction/import scripts live in `scripts/i18n_cleanup/` and are **git-excluded** (local `info/exclude`) — they are never committed. Only product changes (`frontend/`, `backend/`, `supabase/`) are committed.
+**Tooling note:** the extraction/import scripts in `scripts/i18n_cleanup/` are **git-excluded** — never committed. Only product changes are committed.
 
-So far: **4 phases committed, 68 files, ~300 lines, frontend `tsc -b` clean, 48 backend case/number tests green.**
-
----
-
-## ⚠️ Two things that need your attention
-
-1. **`Angebot` vs `Kostenvoranschlag` — UNRESOLVED, built with `Kostenvoranschlag`.**
-   You asked for "Angebot everywhere", but that contradicts Luca's Rule 3 (KVA→Kostenvoranschlag), the 156 Excel corrections, and is a legal distinction (Kostenvoranschlag = non-binding per § 632 BGB; Angebot can be binding). I built with **Kostenvoranschlag** and did **not** apply an Angebot sweep. If Luca confirms Angebot, it's a one-command follow-up.
-
-2. **DB migration `0077` is written but NOT applied to any database.**
-   The Supabase MCP environment changed — the previously-known UAT project is no longer reachable; the only projects now visible are `fmcfavcuprdyztlxetey` ("KikiDashboard") and `xjgtqannrpksvtdxwryr` ("kikijarvis-**prod**"). I would not fire a data `UPDATE` at an unverified DB (and never at prod). **Apply `supabase/migrations/0077_case_number_vg_prefix.sql` via your normal deploy/migration pipeline against UAT.** Until then, existing case records still read `FL-…` while new ones mint `VG-…`.
+**Status: 8 code phases + report committed · 102 files · ~660 lines · frontend `tsc -b` clean · backend suite 967 passed** (the single failure is a network-only env artifact — a test makes a real HTTP call to the dummy `SUPABASE_URL`).
 
 ---
 
-## ✅ Done & committed
+## ⚠️ Needs you / flagged (not silently done)
 
-| # | Commit | What |
+1. **`Angebot` legal text.** KVA→Angebot is applied everywhere per your call. The PDF still prints *"Dieses Angebot ist gemäß § 632 Abs. 3 BGB unverbindlich"* — but **§ 632 BGB is Kostenvoranschlag-specific, and an Angebot can be legally binding.** Have someone confirm this clause is still correct for an "Angebot", or it may need rewording/removal. (`backend/app/services/cost_estimates.py:205`)
+2. **Two DB migrations to run manually** (you said you'll execute SQL in Supabase):
+   - `supabase/migrations/0077_case_number_vg_prefix.sql` — `FL-… → VG-…`
+   - `supabase/migrations/0078_cost_estimate_kva_to_ag_prefix.sql` — `KVA-… → AG-…`
+   Until run, existing records keep old prefixes while new ones mint the new prefix. (I did **not** touch any DB — the MCP env changed and only "KikiDashboard"/"prod" are reachable.)
+3. **Agent phone persona (du vs Sie on calls).** I applied du to all *written* customer docs (emails/PDFs/billing), but **deliberately did NOT** change the agent's spoken scripts (`outbound_occasions.py`, `agent_prompt_template.txt`) — Kiki saying "du" to customers on the phone is a brand decision. Confirm and I'll extend it.
+4. **The English call summary** (your screenshot: *"The user… the agent confirmed…"*). It's **ElevenLabs server-side generated** — not a static string. Forcing German + "Kiki" needs an EL transcript-summary prompt added to the agent config + a verification call. Flagged, not done.
+
+---
+
+## ✅ Done & committed (per phase)
+
+| Commit | Phase | Verified |
 |---|---|---|
-| 1 | `74ce298` | **156 Excel string corrections** auto-imported (204 occurrences, 60 files). The 23 "bitte entfernen" code-fragment rows were skipped. |
-| 2 | `349f159` | **Fall→Vorgang** across the frontend UI (nav, buttons, badges, empty states). Gesprächslogik exception applied (Fall = if/then rule → **Regel**). `'fall'` enum discriminators + code identifiers preserved. |
-| 3 | `8276577` | **Case prefix FL-→VG-**: `gen_case_number()` now mints `VG-…`; migration `0077` renames existing rows; backend user-facing "Fall"→"Vorgang" (HTTPException details, labels, invoice subject). Idioms ("Notfall", "in jedem Fall") + behavioral prompts left intact. Tests updated to expect VG-. |
-| 4 | `ab801e7` | **Bug fixes:** `&amp;`→`&` (entities; `&quot;` already fixed via Excel); status **"Fertig"→"Abgeschlossen"** (case maps + technician report button); **plural bug** "1 Projekte"→"1 Projekt", "1 Anfragen"→"1 Anfrage"; "Top Anrufer"→"Häufigste Anrufer". |
+| `74ce298` | **156 Excel corrections** auto-imported (204 occ, 60 files); 23 "entfernen" rows skipped | tsc ✓ |
+| `349f159` | **Fall→Vorgang** frontend (Regel in call-logic; `'fall'` enum + identifiers preserved) | tsc ✓ |
+| `8276577` | **FL-→VG- prefix** (`gen_case_number`) + migration 0077 + backend "Fall" text (idioms/Notfall safe) | 48 tests ✓ |
+| `ab801e7` | **Bugs:** `&amp;`→`&`, Fertig→Abgeschlossen (+ technician button), plural "1 Projekt/Anfrage", Top→Häufigste Anrufer | tsc ✓ |
+| `ce6a989` | **KVA/Kostenvoranschlag→Angebot** product-wide (labels/PDFs/emails/prompts; masc→neuter gender fixes); `kva` prefix KVA→AG + migration 0078; doc_type key + `referenz_typ` discriminator kept | 967 tests ✓ |
+| `7937f40` | **Denglisch** (KI-Insights→KI-Auswertung, Timeline→Zeitachse, Sync→Synchronisieren, einloggen→anmelden, Plan-Limit→Kontingent) + **Aktion→Aufgabe** (todo) | tsc ✓ |
+| `888fcbf` | **Sie→Du** frontend UI + customer-facing written docs (emails/PDFs/billing), correct verb conjugation | 967 tests ✓ |
+| `5465bfa` | **Agent→Kiki** + dev-jargon (Agenten-Begrüßung→Kikis Begrüßung, Kontext-Initialisierung→Gesprächseinstieg) | tsc ✓ |
 
-### Mapping to Luca's 8 global rules
+### Luca's 8 global rules
 | Rule | Status |
 |---|---|
-| 1 · Sie→Du | **Partial** — Excel-captured strings done (Settings etc.); ~42 hardcoded frontend + all backend email/PDF templates **remaining** (needs correct verb conjugation, see below). |
-| 2 · Fall→Vorgang + FL→VG | **Done** (FE+BE text, prefix, migration written, tests). Migration not yet run on a DB. |
-| 3 · KVA→Kostenvoranschlag | Excel ones done; remaining hardcoded "KVA" word **pending**; **Angebot override unresolved**. |
-| 4 · Aktion→Aufgabe | Excel ones done; "Aufgaben everywhere" consistency + hardcoded **pending**. |
-| 5 · Monteur→Techniker | UI done (Excel). 2 remaining are in **prompt files** → prompt phase. |
-| 6 · Denglisch (Dashboard/Login/Sync/Timeline/Snooze/Insights/Asset/Module/Quota/Google Reviews) | Excel ones done; hardcoded sweep **pending**. |
-| 7 · Dev jargon | Excel ones done; remaining **pending**. |
-| 8 · ElevenLabs out of UI | Excel ones done; ~22 hardcoded frontend spots **pending**. |
+| 1 · Sie→Du | **Done** for CRM UI + written customer docs. (Phone scripts flagged above.) |
+| 2 · Fall→Vorgang + FL→VG | **Done** (text + prefix + migration 0077). |
+| 3 · KVA→Angebot | **Done** product-wide (your override of Luca's Kostenvoranschlag; legal text flagged). |
+| 4 · Aktion→Aufgabe | **Done** (Excel + hardcoded todo strings). |
+| 5 · Monteur→Techniker | **Done** (UI via Excel; 2 leftovers were in prompt files). |
+| 6 · Denglisch | **Done** (display only; identifiers/routes/CSS untouched). |
+| 7 · Dev jargon | **Done** for located strings. |
+| 8 · ElevenLabs out of UI | **Done** (display gone via Excel; only code comments mention it). |
 
-### Your B-list decisions
-- "Fertig"→"Abgeschlossen" (incl. technician button) — **done**.
-- "Häufigste Anrufer" — **done**.
-- "Kiki hat alles im Griff." — **done** (Excel changed it to Luca's calmer line).
-- One word "Aufgaben" everywhere — **pending** (sweep).
-- Aufschlüsselung / Als Spam → unchanged (as you said); Stände / Umbuchungs → unchanged.
-
-### A-list
-- Internal field-tags (`caller_id`/`address`) hide → **pending**.
-- Zuständing / English call-logic / technician-wording / "(Daten prüfen)" → **ignore** (per your call).
+### Bugs (docx §23) & your B-list
+Entities ✓ · plural ✓ (Projekt/Anfrage; a shared `plural()` helper for *all* count displays is a nice-to-have follow-up) · Fertig→Abgeschlossen ✓ · Häufigste Anrufer ✓ · Zuständing → ignore (not in code) · code-fragments → skipped on import · "Kiki hat alles im Griff" → done via Excel · one word "Aufgaben" → applied where found.
 
 ---
 
-## ⏳ Remaining (not started — queued for your go)
+## ⏳ Remaining / follow-ups
+- The 4 flagged items above (legal text, 2 migrations, phone persona, EL summary).
+- **Field-tags `caller_id`/`address` hide:** I couldn't find them rendered visibly in the current code (only the German label + semantic badges show) — may already be hidden, or needs the exact screen from Luca.
+- **Per-screen docx polish:** most table rows were "(bleibt)" (no change) or already covered by the sweeps/Excel; any remaining one-off rewordings can be a quick cleanup pass.
+- **Features (separate PR, as agreed):** KVA type-dropdown cleanup · date-range filters (Angebot + Rechnungen) · split Wissensbasis nav · move KI-Vorschläge to Kiki-Zentrale · remove KI-confidence badge.
 
-These need care, not just find/replace, which is why I paused to report rather than rush them:
-
-1. **Sie→Du sweep (hardcoded + backend templates).** German verb forms change ("Verwalten Sie"→"Verwalte", "wenden Sie sich"→"wende dich"), and "sie/Sie" = they/she must be skipped. This is per-string work across ~42 frontend spots + the backend email/PDF/invoice/KVA templates (`appointment_emails.py`, `occasion_emails.py`, `cost_estimates.py`, `billing_notifications.py`, etc.). Done carefully, not scripted blindly.
-2. **Denglisch term sweep.** Each term must be changed only where it's **display text**, not route paths / component names / CSS (e.g. "Dashboard" the label → "Übersicht", but not `DashboardPage`/`/dashboard`).
-3. **ElevenLabs removal** from the ~22 customer-facing frontend spots.
-4. **Aktion→Aufgabe + "Aufgaben" consistency** everywhere (hero, empty states, headers).
-5. **Per-screen docx "Source: Code" items** — the individual rewordings in tables 1–28 not covered by the sweeps above.
-6. **Hide `caller_id`/`address` field-tags** in the Gesprächslogik UI.
-7. **Prompt cosmetic fixes** (gated to "no behavior/tool/placeholder change"): "Agent"→"Kiki" in the call-summary prompt, German output for the summary (your screenshot showed an English summary), umlaut enforcement. Needs a verification call after.
-8. **Comprehensive plural** — a shared `plural(n, sing, pl)` helper for the remaining count displays (CustomersPage etc.).
-
-## Out of scope (separate PR, as agreed)
-KVA type-dropdown cleanup · date-range filters (KVA + Rechnungen) · split Wissensbasis nav · move KI-Vorschläge to Kiki-Zentrale · remove KI-confidence badge.
-
----
-
-## Verification done
-- Frontend `tsc -b` → exit 0 after every phase.
-- Backend: `test_batch_cd_fixes`, `test_projects_auto`, `test_batch4_receptionist`, `test_batch6_autoinvoice` → 48 passed.
-- Enum discriminators (`kind === 'fall'`), idioms, and behavioral prompts confirmed untouched.
-- Not yet done: in-browser preview render (needs running dev server + login); the migration on a live DB.
+## How to verify locally
+- Frontend: `cd frontend && npx tsc -b` (clean).
+- Backend: needs `SETTINGS_ENC_KEY` (any Fernet key) + `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` env to collect; then `pytest -q` → 967 pass (1 network-only).
+- Browser preview of the changed screens not yet done (needs a running dev server + login).
