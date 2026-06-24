@@ -190,7 +190,7 @@ function HeroDeck() {
                 : `${total} ${total === 1 ? `${taskNoun} wartet` : `${taskNounPl} warten`} auf Sie`}
             </p>
             <p className="mt-0.5 text-[11px] font-medium text-muted">
-              {callsCount} Anrufe · {casesCount} Fälle · {total} offen
+              {callsCount} Anrufe · {casesCount} Vorgänge · {total} offen
             </p>
           </div>
         {total > 1 && (

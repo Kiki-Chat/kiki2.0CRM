@@ -48,7 +48,7 @@ function DecisionCard({
           <TypeTag type={d.type} label={d.typeLabel} />
         </div>
 
-        {/* Which case (Fall) this decision belongs to — point 2/6. */}
+        {/* Which case (Vorgang) this decision belongs to — point 2/6. */}
         {d.caseName && (
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, maxWidth: '100%', marginBottom: 11, padding: '5px 11px', background: 'var(--green-tint-50)', borderRadius: 'var(--radius-md)' }}>
             <Folder size={13} color="var(--green-deep)" style={{ flexShrink: 0 }} />
@@ -90,8 +90,8 @@ export function PosteingangPage() {
   const taskNoun = isAdmin ? 'Entscheidung' : 'Aufgabe'
   const taskNounPl = isAdmin ? 'Entscheidungen' : 'Aufgaben'
   const introCopy = isAdmin
-    ? 'Kiki hat Ihre Anrufe bearbeitet und in Fälle sortiert. Hier treffen Sie die offenen Entscheidungen — die Fälle selbst finden Sie unter „Fälle".'
-    : 'Das sind Ihre offenen Aufgaben — was Kiki für Sie vorbereitet hat und worauf Sie reagieren müssen. Die Fälle selbst finden Sie unter „Fälle".'
+    ? 'Kiki hat Ihre Anrufe bearbeitet und in Vorgänge sortiert. Hier treffen Sie die offenen Entscheidungen — die Vorgänge selbst finden Sie unter „Vorgänge".'
+    : 'Das sind Ihre offenen Aufgaben — was Kiki für Sie vorbereitet hat und worauf Sie reagieren müssen. Die Vorgänge selbst finden Sie unter „Vorgänge".'
   const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
   // Optimistic assignee overrides per inquiry: assigneeId on a decision is derived
   // from the windowed calls list, so a fresh assignment may not be reflected by the

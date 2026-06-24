@@ -86,7 +86,7 @@ export function ProjectsPage() {
           <FolderOpen size={26} className="text-green-primary" />
           <div>
             <h1 className="text-2xl font-bold text-text">Projekte</h1>
-            <p className="mt-0.5 text-sm text-muted">{projects.length} Projekte · {activeProjects.length} offen — übergeordnete Aufträge, die mehrere Fälle bündeln</p>
+            <p className="mt-0.5 text-sm text-muted">{projects.length} Projekte · {activeProjects.length} offen — übergeordnete Aufträge, die mehrere Vorgänge bündeln</p>
           </div>
         </div>
         <button
@@ -127,7 +127,7 @@ export function ProjectsPage() {
         </div>
       </div>
 
-      {/* Cards — a lean Fall is a ticket: customer + the call(s) and the five things
+      {/* Cards — a lean Vorgang is a ticket: customer + the call(s) and the five things
           (Anfragen/Anrufe · Termine · KVA · Rechnungen · Mitarbeiter). No budget/dates. */}
       <div className="space-y-3">
         {filtered.map((p) => {

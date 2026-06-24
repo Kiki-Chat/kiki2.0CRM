@@ -105,7 +105,7 @@ export function CallDrawer({ callId, onClose }: { callId: string | null; onClose
                 {c.emergency && <NotdienstBadge small />}
               </div>
 
-              {/* Read-only Fall indicator (triage moved to the Anrufe cockpit). */}
+              {/* Read-only Vorgang indicator (triage moved to the Anrufe cockpit). */}
               {c.vorgangProblem ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', background: 'var(--green-tint-50)', borderRadius: 'var(--radius-lg)', marginBottom: 18 }}>
                   <Folder size={16} color="var(--green-deep)" />

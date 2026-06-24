@@ -62,7 +62,7 @@ export function MoveMenu({
           toggle()
         }}
         className="rounded p-1 text-faint hover:bg-border"
-        title="In anderen Fall verschieben"
+        title="In anderen Vorgang verschieben"
       >
         <MoreVertical size={15} />
       </button>
@@ -78,14 +78,14 @@ export function MoveMenu({
             >
               {currentCaseId && (
                 <button onClick={() => move.mutate({ case_id: null })} className={itemCls}>
-                  Aus Fall lösen
+                  Aus Vorgang lösen
                 </button>
               )}
               <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Vorgang verschieben</div>
               {others.length > 0 ? (
                 others.map((c) => (
                   <button key={c.id} onClick={() => move.mutate({ case_id: c.id })} className={itemCls}>
-                    → {c.label || 'Fall'}
+                    → {c.label || 'Vorgang'}
                     {c.number ? <span className="ml-1 font-mono text-xs text-muted">{c.number}</span> : null}
                   </button>
                 ))
@@ -94,12 +94,12 @@ export function MoveMenu({
               )}
               <button
                 onClick={() => {
-                  const l = window.prompt('Neuer Fall — Thema:')
+                  const l = window.prompt('Neuer Vorgang — Thema:')
                   if (l) move.mutate({ new_case_label: l })
                 }}
                 className="block w-full rounded px-2.5 py-1.5 text-left text-sm font-medium text-green-deep hover:bg-alt"
               >
-                ＋ Neuer Fall…
+                ＋ Neuer Vorgang…
               </button>
             </div>
           </>,
@@ -161,13 +161,13 @@ export function GroupingReviewModal({
           disabled={apply.isPending || picked.size === 0}
           className="w-full rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
         >
-          {picked.size} Fälle übernehmen
+          {picked.size} Vorgänge übernehmen
         </button>
       }
     >
       <div className="space-y-2">
         <p className="text-xs text-muted">
-          {proposal.n_inquiries} Anfragen analysiert ({proposal.model}). Haken = als einen Fall bündeln; einzelne Anfragen
+          {proposal.n_inquiries} Anfragen analysiert ({proposal.model}). Haken = als einen Vorgang bündeln; einzelne Anfragen
           kannst du danach jederzeit verschieben.
         </p>
         {merges.length === 0 && <p className="py-6 text-center text-sm text-muted">Kein Bündelungsvorschlag — alle Anfragen wirken eigenständig.</p>}

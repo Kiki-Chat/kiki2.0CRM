@@ -202,7 +202,7 @@ function EmptyHint({ text }: { text: string }) {
 function TicketLoad({ n }: { n: number }) {
   const tone = n >= 5 ? 'bg-error-bg text-error' : n >= 3 ? 'bg-warning-bg text-warning' : 'bg-alt text-muted'
   return (
-    <span className={cn('ml-auto shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold', tone)} title={`${n} offene Fälle`}>
+    <span className={cn('ml-auto shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold', tone)} title={`${n} offene Vorgänge`}>
       {n} offen
     </span>
   )
@@ -345,7 +345,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
 
   const apptCall = {
     customer_id: customerId,
-    summary_title: cs.label ?? 'Fall',
+    summary_title: cs.label ?? 'Vorgang',
     summary: '',
     customers: cs.customer ? { full_name: cs.customer.full_name, phone: cs.customer.phone } : null,
     data_collection: {},
@@ -373,7 +373,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
             <span className="grid h-[58px] w-[58px] flex-shrink-0 place-items-center rounded-full bg-alt text-xl font-extrabold text-body ring-1 ring-inset ring-border">{initials(cs.customer?.full_name ?? '?')}</span>
             <div className="min-w-0 flex-1">
               <h1 className="font-poster text-[26px] font-extrabold leading-tight text-text">{cs.customer?.full_name ?? 'Kunde'}</h1>
-              <div className="mt-0.5 text-[16px] text-body">{cs.label ?? 'Fall'} · <span className="font-mono text-sm text-muted">{cs.number ?? '—'}</span></div>
+              <div className="mt-0.5 text-[16px] text-body">{cs.label ?? 'Vorgang'} · <span className="font-mono text-sm text-muted">{cs.number ?? '—'}</span></div>
             </div>
           </div>
           <div className="mt-4 flex flex-col gap-2.5">
@@ -478,7 +478,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                 </Fragment>
               ))}
             </GroupedTable>
-          ) : <EmptyHint text="Noch keine Anfragen in diesem Fall." />}
+          ) : <EmptyHint text="Noch keine Anfragen in diesem Vorgang." />}
         </BigCard>
 
         {/* TERMINE */}

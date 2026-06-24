@@ -132,7 +132,7 @@ function LogTableRow({
         </div>
       </td>
 
-      {/* 6 — Fall / Anfrage (case) */}
+      {/* 6 — Vorgang / Anfrage (case) */}
       <td className={td}>
         <div className="flex max-w-[190px] flex-col items-start gap-1">
           {link ? (
@@ -145,11 +145,11 @@ function LogTableRow({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') e.stopPropagation()
               }}
-              title={`${link.kind === 'fall' ? 'Fall' : 'Anfrage'} öffnen${link.title ? ` · ${link.title}` : ''}`}
+              title={`${link.kind === 'fall' ? 'Vorgang' : 'Anfrage'} öffnen${link.title ? ` · ${link.title}` : ''}`}
               className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-green-primary/40 bg-green-tint-50 px-2 py-0.5 font-mono text-[11px] font-bold text-green-deep transition hover:bg-green-tint-100"
             >
               <Folder size={11} className="flex-shrink-0" />
-              <span className="truncate">{link.number ?? (link.kind === 'fall' ? 'Fall' : 'Anfrage')}</span>
+              <span className="truncate">{link.number ?? (link.kind === 'fall' ? 'Vorgang' : 'Anfrage')}</span>
               <ChevronRight size={11} className="flex-shrink-0 opacity-60" />
             </button>
           ) : (

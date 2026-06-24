@@ -609,12 +609,12 @@ export function Workspace({
           <div className="mb-3.5 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => navigate(`/fall/${caseId}`)}
-              title="Zum Fall (alle Anfragen, Termine, KVA, Rechnungen, Techniker)"
+              title="Zum Vorgang (alle Anfragen, Termine, KVA, Rechnungen, Techniker)"
               className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-ai-bg bg-ai-bg px-2.5 py-1.5 text-xs font-bold text-ai transition hover:brightness-95"
             >
               <Layers size={13} className="flex-shrink-0" />
               <span className="truncate">
-                Fall {call.case_number ?? ''}
+                Vorgang {call.case_number ?? ''}
                 {call.case_label ? ` · ${call.case_label}` : ''}
               </span>
               <ChevronRight size={13} className="flex-shrink-0" />

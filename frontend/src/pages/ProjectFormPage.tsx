@@ -165,7 +165,7 @@ export function ProjectFormPage() {
             <div className="flex items-center gap-2.5 rounded-lg border border-green-tint-200 bg-green-tint-50 px-3.5 py-2.5 text-sm text-green-deep">
               <Link2 size={16} className="flex-shrink-0" />
               <span>
-                Der Fall <span className="font-bold">{attachCaseNumber || 'FL-…'}</span> wird diesem Projekt zugeordnet — Kunde &amp; Adresse sind bereits übernommen.
+                Der Vorgang <span className="font-bold">{attachCaseNumber || 'FL-…'}</span> wird diesem Projekt zugeordnet — Kunde &amp; Adresse sind bereits übernommen.
               </span>
             </div>
           )}

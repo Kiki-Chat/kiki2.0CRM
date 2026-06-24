@@ -370,7 +370,7 @@ function CasesTab({ project }: { project: Project }) {
         <h3 className="text-sm font-bold text-text">Vorgänge in diesem Projekt <span className="text-muted">({members.length})</span></h3>
         <div className="relative">
           <button onClick={() => setAdding((o) => !o)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-sm font-semibold text-white hover:brightness-105">
-            <Plus size={15} /> Fall hinzufügen
+            <Plus size={15} /> Vorgang hinzufügen
           </button>
           {adding && (
             <>
@@ -379,7 +379,7 @@ function CasesTab({ project }: { project: Project }) {
                 <div className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wide text-faint">Vorgang des Kunden zuordnen</div>
                 {candidates.length ? candidates.map((c) => (
                   <button key={c.id} onClick={() => attach.mutate(c.id)} className="block w-full rounded-lg px-2.5 py-2 text-left hover:bg-alt">
-                    <div className="truncate text-sm font-semibold text-text">{c.title || 'Fall'}</div>
+                    <div className="truncate text-sm font-semibold text-text">{c.title || 'Vorgang'}</div>
                     <div className="truncate text-xs text-muted">{c.customer_name ?? '—'} · {c.number} · {c.stats.calls} Anrufe · {c.stats.inquiries} Anfragen</div>
                   </button>
                 )) : <p className="px-2.5 py-3 text-xs text-muted">Keine freien Vorgänge für diesen Kunden.</p>}
@@ -398,7 +398,7 @@ function CasesTab({ project }: { project: Project }) {
                 <div className="flex items-start justify-between gap-3">
                   <button onClick={() => navigate(`/cases?case=${c.id}`)} className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-base font-bold text-text">{c.title || 'Fall'}</span>
+                      <span className="truncate text-base font-bold text-text">{c.title || 'Vorgang'}</span>
                       <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium', sm.cls)}>{sm.label}</span>
                       {c.emergency && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-error" title="Notdienst" />}
                     </div>
@@ -418,7 +418,7 @@ function CasesTab({ project }: { project: Project }) {
         </div>
       ) : (
         <div className="rounded-xl border border-dashed border-border bg-surface px-4 py-12 text-center text-muted">
-          Noch keine Fälle zugeordnet. Über „Fall hinzufügen" einen Fall des Kunden anhängen — seine Anrufe, KVA, Rechnungen und Mitarbeiter erscheinen dann automatisch in den übrigen Tabs.
+          Noch keine Vorgänge zugeordnet. Über „Vorgang hinzufügen" einen Vorgang des Kunden anhängen — die Anrufe, Kostenvoranschläge, Rechnungen und Mitarbeiter des Kunden erscheinen dann automatisch in den übrigen Tabs.
         </div>
       )}
     </div>

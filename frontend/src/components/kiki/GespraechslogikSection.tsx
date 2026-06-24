@@ -448,14 +448,14 @@ function RuleEditor({ rule, depth, guideFields, onChange }: { rule: LogicRule; d
           }}
           className="rounded-md border border-warning/40 bg-warning-bg/40 px-2.5 py-1.5 text-xs font-semibold text-warning hover:bg-warning-bg"
         >
-          + Weiterer Fall (andernfalls, wenn …)
+          + Weitere Regel (andernfalls, wenn …)
         </button>
         {!hasSonst && (
           <button
             onClick={() => onChange({ ...rule, branches: [...rule.branches, newBranch('sonst')] })}
             className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-semibold text-muted hover:bg-alt"
           >
-            + Auffang-Fall (alle anderen)
+            + Auffang-Regel (alle anderen)
           </button>
         )}
       </div>

@@ -501,7 +501,7 @@ export function TeamTab({ project }: { project: ProjectLite }) {
         <button
           onClick={() => { if (!hasNoCases) setAddOpen(true) }}
           disabled={hasNoCases}
-          title={hasNoCases ? 'Zuerst einen Fall zum Projekt hinzufügen' : undefined}
+          title={hasNoCases ? 'Zuerst einen Vorgang zum Projekt hinzufügen' : undefined}
           className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Plus size={14} /> Mitarbeiter hinzufügen
@@ -509,7 +509,7 @@ export function TeamTab({ project }: { project: ProjectLite }) {
       </div>
       {hasNoCases && (
         <div className="rounded-xl border border-border bg-alt px-4 py-3 text-sm text-muted">
-          Fügen Sie dem Projekt zuerst einen Fall hinzu, um Mitarbeiter zuzuweisen.
+          Fügen Sie dem Projekt zuerst einen Vorgang hinzu, um Mitarbeiter zuzuweisen.
         </div>
       )}
       {team.length ? (

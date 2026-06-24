@@ -82,7 +82,7 @@ function CaseRow({ c, active, onSelect }: { c: CaseListRow; active: boolean; onS
       <CaseAvatar name={c.customer_name} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[17px] font-extrabold text-text">{c.customer_name || 'Unbekannt'}</div>
-        <div className="mt-0.5 truncate text-[14.5px] text-muted">{c.title || 'Fall'}</div>
+        <div className="mt-0.5 truncate text-[14.5px] text-muted">{c.title || 'Vorgang'}</div>
       </div>
       <div className="flex flex-shrink-0 items-center gap-2">
         {c.emergency && <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-error" title="Notdienst" />}

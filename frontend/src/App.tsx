@@ -80,7 +80,7 @@ export default function App() {
               <Route path="customers" element={<CustomersPage />} />
               <Route path="customers/:id" element={<CustomerDetailPage />} />
               <Route path="vorgang/:id" element={<VorgangThreadPage />} />
-              {/* Cases are now the split view at /cases; deep-links to a single Fall
+              {/* Cases are now the split view at /cases; deep-links to a single Vorgang
                   pre-select it in that view. */}
               <Route path="fall/:id" element={<FallRedirect />} />
               <Route path="calendar" element={<CalendarPage />} />

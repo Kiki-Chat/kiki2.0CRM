@@ -249,7 +249,7 @@ function buildVorgaenge(calls: RawCall[], actions: RawAction[]): VorgangVM[] {
         .map((c) => ({ id: c.id, dir: c.direction === 'outbound' ? 'outbound' : 'inbound', title: c.summary_title || 'Anruf', time: rel(c.started_at || c.created_at), ts: ts(c.started_at) })),
       custId: latest.customer_id,
       customer: latest.customers?.full_name || latest.caller_number || 'Unbekannt',
-      problem: (isCase ? latest.case_label : latest.inquiry_subject) || latest.summary_title || 'Fall',
+      problem: (isCase ? latest.case_label : latest.inquiry_subject) || latest.summary_title || 'Vorgang',
       ticket: isCase ? latest.case_number : latest.inquiry_number,
       calls: group.length,
       activity: rel(latest.started_at || latest.created_at),

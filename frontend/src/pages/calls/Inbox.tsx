@@ -55,7 +55,7 @@ export function CallRow({
   // The Fall (case) this call belongs to — chip deep-links into the Posteingang.
   // Key mirrors the inbox bundling: case_id (the Fall) if any, else the inquiry.
   const caseKey = call.case_id ?? call.inquiry_id
-  const caseLabel = call.case_label || call.inquiry_subject || 'Fall'
+  const caseLabel = call.case_label || call.inquiry_subject || 'Vorgang'
   const caseTicket = call.case_number || call.inquiry_number
   return (
     <div
@@ -145,7 +145,7 @@ export function CallRow({
               e.stopPropagation()
               onOpenCase(caseKey)
             }}
-            title={`Fall${caseTicket ? ` ${caseTicket}` : ''} · ${caseLabel} — im Posteingang öffnen`}
+            title={`Vorgang${caseTicket ? ` ${caseTicket}` : ''} · ${caseLabel} — im Posteingang öffnen`}
             className="mt-1.5 inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-alt px-1.5 py-0.5 text-[11px] font-bold text-muted transition-colors hover:border-green-primary hover:text-green-deep"
           >
             <Layers size={11} className="flex-shrink-0" />

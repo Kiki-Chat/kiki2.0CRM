@@ -340,12 +340,12 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
           </button>
           <button
             onClick={() => {
-              const l = window.prompt('Neuer Fall — Thema:')
+              const l = window.prompt('Neuer Vorgang — Thema:')
               if (l) createCase.mutate(l)
             }}
             className="flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-xs font-semibold text-white hover:brightness-110"
           >
-            <Plus size={14} /> Neuer Fall
+            <Plus size={14} /> Neuer Vorgang
           </button>
         </div>
       }
@@ -354,7 +354,7 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Tag variant="info">{open} offen</Tag>
           <Tag variant="success">{done} erledigt</Tag>
-          {cases.length > 0 && <Tag variant="ai">{cases.length} Fälle</Tag>}
+          {cases.length > 0 && <Tag variant="ai">{cases.length} Vorgänge</Tag>}
         </div>
         <div className="relative mb-3">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
@@ -376,10 +376,10 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
                 <button
                   onClick={() => navigate(`/fall/${cid}`)}
                   className="mb-1.5 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left transition hover:bg-ai-bg"
-                  title="Fall öffnen (alle Anfragen)"
+                  title="Vorgang öffnen (alle Anfragen)"
                 >
                   <Layers size={14} className="flex-shrink-0 text-ai" />
-                  <span className="truncate text-sm font-bold text-text">{c.label || 'Fall'}</span>
+                  <span className="truncate text-sm font-bold text-text">{c.label || 'Vorgang'}</span>
                   {c.number && <span className="font-mono text-[11px] text-ai">{c.number}</span>}
                   <span className="flex-1" />
                   <span className="text-xs text-muted">{items.length} Anfragen</span>
@@ -468,7 +468,7 @@ function MoveMenu({ inquiry, cases, onMoved }: { inquiry: Inquiry; cases: CaseRo
           setOpen((o) => !o)
         }}
         className="rounded p-1 text-faint hover:bg-border"
-        title="In anderen Fall verschieben"
+        title="In anderen Vorgang verschieben"
       >
         <MoreVertical size={15} />
       </button>
@@ -478,23 +478,23 @@ function MoveMenu({ inquiry, cases, onMoved }: { inquiry: Inquiry; cases: CaseRo
           <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-border bg-surface p-1 shadow-e3">
             {inquiry.case_id && (
               <button onClick={() => move.mutate({ case_id: null })} className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
-                Aus Fall lösen
+                Aus Vorgang lösen
               </button>
             )}
             {others.length > 0 && <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Vorgang verschieben</div>}
             {others.map((c) => (
               <button key={c.id} onClick={() => move.mutate({ case_id: c.id })} className="block w-full truncate rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
-                → {c.label || 'Fall'}
+                → {c.label || 'Vorgang'}
               </button>
             ))}
             <button
               onClick={() => {
-                const l = window.prompt('Neuer Fall — Thema:')
+                const l = window.prompt('Neuer Vorgang — Thema:')
                 if (l) move.mutate({ new_case_label: l })
               }}
               className="block w-full rounded px-2.5 py-1.5 text-left text-sm font-medium text-green-deep hover:bg-alt"
             >
-              ＋ Neuer Fall…
+              ＋ Neuer Vorgang…
             </button>
           </div>
         </>
@@ -547,13 +547,13 @@ function GroupingReviewModal({
           disabled={apply.isPending || picked.size === 0}
           className="w-full rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
         >
-          {picked.size} Fälle übernehmen
+          {picked.size} Vorgänge übernehmen
         </button>
       }
     >
       <div className="space-y-2">
         <p className="text-xs text-muted">
-          {proposal.n_inquiries} Anfragen analysiert ({proposal.model}). Haken = als einen Fall bündeln; einzelne Anfragen
+          {proposal.n_inquiries} Anfragen analysiert ({proposal.model}). Haken = als einen Vorgang bündeln; einzelne Anfragen
           kannst du danach jederzeit verschieben.
         </p>
         {merges.length === 0 && <p className="py-6 text-center text-sm text-muted">Kein Bündelungsvorschlag — alle Anfragen wirken eigenständig.</p>}

@@ -435,7 +435,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                     <Folder size={17} className="flex-shrink-0 text-green-deep" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[14px] font-bold text-green-deep">
-                        {link.title || (link.kind === 'fall' ? 'Fall' : 'Anfrage')}
+                        {link.title || (link.kind === 'fall' ? 'Vorgang' : 'Anfrage')}
                       </div>
                       {link.number && <div className="font-mono text-[11.5px] text-muted">{link.number}</div>}
                     </div>
