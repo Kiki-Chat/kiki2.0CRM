@@ -293,7 +293,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
   })
   const dismissAction = useMutation({
     mutationFn: (d: DecisionVM) => apiFetch('/api/actions/state', { method: 'POST', body: JSON.stringify({ action_key: d.actionKey, status: 'dismissed' }) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['pe'] }); flash('Aktion entfernt') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['pe'] }); flash('Aufgabe entfernt') },
   })
   const dispatchTech = useMutation({
     mutationFn: () => apiFetch(`/api/appointments/${techAppt}/dispatch-technician`, { method: 'POST', body: JSON.stringify({ employee_id: techEmp }) }),

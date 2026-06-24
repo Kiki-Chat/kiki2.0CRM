@@ -312,7 +312,7 @@ function ActionsTab({
         <>
           {appointmentSlot && (
             <div>
-              <SectionLabel>Offene Aktion</SectionLabel>
+              <SectionLabel>Offene Aufgabe</SectionLabel>
               {appointmentSlot}
             </div>
           )}

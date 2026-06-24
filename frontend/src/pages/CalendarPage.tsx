@@ -416,7 +416,7 @@ export function CalendarPage() {
             className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt disabled:opacity-60"
           >
             <RefreshCw size={15} className={syncCal.isPending ? 'animate-spin' : ''} />
-            {syncCal.isPending ? 'Synchronisiert…' : 'Sync'}
+            {syncCal.isPending ? 'Synchronisiert…' : 'Synchronisieren'}
           </button>
           <button
             onClick={() => {

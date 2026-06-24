@@ -298,7 +298,7 @@ export function PlanningBoardPage() {
                   view === v ? 'bg-surface font-semibold text-text shadow-e1' : 'font-medium text-muted',
                 )}
               >
-                {v === 'day' ? 'Tag' : 'Timeline'}
+                {v === 'day' ? 'Tag' : 'Zeitachse'}
               </button>
             ))}
           </div>

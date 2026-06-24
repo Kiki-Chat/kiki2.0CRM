@@ -22,7 +22,7 @@ const TABS = [
   { id: 'overview', label: 'Übersicht', icon: LayoutDashboard },
   { id: 'finanzen', label: 'Finanzen', icon: Euro },
   { id: 'ki-nutzung', label: 'KI-Nutzung', icon: Clock },
-  { id: 'ki-insights', label: 'KI-Insights', icon: Sparkles },
+  { id: 'ki-insights', label: 'KI-Auswertung', icon: Sparkles },
 ] as const
 
 // Current hour in Europe/Berlin, regardless of the viewer's own timezone — so

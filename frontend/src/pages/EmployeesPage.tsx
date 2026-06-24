@@ -849,7 +849,7 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
             checked={loginAccess}
             onChange={setLoginAccess}
             label="Zugang zu HeyKiki"
-            sub="Der Mitarbeiter erhält eine E-Mail-Einladung und kann sich einloggen. Zählt zum Plan-Limit."
+            sub="Der Mitarbeiter erhält eine E-Mail-Einladung und kann sich anmelden. Zählt zum gebuchten Kontingent."
           />
         </div>
         <div>
@@ -877,7 +877,7 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
           </div>
           <p className="mt-1 text-xs text-muted">Admins haben automatisch vollen Zugriff auf alle Bereiche.</p>
         </div>
-        <Check checked={active} onChange={setActive} label="Konto aktiv" sub="Inaktive Konten können sich nicht einloggen." />
+        <Check checked={active} onChange={setActive} label="Konto aktiv" sub="Inaktive Konten können sich nicht anmelden." />
         <Check
           checked={isTechnician}
           onChange={setIsTechnician}
@@ -989,7 +989,7 @@ function EditEmployeeModal({ employee, onClose }: { employee: Employee; onClose:
             <Radio checked={role === 'admin'} onChange={() => setRole('admin')} label="Admin" />
           </div>
         </div>
-        <Check checked={active} onChange={setActive} label="Konto aktiv" sub="Inaktive Konten können sich nicht einloggen." />
+        <Check checked={active} onChange={setActive} label="Konto aktiv" sub="Inaktive Konten können sich nicht anmelden." />
         <Check
           checked={isTechnician}
           onChange={setIsTechnician}
