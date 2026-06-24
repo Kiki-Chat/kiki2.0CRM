@@ -132,6 +132,13 @@ _ACCEPTED_WEBHOOK_URLS = frozenset({
     _PROD_WEBHOOK_URL,
 })
 
+# Unrendered CRM template tokens are UPPER_SNAKE ({{COMPANY_NAME}}, {{KZ_EMERGENCY}},
+# {{TRADE_SELFHELP_EXAMPLES}}, …) and MUST be gone after render. ElevenLabs dynamic
+# variables are lowercase ({{system__time}}, {{system__caller_id}}, {{customer_name}}, …)
+# and legitimately REMAIN in the prompt — EL fills them per call — so the verify gate
+# must NOT flag them. (The old "any '{{'" rule false-positived every agent.)
+_CRM_TOKEN_RE = re.compile(r"\{\{\s*[A-Z][A-Z0-9_]*\s*\}\}")
+
 # Actionable German message surfaced when an agent has no phone bound (2.3).
 NO_PHONE_MESSAGE = (
     "Keine Telefonnummer im ElevenLabs-Agent hinterlegt — bitte zuerst eine "
@@ -1618,14 +1625,20 @@ def verify_agent_health(org_id: str | UUID, agent_id: str) -> dict:
         else "'audio' fehlt in client_events — der Agent bliebe im Anruf stumm.",
     ))
 
-    # prompt_rendered — non-empty AND no unsubstituted '{{' template tokens.
+    # prompt_rendered — non-empty AND no UNRENDERED CRM token. Our tokens are
+    # UPPER_SNAKE ({{COMPANY_NAME}}, {{KZ_EMERGENCY}}, …) and must be substituted;
+    # EL dynamic variables ({{system__time}}, {{customer_name}}, …) are lowercase
+    # and legitimately REMAIN (EL fills them per call) — flagging any '{{' wrongly
+    # red-flagged every agent on its {{system__*}} variables.
     prompt = (_get_path(cfg, PROMPT_PATH) or "").strip()
-    has_unsubstituted = "{{" in prompt
-    prompt_ok = bool(prompt) and not has_unsubstituted
+    leftover = sorted(set(_CRM_TOKEN_RE.findall(prompt)))
+    prompt_ok = bool(prompt) and not leftover
     if not prompt:
         prompt_detail = "Prompt ist leer."
-    elif has_unsubstituted:
-        prompt_detail = "Prompt enthält nicht ersetzte '{{…}}'-Platzhalter."
+    elif leftover:
+        prompt_detail = (
+            "Prompt enthält nicht ersetzte Platzhalter: " + ", ".join(leftover)
+        )
     else:
         prompt_detail = "Prompt ist gesetzt und vollständig ersetzt."
     checks.append(_check("prompt_rendered", prompt_ok, prompt_detail))

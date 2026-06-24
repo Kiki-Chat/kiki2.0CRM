@@ -168,6 +168,20 @@ def test_verify_red_prompt_unsubstituted_token(monkeypatch):
     assert "{{" in prompt["detail"] or "Platzhalter" in prompt["detail"]
 
 
+def test_verify_green_keeps_el_dynamic_variables(monkeypatch):
+    # EL dynamic variables ({{system__*}} / lowercase) legitimately remain in the
+    # prompt and must NOT trip prompt_rendered — only UPPER_SNAKE CRM tokens do.
+    cfg = _green_config()
+    _set_path(
+        cfg, PROMPT_PATH,
+        "Du bist Kiki. Es ist {{system__time}}, Anrufer-Nr {{system__caller_id}}.",
+    )
+    _stub_green_environment(monkeypatch, config=cfg)
+    report = ac.verify_agent_health(ORG_ID, AGENT_ID)
+    assert _check_by_name(report, "prompt_rendered")["ok"] is True
+    assert report["ok"] is True
+
+
 def test_verify_red_override_flags_off(monkeypatch):
     cfg = _green_config()
     _set_path(
