@@ -128,7 +128,7 @@ export function CalendarPage() {
 
   // Hey-Kiki live fill: a confirmed copilot create_appointment lands here via
   // lib/liveFill — open the real create modal and let it fill itself visibly
-  // (same takeover pattern as the invoice/KVA forms). Consumed on mount AND on
+  // (same takeover pattern as the invoice/Angebot forms). Consumed on mount AND on
   // the request event, because the user may already be on /calendar.
   const [liveFill, setLiveFill] = useState<LiveFillPayload | null>(null)
   useEffect(() => {

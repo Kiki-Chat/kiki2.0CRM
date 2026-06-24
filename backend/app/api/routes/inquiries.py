@@ -234,7 +234,7 @@ async def get_inquiry_thread(
     inquiry_id: str, user: CurrentUser = Depends(require_org)
 ) -> dict:
     """The full Vorgang (case) thread: header + one chronological timeline of every
-    call (in/out), appointment, KVA and status change on this case, the raw record
+    call (in/out), appointment, Angebot and status change on this case, the raw record
     lists, and any linked/duplicate cases."""
     from app.api.routes.calls import build_case_thread
 
@@ -316,6 +316,6 @@ def _merge_case(org_id: str, child_id: str, parent_id: str) -> dict:
 async def merge_case(
     inquiry_id: str, payload: CaseMergePayload, user: CurrentUser = Depends(require_org)
 ) -> dict:
-    """Merge this Vorgang INTO another: moves its calls/appointments/KVAs onto the
+    """Merge this Vorgang INTO another: moves its calls/appointments/Angebote onto the
     target case, marks this one a closed duplicate, and links them. Reversible."""
     return await run_in_threadpool(_merge_case, user.org_id, inquiry_id, payload.into_case_id)

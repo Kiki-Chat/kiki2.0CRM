@@ -56,7 +56,7 @@ export const NAV: NavEntry[] = [
     icon: Wallet,
     label: 'Finanzen',
     children: [
-      { to: '/cost-estimates', label: 'Kostenvoranschläge' },
+      { to: '/cost-estimates', label: 'Angebote' },
       { to: '/invoices', label: 'Rechnungen' },
       { to: '/catalog', label: 'Artikel' },
     ],

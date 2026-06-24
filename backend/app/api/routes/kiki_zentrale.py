@@ -1333,7 +1333,7 @@ async def delete_category(
     return result
 
 
-# ─── KVA-Automatisierung / Preisauskunft ─────────────────────────────────────
+# ─── Angebot-Automatisierung / Preisauskunft ─────────────────────────────────────
 @router.patch("/kva-automation")
 async def update_kva_automation(payload: TogglePayload, user: CurrentUser = Depends(require_org)) -> dict:
     # Legacy toggle (no frontend caller; the field does not feed the prompt) —

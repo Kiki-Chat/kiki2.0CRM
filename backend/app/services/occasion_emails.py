@@ -48,7 +48,7 @@ def render_occasion_email(occasion: str, record: dict, customer: dict | None, or
     elif occasion == "kva_followup":
         nr = (r.get("number") or "").strip()
         betreff = (r.get("subject") or "").strip()
-        ref = f"Kostenvoranschlag {nr}" if nr else "Kostenvoranschlag"
+        ref = f"Angebot {nr}" if nr else "Angebot"
         bc = f" zum Thema „{betreff}“" if betreff else ""
         summe = f" über {de_eur(r['total'])} Euro" if r.get("total") is not None else ""
         subject = f"Nachfrage zu Ihrem {ref}"

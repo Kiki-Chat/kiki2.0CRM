@@ -196,7 +196,7 @@ export function AdminOrgsPage() {
                       {s ? (
                         <div className="space-y-0.5 text-slate-300">
                           <div><span className="text-slate-500">Anrufe:</span> <span className="font-mono">{s.calls}</span></div>
-                          <div><span className="text-slate-500">KVAs:</span> <span className="font-mono">{s.kvas_sent}</span></div>
+                          <div><span className="text-slate-500">Angebote:</span> <span className="font-mono">{s.kvas_sent}</span></div>
                           <div><span className="text-slate-500">MA:</span> <span className="font-mono">{s.employees}</span> · <span className="text-slate-500">Termine:</span> <span className="font-mono">{s.appointments}</span></div>
                         </div>
                       ) : (
@@ -285,7 +285,7 @@ export function AdminOrgsPage() {
               <h2 className="text-lg font-bold text-slate-100">Organisation löschen?</h2>
               <p className="mt-1 text-xs text-slate-400">
                 Diese Aktion ist <span className="font-semibold text-red-400">unwiderruflich</span>.
-                Alle Kunden, Anrufe, Anfragen, Termine, KVAs, Rechnungen und Benutzer dieser
+                Alle Kunden, Anrufe, Anfragen, Termine, Angebote, Rechnungen und Benutzer dieser
                 Organisation werden gelöscht.
               </p>
             </div>

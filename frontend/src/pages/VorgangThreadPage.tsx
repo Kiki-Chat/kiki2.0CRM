@@ -210,7 +210,7 @@ export function VorgangThreadPage() {
           <span className="mx-1 hidden h-5 w-px bg-border sm:block" />
           <Stat label="Anrufe" value={data.calls.length} />
           <Stat label="Termine" value={data.appointments.length} />
-          <Stat label="KVAs" value={data.cost_estimates.length} />
+          <Stat label="Angebote" value={data.cost_estimates.length} />
           <Stat label="offene Punkte" value={data.open_count} highlight={data.open_count > 0} />
         </div>
       </div>
@@ -466,7 +466,7 @@ function LinkMergeModal({
           <button
             disabled={!picked || merge.isPending}
             onClick={() => {
-              if (window.confirm('Diesen Vorgang in den gewählten zusammenführen? Anrufe, Termine und KVAs werden verschoben.'))
+              if (window.confirm('Diesen Vorgang in den gewählten zusammenführen? Anrufe, Termine und Angebote werden verschoben.'))
                 merge.mutate()
             }}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"

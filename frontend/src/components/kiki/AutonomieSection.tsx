@@ -9,7 +9,7 @@ import { Modal } from '../ui/Modal'
 import { Card, GroupLabel, Toggle, useKikiConfirm } from './shared'
 
 type CapKey = 'appointments' | 'kva' | 'projects' | 'invoices'
-// Per-capability autonomy (topics 19/21/22). Termine + KVA act in the call;
+// Per-capability autonomy (topics 19/21/22). Termine + Angebot act in the call;
 // Projekte + Rechnungen run in the background. levels[0..2] = Stufe 1..3 — but the
 // UI no longer exposes "Stufe": the on/off Toggle IS level 1 (off = record-only),
 // and when on the user picks halb- (2) or vollautomatisch (3). The stored 1/2/3
@@ -17,8 +17,8 @@ type CapKey = 'appointments' | 'kva' | 'projects' | 'invoices'
 const CAPABILITIES: { key: CapKey; label: string; hint: string; backOffice?: boolean; levels: [string, string, string] }[] = [
   { key: 'appointments', label: 'Termine', hint: 'Die Telefon-KI bucht Termine im Gespräch.',
     levels: ['Nur Anfrage aufnehmen — keine Buchung', 'Vorläufig buchen — das Team bestätigt', 'Verbindlich buchen & im Gespräch bestätigen'] },
-  { key: 'kva', label: 'Kostenvoranschläge', hint: 'Die Telefon-KI erstellt Kostenvoranschläge.',
-    levels: ['Nur Anfrage aufnehmen — kein KVA', 'Entwurf erstellen — das Team versendet', 'Entwurf erstellen & direkt an den Kunden senden'] },
+  { key: 'kva', label: 'Angebote', hint: 'Die Telefon-KI erstellt Angebote.',
+    levels: ['Nur Anfrage aufnehmen — kein Angebot', 'Entwurf erstellen — das Team versendet', 'Entwurf erstellen & direkt an den Kunden senden'] },
   { key: 'projects', label: 'Vorgänge & Plantafel', hint: 'Im Hintergrund bei Terminbestätigung.', backOffice: true,
     levels: ['Keinen Vorgang anlegen', 'Vorgang als Entwurf bei Terminbestätigung', 'Vorgang automatisch bei Terminbestätigung'] },
   { key: 'invoices', label: 'Rechnungen', hint: 'Im Hintergrund bei Vorgangsabschluss.', backOffice: true,
@@ -89,7 +89,7 @@ export function AutonomieSection({ data, flash }: { data: KzOverview; flash: (m:
         </div>
         <p className="mb-3 text-xs text-muted">
           Schalte jeden Bereich einzeln ein und wähle, wie selbstständig Kiki arbeitet. Ist der
-          Schalter aus, nimmt Kiki die Anfrage nur auf. Termine & KVA wirken im Telefongespräch; Projekte
+          Schalter aus, nimmt Kiki die Anfrage nur auf. Termine & Angebot wirken im Telefongespräch; Projekte
           & Rechnungen laufen im Hintergrund.
         </p>
         <div className="space-y-3">

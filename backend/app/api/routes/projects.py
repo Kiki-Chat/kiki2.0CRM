@@ -208,7 +208,7 @@ def _list(org_id: str, status: str | None, customer_id: str | None, search: str 
         ),
     )
 
-    # Invoices: case_id ∈ cases OR via the KVA chain (no inquiry_id on invoices).
+    # Invoices: case_id ∈ cases OR via the Angebot chain (no inquiry_id on invoices).
     kva_ids = [k["id"] for k in kvas]
     proj_of_kva = {k["id"]: _proj_of_action(k) for k in kvas}
     invs_by_case = fetch_all_rows(
@@ -403,7 +403,7 @@ def _detail(org_id: str, project_id: str) -> dict | None:
 
     inquiries, appts, kvas, docs, calls = run_parallel(_inq, _appts, _kvas, _docs, _calls_count)
 
-    # Invoices: case_id ∈ cases OR via the KVA chain (no project/inquiry on invoices).
+    # Invoices: case_id ∈ cases OR via the Angebot chain (no project/inquiry on invoices).
     kva_ids = [k["id"] for k in kvas]
     invs = _invoice_rows(client, org_id, "id, total, status", case_ids, kva_ids)
 
@@ -544,7 +544,7 @@ def _activity(org_id: str, project_id: str, limit: int) -> list[dict] | None:
         items.append({"type": "appointment_done" if done else "appointment", "date": a.get("scheduled_at"), "label": f"Termin {verb}: {a.get('title') or ''}".strip()})
     kvas = _action_rows(client, org_id, "cost_estimates", "id, number, created_at, total", case_ids, member_ids)
     for k in kvas:
-        items.append({"type": "cost_estimate", "date": k.get("created_at"), "amount": k.get("total"), "label": f"{k.get('number') or 'KVA'} erstellt"})
+        items.append({"type": "cost_estimate", "date": k.get("created_at"), "amount": k.get("total"), "label": f"{k.get('number') or 'Angebot'} erstellt"})
     kva_ids = [k["id"] for k in kvas]
     for v in _invoice_rows(client, org_id, "id, number, created_at, total, status, sent_at, paid_at", case_ids, kva_ids):
         items.append({"type": "invoice", "date": v.get("sent_at") or v.get("created_at"), "amount": v.get("total"), "label": f"{v.get('number') or 'RE'} {'bezahlt' if v.get('status') == 'paid' else 'erstellt'}"})
@@ -692,7 +692,7 @@ async def project_invoices(project_id: str, user: CurrentUser = Depends(require_
         if not _fetch(client, user.org_id, project_id):
             return None
         case_ids, member_ids = _chain_ids(client, user.org_id, project_id)
-        # KVA chain: invoice → cost_estimate → (case_id ∈ cases OR inquiry_id ∈ members).
+        # Angebot chain: invoice → cost_estimate → (case_id ∈ cases OR inquiry_id ∈ members).
         kvas = _action_rows(client, user.org_id, "cost_estimates", "id", case_ids, member_ids)
         kva_ids = [k["id"] for k in kvas]
         _INV_COLS = "id, number, status, invoice_date, due_date, total, sent_at, paid_at, created_at, case_id, cost_estimate_id"

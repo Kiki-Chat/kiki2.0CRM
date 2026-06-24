@@ -39,9 +39,9 @@ _DEFAULT_REQUIRED_FIELDS = [
     ("problem_description", "Anliegen / Problembeschreibung", "Das Anliegen des Kunden — welche Problem-Details Kiki erfassen soll.", True, True, None, 3, True, None),
     # Leitfaden rework (migration 0060): optional email (off by default) + the
     # three linked offer-steps whose ACTIVE state mirrors agent_configs.
-    ("email", "E-Mail-Adresse", "E-Mail des Kunden (für Bestätigungen und Kostenvoranschläge)", False, False, None, 4, False, None),
+    ("email", "E-Mail-Adresse", "E-Mail des Kunden (für Bestätigungen und Angebote)", False, False, None, 4, False, None),
     ("offer_appointment", "Termin anbieten", "Kiki bietet an dieser Stelle aktiv einen Termin an", True, False, None, 5, True, "appointments_enabled"),
-    ("offer_kva", "Kostenvoranschlag anbieten", "Kiki bietet an dieser Stelle aktiv einen unverbindlichen Kostenvoranschlag an", True, False, None, 6, True, "kva_enabled"),
+    ("offer_kva", "Angebot anbieten", "Kiki bietet an dieser Stelle aktiv ein unverbindliches Angebot an", True, False, None, 6, True, "kva_enabled"),
     ("offer_price_info", "Preisauskunft", "Kiki beantwortet Preisfragen an dieser Stelle (Richtpreise aus den Artikeln)", True, False, None, 7, True, "price_info_enabled"),
 ]
 

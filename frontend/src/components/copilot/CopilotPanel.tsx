@@ -26,7 +26,7 @@ import { cn } from '../../lib/utils'
  *  - writes come back as proposed actions → Bestätigen runs /api/copilot/confirm,
  *    then the panel makes the change VISIBLE live: it invalidates all queries
  *    (the open page refreshes in place) and navigates to the created object
- *    (new invoice/KVA/customer/appointment) so the user watches it appear,
+ *    (new invoice/Angebot/customer/appointment) so the user watches it appear,
  *  - client actions (navigate_to) jump straight to the requested page.
  */
 
@@ -101,7 +101,7 @@ function actionSummary(a: ProposedAction): string {
       return `Termin ändern${at ? ' → ' + at : ''}`
     }
     case 'create_cost_estimate':
-      return `Kostenvoranschlag erstellen${a.args.subject ? ': ' + s('subject') : ''}`
+      return `Angebot erstellen${a.args.subject ? ': ' + s('subject') : ''}`
     case 'create_invoice':
       return `Rechnung erstellen${a.args.subject ? ': ' + s('subject') : ''}`
     case 'report_problem':
@@ -119,7 +119,7 @@ function resultRoute(tool: string, result: Record<string, unknown>): { route: st
   const inv = obj('invoice')
   if (tool === 'create_invoice' && inv?.id) return { route: `/invoices/${inv.id}`, label: `Rechnung ${inv.number ?? ''} geöffnet` }
   const ce = obj('cost_estimate')
-  if (tool === 'create_cost_estimate' && ce?.id) return { route: `/cost-estimates/${ce.id}`, label: `KVA ${ce.number ?? ''} geöffnet` }
+  if (tool === 'create_cost_estimate' && ce?.id) return { route: `/cost-estimates/${ce.id}`, label: `Angebot ${ce.number ?? ''} geöffnet` }
   const cust = obj('customer')
   if ((tool === 'create_customer' || tool === 'update_customer') && cust?.id)
     return { route: `/customers/${cust.id}`, label: 'Kontakt geöffnet' }

@@ -50,7 +50,7 @@ class Attachment:
 
     ``filename`` is what the recipient sees. ``content`` is the raw bytes.
     ``mime_type`` is the IANA media type (defaults to ``application/pdf``
-    because the dominant use case here is KVA / Rechnung PDF attachments).
+    because the dominant use case here is Angebot / Rechnung PDF attachments).
     """
     filename: str
     content: bytes
@@ -86,7 +86,7 @@ def send_email(
     SMTP succeeds) are reported in ``SendResult.fallback_chain``.
     """
     # Fail-safe (B6): never attempt a send with an empty recipient. Route callers
-    # already guard (KVA/invoice → 400), but this protects every current + future
+    # already guard (Angebot/invoice → 400), but this protects every current + future
     # caller from silently emitting to an empty "To:".
     if not (to_email and str(to_email).strip()):
         raise RuntimeError("Keine Empfänger-E-Mail angegeben.")
@@ -105,7 +105,7 @@ def send_email(
     # HeyKiki "via" address, and never a per-connection sending account. HeyKiki
     # only triggers the mail; we deliberately do NOT route replies per sending
     # account (one consistent reply target across every email type: appointment
-    # calls/emails, KVA, invoice, employee invite, test mail). Falls back to the
+    # calls/emails, Angebot, invoice, employee invite, test mail). Falls back to the
     # caller-supplied reply_to only when the org has no email on file.
     org_email = _load_org_email(org_id_str)
     reply_to = org_email or (reply_to or "").strip() or None

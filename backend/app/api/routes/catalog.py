@@ -10,7 +10,7 @@ from app.schemas.admin import CatalogItemUpsert
 from app.services.price_knowledge import sync_price_list_kb
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
-# Legacy alias still used by the KVA quick-select until it is repointed.
+# Legacy alias still used by the Angebot quick-select until it is repointed.
 items_router = APIRouter(prefix="/api/catalog-items", tags=["catalog"])
 
 _COLS = (

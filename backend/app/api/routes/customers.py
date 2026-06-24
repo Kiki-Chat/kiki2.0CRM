@@ -231,7 +231,7 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     )
 
     # Vorgang-card enrichment — per-case call count, last activity, and a count of
-    # open points (pending appointments + KVAs awaiting send/answer). Computed in
+    # open points (pending appointments + Angebote awaiting send/answer). Computed in
     # Python from the lists already fetched above → zero extra round-trips.
     call_count: Counter = Counter()
     open_count: Counter = Counter()
@@ -420,7 +420,7 @@ async def get_customer_timeline(
     customer_id: str, user: CurrentUser = Depends(require_org)
 ) -> list[dict]:
     """The customer's unified activity timeline (calls, inquiries, appointments,
-    KVAs) — same event shape as the per-call Verlauf, scoped to this customer."""
+    Angebote) — same event shape as the per-call Verlauf, scoped to this customer."""
     from app.api.routes.calls import build_customer_timeline
 
     tl = await run_in_threadpool(build_customer_timeline, user.org_id, customer_id)

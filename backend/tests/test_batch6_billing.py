@@ -319,7 +319,7 @@ def test_gen_number_scopes_count_by_type():
 
 def test_gen_number_type_filter_per_prefix():
     """Sanity: each doc-type maps to its prefix AND filters by that type."""
-    for doc_type, prefix in [("kva", "KVA"), ("offer", "ANG"),
+    for doc_type, prefix in [("kva", "AG"), ("offer", "ANG"),
                              ("order_confirmation", "AB"), ("invoice", "RE")]:
         calls = []
 

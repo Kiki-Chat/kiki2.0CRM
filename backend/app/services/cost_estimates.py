@@ -1,4 +1,4 @@
-"""Cost estimate (Kostenvoranschlag) helpers: numbering, totals, PDF."""
+"""Cost estimate (Angebot) helpers: numbering, totals, PDF."""
 
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,7 +11,7 @@ from app.services.common import format_address, now_berlin
 _FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
 DOC_TITLES = {
-    "kva": "KOSTENVORANSCHLAG",
+    "kva": "ANGEBOT",  # KVA→Angebot product-wide (Amber's call); doc_type key stays "kva"
     "offer": "ANGEBOT",
     "order_confirmation": "AUFTRAGSBESTÄTIGUNG",
     "invoice": "RECHNUNG",
@@ -19,12 +19,13 @@ DOC_TITLES = {
 
 
 def gen_number(client, org_id: str, doc_type: str = "kva") -> str:
-    # INV-002: scope the per-year sequence by doc-type so KVA/ANG/AB/RG numbers
-    # are contiguous *per type* (KVA-2026-00001, KVA-2026-00002, …) instead of
+    # INV-002: scope the per-year sequence by doc-type so the numbers
+    # are contiguous *per type* (AG-2026-00001, AG-2026-00002, …) instead of
     # sharing one cross-type counter (which left gaps in each type's series).
+    # Angebot→AG: the former "kva" type is now branded "Angebot" → AG- Aktenzeichen.
     year = now_berlin().year
-    prefix = {"kva": "KVA", "offer": "ANG", "order_confirmation": "AB", "invoice": "RE"}.get(
-        doc_type, "KVA"
+    prefix = {"kva": "AG", "offer": "ANG", "order_confirmation": "AB", "invoice": "RE"}.get(
+        doc_type, "AG"
     )
     res = (
         client.table("cost_estimates")
@@ -162,7 +163,7 @@ def _invoice_bank_footer(org: dict) -> list[tuple[str, list[str]]]:
 
 
 def _render_org_logo(pdf, logo_url: str | None) -> None:
-    """Top-left org-logo render for KVA / Invoice / Angebot / AB PDFs (P1.3).
+    """Top-left org-logo render for Angebot / Invoice / Angebot / AB PDFs (P1.3).
     Best-effort: any fetch failure is swallowed so the PDF still generates."""
     if not logo_url:
         return
@@ -192,7 +193,7 @@ def _render_org_logo(pdf, logo_url: str | None) -> None:
 
 def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes:
     doc_type = ce.get("type") or "kva"
-    title = DOC_TITLES.get(doc_type, "KOSTENVORANSCHLAG")
+    title = DOC_TITLES.get(doc_type, "ANGEBOT")
     tol = ce.get("tolerance_pct", 20)
     binding = ce.get("is_binding")
     if doc_type == "kva":
@@ -201,7 +202,7 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
         subtitle = ""
 
     legal = (
-        f"Dieser Kostenvoranschlag ist gemäß § 632 Abs. 3 BGB unverbindlich. "
+        f"Dieses Angebot ist gemäß § 632 Abs. 3 BGB unverbindlich. "
         f"Der tatsächliche Preis kann nach Leistungserbringung um bis zu {tol}% von der "
         "Schätzung abweichen. Bei voraussichtlicher wesentlicher Überschreitung werden "
         "wir Sie unverzüglich informieren (§ 650c BGB)."
@@ -274,7 +275,7 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
             ("Kundennummer:", (customer or {}).get("customer_number") or "-"),
         ]
     else:
-        nr_label = {"kva": "KVA-Nr.:", "offer": "Angebot-Nr.:"}.get(doc_type, "KVA-Nr.:")
+        nr_label = {"kva": "Angebot-Nr.:", "offer": "Angebot-Nr.:"}.get(doc_type, "Angebot-Nr.:")
         rows = [
             (nr_label, ce.get("number") or "VORSCHAU"),
             ("Datum:", _fmt_de_date(ce.get("date") or now_berlin())),
@@ -359,7 +360,7 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
     # ── Skonto (invoices only, DISPLAY-ONLY) — 6.1 ──
     # Per the Skonto contract: skonto NEVER reduces the amount due. Gesamtbetrag
     # above stays the amount owed; we only *display* the early-payment discount
-    # and the resulting reduced figure. Guarded so KVA/Angebot/AB and invoices
+    # and the resulting reduced figure. Guarded so Angebot/Angebot/AB and invoices
     # without a skonto% are completely unchanged.
     skonto_pct = float(ce.get("skonto_pct") or 0)
     skonto_days = ce.get("skonto_days") or 0
@@ -467,7 +468,7 @@ def _ce_pdf_view(row: dict) -> dict:
 
 
 def _send_draft_kva(client, org_id: str, row: dict) -> bool:
-    """Best-effort email send of a freshly-drafted KVA (used by L3). Self-contained
+    """Best-effort email send of a freshly-drafted Angebot (used by L3). Self-contained
     so the service doesn't import the route. Resolves the recipient from the
     customer's stored email, renders the PDF, sends a default German email, and
     stamps status='sent' + sent_at on success. Returns True iff actually sent;
@@ -495,11 +496,11 @@ def _send_draft_kva(client, org_id: str, row: dict) -> bool:
         org_name = org.get("name") or "HeyKiki"
         number = row.get("number") or "—"
         cust_name = (customer or {}).get("full_name") or ""
-        subject = f"Kostenvoranschlag {number} von {org_name}"
+        subject = f"Angebot {number} von {org_name}"
         greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
         body_text = (
             f"{greeting}\n\n"
-            f"anbei senden wir Ihnen den Kostenvoranschlag {number}.\n\n"
+            f"anbei senden wir Ihnen das Angebot {number}.\n\n"
             f"Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.\n\n"
             f"Mit freundlichen Grüßen\n{org_name}"
         )
@@ -508,7 +509,7 @@ def _send_draft_kva(client, org_id: str, row: dict) -> bool:
             contact_email=org.get("email"),
             address=email_templates.addr_line(org.get("address")),
         )
-        filename = f"KVA-{number}.pdf"
+        filename = f"{number}.pdf"  # number already carries its type prefix (AG-/ANG-/RE-)
         send_email(
             org_id=org_id,
             to_email=to_email,
@@ -527,15 +528,15 @@ def _send_draft_kva(client, org_id: str, row: dict) -> bool:
 
 
 def draft_cost_estimate(org_id: str, payload) -> dict:
-    """hk_draftCostEstimate handler: create a DRAFT Kostenvoranschlag from the
-    agent's collected positions/subject, gated on the org's KVA-Automatisierung
+    """hk_draftCostEstimate handler: create a DRAFT Angebot from the
+    agent's collected positions/subject, gated on the org's Angebot-Automatisierung
     toggle.
 
-    - KVA-Automatisierung off → no-op, returns success=False with a German note.
+    - Angebot-Automatisierung off → no-op, returns success=False with a German note.
     - Otherwise: build + insert a draft (type='kva', status='draft'), linking the
       customer + inquiry the agent passed.
     - At autonomy level 3: best-effort email-send via the existing send path; if
-      it fails, the KVA stays a draft (no raise). At L1/L2 it stays a draft for
+      it fails, the Angebot stays a draft (no raise). At L1/L2 it stays a draft for
       the team to review.
 
     Returns {success, id, number, status, message}."""
@@ -555,17 +556,17 @@ def draft_cost_estimate(org_id: str, payload) -> dict:
     if kva_on is None:
         kva_on = cfg_row.get("kva_automation_enabled")
     if not kva_on:
-        return {"success": False, "message": "KVA-Erstellung ist nicht aktiviert."}
+        return {"success": False, "message": "Angebot-Erstellung ist nicht aktiviert."}
     # Amber's ruling 2026-06-12 (closes audit item AUT-05): L1 = OFF for EVERY
     # capability, server-side. Projects/invoices/appointments already hard-block
-    # at level 1 — KVA was the only one relying on the prompt alone, so a tool
+    # at level 1 — Angebot was the only one relying on the prompt alone, so a tool
     # call at L1+enabled would still have created a draft.
     try:
         kva_level = int(cfg_row.get("kva_level") or cfg_row.get("kiki_level") or 2)
     except (TypeError, ValueError):
         kva_level = 2
     if kva_level <= 1:
-        return {"success": False, "message": "KVA-Erstellung ist nicht aktiviert."}
+        return {"success": False, "message": "Angebot-Erstellung ist nicht aktiviert."}
 
     positions = [_normalize_position(p) for p in (payload.positions or [])]
     totals = compute_totals(positions, 0, 0)
@@ -589,7 +590,7 @@ def draft_cost_estimate(org_id: str, payload) -> dict:
     }
     created = insert_with_number_retry(client, org_id, row, "kva")
 
-    # KVA level 3: try to send immediately; otherwise leave as a draft.
+    # Angebot level 3: try to send immediately; otherwise leave as a draft.
     level = cfg_row.get("kva_level")
     if level is None:
         level = cfg_row.get("kiki_level")
@@ -603,7 +604,7 @@ def draft_cost_estimate(org_id: str, payload) -> dict:
         sent = _send_draft_kva(client, org_id, created)
 
     status = "sent" if sent else "draft"
-    message = "Kostenvoranschlag wurde erstellt."
+    message = "Angebot wurde erstellt."
     if sent:
         message += " und versendet."
     return {

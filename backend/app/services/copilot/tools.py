@@ -143,21 +143,21 @@ _ORG_PROFILE_FIELDS = ("name", "trade", "phone_number", "fax", "email", "website
 # key -> (German trigger terms, explanation). Powers explain_setting.
 _SETTINGS_DICT: dict[str, tuple[tuple[str, ...], str]] = {
     "autonomy": (("autonom", "kiki-stufe", "stufe", "eigenständig", "kiki level"),
-        "Die Autonomie wird pro Bereich (Termine, KVA, Projekte, Rechnungen) als Stufe 1–3 eingestellt: Stufe 1 = nimmt nur das Anliegen auf, Stufe 2 = erstellt Entwürfe / bucht vorläufig (du bestätigst), Stufe 3 = erledigt es eigenständig. Jeder Bereich hat einen eigenen Schalter. Unter Kiki-Zentrale → Verhalten."),
+        "Die Autonomie wird pro Bereich (Termine, Angebot, Projekte, Rechnungen) als Stufe 1–3 eingestellt: Stufe 1 = nimmt nur das Anliegen auf, Stufe 2 = erstellt Entwürfe / bucht vorläufig (du bestätigst), Stufe 3 = erledigt es eigenständig. Jeder Bereich hat einen eigenen Schalter. Unter Kiki-Zentrale → Verhalten."),
     "ai_suggestions": (("vorschläge", "vorschlag", "erinnerung", "nachfassen"),
-        "KI-Vorschläge erinnern dich automatisch (KVA nachfassen, offene Rechnungen, Wartung). Die Schwellen in Tagen stellst du unter Einstellungen → KI-Vorschläge ein."),
+        "KI-Vorschläge erinnern dich automatisch (Angebot nachfassen, offene Rechnungen, Wartung). Die Schwellen in Tagen stellst du unter Einstellungen → KI-Vorschläge ein."),
     "emergency": (("notdienst", "notfall", "dringend"),
         "Der Notdienst leitet dringende Anrufe außerhalb der Geschäftszeiten an eine Notfallnummer weiter (erkannt über Stichwörter). Unter Kiki-Zentrale → Notdienst."),
     "business_hours": (("geschäftszeiten", "öffnungszeiten", "arbeitszeit"),
         "Die Geschäftszeiten bestimmen, wann Termine vergeben werden und wann der Notdienst greift. Unter Kalender → Geschäftszeiten."),
     "outbound": (("ausgehend", "rückruf", "automatisch anrufen"),
-        "Ausgehende Anrufe/E-Mails (Terminerinnerung, KVA-Nachfassen) sendet Kiki automatisch zu bestimmten Anlässen. Unter Kiki-Zentrale → Ausgehende Anrufe."),
+        "Ausgehende Anrufe/E-Mails (Terminerinnerung, Angebot nachfassen) sendet Kiki automatisch zu bestimmten Anlässen. Unter Kiki-Zentrale → Ausgehende Anrufe."),
     "kva_automation": (("kva", "kostenvoranschlag", "automatisierung"),
-        "Bei aktiver KVA-Automatisierung erstellt Kiki nach passenden Anrufen automatisch einen KVA-Entwurf (Stufe 3 versendet ihn). Unter Kiki-Zentrale."),
+        "Bei aktiver Angebot-Automatisierung erstellt Kiki nach passenden Anrufen automatisch einen KVA-Entwurf (Stufe 3 versendet ihn). Unter Kiki-Zentrale."),
     "email": (("e-mail", "email", "smtp", "versand"),
-        "Die E-Mail-Konfiguration legt fest, über welches Konto Rechnungen/KVAs versendet werden (eigenes SMTP oder verbundenes Google/Outlook). Unter Einstellungen → E-Mail. Änderungen mit Vorsicht — falsche Daten stoppen den Mailversand."),
+        "Die E-Mail-Konfiguration legt fest, über welches Konto Rechnungen/Angebote versendet werden (eigenes SMTP oder verbundenes Google/Outlook). Unter Einstellungen → E-Mail. Änderungen mit Vorsicht — falsche Daten stoppen den Mailversand."),
     "company_profile": (("stammdaten", "firma", "betrieb", "anschrift", "adresse"),
-        "Die Stammdaten (Name, Anschrift, Telefon, Bank, Steuer) erscheinen auf Rechnungen/KVAs und im Briefkopf. Unter Einstellungen → Allgemein."),
+        "Die Stammdaten (Name, Anschrift, Telefon, Bank, Steuer) erscheinen auf Rechnungen/Angebote und im Briefkopf. Unter Einstellungen → Allgemein."),
 }
 
 
@@ -478,7 +478,7 @@ def _create_cost_estimate(user: CurrentUser, args: dict) -> dict:
         return {"cost_estimate": {k: ce.get(k) for k in
                 ("id", "number", "status", "subtotal", "vat_amount", "total", "customer_id")}}
     except Exception as exc:  # noqa: BLE001
-        return {"error": f"KVA nicht angelegt: {getattr(exc, 'detail', str(exc))}"}
+        return {"error": f"Angebot nicht angelegt: {getattr(exc, 'detail', str(exc))}"}
 
 
 def _create_invoice(user: CurrentUser, args: dict) -> dict:
@@ -540,7 +540,7 @@ REGISTRY: list[Tool] = [
     ),
     Tool(
         name="get_finance_summary",
-        description="Finanz-Überblick: Umsatz, bezahlte/offene Rechnungen, ausstehende KVAs.",
+        description="Finanz-Überblick: Umsatz, bezahlte/offene Rechnungen, ausstehende Angebote.",
         parameters={"type": "object", "properties": {}},
         run=_get_finance_summary,
         kind="read",
@@ -681,7 +681,7 @@ REGISTRY: list[Tool] = [
     ),
     Tool(
         name="create_cost_estimate",
-        description="Erstelle einen Kostenvoranschlag (KVA/Angebot) als ENTWURF. Frage vorher Kunde + Positionen (Beschreibung, Menge, Netto-Preis, MwSt) ab.",
+        description="Erstelle ein Angebot als ENTWURF. Frage vorher Kunde + Positionen (Beschreibung, Menge, Netto-Preis, MwSt) ab.",
         parameters={
             "type": "object",
             "properties": {

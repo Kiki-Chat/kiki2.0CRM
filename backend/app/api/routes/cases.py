@@ -48,7 +48,7 @@ _CLOSED_INQ = {"completed", "closed", "done", "resolved", "deleted"}
 async def list_cases(user: CurrentUser = Depends(require_org)) -> list[dict]:
     """All Fälle for the org with per-case rollup stats (powers the Cases page).
     A Vorgang is a ticket: customer + the call(s) and the five linked things
-    (Anfragen/Anrufe · Termine · KVA · Rechnungen · Mitarbeiter). Batched (no N+1)."""
+    (Anfragen/Anrufe · Termine · Angebot · Rechnungen · Mitarbeiter). Batched (no N+1)."""
     def _run():
         client = get_service_client()
         org_id = user.org_id

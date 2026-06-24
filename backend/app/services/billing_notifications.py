@@ -20,7 +20,7 @@ from app.services.common import month_start_utc_iso, now_berlin
 log = logging.getLogger(__name__)
 
 # HeyKiki support address — the biller's contact on billing emails (these are
-# HeyKiki→customer, unlike white-labeled org→customer invoice/KVA mails).
+# HeyKiki→customer, unlike white-labeled org→customer invoice/Angebot mails).
 BILLING_FROM_NAME = "HeyKiki"
 BILLING_CONTACT = "info@kikichat.de"
 
@@ -84,7 +84,7 @@ def _maybe_dispatch_email(nid, org_id, ntype, title, body) -> None:
         from app.services.email_send import send_email
         from app.services.email_templates import message_to_html, render_email
 
-        # Same branded shell as the Invoice/KVA emails (green-gradient header +
+        # Same branded shell as the Invoice/Angebot emails (green-gradient header +
         # footer), with a title heading then the message body. Branded HeyKiki —
         # these are HeyKiki billing the customer, not the org's own customer mail.
         heading = (

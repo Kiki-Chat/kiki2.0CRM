@@ -166,7 +166,7 @@ def _termin_anfrage(client, org_id: str) -> list[dict[str, Any]]:
 
 
 def _kva_to_send(client, org_id: str) -> list[dict[str, Any]]:
-    """Draft KVAs older than 24h — assumed to have stalled and need sending."""
+    """Draft Angebote older than 24h — assumed to have stalled and need sending."""
     cutoff = _iso_minus_hours(24)
     rows = (
         client.table("cost_estimates")
@@ -188,7 +188,7 @@ def _kva_to_send(client, org_id: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for r in rows:
         nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
-        num = r.get("number") or "KVA"
+        num = r.get("number") or "Angebot"
         out.append(
             {
                 "kind": "kva_to_send",
@@ -207,7 +207,7 @@ def _kva_to_send(client, org_id: str) -> list[dict[str, Any]]:
 
 
 def _kva_pending_acceptance(client, org_id: str) -> list[dict[str, Any]]:
-    """Sent KVAs from the last 7 days with no accept/reject yet."""
+    """Sent Angebote from the last 7 days with no accept/reject yet."""
     cutoff = _iso_minus_days(7)
     rows = (
         client.table("cost_estimates")
@@ -236,7 +236,7 @@ def _kva_pending_acceptance(client, org_id: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for r in rows:
         nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
-        num = r.get("number") or "KVA"
+        num = r.get("number") or "Angebot"
         out.append(
             {
                 "kind": "kva_pending_acceptance",

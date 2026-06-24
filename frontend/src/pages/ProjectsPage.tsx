@@ -128,7 +128,7 @@ export function ProjectsPage() {
       </div>
 
       {/* Cards — a lean Vorgang is a ticket: customer + the call(s) and the five things
-          (Anfragen/Anrufe · Termine · KVA · Rechnungen · Mitarbeiter). No budget/dates. */}
+          (Anfragen/Anrufe · Termine · Angebot · Rechnungen · Mitarbeiter). No budget/dates. */}
       <div className="space-y-3">
         {filtered.map((p) => {
           const sm = STATUS_META[p.status] ?? STATUS_META.planning
@@ -164,7 +164,7 @@ export function ProjectsPage() {
                 <Stat icon={<Phone size={14} />} n={p.stats.calls} title="Anrufe" />
                 <Stat icon={<ClipboardList size={14} />} n={p.stats.inquiries} title="Anfragen" />
                 <Stat icon={<Calendar size={14} />} n={p.stats.appointments} title="Termine" />
-                <Stat icon={<FileText size={14} />} n={p.stats.cost_estimates} title="KVA" />
+                <Stat icon={<FileText size={14} />} n={p.stats.cost_estimates} title="Angebot" />
                 <Stat icon={<Receipt size={14} />} n={p.stats.invoices} title="Rechnungen" />
                 <Stat icon={<Users size={14} />} n={p.stats.employees} title="Mitarbeiter" />
               </div>

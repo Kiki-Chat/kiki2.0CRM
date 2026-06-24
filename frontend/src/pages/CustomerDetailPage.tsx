@@ -189,7 +189,7 @@ export function CustomerDetailPage() {
               onClick={() => navigate(`/cost-estimates/new?customer_id=${customer.id}`)}
               className="flex items-center gap-1.5 text-sm font-medium text-green-deep hover:underline"
             >
-              <FileText size={15} /> Kostenvoranschlag erstellen
+              <FileText size={15} /> Angebot erstellen
             </button>
             <button
               onClick={() => setEditOpen(true)}
@@ -226,7 +226,7 @@ export function CustomerDetailPage() {
       </div>
 
       {/* VERLAUF — single unified activity timeline (calls, inquiries,
-          appointments, KVAs) from the backend. The old frontend-reconstructed
+          appointments, Angebote) from the backend. The old frontend-reconstructed
           "Aktivitäten" strip was removed: it duplicated these same events. */}
       <CustomerTimeline events={timeline} />
 
@@ -617,7 +617,7 @@ const TL_ICON: Record<TimelineEventKind, { Icon: LucideIcon; cls: string }> = {
 
 // Unified customer activity timeline — the SAME event shape as the call-log
 // Verlauf tab, fed by GET /api/customers/{id}/timeline (every call, inquiry
-// status change, appointment booked/rescheduled/confirmed and KVA for this
+// status change, appointment booked/rescheduled/confirmed and Angebot for this
 // customer, newest first).
 function CustomerTimeline({ events }: { events: TimelineEvent[] }) {
   return (

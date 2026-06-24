@@ -1,7 +1,7 @@
 // Posteingang — the pending-DECISIONS queue. Reached via the dashboard "Alle
 // ansehen" link. Shows ONLY the decisions; the Fälle themselves live on /cases
 // (no duplication — Amber 2026-06-16). Decisions come from /api/actions/pending
-// and resolve through the real appointment/KVA endpoints.
+// and resolve through the real appointment/Angebot endpoints.
 import { Check, Folder, Inbox } from 'lucide-react'
 import { useMemo, useState } from 'react'
 

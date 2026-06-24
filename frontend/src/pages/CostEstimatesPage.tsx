@@ -48,7 +48,7 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   rejected: { label: 'Abgelehnt', cls: 'bg-error-bg text-error' },
   invoiced: { label: 'Abgerechnet', cls: 'bg-ai-bg text-ai' },
 }
-const TYPE_LABEL: Record<string, string> = { kva: 'KVA', offer: 'Angebot', order_confirmation: 'Auftragsbest.', invoice: 'Rechnung' }
+const TYPE_LABEL: Record<string, string> = { kva: 'Angebot', offer: 'Angebot', order_confirmation: 'Auftragsbest.', invoice: 'Rechnung' }
 
 const money = (n: number | null) =>
   '€' + (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -129,8 +129,8 @@ export function CostEstimatesPage() {
         <div className="flex items-center gap-3">
           <ClipboardList size={26} className="text-green-primary" />
           <div>
-            <h1 className="text-2xl font-bold text-text">Kostenvoranschläge</h1>
-            <p className="mt-0.5 text-sm text-muted">{estimates.length} Kostenvoranschläge</p>
+            <h1 className="text-2xl font-bold text-text">Angebote</h1>
+            <p className="mt-0.5 text-sm text-muted">{estimates.length} Angebote</p>
           </div>
         </div>
         {isAdmin && (
@@ -138,7 +138,7 @@ export function CostEstimatesPage() {
             onClick={() => navigate('/cost-estimates/new')}
             className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
           >
-            + Neuer KVA
+            + Neuer Angebot
           </button>
         )}
       </div>
@@ -148,7 +148,7 @@ export function CostEstimatesPage() {
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-body">Filter</div>
         <div className="grid gap-3 md:grid-cols-4">
           <div>
-            <div className="mb-1 text-xs font-medium text-muted">KVA-Nummer</div>
+            <div className="mb-1 text-xs font-medium text-muted">Angebotsnummer</div>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
               <input value={num} onChange={(e) => setNum(e.target.value)} placeholder="z.B. KVA-2026-00001" className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-text outline-none focus:border-green-primary" />
@@ -176,7 +176,7 @@ export function CostEstimatesPage() {
             <div className="mb-1 text-xs font-medium text-muted">Typ</div>
             <select value={type} onChange={(e) => setType(e.target.value)} className={selectCls}>
               <option value="all">Alle Typen</option>
-              <option value="kva">KVA</option>
+              <option value="kva">Angebot</option>
               <option value="offer">Angebot</option>
               <option value="invoice">Rechnung</option>
             </select>
@@ -263,7 +263,7 @@ export function CostEstimatesPage() {
               )
             })}
             {!filtered.length && (
-              <tr><td colSpan={9} className="px-4 py-12 text-center text-muted">Keine Kostenvoranschläge.</td></tr>
+              <tr><td colSpan={9} className="px-4 py-12 text-center text-muted">Keine Angebote.</td></tr>
             )}
           </tbody>
         </table>
@@ -286,9 +286,9 @@ export function CostEstimatesPage() {
 
 function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose: () => void; onSent: () => void }) {
   const [to, setTo] = useState(estimate.customer_email ?? '')
-  const [subject, setSubject] = useState(`Ihr Kostenvoranschlag ${estimate.number ?? ''}`)
+  const [subject, setSubject] = useState(`Ihr Angebot ${estimate.number ?? ''}`)
   const [message, setMessage] = useState(
-    `Sehr geehrte Damen und Herren,\n\nanbei erhalten Sie unseren Kostenvoranschlag ${estimate.number ?? ''}. ` +
+    `Sehr geehrte Damen und Herren,\n\nanbei erhalten Sie unser Angebot ${estimate.number ?? ''}. ` +
       `Bei Fragen stehen wir Ihnen gerne zur Verfügung.\n\nMit freundlichen Grüßen`,
   )
   const [copyToMe, setCopyToMe] = useState(false)
@@ -311,7 +311,7 @@ function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose:
     <Modal
       open
       onOpenChange={(o) => !o && onClose()}
-      title="KVA senden"
+      title="Angebot senden"
       widthClass="max-w-lg"
       footer={
         <div className="flex gap-3">
@@ -334,7 +334,7 @@ function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose:
         <div><div className="mb-1 text-xs font-semibold text-body">Nachricht</div><textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} className={ta} /></div>
         <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={attachPdf} onChange={(e) => setAttachPdf(e.target.checked)} className="h-4 w-4 accent-green-primary" /> PDF anhängen</label>
         <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={copyToMe} onChange={(e) => setCopyToMe(e.target.checked)} className="h-4 w-4 accent-green-primary" /> Kopie an mich senden</label>
-        <p className="rounded-md bg-info-bg px-3 py-2 text-xs text-info">Hinweis: E-Mail-Versand (SMTP) ist noch nicht konfiguriert — der Kostenvoranschlag wird als „Gesendet“ markiert.</p>
+        <p className="rounded-md bg-info-bg px-3 py-2 text-xs text-info">Hinweis: E-Mail-Versand (SMTP) ist noch nicht konfiguriert — das Angebot wird als „Gesendet“ markiert.</p>
       </div>
     </Modal>
   )

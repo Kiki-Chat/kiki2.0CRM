@@ -21,7 +21,7 @@ type Props = { data: KzOverview; flash: (m: string) => void }
 const TRADES = ['Heizung & Sanitär', 'Elektro', 'Schlüsseldienst', 'Dachdecker', 'Maler & Lackierer', 'Tischler/Schreiner', 'Garten- & Landschaftsbau', 'SHK', 'Sonstiges']
 const WEEKDAYS: [string, string][] = [['mon', 'Mo'], ['tue', 'Di'], ['wed', 'Mi'], ['thu', 'Do'], ['fri', 'Fr'], ['sat', 'Sa'], ['sun', 'So']]
 const OCCASIONS: [string, string][] = [
-  ['kva_followup', 'KVA-Nachfassen'], ['appointment_reminder', 'Terminerinnerung'],
+  ['kva_followup', 'Angebot nachfassen'], ['appointment_reminder', 'Terminerinnerung'],
   ['payment_reminder', 'Zahlungserinnerung'], ['maintenance_due', 'Wartung fällig'],
   ['satisfaction_survey', 'Zufriedenheitsumfrage'], ['missed_callback', 'Rückruf bei verpasstem Anruf'],
   ['review_request', 'Bewertungsanfrage'],
@@ -128,11 +128,11 @@ function FieldDescriptionInput({ field, onSave }: { field: KzRequiredField; onSa
 
 // ─── Leitfaden (ehem. Pflichtfelder) ─────────────────────────────────────────
 // Local-state editor: drag + toggles only mutate local state; ONE batch PATCH on
-// Speichern (one agent push — no more push-per-drag). Linked rows (Termin/KVA/
+// Speichern (one agent push — no more push-per-drag). Linked rows (Termin/Angebot/
 // Preisauskunft) mirror their real setting two-way and warn before toggling.
 const LINKED_TARGET_LABEL: Record<string, string> = {
   appointments_enabled: 'Autonomie (Bereich „Termine“)',
-  kva_enabled: 'Autonomie (Bereich „Kostenvoranschläge“)',
+  kva_enabled: 'Autonomie (Bereich „Angebote“)',
   price_info_enabled: 'Preisauskunft',
 }
 
@@ -232,7 +232,7 @@ export function LeitfadenSection({ flash, specialCaseFieldKeys }: Props & {
         </div>
         <p className="mb-3 text-xs text-muted">
           Kiki arbeitet diese Punkte im Gespräch von oben nach unten ab: Felder werden erfragt,
-          Angebots-Punkte (Termin, KVA, Preisauskunft) an ihrer Position aktiv angeboten. Der Schalter
+          Angebots-Punkte (Termin, Angebot, Preisauskunft) an ihrer Position aktiv angeboten. Der Schalter
           legt fest, ob ein Punkt überhaupt vorkommt. Erst „Speichern“ überträgt die Änderungen an Kiki.
         </p>
         <div className="space-y-2">
@@ -643,7 +643,7 @@ export function PreisauskunftSection({ data, flash }: Props) {
         <span>
           {on
             ? `Kiki gibt telefonisch Richtpreise heraus — Quelle ist die automatisch erzeugte Preisliste aus deinen Artikeln (${pricedCount} Position${pricedCount === 1 ? '' : 'en'} mit Preis). Preise, die dort nicht stehen, nennt Kiki nicht.`
-            : 'Kiki gibt keine Preise heraus und verweist auf einen Kostenvoranschlag.'}
+            : 'Kiki gibt keine Preise heraus und verweist auf ein Angebot.'}
         </span>
       </div>
       {kc.element}

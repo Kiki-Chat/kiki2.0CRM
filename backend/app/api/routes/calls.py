@@ -539,7 +539,7 @@ def _appointment_events(appt: dict) -> list[dict]:
 
 
 def _kva_events(kva: dict) -> list[dict]:
-    num = kva.get("number") or "KVA"
+    num = kva.get("number") or "Angebot"
     out: list[dict] = []
     if kva.get("sent_at"):
         out.append({
@@ -790,7 +790,7 @@ def build_customer_timeline(org_id: str, customer_id: str) -> list[dict] | None:
 def build_case_thread(org_id: str, inquiry_id: str) -> dict | None:
     """One Vorgang (case) = one thread. Returns the case header + a single
     chronological timeline of EVERY call (inbound + outbound, labelled), appointment,
-    KVA and status change tied to this inquiry, plus the raw record lists the thread
+    Angebot and status change tied to this inquiry, plus the raw record lists the thread
     view renders. None when the case isn't in this org. Same event shapes as the
     per-call / customer timelines, but scoped to one case via `calls.inquiry_id` —
     exactly the link Vorgang threading made reliable for OUTBOUND calls too."""
@@ -899,7 +899,7 @@ def build_case_thread(org_id: str, inquiry_id: str) -> dict | None:
 
     events.sort(key=lambda e: e.get("timestamp") or "", reverse=True)
 
-    # "Offene Punkte" = pending appointments + KVAs awaiting send/answer.
+    # "Offene Punkte" = pending appointments + Angebote awaiting send/answer.
     open_count = (
         sum(1 for a in appt_rows if a.get("status") == "pending")
         + sum(1 for k in kva_rows if k.get("status") in ("draft", "sent"))

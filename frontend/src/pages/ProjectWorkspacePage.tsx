@@ -85,7 +85,7 @@ const TABS: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'calls', label: 'Anrufe', icon: Phone },
   { key: 'inquiries', label: 'Anfragen', icon: ClipboardList },
   { key: 'appointments', label: 'Termine', icon: Calendar },
-  { key: 'cost_estimates', label: 'Kostenvoranschläge', icon: FileText },
+  { key: 'cost_estimates', label: 'Angebote', icon: FileText },
   { key: 'invoices', label: 'Rechnungen', icon: Receipt },
   { key: 'team', label: 'Team', icon: Users },
   { key: 'documents', label: 'Dokumente', icon: FolderOpen },
@@ -309,14 +309,14 @@ function OverviewTab({ project }: { project: Project }) {
 
 // ─── Fälle tab — the member cases of this project + attach/detach ───────────
 // Attaching a case (cases.project_id = project) auto-rolls its calls / Anfragen /
-// Termine / KVA / Rechnungen / Team into the project's other tabs (the backend
+// Termine / Angebot / Rechnungen / Team into the project's other tabs (the backend
 // aggregates every per-project resource by case_id), so the chips here preview
 // exactly what each case brings in.
 function CaseStatChips({ c }: { c: CaseListRow }) {
   const s = c.stats
   const chips: [string, number][] = [
     ['Anrufe', s.calls], ['Anfragen', s.inquiries], ['Termine', s.appointments],
-    ['KVA', s.cost_estimates], ['Rechnungen', s.invoices], ['Mitarbeiter', s.employees],
+    ['Angebot', s.cost_estimates], ['Rechnungen', s.invoices], ['Mitarbeiter', s.employees],
   ]
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -418,7 +418,7 @@ function CasesTab({ project }: { project: Project }) {
         </div>
       ) : (
         <div className="rounded-xl border border-dashed border-border bg-surface px-4 py-12 text-center text-muted">
-          Noch keine Vorgänge zugeordnet. Über „Vorgang hinzufügen" einen Vorgang des Kunden anhängen — die Anrufe, Kostenvoranschläge, Rechnungen und Mitarbeiter des Kunden erscheinen dann automatisch in den übrigen Tabs.
+          Noch keine Vorgänge zugeordnet. Über „Vorgang hinzufügen" einen Vorgang des Kunden anhängen — die Anrufe, Angebote, Rechnungen und Mitarbeiter des Kunden erscheinen dann automatisch in den übrigen Tabs.
         </div>
       )}
     </div>

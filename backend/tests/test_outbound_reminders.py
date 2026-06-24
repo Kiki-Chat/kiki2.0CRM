@@ -294,7 +294,7 @@ def test_render_fallbacks_drop_optional_clauses():
     ck = _content("kva_followup", kva_bare, customer=None)
     fmk = ck["conversation_config_override"]["agent"]["first_message"]
     assert "Euro" not in fmk and "vom " not in fmk and "zum Thema" not in fmk
-    assert "Kostenvoranschlag" in fmk
+    assert "Angebot" in fmk  # KVA→Angebot product-wide
     assert ck["dynamic_variables"]["kundeId"] == ""
 
 

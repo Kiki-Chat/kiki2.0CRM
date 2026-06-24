@@ -218,7 +218,7 @@ def _select_kva_followup(db, org_id: str, cfg: dict, now_local: datetime) -> lis
     n = cfg.get("kva_followup_days")
     n = _DEFAULT_KVA_FOLLOWUP_DAYS if n is None else int(n)
     cutoff = (now_local - timedelta(days=n)).astimezone(timezone.utc).isoformat()
-    # Follow up KVAs that were SENT (awaiting response) at least N days ago.
+    # Follow up Angebote that were SENT (awaiting response) at least N days ago.
     # status='sent' already excludes accepted/rejected; .lte excludes NULL sent_at.
     return (
         db.table("cost_estimates")
@@ -241,14 +241,14 @@ def _render_kva_followup(record: dict, customer: dict | None, org: dict) -> Rend
     total = record.get("total")
     sent = record.get("sent_at")
 
-    kva_ref = f"Kostenvoranschlag {nr}" if nr else "Kostenvoranschlag"
+    kva_ref = f"Angebot {nr}" if nr else "Angebot"
     betreff_clause = f" zum Thema „{betreff}“" if betreff else ""
     summe_clause = f" über {de_eur(total)} Euro" if total is not None else ""
     datum_clause = f" vom {de_short_date(sent)}" if sent else ""
 
     first = (
         f"Guten Tag, hier ist der Telefonassistent von {company}. Es geht um "
-        f"Ihren {kva_ref}{betreff_clause}{summe_clause}{datum_clause}. Ich wollte "
+        f"Ihr {kva_ref}{betreff_clause}{summe_clause}{datum_clause}. Ich wollte "
         "kurz nachfragen, ob dazu noch Fragen offen sind oder wie Sie weiter "
         "verfahren möchten."
     )
@@ -258,16 +258,16 @@ def _render_kva_followup(record: dict, customer: dict | None, org: dict) -> Rend
         "uns, wenn Sie Fragen haben oder den Auftrag erteilen möchten. Auf Wiederhören!"
     )
     task = (
-        "## PRIMÄRE AUFGABE – KVA-Nachfassen\n"
+        "## PRIMÄRE AUFGABE – Angebot nachfassen\n"
         f"Deine erste Nachricht betraf den {kva_ref}{betreff_clause}{summe_clause}. "
         "Du hast gefragt, ob es dazu Fragen gibt oder wie der Kunde verfahren möchte.\n"
         "- Möchte der Kunde annehmen/beauftragen: bestätige, dass du es ans Team "
         "weitergibst, und erfasse es mit hk_createInquiry (kurzer Anlass, z. B. "
-        "„KVA angenommen – Auftrag gewünscht“).\n"
+        "„Angebot angenommen – Auftrag gewünscht“).\n"
         "- Hat der Kunde Fragen, die du nicht sicher beantworten kannst: erfasse "
         "einen Rückruf mit hk_createInquiry (rueckrufGewuenscht=true) oder leite "
         "bei umfangreichen Anliegen mit transfer_to_agent weiter.\n"
-        "- Möchte der Kunde den Kostenvoranschlag erneut zugeschickt bekommen: "
+        "- Möchte der Kunde das Angebot erneut zugeschickt bekommen: "
         "erfasse den Wunsch mit hk_createInquiry – du selbst versendest KEINE Dokumente.\n"
         "Nenne keine internen Einzelpositionen oder Preise über den genannten "
         "Gesamtbetrag hinaus."
@@ -498,7 +498,7 @@ def _render_missed_callback(record: dict, customer: dict | None, org: dict) -> R
 
 # ─── inquiry (case) derivation per occasion ──────────────────────────────────
 def _inq_from_record(db, org_id, record):
-    """Default: the record carries inquiry_id directly (appointments, KVAs)."""
+    """Default: the record carries inquiry_id directly (appointments, Angebote)."""
     return record.get("inquiry_id")
 
 
@@ -508,7 +508,7 @@ def _inq_self(db, org_id, record):
 
 
 def _inq_from_invoice(db, org_id, record):
-    """Invoices have no inquiry_id — derive it via the linked KVA (cost_estimate)."""
+    """Invoices have no inquiry_id — derive it via the linked Angebot (cost_estimate)."""
     ce_id = record.get("cost_estimate_id")
     if not ce_id:
         return None
@@ -711,7 +711,7 @@ OCCASIONS: dict[str, OccasionSpec] = {
     "kva_followup": OccasionSpec(
         key="kva_followup",
         anlass_typ="KVA_NACHFASSEN",
-        referenz_typ="KVA",
+        referenz_typ="KVA",  # internal ledger discriminator (NOT display) — stays KVA
         table="cost_estimates",
         columns=_KVA_COLUMNS,
         select=_select_kva_followup,

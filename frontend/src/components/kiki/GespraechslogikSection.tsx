@@ -84,8 +84,8 @@ const KIND_META: Record<LogicBranch['kind'], { label: string; badge: string; bor
   },
 }
 
-// Offer-point rows (Termin/KVA/Preisauskunft) ARE selectable in rules — they
-// were filtered out before, which is why "Termine" and "KVA" were missing from
+// Offer-point rows (Termin/Angebot/Preisauskunft) ARE selectable in rules — they
+// were filtered out before, which is why "Termine" and "Angebot" were missing from
 // the dropdown (item 7). Invoices intentionally have no row here at all.
 const RULE_LINKED_OK = new Set(['appointments_enabled', 'kva_enabled', 'price_info_enabled'])
 
@@ -175,7 +175,7 @@ export function GespraechslogikSection({
 
   // Shared vocabulary with the Leitfaden: rules can ask guide fields directly
   // (ask_field), so both surfaces work on the same data points. Includes the
-  // offer points (Termine/KVA/Preisauskunft) and also INACTIVE fields — a field
+  // offer points (Termine/Angebot/Preisauskunft) and also INACTIVE fields — a field
   // used here is deliberately off in the Standard-Ablauf (either/or).
   const { data: fieldsData } = useQuery({
     queryKey: ['kiki-zentrale', 'required-fields'],

@@ -513,7 +513,7 @@ function DesignSection({ org }: { org: Org }) {
       <div className="mt-4 rounded-lg bg-alt p-4" style={{ fontFamily: fontStack(font) }}>
         <div className="mb-2 text-xs font-semibold text-muted" style={{ fontFamily: 'Inter, sans-serif' }}>Vorschau</div>
         <div className="text-2xl font-bold text-text">Übersicht</div>
-        <div className="text-base font-semibold text-body">Rechnungen & Kostenvoranschläge</div>
+        <div className="text-base font-semibold text-body">Rechnungen & Angebote</div>
       </div>
 
       {/* Darstellung — per-device preference (localStorage), applies live, no save
@@ -857,7 +857,7 @@ function KiVorschlaegeSection({ ai, flash }: { ai: AiSuggestions; flash: (m: str
   })
   const gen = useMutation({ mutationFn: () => apiFetch<{ message?: string }>('/api/settings/generate-suggestions', { method: 'POST' }), onSuccess: (r) => flash(r?.message || 'Vorschläge werden generiert.') })
   const cards = [
-    { icon: FileText, title: 'KVA-Nachfassen', sub: 'Vorschlag, wenn ein gesendeter Kostenvoranschlag nicht beantwortet wurde', value: kva, set: setKva, unit: 'Tage ohne Antwort' },
+    { icon: FileText, title: 'Angebot nachfassen', sub: 'Vorschlag, wenn ein gesendeter Angebot nicht beantwortet wurde', value: kva, set: setKva, unit: 'Tage ohne Antwort' },
     { icon: Receipt, title: 'Zahlungserinnerung', sub: 'Vorschlag für eine Zahlungserinnerung bei überfälligen Rechnungen', value: pay, set: setPay, unit: 'Tage Zahlungsverzug' },
     { icon: Calendar, title: 'Terminerinnerung', sub: 'Tägliche Übersicht über anstehende Termine', value: appt, set: setAppt, unit: 'Tag(e) vorher' },
     { icon: Wrench, title: 'Wartungserinnerung', sub: 'Erscheint, wenn die Wartung laut Wartungsvertrag bald fällig ist.', value: maint, set: setMaint, unit: 'Tage vor Fälligkeit' },
@@ -1218,7 +1218,7 @@ function EmailVorlagenSection({ config, flash }: { config: EmailConfig | null; f
           <h3 className="mb-3 text-sm font-bold text-text">KVA-E-Mail</h3>
           <Field label="Betreff"><input value={kvaSub} onChange={(e) => setKvaSub(e.target.value)} className={inputCls} /></Field>
           <div className="mt-3"><div className={labelCls}>Nachricht</div>
-            <textarea data-field="kvaBody" onFocus={(e) => (lastFocused.current = e.currentTarget)} value={kvaBody} onChange={(e) => setKvaBody(e.target.value)} placeholder="Sehr geehrte/r {kundename}, anbei erhalten Sie unseren Kostenvoranschlag {kvanummer}…" className={ta} />
+            <textarea data-field="kvaBody" onFocus={(e) => (lastFocused.current = e.currentTarget)} value={kvaBody} onChange={(e) => setKvaBody(e.target.value)} placeholder="Sehr geehrte/r {kundename}, anbei erhalten Sie unser Angebot {kvanummer}…" className={ta} />
           </div>
         </Card>
       </div>

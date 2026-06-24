@@ -8,7 +8,7 @@ prices). The doc id lives in agent_configs.price_list_doc_id; on every catalog
 change or toggle flip the doc is regenerated (delete + recreate + re-attach).
 
 Best-effort everywhere: a failed KB sync must never break the catalog save or
-the toggle — the prompt instructs the agent to fall back to the KVA offer when
+the toggle — the prompt instructs the agent to fall back to the Angebot offer when
 no price is found.
 """
 

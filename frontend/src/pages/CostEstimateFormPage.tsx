@@ -47,7 +47,7 @@ const UNITS = ['Stk', 'm', 'm²', 'h', 'Std', 'pauschal', 'kg', 'l', 'Tag']
 const VATS = [19, 7, 0]
 const VALIDITY = [7, 14, 30, 60, 90]
 const DOC_TYPES = [
-  { v: 'kva', l: 'Kostenvoranschlag' },
+  { v: 'kva', l: 'Angebot' },
   { v: 'offer', l: 'Angebot' },
   { v: 'order_confirmation', l: 'Auftragsbestätigung' },
 ]
@@ -276,7 +276,7 @@ export function CostEstimateFormPage() {
             positions: rows.map(({ _id, ...p }, r) => ({ ...p, description: String(wanted[r].description || '') })),
             // Persist what the user WATCHED being filled: the org's default text
             // modules are visible in the form (text-defaults effect) and in the
-            // live PDF preview — saving '' here silently shipped a KVA missing
+            // live PDF preview — saving '' here silently shipped a Angebot missing
             // its intro/closing/payment texts (audit 2026-06-11).
             intro_text: args.intro_text
               ? String(args.intro_text)
@@ -294,7 +294,7 @@ export function CostEstimateFormPage() {
         emitLiveFillStatus({
           tool: 'create_cost_estimate',
           status: 'done',
-          note: `KVA${ce.number ? ' ' + ce.number : ''} live ausgefüllt & gespeichert`,
+          note: `Angebot${ce.number ? ' ' + ce.number : ''} live ausgefüllt & gespeichert`,
           route: `/cost-estimates/${ce.id}`,
         })
         navigate(`/cost-estimates/${ce.id}`)
@@ -391,8 +391,8 @@ export function CostEstimateFormPage() {
       <div className="flex items-center gap-3 px-8 pt-8">
         <button onClick={() => navigate('/cost-estimates')} className="rounded-md p-1.5 text-muted hover:bg-alt"><ArrowLeft size={20} /></button>
         <div>
-          <h1 className="text-2xl font-bold text-text">{isEdit ? `${loadedNumber ?? 'KVA'} bearbeiten` : 'Neuer Kostenvoranschlag'}</h1>
-          <p className="mt-0.5 text-sm text-muted">{isEdit ? 'Kostenvoranschlag bearbeiten' : 'Erstellen Sie einen neuen Kostenvoranschlag'}</p>
+          <h1 className="text-2xl font-bold text-text">{isEdit ? `${loadedNumber ?? 'Angebot'} bearbeiten` : 'Neuer Angebot'}</h1>
+          <p className="mt-0.5 text-sm text-muted">{isEdit ? 'Angebot bearbeiten' : 'Erstellen Sie einen neuen Angebot'}</p>
         </div>
       </div>
 
@@ -402,7 +402,7 @@ export function CostEstimateFormPage() {
           {kikiFilling && (
             <div className="sticky top-0 z-10 flex items-center gap-2 rounded-lg border border-ai/30 bg-ai-bg px-4 py-2.5 text-sm font-semibold text-ai shadow-e1">
               <Loader2 size={15} className="animate-spin" />
-              Kiki füllt den Kostenvoranschlag aus … bitte kurz zusehen, gespeichert wird automatisch.
+              Kiki füllt das Angebot aus … bitte kurz zusehen, gespeichert wird automatisch.
             </div>
           )}
           {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
@@ -419,8 +419,8 @@ export function CostEstimateFormPage() {
               <div className="mt-3"><div className={labelCls}>Anfrage zuordnen (optional)</div>
                 <select value={inquiryId} onChange={(e) => { setInquiryId(e.target.value); const inq = inquiries.find((i) => i.id === e.target.value); const t = inq?.subject || inq?.title; if (t) setSubject(t) }} className={inputCls}>
                   <option value="">Keine Anfrage</option>
-                  {/* Number first (the "header"), then topic — one KVA per inquiry;
-                      the KVA inherits the inquiry's PROJEKT automatically. */}
+                  {/* Number first (the "header"), then topic — one Angebot per inquiry;
+                      the Angebot inherits the inquiry's PROJEKT automatically. */}
                   {inquiries.map((i) => (
                     <option key={i.id} value={i.id}>
                       {i.number ? `${i.number} — ` : ''}{i.subject ?? i.title ?? 'Anfrage'}
@@ -428,7 +428,7 @@ export function CostEstimateFormPage() {
                   ))}
                 </select>
                 {inquiryId && (
-                  <p className="mt-1 text-xs text-muted">Der Kostenvoranschlag wird automatisch dem Vorgang dieser Anfrage zugeordnet.</p>
+                  <p className="mt-1 text-xs text-muted">Der Angebot wird automatisch dem Vorgang dieser Anfrage zugeordnet.</p>
                 )}
               </div>
             )}
@@ -452,7 +452,7 @@ export function CostEstimateFormPage() {
               <input type="checkbox" checked={isBinding} onChange={(e) => setIsBinding(e.target.checked)} className="h-4 w-4 accent-green-primary" />
               Verbindlich (garantiert)
             </label>
-            <p className="mt-1 text-xs text-muted">{isBinding ? 'Verbindliches Angebot.' : `Unverbindlicher Kostenvoranschlag — Toleranz ±${tolerance}% (§ 650c BGB).`}</p>
+            <p className="mt-1 text-xs text-muted">{isBinding ? 'Verbindliches Angebot.' : `Unverbindlicher Angebot — Toleranz ±${tolerance}% (§ 650c BGB).`}</p>
           </Card>
 
           {/* Section 3 */}
@@ -523,7 +523,7 @@ export function CostEstimateFormPage() {
       {/* Sticky bottom bar */}
       <div className="sticky bottom-0 flex items-center justify-end gap-3 border-t border-border bg-surface px-8 py-3">
         <button onClick={() => navigate('/cost-estimates')} className="rounded-md border border-border bg-alt px-5 py-2 text-sm font-medium text-body">{isAdmin ? 'Abbrechen' : 'Zurück'}</button>
-        {/* Saving KVAs is admin-only; employees can still view (PDF preview). */}
+        {/* Saving Angebote is admin-only; employees can still view (PDF preview). */}
         {isAdmin && (
           <button disabled={!customerId || save.isPending} onClick={() => save.mutate()} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
             {save.isPending ? 'Speichert…' : isEdit ? 'Aktualisieren' : 'Erstellen'}

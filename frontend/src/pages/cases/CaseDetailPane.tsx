@@ -1,7 +1,7 @@
 // Right pane of the Cases split-view — the dirC "Karteikarte". Header (customer +
 // status switch) · a FOCUSED "Was ist zu tun?" panel (the compact version of the
 // Call-Log Aktionen — the detailed version lives in the call drawer) · quick-action
-// tiles · record TABLES (Anfragen / Termine / Kostenvoranschläge / Rechnungen /
+// tiles · record TABLES (Anfragen / Termine / Angebote / Rechnungen /
 // Techniker), each always shown, grouped by date, with empty states + add actions.
 // Clicking an Anfrage opens that call's transcript drawer.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -435,7 +435,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
         {/* QUICK ACTIONS */}
         <div className="grid grid-cols-2 gap-3">
           <QuickTile label="Termin" icon={CalendarCheck} tone="green" onClick={() => setApptOpen(true)} />
-          <QuickTile label="Kostenvoranschlag" icon={Receipt} tone="ai" onClick={goKva} disabled={!customerId} />
+          <QuickTile label="Angebot" icon={Receipt} tone="ai" onClick={goKva} disabled={!customerId} />
           <QuickTile label="Rechnung" icon={FileText} tone="ai" onClick={goInvoice} disabled={!customerId} />
           <div className="relative">
             <QuickTile label="Mitarbeiter" icon={Users} tone="steel" onClick={() => setEmpOpen((o) => !o)} />
@@ -506,14 +506,14 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
         </BigCard>
 
         {/* KOSTENVORANSCHLÄGE */}
-        <BigCard title="Kostenvoranschläge" icon={Receipt} accent="ai" count={data.cost_estimates.length} action={<AddBtn label="KVA" onClick={goKva} />}>
+        <BigCard title="Angebote" icon={Receipt} accent="ai" count={data.cost_estimates.length} action={<AddBtn label="Angebot" onClick={goKva} />}>
           {data.cost_estimates.length ? (
             <GroupedTable columns={['Nummer', 'Betrag', 'Status']}>
               {groupByDay(data.cost_estimates, () => null).map((g) => (
                 <Fragment key={g.key}>
                   {g.items.map((k) => (
                     <tr key={k.id} className={rowCls} onClick={() => navigate(`/cost-estimates/${k.id}`)}>
-                      <td className="px-3 py-2.5 font-mono text-xs text-muted">{k.number ?? 'KVA'}</td>
+                      <td className="px-3 py-2.5 font-mono text-xs text-muted">{k.number ?? 'Angebot'}</td>
                       <td className="px-3 py-2.5 font-bold text-text">{euro(k.total)}</td>
                       <td className="px-3 py-2.5"><Tag variant={k.status === 'accepted' ? 'success' : k.status === 'rejected' ? 'neutral' : 'info'}>{k.status}</Tag></td>
                     </tr>
@@ -521,7 +521,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                 </Fragment>
               ))}
             </GroupedTable>
-          ) : <EmptyHint text="Noch keine Kostenvoranschläge." />}
+          ) : <EmptyHint text="Noch keine Angebote." />}
         </BigCard>
 
         {/* RECHNUNGEN */}

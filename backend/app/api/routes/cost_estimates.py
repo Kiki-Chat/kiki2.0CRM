@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/cost-estimates", tags=["cost-estimates"])
 # invoices._STAMP. The dedicated POST /send route stamps sent_at directly, but
 # a status-transition to "sent" through this endpoint must also fill it, or
 # the AI Insights `kva_followup` suggestion (dashboard._ai_insights) silently
-# never fires for that KVA because it gates on a non-NULL sent_at.
+# never fires for that Angebot because it gates on a non-NULL sent_at.
 _STAMP = {"sent": "sent_at", "accepted": "accepted_at", "rejected": "rejected_at"}
 
 
@@ -149,7 +149,7 @@ def _create(org_id: str, user_id: str | None, payload: CostEstimateUpsert) -> di
     client = get_service_client()
     _validate_fks(client, org_id, payload)
     row = _build_row(org_id, payload, user_id)
-    # Case grouping: a KVA for an inquiry belongs to that inquiry's
+    # Case grouping: a Angebot for an inquiry belongs to that inquiry's
     # Fall (case) — inherit it when the form didn't set one explicitly.
     if row.get("inquiry_id") and not row.get("case_id"):
         inq = (
@@ -246,7 +246,7 @@ def _pdf_for_row(org_id: str, ce_id: str) -> tuple[bytes, str] | None:
     org = fetch_org(client, org_id)
     customer = fetch_customer(client, org_id, row.get("customer_id"))
     totals = {"net": row.get("subtotal") or 0, "vat": row.get("vat_amount") or 0, "gross": row.get("total") or 0}
-    return build_pdf(org, customer, _ce_for_pdf(row), totals), (row.get("number") or "KVA")
+    return build_pdf(org, customer, _ce_for_pdf(row), totals), (row.get("number") or "Angebot")
 
 
 @router.get("/{ce_id}/pdf")
@@ -308,7 +308,7 @@ def _build_kva_email(
     email_config: dict | None,
     payload: CostEstimateSend,
 ) -> tuple[str, str]:
-    """Render subject + HTML body for the KVA / Angebot / AB email.
+    """Render subject + HTML body for the Angebot / Angebot / AB email.
 
     Customer-stored templates (``kva_email_subject`` / ``kva_email_body``)
     win, then the request payload's ``subject`` / ``message``, then a sane
@@ -317,10 +317,10 @@ def _build_kva_email(
     """
     doc_type = ce_row.get("type") or "kva"
     type_label = {
-        "kva": "Kostenvoranschlag",
+        "kva": "Angebot",
         "offer": "Angebot",
         "order_confirmation": "Auftragsbestätigung",
-    }.get(doc_type, "Kostenvoranschlag")
+    }.get(doc_type, "Angebot")
     number = ce_row.get("number") or "—"
     org_name = org.get("name") or "HeyKiki"
     cust_name = (customer or {}).get("full_name") or ""
@@ -502,7 +502,7 @@ async def set_status(
         if valid_until and str(valid_until)[:10] < now_berlin().date().isoformat():
             raise HTTPException(
                 status_code=409,
-                detail="Der Kostenvoranschlag ist abgelaufen. Bitte zuerst die Gültigkeit verlängern.",
+                detail="Der Angebot ist abgelaufen. Bitte zuerst die Gültigkeit verlängern.",
             )
 
     def _set() -> dict | None:

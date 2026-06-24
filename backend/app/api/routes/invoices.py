@@ -123,14 +123,14 @@ async def list_invoices(user: CurrentUser = Depends(require_org)) -> list[dict]:
 def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
     client = get_service_client()
     # The service-role client BYPASSES RLS, so a client-supplied FK is trusted
-    # unless we check it. Reject pointers to another org's customer / KVA / case
+    # unless we check it. Reject pointers to another org's customer / Angebot / case
     # (cross-tenant integrity, IDOR) before writing anything.
     # payload.case_id is the grouping pointer → the `cases` table (FL-).
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
-    validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Kostenvoranschlag")
+    validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Angebot")
     validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
 
-    # INV-009: a KVA may be converted into a Rechnung exactly once. If the source
+    # INV-009: a Angebot may be converted into a Rechnung exactly once. If the source
     # estimate is already invoiced (or carries a back-link to an invoice), block
     # the second conversion instead of silently creating a duplicate invoice and
     # clobbering the existing back-link.
@@ -142,13 +142,13 @@ def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
         if existing and (existing[0].get("status") == "invoiced" or existing[0].get("invoice_id")):
             raise HTTPException(
                 status_code=409,
-                detail="Dieser Kostenvoranschlag wurde bereits in eine Rechnung umgewandelt.",
+                detail="Dieses Angebot wurde bereits in eine Rechnung umgewandelt.",
             )
 
     row = _build_row(org_id, payload, user_id)
-    # Case grouping: an invoice built from a KVA belongs to that KVA's
-    # Fall (case, directly or via the KVA's inquiry) — inherit when not set.
-    # (invoices have no inquiry_id; the case is resolved through the KVA.)
+    # Case grouping: an invoice built from a Angebot belongs to that Angebot's
+    # Fall (case, directly or via the Angebot's inquiry) — inherit when not set.
+    # (invoices have no inquiry_id; the case is resolved through the Angebot.)
     if row.get("cost_estimate_id") and not row.get("case_id"):
         kva = (
             client.table("cost_estimates").select("case_id, inquiry_id")
@@ -167,9 +167,9 @@ def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
     row["number"] = gen_invoice_number(client, org_id)
     row["status"] = "draft"
     created = client.table("invoices").insert(row).execute().data[0]
-    # Converting a KVA: mark the source estimate invoiced and link it both ways.
+    # Converting a Angebot: mark the source estimate invoiced and link it both ways.
     # Two writes, no transaction — if the back-link update fails, COMPENSATE by
-    # deleting the just-created invoice so we never leave an invoice whose KVA
+    # deleting the just-created invoice so we never leave an invoice whose Angebot
     # still shows "draft" with no link (the conversion would look broken).
     if payload.kva_id:
         try:
@@ -183,7 +183,7 @@ def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
                 ).execute()
             except Exception:  # noqa: BLE001
                 logger.exception(
-                    "invoice create: KVA back-link failed AND invoice rollback failed "
+                    "invoice create: Angebot back-link failed AND invoice rollback failed "
                     "— orphan invoice %s (org %s)", created["id"], org_id
                 )
             raise
@@ -228,7 +228,7 @@ def _update(org_id: str, inv_id: str, payload: InvoiceUpsert) -> dict | None:
     # Same FK-in-org guards as _create — the UPDATE path is just as exposed.
     # payload.case_id is the grouping pointer → the `cases` table (FL-).
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
-    validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Kostenvoranschlag")
+    validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Angebot")
     validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
     row = _build_row(org_id, payload, None)
     row.pop("created_by", None)
@@ -354,7 +354,7 @@ def _build_invoice_email(
 ) -> tuple[str, str]:
     """Render subject + HTML body for the invoice email.
 
-    Same precedence as KVA: customer template → request payload → German
+    Same precedence as Angebot: customer template → request payload → German
     default. Variables ``{number}`` / ``{customer_name}`` / ``{org_name}``
     are substituted in templates.
     """

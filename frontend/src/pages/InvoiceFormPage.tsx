@@ -111,12 +111,12 @@ export function InvoiceFormPage() {
   const customers = customerData?.customers ?? []
   const { data: catalog = [] } = useQuery({ queryKey: ['catalog-active'], queryFn: () => apiFetch<CatalogItem[]>('/api/catalog?status=active') })
   const { data: estimates = [] } = useQuery({ queryKey: ['cost-estimates'], queryFn: () => apiFetch<Estimate[]>('/api/cost-estimates') })
-  // KVAs you can turn into an invoice: any of this customer's that aren't rejected
+  // Angebote you can turn into an invoice: any of this customer's that aren't rejected
   // (draft/sent/accepted) — not only 'accepted', so the dropdown isn't empty.
   const KVA_STATUS_DE: Record<string, string> = { draft: 'Entwurf', sent: 'Gesendet', accepted: 'Angenommen' }
   const selectableKvas = estimates.filter((e) => e.customer_id === customerId && e.status !== 'rejected')
 
-  // Import positions/subject/customer from a cost estimate (KVA → Rechnung).
+  // Import positions/subject/customer from a cost estimate (Angebot → Rechnung).
   // Copies every field shared with invoices; does NOT overwrite fields the user already edited.
   const importKva = useCallback(async (estimateId: string) => {
     try {
@@ -136,11 +136,11 @@ export function InvoiceFormPage() {
       const li = (ce.line_items as Position[]) || []
       setPositions(li.length ? li.map((p) => ({ ...newPos(), ...p, _id: uid() })) : [newPos()])
     } catch {
-      setError('KVA konnte nicht übernommen werden.')
+      setError('Angebot konnte nicht übernommen werden.')
     }
   }, [])
 
-  // On mount: if arriving from a KVA ("In Rechnung umwandeln"), import it.
+  // On mount: if arriving from a Angebot ("In Rechnung umwandeln"), import it.
   const kvaParamHandled = useRef(false)
   useEffect(() => {
     if (isEdit || kvaParamHandled.current) return
@@ -497,12 +497,12 @@ export function InvoiceFormPage() {
               </div>
             )}
             {!!customerId && (
-              <div className="mt-3"><div className={labelCls}>Aus Kostenvoranschlag übernehmen (optional)</div>
+              <div className="mt-3"><div className={labelCls}>Aus Angebot übernehmen (optional)</div>
                 <select value="" onChange={(e) => { if (e.target.value) importKva(e.target.value); e.currentTarget.value = '' }} className={inputCls}>
-                  <option value="">Kostenvoranschlag übernehmen…</option>
-                  {selectableKvas.map((k) => <option key={k.id} value={k.id}>{k.number} — {k.subject || 'KVA'} ({money(k.total ?? 0)}) · {KVA_STATUS_DE[k.status] ?? k.status}</option>)}
+                  <option value="">Angebot übernehmen…</option>
+                  {selectableKvas.map((k) => <option key={k.id} value={k.id}>{k.number} — {k.subject || 'Angebot'} ({money(k.total ?? 0)}) · {KVA_STATUS_DE[k.status] ?? k.status}</option>)}
                 </select>
-                {kvaId && <p className="mt-1 text-xs text-green-deep">Positionen aus {estimates.find((e) => e.id === kvaId)?.number ?? 'KVA'} übernommen.</p>}
+                {kvaId && <p className="mt-1 text-xs text-green-deep">Positionen aus {estimates.find((e) => e.id === kvaId)?.number ?? 'Angebot'} übernommen.</p>}
               </div>
             )}
           </Card>

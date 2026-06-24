@@ -420,7 +420,7 @@ def render_price_info_block(cfg: dict) -> str:
     """``# Preise`` body, gated by the Preisauskunft toggle (price_info_enabled).
 
     ON  → Kiki quotes Richtpreise from the knowledge base (legacy behavior).
-    OFF (default) → Kiki gives NO prices and offers a Kostenvoranschlag instead.
+    OFF (default) → Kiki gives NO prices and offers a Angebot instead.
     Wires the Kiki-Zentrale toggle to real call behavior (previously decorative)."""
     if cfg.get("price_info_enabled"):
         return (
@@ -433,16 +433,16 @@ def render_price_info_block(cfg: dict) -> str:
             "  (Richtpreise)“ — exakt den dort hinterlegten Betrag, inkl. Einheit. ERFINDE\n"
             "  NIEMALS einen Preis und runde nicht frei. Steht die angefragte Leistung\n"
             "  NICHT in der Preisliste: sage ehrlich, dass du dafür keinen Richtpreis\n"
-            "  nennen kannst, und biete an, dass das Team einen unverbindlichen\n"
-            "  Kostenvoranschlag erstellt — keine Preise raten."
+            "  nennen kannst, und biete an, dass das Team ein unverbindliches\n"
+            "  Angebot erstellt — keine Preise raten."
         )
     return (
         "  Nenne am Telefon KEINE Preise oder Richtpreise — auch keine ungefähren.\n"
         "  Wenn nach Preisen gefragt wird, erkläre freundlich, dass sich der genaue\n"
         "  Preis erst nach einer Einschätzung beziffern lässt, und biete an, dass das\n"
-        "  Team einen unverbindlichen Kostenvoranschlag erstellt:\n"
+        "  Team ein unverbindliches Angebot erstellt:\n"
         "  „Das hängt von den Details vor Ort ab — ich nehme Ihr Anliegen gern auf und\n"
-        "  das Team meldet sich mit einem unverbindlichen Kostenvoranschlag.“"
+        "  das Team meldet sich mit einem unverbindlichen Angebot.“"
     )
 
 
@@ -527,8 +527,8 @@ _LINKED_OFFER_LINES = {
         "(weiter mit Schritt 3 — Termin)."
     ),
     "offer_kva": (
-        "- **Kostenvoranschlag anbieten** — biete an dieser Stelle aktiv einen "
-        "unverbindlichen Kostenvoranschlag an."
+        "- **Angebot anbieten** — biete an dieser Stelle aktiv einen "
+        "unverbindlichen Angebot an."
     ),
     "offer_price_info": (
         "- **Preisauskunft** — beantworte Preisfragen an dieser Stelle gemäß "
@@ -551,7 +551,7 @@ def _field_effective_active(f: dict, cfg: dict | None) -> bool:
 
 def render_required_fields_block(fields: list[dict], cfg: dict | None = None) -> str:
     """The ordered Leitfaden for the ``## Pflichtfelder`` body: fields to ask plus
-    offer-steps (Termin/KVA/Preisauskunft) at their configured position.
+    offer-steps (Termin/Angebot/Preisauskunft) at their configured position.
 
     Each field → ``- **{label}**{' (optional)'} — {description}``. Fields with an
     identification_role are noted as auto-recognised; inactive rows are skipped.
@@ -595,7 +595,7 @@ def render_required_fields_block(fields: list[dict], cfg: dict | None = None) ->
     # for the phone number it already has.)
     lead = (
         "Arbeite die folgenden Punkte in DIESER Reihenfolge ab (oberster Punkt = "
-        "höchste Priorität, zuerst): Felder erfragen bzw. Angebote (Termin/KVA/"
+        "höchste Priorität, zuerst): Felder erfragen bzw. Angebote (Termin/Angebot/"
         "Preisauskunft) aktiv an genau dieser Stelle machen. Felder, die bereits "
         "bekannt sind oder automatisch erkannt wurden (z. B. die Telefonnummer über "
         "die Anrufererkennung bzw. hk_identifyCustomer), NICHT erneut erfragen — "
@@ -860,7 +860,7 @@ def render_staff_transfer_block(cfg: dict) -> str:
 def render_autonomy_block(cfg: dict) -> str:
     """Per-capability autonomy guidance for the ``{{KZ_AUTONOMY}}`` token.
 
-    Emits a Termine sub-block and a KVA sub-block, each gated by its own enable
+    Emits a Termine sub-block and a Angebot sub-block, each gated by its own enable
     toggle + level (1/2/3) on agent_configs (appointments_enabled/_level,
     kva_enabled/_level). Falls back to the legacy single kiki_level when a
     per-capability level is unset. Projekte + Rechnungen are back-office
@@ -901,21 +901,21 @@ def render_autonomy_block(cfg: dict) -> str:
             "Team bestätigt sie anschließend — sag dem Anrufer, dass die Bestätigung folgt."
         )
 
-    # ── Kostenvoranschläge (KVA) ──
+    # ── Angebote ──
     if not bool(cfg.get("kva_enabled")) or _level("kva_level") == 1:
         lines.append(
-            "  Kostenvoranschläge: Du erstellst KEINE Kostenvoranschläge und schlägst "
+            "  Angebote: Du erstellst KEINE Angebote und schlägst "
             "auch keine vor — nimm einen entsprechenden Wunsch nur als Anliegen auf."
         )
     elif _level("kva_level") == 3:
         lines.append(
-            "  Kostenvoranschläge: Erstelle aus den besprochenen Positionen einen "
+            "  Angebote: Erstelle aus den besprochenen Positionen einen "
             "KVA-Entwurf (hk_draftCostEstimate); er wird — sofern eine E-Mail-Adresse "
             "vorliegt — direkt an den Kunden versendet."
         )
     else:
         lines.append(
-            "  Kostenvoranschläge: Erstelle aus den besprochenen Positionen einen "
+            "  Angebote: Erstelle aus den besprochenen Positionen einen "
             "KVA-Entwurf (hk_draftCostEstimate); das TEAM prüft und versendet ihn."
         )
 

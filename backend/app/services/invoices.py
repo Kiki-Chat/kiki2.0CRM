@@ -45,10 +45,10 @@ def maybe_create_invoice_for_project(
     org_id: str, case: dict, user_id: str | None = None, client=None
 ) -> dict | None:
     """Back-office automation (topic 19): when a **Fall (case)** is marked
-    'completed', auto-draft an invoice from the case's ACCEPTED KVA, gated by
+    'completed', auto-draft an invoice from the case's ACCEPTED Angebot, gated by
     agent_configs.invoices_enabled + invoices_level.
 
-    Case↔Project split (migration 0073): KVAs and invoices anchor on
+    Case↔Project split (migration 0073): Angebote and invoices anchor on
     ``case_id`` now (the renamed former ``project_id`` column → ``cases`` table),
     so the lookup keys on the case id. The public name is kept for callers; the
     ``case`` row carries the project-style schema (id / number / customer_id).
@@ -91,7 +91,7 @@ def maybe_create_invoice_for_project(
         )
         if existing:
             return None
-        # Source = the case's ACCEPTED KVA (only invoice an agreed quote).
+        # Source = the case's ACCEPTED Angebot (only invoice an agreed quote).
         kvas = (
             client.table("cost_estimates")
             .select("id, customer_id, line_items, subtotal, vat_amount, total")
@@ -128,7 +128,7 @@ def maybe_create_invoice_for_project(
         created = client.table("invoices").insert(inv).execute().data
         invoice = created[0] if created else None
         if invoice:
-            # Mirror the manual KVA→invoice link.
+            # Mirror the manual Angebot→invoice link.
             (
                 client.table("cost_estimates")
                 .update({"status": "invoiced", "invoice_id": invoice["id"]})

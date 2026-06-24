@@ -356,13 +356,13 @@ export function CostEstimatesTab({ project }: { project: ProjectLite }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button onClick={() => navigate(newUrl)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110"><Plus size={14} /> Neuer Kostenvoranschlag</button>
+        <button onClick={() => navigate(newUrl)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110"><Plus size={14} /> Neuer Angebot</button>
       </div>
       {kvas.length ? (
         <div className="overflow-x-auto rounded-xl border border-border bg-surface">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-border text-left text-xs font-semibold uppercase tracking-wide text-muted">
-              <th className="px-4 py-3">KVA-Nr.</th><th className="px-4 py-3">Datum</th><th className="px-4 py-3">Betreff</th><th className="px-4 py-3 text-right">Betrag</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Aktionen</th>
+              <th className="px-4 py-3">Angebot-Nr.</th><th className="px-4 py-3">Datum</th><th className="px-4 py-3">Betreff</th><th className="px-4 py-3 text-right">Betrag</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Aktionen</th>
             </tr></thead>
             <tbody>
               {kvas.map((k) => (
@@ -390,7 +390,7 @@ export function CostEstimatesTab({ project }: { project: ProjectLite }) {
           </table>
         </div>
       ) : (
-        <EmptyState>Noch keine Kostenvoranschläge für dieses Projekt.</EmptyState>
+        <EmptyState>Noch keine Angebote für dieses Projekt.</EmptyState>
       )}
     </div>
   )

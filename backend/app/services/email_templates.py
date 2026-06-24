@@ -1,4 +1,4 @@
-"""Shared branded email shell for all CRM-sent emails (Invoice, KVA, Test, …).
+"""Shared branded email shell for all CRM-sent emails (Invoice, Angebot, Test, …).
 
 Brand/style is HeyKiki's canonical template (ported from the n8n post-call
 reference): sage→green gradient header, 600px container, 8px radius, Kiki-Chat
@@ -83,7 +83,7 @@ def render_message_email(
     *, company_name: str | None, message_text: str | None,
     contact_email: str | None = None, address: str | None = None,
 ) -> str:
-    """Shell + a client-authored plain-text message (Invoice / KVA / Test)."""
+    """Shell + a client-authored plain-text message (Invoice / Angebot / Test)."""
     return render_email(
         company_name=company_name, body_html=message_to_html(message_text),
         contact_email=contact_email, address=address,

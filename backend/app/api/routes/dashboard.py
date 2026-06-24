@@ -654,7 +654,7 @@ def _ai_insights(org_id: str, scope=None) -> dict:
             cust_ids.append(e.get("customer_id"))
             suggestions.append({
                 "id": key, "category": "kva_followup",
-                "title": f"{e.get('number') or 'KVA'} wurde vor {(now - sent).days} Tagen versendet, noch keine Antwort",
+                "title": f"{e.get('number') or 'Angebot'} wurde vor {(now - sent).days} Tagen versendet, noch keine Antwort",
                 "subtitle": f"Betrag: {_eur(e.get('total'))}",
                 "customer_id": e.get("customer_id"), "created_at": e.get("sent_at"),
             })

@@ -111,7 +111,7 @@ export interface KzRequiredField {
   /** Off = Kiki skips this point entirely. For linked rows this mirrors the
    * real setting (Autonomie/Preisauskunft) — two-way sync. */
   is_active: boolean
-  /** Set on the three offer-step rows (Termin/KVA/Preisauskunft). */
+  /** Set on the three offer-step rows (Termin/Angebot/Preisauskunft). */
   linked_setting: 'appointments_enabled' | 'kva_enabled' | 'price_info_enabled' | null
 }
 

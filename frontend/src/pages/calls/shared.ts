@@ -143,8 +143,8 @@ export const COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#
 // stays language-neutral.
 export const ACTION_KIND_LABEL: Record<ActionItem['kind'], string> = {
   termin_anfrage: 'Terminbestätigung',
-  kva_to_send: 'KVA senden',
-  kva_pending_acceptance: 'Kostenvoranschlag-Antwort offen',
+  kva_to_send: 'Angebot senden',
+  kva_pending_acceptance: 'Angebot-Antwort offen',
   callback_owed: 'Rückruf',
   alt_time_proposal: 'Alternativtermin',
   appointment_cancelled: 'Termin storniert',

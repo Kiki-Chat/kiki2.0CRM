@@ -146,7 +146,7 @@ const KIND_CFG: Record<
   alt_time_proposal: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschieben', variant: 'warning', title: () => 'Neuen Termin annehmen?', primary: 'Annehmen', secondary: null, tertiary: 'Ablehnen', reco: () => 'Vorgeschlagenen Termin annehmen', assignable: false },
   appointment_cancelled: { type: 'storno', accent: 'var(--error)', label: 'Storno', variant: 'error', title: () => 'Termin storniert', primary: 'Verstanden', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
   callback_owed: { type: 'rueckruf', accent: 'var(--green-primary)', label: 'Rückruf', variant: 'green', title: (a) => `Rückruf an ${a.customer_name || 'Kunde'}?`, primary: 'Erledigt', secondary: 'Zuweisen', tertiary: null, reco: (n) => `${n} den Rückruf zuweisen`, assignable: true },
-  kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'KVA', variant: 'ai', title: (a) => `KVA an ${a.customer_name || 'Kunde'} senden?`, primary: 'KVA senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `KVA jetzt an ${c} senden`, assignable: false },
+  kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: (a) => `Angebot an ${a.customer_name || 'Kunde'} senden?`, primary: 'Angebot senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `Angebot jetzt an ${c} senden`, assignable: false },
   kva_pending_acceptance: { type: 'kva', accent: 'var(--ai)', label: 'KVA-Antwort', variant: 'ai', title: () => 'Kundenantwort erfassen', primary: 'Angenommen', secondary: null, tertiary: 'Abgelehnt', reco: () => 'Antwort des Kunden eintragen', assignable: false },
   reschedule_unmatched: { type: 'reschedule', accent: 'var(--warning)', label: 'Zuordnen', variant: 'warning', title: () => 'Terminänderung zuordnen', primary: 'Zuordnen', secondary: null, tertiary: 'Erledigt', reco: () => 'Terminänderung manuell einem Termin zuordnen', assignable: false },
 }
@@ -322,7 +322,7 @@ function mapThread(thread: {
   }
   for (const k of thread.cost_estimates ?? []) {
     const done = k.status === 'sent' || k.status === 'accepted'
-    items.push({ kind: 'kva', label: 'KVA', detail: k.total != null ? `${k.total} €` : '', done, doneLabel: k.status === 'accepted' ? 'Angenommen' : 'Gesendet', time: rel(k.sent_at || k.created_at), ts: ts(k.sent_at || k.created_at) })
+    items.push({ kind: 'kva', label: 'Angebot', detail: k.total != null ? `${k.total} €` : '', done, doneLabel: k.status === 'accepted' ? 'Angenommen' : 'Gesendet', time: rel(k.sent_at || k.created_at), ts: ts(k.sent_at || k.created_at) })
   }
   items.sort((x, y) => x.ts - y.ts)
   return { timeline: items, assigneeId: thread.inquiry?.assigned_employee?.id ?? null }

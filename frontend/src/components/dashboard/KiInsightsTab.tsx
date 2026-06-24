@@ -53,7 +53,7 @@ export function KiInsightsTab() {
 
       <KpiRow>
         <DashKpi label="KI-Vorschläge offen" value={k.open_count} icon={Sparkles} />
-        <DashKpi label="Kostenvoranschläge zum Nachfassen" value={k.kva_followup_count} icon={FileText} />
+        <DashKpi label="Angebote zum Nachfassen" value={k.kva_followup_count} icon={FileText} />
         <DashKpi label="Überfällige Rechnungen" value={k.overdue_invoices_count} icon={Receipt} />
         <DashKpi label="Inaktive Kunden" value={k.inactive_customers_count} icon={UserX} />
       </KpiRow>
@@ -67,7 +67,7 @@ export function KiInsightsTab() {
             <div className="max-w-md space-y-1">
               <p className="text-base font-semibold text-text">Du bist auf dem Laufenden!</p>
               <p className="text-sm text-muted">
-                Keine offenen Vorschläge. Kiki prüft regelmäßig auf KVAs, die ein Nachfassen brauchen, überfällige Rechnungen und seit langem inaktive Kunden — sobald etwas zu tun ist, erscheint es hier.
+                Keine offenen Vorschläge. Kiki prüft regelmäßig auf Angebote, die ein Nachfassen brauchen, überfällige Rechnungen und seit langem inaktive Kunden — sobald etwas zu tun ist, erscheint es hier.
               </p>
             </div>
           </div>

@@ -1,5 +1,5 @@
 // Right-side detail drawer for one call. Action-first: the appointment-confirmation
-// card + create-actions (Termin / KVA / Rechnung) + Zuständig live up top, then the
+// card + create-actions (Termin / Angebot / Rechnung) + Zuständig live up top, then the
 // Fall/Projekt link + triage, the Kiki summary, audio, and a collapsible transcript.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -394,7 +394,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                     Termin
                   </ActionBtn>
                   <ActionBtn variant="secondary" icon={<FileText size={15} />} disabled={!call.customer_id} onClick={goKva}>
-                    KVA
+                    Angebot
                   </ActionBtn>
                   <ActionBtn variant="secondary" icon={<Receipt size={15} />} disabled={!call.customer_id} onClick={goInvoice}>
                     Rechnung

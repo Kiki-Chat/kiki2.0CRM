@@ -29,7 +29,7 @@ export function FinanzenTab() {
       <KpiRow>
         <DashKpi label={`Umsatz (${pl})`} value={fmtEur(k.umsatz_month)} icon={Euro} trend={<TrendBadge delta={Math.round(k.umsatz_month - k.prev_umsatz)} unit="€" />} />
         <DashKpi label="Offene Rechnungen" value={k.open_invoices_count} sub={fmtEur(k.open_invoices_sum)} icon={Receipt} />
-        <DashKpi label="Ausstehende Kostenvoranschläge" value={k.kvas_pending_count} sub={fmtEur(k.kvas_pending_sum)} icon={FileText} />
+        <DashKpi label="Ausstehende Angebote" value={k.kvas_pending_count} sub={fmtEur(k.kvas_pending_sum)} icon={FileText} />
         <DashKpi label={`Bezahlt (${pl})`} value={fmtEur(k.paid_month)} icon={BadgeEuro} trend={<TrendBadge delta={Math.round(k.paid_month - k.prev_paid)} unit="€" />} />
       </KpiRow>
 

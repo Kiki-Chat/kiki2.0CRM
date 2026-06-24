@@ -154,7 +154,7 @@ function MoreMenu({ onDelete, disabled }: { onDelete: () => void; disabled: bool
 }
 
 // ─── Outbound outcome panel (replaces intake actions on outbound calls) ──────
-// Spec: an OUTBOUND screen must NOT offer create-appointment / KVA / change-customer
+// Spec: an OUTBOUND screen must NOT offer create-appointment / Angebot / change-customer
 // (those are inbound intake). It shows a minimal outcome instead.
 const OUTCOMES: { key: string; label: string; on: string }[] = [
   { key: 'confirmed', label: 'Bestätigt', on: 'border-success bg-success-bg text-success' },
@@ -320,7 +320,7 @@ function ActionsTab({
             <SectionLabel>Aufgabe erstellen</SectionLabel>
             <div className="flex gap-2.5">
               <PrimaryAction icon={CalendarPlus} label="Termin erstellen" tone="green" onClick={onAppointment} />
-              <PrimaryAction icon={Receipt} label="Kostenvoranschlag" tone="money" onClick={onKva} disabled={!onKva} />
+              <PrimaryAction icon={Receipt} label="Angebot" tone="money" onClick={onKva} disabled={!onKva} />
             </div>
             {/* Techniker-Einsatz: lebt am bestätigten Termin (Kalender →
                 Termin-Details → „Techniker einsetzen“), nicht am Anrufprotokoll. */}
@@ -609,7 +609,7 @@ export function Workspace({
           <div className="mb-3.5 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => navigate(`/fall/${caseId}`)}
-              title="Zum Vorgang (alle Anfragen, Termine, KVA, Rechnungen, Techniker)"
+              title="Zum Vorgang (alle Anfragen, Termine, Angebot, Rechnungen, Techniker)"
               className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-ai-bg bg-ai-bg px-2.5 py-1.5 text-xs font-bold text-ai transition hover:brightness-95"
             >
               <Layers size={13} className="flex-shrink-0" />

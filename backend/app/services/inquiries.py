@@ -162,8 +162,8 @@ def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
 # referenz_typ is the German occasion label stored on the outbound_calls ledger.
 def _resolve_case_from_referenz(client, org_id, referenz_typ, referenz_id):
     """Resolve the case (inquiry_id) a triggering record belongs to:
-    Termin→appointment.inquiry_id, KVA→cost_estimate.inquiry_id, Vorgang→the inquiry
-    itself, Rechnung→the invoice's KVA. Wartung/Rückruf have no case → None."""
+    Termin→appointment.inquiry_id, Angebot→cost_estimate.inquiry_id, Vorgang→the inquiry
+    itself, Rechnung→the invoice's Angebot. Wartung/Rückruf have no case → None."""
     if not referenz_id or not referenz_typ:
         return None
     t = str(referenz_typ).strip().lower()
