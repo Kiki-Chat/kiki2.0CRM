@@ -89,8 +89,8 @@ export function AutonomieSection({ data, flash }: { data: KzOverview; flash: (m:
         </div>
         <p className="mb-3 text-xs text-muted">
           Schalte jeden Bereich einzeln ein und wähle, wie selbstständig Kiki arbeitet. Ist der
-          Schalter aus, nimmt Kiki die Anfrage nur auf. Termine &amp; KVA wirken im Telefongespräch; Projekte
-          &amp; Rechnungen laufen im Hintergrund.
+          Schalter aus, nimmt Kiki die Anfrage nur auf. Termine & KVA wirken im Telefongespräch; Projekte
+          & Rechnungen laufen im Hintergrund.
         </p>
         <div className="space-y-3">
           {CAPABILITIES.map((cap) => {

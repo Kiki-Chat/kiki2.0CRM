@@ -249,7 +249,7 @@ export function Timeline({ timeline, onOpenCall }: { timeline: TLItem[]; onOpenC
                         fontWeight: 700,
                       }}
                     >
-                      <Play size={11} /> Aufnahme &amp; Transkript
+                      <Play size={11} /> Aufnahme & Transkript
                     </button>
                   )}
                 </>

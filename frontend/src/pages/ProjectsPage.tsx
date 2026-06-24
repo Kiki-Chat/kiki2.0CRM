@@ -86,7 +86,7 @@ export function ProjectsPage() {
           <FolderOpen size={26} className="text-green-primary" />
           <div>
             <h1 className="text-2xl font-bold text-text">Projekte</h1>
-            <p className="mt-0.5 text-sm text-muted">{projects.length} Projekte · {activeProjects.length} offen — übergeordnete Aufträge, die mehrere Vorgänge bündeln</p>
+            <p className="mt-0.5 text-sm text-muted">{projects.length} {projects.length === 1 ? 'Projekt' : 'Projekte'} · {activeProjects.length} offen — übergeordnete Aufträge, die mehrere Vorgänge bündeln</p>
           </div>
         </div>
         <button

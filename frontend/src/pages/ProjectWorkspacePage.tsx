@@ -334,7 +334,7 @@ function CaseStatChips({ c }: { c: CaseListRow }) {
 const CASE_STATUS_META: Record<string, { label: string; cls: string }> = {
   planning: { label: 'Offen', cls: 'bg-info-bg text-info' },
   active: { label: 'In Arbeit', cls: 'bg-warning-bg text-warning' },
-  completed: { label: 'Fertig', cls: 'bg-success-bg text-success' },
+  completed: { label: 'Abgeschlossen', cls: 'bg-success-bg text-success' },
   archived: { label: 'Archiviert', cls: 'bg-alt text-muted' },
 }
 

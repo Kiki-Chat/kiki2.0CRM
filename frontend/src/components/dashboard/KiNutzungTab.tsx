@@ -89,7 +89,7 @@ export function KiNutzungTab() {
           </div>
         </Panel>
 
-        <Panel title={`Top Anrufer (${pl})`} className="lg:col-span-4">
+        <Panel title={`Häufigste Anrufer (${pl})`} className="lg:col-span-4">
           {data.top_callers.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted">Keine Anrufe in diesem Zeitraum.</div>
           ) : (

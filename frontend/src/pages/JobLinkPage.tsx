@@ -203,7 +203,7 @@ export function JobLinkPage() {
 
           <FieldBlock label="Auftrag abgeschlossen?">
             <div className="flex gap-2">
-              {[['Ja, fertig', true], ['Noch offen', false]].map(([label, val]) => (
+              {[['Abgeschlossen', true], ['Noch offen', false]].map(([label, val]) => (
                 <button
                   key={String(label)}
                   onClick={() => setFinished(val as boolean)}

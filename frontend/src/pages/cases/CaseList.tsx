@@ -15,7 +15,7 @@ const NOW = Date.now()
 const LIST_STATUS: Record<string, { label: string; cls: string }> = {
   planning: { label: 'Offen', cls: 'bg-info-bg text-info' },
   active: { label: 'In Arbeit', cls: 'bg-warning-bg text-warning' },
-  completed: { label: 'Fertig', cls: 'bg-success-bg text-success' },
+  completed: { label: 'Abgeschlossen', cls: 'bg-success-bg text-success' },
   archived: { label: 'Archiviert', cls: 'bg-alt text-muted' },
 }
 
@@ -130,7 +130,7 @@ export function CaseList({ cases, selectedId, onSelect }: {
     { value: 'emergency', label: 'Notdienst', dot: 'var(--error)', count: cases.filter((c) => c.emergency).length },
     { value: 'planning', label: 'Offen', dot: 'var(--info)', count: cases.filter((c) => c.status === 'planning').length },
     { value: 'active', label: 'In Arbeit', dot: 'var(--warning)', count: cases.filter((c) => c.status === 'active').length },
-    { value: 'completed', label: 'Fertig', dot: 'var(--success)', count: cases.filter((c) => c.status === 'completed').length },
+    { value: 'completed', label: 'Abgeschlossen', dot: 'var(--success)', count: cases.filter((c) => c.status === 'completed').length },
   ]
   const contactOpts: Opt[] = [...new Set(cases.map((c) => c.customer_name).filter(Boolean) as string[])]
     .sort((a, b) => a.localeCompare(b, 'de'))

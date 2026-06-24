@@ -382,7 +382,7 @@ function InquiriesPanel({ customer }: { customer: Customer }) {
                   <span className="truncate text-sm font-bold text-text">{c.label || 'Vorgang'}</span>
                   {c.number && <span className="font-mono text-[11px] text-ai">{c.number}</span>}
                   <span className="flex-1" />
-                  <span className="text-xs text-muted">{items.length} Anfragen</span>
+                  <span className="text-xs text-muted">{items.length} {items.length === 1 ? 'Anfrage' : 'Anfragen'}</span>
                   <ChevronRight size={14} className="text-faint" />
                 </button>
                 <div className="space-y-1.5">
