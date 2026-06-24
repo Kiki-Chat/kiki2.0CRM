@@ -109,17 +109,28 @@ HK_TOOL_NAMES: list[str] = [
 
 # Conversation-initiation client-data webhook route on this backend.
 # Verified live at backend/app/api/routes/conversation_init.py (router prefix
-# "/api/elevenlabs", path "/conversation-init"). Built at runtime from
-# ``settings.backend_public_url`` so it follows local vs. prod automatically.
+# "/api/elevenlabs", path "/conversation-init").
 _CONVERSATION_INIT_PATH = "/api/elevenlabs/conversation-init"
 
-# Production backend public URL — the conversation-initiation webhook on a
-# live agent MUST point here (verify_agent_health's webhook_url_is_prod check).
-# Defined explicitly per the Batch-2 contract; the configured
-# ``settings.backend_public_url`` follows local-vs-prod for the WRITE side, while
-# this constant is the read-side assertion target for the prod health board.
-_PROD_BACKEND_URL = "https://backend-production-3f88a.up.railway.app"
+# The conversation-init webhook URL we write onto every agent. Host is the
+# ElevenLabs env-var placeholder so the SAME webhook resolves to the correct
+# backend per the call's environment (the phone-number ``environment`` pin →
+# ``api_host``) — no per-environment agent duplication. ``https://`` MUST be
+# literal before any ``{{...}}`` per EL's URL rules.
+_CONVERSATION_INIT_WEBHOOK_URL = "https://{{system__env_api_host}}" + _CONVERSATION_INIT_PATH
+
+# verify_agent_health's webhook_url_is_prod check accepts the env-routed URL (the
+# correct target going forward) OR a legacy hardcoded backend host, so agents not
+# yet re-synced don't red-flag during the migration. (3f88a = UAT, 7bca =
+# production — the old ``_PROD_BACKEND_URL`` was mislabeled at 3f88a.)
+_UAT_BACKEND_URL = "https://backend-production-3f88a.up.railway.app"
+_PROD_BACKEND_URL = "https://backend-production-7bca.up.railway.app"
 _PROD_WEBHOOK_URL = f"{_PROD_BACKEND_URL}{_CONVERSATION_INIT_PATH}"
+_ACCEPTED_WEBHOOK_URLS = frozenset({
+    _CONVERSATION_INIT_WEBHOOK_URL,
+    f"{_UAT_BACKEND_URL}{_CONVERSATION_INIT_PATH}",
+    _PROD_WEBHOOK_URL,
+})
 
 # Actionable German message surfaced when an agent has no phone bound (2.3).
 NO_PHONE_MESSAGE = (
@@ -1205,6 +1216,86 @@ def _stamp_agent_provisioned(org_id: str | UUID) -> None:
     ).eq("id", str(org_id)).execute()
 
 
+# ─── Reusable additive steps (shared by configure_agent + the bind path) ─────
+def attach_hk_tools(
+    agent_id: str,
+    *,
+    actor_id: str | UUID | None = None,
+    org_id: str | UUID | None = None,
+) -> list[str]:
+    """Additively merge the 11 ``hk_*`` tool ids onto the agent (step B.2).
+
+    Returns the ids newly added (``[]`` when all were already present).
+    Idempotent. Raises HTTPException(400) if a required workspace tool is
+    missing. Goes through ``patch_agent_safely`` (snapshot/verify/rollback).
+    """
+    tool_map = _resolve_hk_tool_ids(HK_TOOL_NAMES)
+    required_ids = list(tool_map.values())
+    current = get_agent_config(agent_id)
+    current_ids = _get_path(current, TOOL_IDS_PATH) or []
+    to_add = [tid for tid in required_ids if tid not in current_ids]
+    if to_add:
+        patch_agent_safely(
+            agent_id=agent_id,
+            field_patches={
+                "conversation_config": {"agent": {"prompt": {"tool_ids": required_ids}}}
+            },
+            merge_arrays=[TOOL_IDS_PATH],
+            actor_id=actor_id,
+            org_id=org_id,
+            endpoint_label="provision_tools",
+        )
+    return to_add
+
+
+def set_conversation_init_webhook(
+    agent_id: str,
+    *,
+    actor_id: str | UUID | None = None,
+    org_id: str | UUID | None = None,
+) -> None:
+    """Point the agent's conversation-init webhook at the env-routed URL and
+    enable it (step B.4).
+
+    ElevenLabs validates the full webhook object on PATCH — a partial
+    ``{url: ...}`` resets siblings and trips "Field required" on
+    request_headers — so we carry the existing ``request_headers`` (preserving
+    the X-HeyKiki-Secret). Idempotent: no write when the URL already matches and
+    the toggle is on. Goes through ``patch_agent_safely``.
+    """
+    current = get_agent_config(agent_id)
+    cur_webhook = (
+        _get_path(
+            current,
+            "platform_settings.workspace_overrides."
+            "conversation_initiation_client_data_webhook",
+        )
+        or {}
+    )
+    cur_url = cur_webhook.get("url")
+    cur_headers = cur_webhook.get("request_headers") or {}
+    cur_enabled = bool(_get_path(current, WEBHOOK_ENABLED_PATH))
+    needs_url = cur_url != _CONVERSATION_INIT_WEBHOOK_URL
+    needs_toggle = not cur_enabled
+    if needs_url or needs_toggle:
+        webhook_patch: dict = {}
+        if needs_url:
+            webhook_patch.setdefault("workspace_overrides", {})[
+                "conversation_initiation_client_data_webhook"
+            ] = {"url": _CONVERSATION_INIT_WEBHOOK_URL, "request_headers": cur_headers}
+        if needs_toggle:
+            webhook_patch.setdefault("overrides", {})[
+                "enable_conversation_initiation_client_data_from_webhook"
+            ] = True
+        patch_agent_safely(
+            agent_id=agent_id,
+            field_patches={"platform_settings": webhook_patch},
+            actor_id=actor_id,
+            org_id=org_id,
+            endpoint_label="provision_webhook",
+        )
+
+
 # ─── Public entry point ──────────────────────────────────────────────────────
 def configure_agent(
     *,
@@ -1299,25 +1390,9 @@ def configure_agent(
         )
 
     # ─── B.2 Tools (additive merge of tool_ids) ──────────────────────────────
-    tool_map = _resolve_hk_tool_ids(HK_TOOL_NAMES)
-    required_ids = list(tool_map.values())
-    current = get_agent_config(agent_id)
-    current_ids = _get_path(current, TOOL_IDS_PATH) or []
-    to_add = [tid for tid in required_ids if tid not in current_ids]
-    if to_add:
-        patch_agent_safely(
-            agent_id=agent_id,
-            field_patches={
-                "conversation_config": {
-                    "agent": {"prompt": {"tool_ids": required_ids}}
-                }
-            },
-            merge_arrays=[TOOL_IDS_PATH],
-            actor_id=actor_id,
-            org_id=org_id,
-            endpoint_label="provision_tools",
-        )
-    summary["tools_attached"] = to_add
+    summary["tools_attached"] = attach_hk_tools(
+        agent_id, actor_id=actor_id, org_id=org_id
+    )
 
     # ─── B.3 Prompt (FIRST run only) ─────────────────────────────────────────
     if is_first_run:
@@ -1346,45 +1421,7 @@ def configure_agent(
         summary["prompt_skipped_reason"] = "already_provisioned"
 
     # ─── B.4 Webhook (conversation initiation client data) ───────────────────
-    # ElevenLabs validates the full webhook object on PATCH — sending a
-    # partial {url: ...} resets siblings and trips "Field required" on
-    # request_headers. So we always carry the existing request_headers in
-    # the patch body to preserve them. Empty {} is a valid default.
-    webhook_url = f"{settings.backend_public_url.rstrip('/')}{_CONVERSATION_INIT_PATH}"
-    current = get_agent_config(agent_id)
-    cur_webhook = (
-        _get_path(
-            current,
-            "platform_settings.workspace_overrides."
-            "conversation_initiation_client_data_webhook",
-        )
-        or {}
-    )
-    cur_url = cur_webhook.get("url")
-    cur_headers = cur_webhook.get("request_headers") or {}
-    cur_enabled = bool(_get_path(current, WEBHOOK_ENABLED_PATH))
-    needs_url = cur_url != webhook_url
-    needs_toggle = not cur_enabled
-    if needs_url or needs_toggle:
-        webhook_patch: dict = {}
-        if needs_url:
-            # Carry existing request_headers so EL doesn't reject the PATCH
-            # for "Field required: request_headers". Preserves the
-            # X-HeyKiki-Secret value already wired on the agent.
-            webhook_patch.setdefault("workspace_overrides", {})[
-                "conversation_initiation_client_data_webhook"
-            ] = {"url": webhook_url, "request_headers": cur_headers}
-        if needs_toggle:
-            webhook_patch.setdefault("overrides", {})[
-                "enable_conversation_initiation_client_data_from_webhook"
-            ] = True
-        patch_agent_safely(
-            agent_id=agent_id,
-            field_patches={"platform_settings": webhook_patch},
-            actor_id=actor_id,
-            org_id=org_id,
-            endpoint_label="provision_webhook",
-        )
+    set_conversation_init_webhook(agent_id, actor_id=actor_id, org_id=org_id)
     summary["webhook_enabled"] = True
 
     # ─── B.5 Audio in client_events ──────────────────────────────────────────
@@ -1550,14 +1587,16 @@ def verify_agent_health(org_id: str | UUID, agent_id: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         checks.append(_check("hk_tools_attached", False, f"Tool-Prüfung fehlgeschlagen: {str(exc)[:150]}"))
 
-    # webhook_url_is_prod — the conversation-init webhook points at prod.
+    # webhook_url_is_prod — the conversation-init webhook points at the
+    # env-routed URL (or a tolerated legacy backend host during migration).
     cur_url = _get_path(cfg, WEBHOOK_URL_PATH)
+    url_ok = cur_url in _ACCEPTED_WEBHOOK_URLS
     checks.append(_check(
         "webhook_url_is_prod",
-        cur_url == _PROD_WEBHOOK_URL,
+        url_ok,
         f"Webhook-URL: {cur_url or '—'}"
-        if cur_url == _PROD_WEBHOOK_URL
-        else f"Webhook-URL ist nicht die Produktions-URL (ist: {cur_url or '—'}).",
+        if url_ok
+        else f"Webhook-URL ist nicht env-geroutet/bekannt (ist: {cur_url or '—'}).",
     ))
 
     # webhook_enabled — the init-webhook toggle is on.

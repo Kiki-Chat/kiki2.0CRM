@@ -21,8 +21,10 @@ from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.schemas.provision import ProvisionRequest
 from app.services.agent_config import (
+    attach_hk_tools,
     configure_agent,
     fetch_phone_meta_for_agent,
+    set_conversation_init_webhook,
     set_phone_environment,
     verify_agent_health,
 )
@@ -629,6 +631,23 @@ async def bind_agent(
                 "bind-agent: environment pin failed for org %s agent %s",
                 org_id, agent_id, exc_info=True,
             )
+
+    # Ensure the n8n-created agent carries the 11 hk_ tools + the (env-routed)
+    # conversation-init webhook — n8n doesn't reliably set these (most agents
+    # have the init webhook OFF). Additive + idempotent (tools merge, webhook
+    # set+enable); the prompt is left untouched. Best-effort: a failure is logged
+    # and surfaced by the verify gate below — it never fails the bind.
+    def _attach() -> None:
+        attach_hk_tools(agent_id, actor_id=_user.id, org_id=org_id)
+        set_conversation_init_webhook(agent_id, actor_id=_user.id, org_id=org_id)
+
+    try:
+        await run_in_threadpool(_attach)
+    except Exception:  # noqa: BLE001 — verify gate surfaces any gap; don't fail the bind
+        logger.warning(
+            "bind-agent: tool/webhook attach failed for org %s agent %s",
+            org_id, agent_id, exc_info=True,
+        )
 
     # Read-only verify gate — never writes to the agent.
     report = await run_in_threadpool(verify_agent_health, org_id, agent_id)

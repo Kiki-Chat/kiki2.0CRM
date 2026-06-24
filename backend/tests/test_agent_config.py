@@ -316,6 +316,49 @@ def _wire_configure_agent(monkeypatch, *, current_cfg, provisioned=False, phones
     return rec
 
 
+# ─── attach_hk_tools / set_conversation_init_webhook (shared B.2/B.4 steps) ───
+def test_attach_hk_tools_merges_then_noops(monkeypatch):
+    _stub_workspace_tools(monkeypatch, ac.HK_TOOL_NAMES)
+    rec = _RecordingPatch()
+    monkeypatch.setattr(ac, "patch_agent_safely", rec)
+    monkeypatch.setattr(ac, "get_agent_config", lambda _a: {})  # no tools yet
+    added = ac.attach_hk_tools("agent_x", actor_id="u", org_id="o")
+    assert len(added) == len(ac.HK_TOOL_NAMES)
+    assert rec.calls and rec.calls[0]["endpoint_label"] == "provision_tools"
+
+    rec2 = _RecordingPatch()
+    monkeypatch.setattr(ac, "patch_agent_safely", rec2)
+    full = _build_current_cfg(tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES])
+    monkeypatch.setattr(ac, "get_agent_config", lambda _a: full)
+    assert ac.attach_hk_tools("agent_x") == []
+    assert rec2.calls == []
+
+
+def test_set_conversation_init_webhook_writes_env_routed_url(monkeypatch):
+    rec = _RecordingPatch()
+    monkeypatch.setattr(ac, "patch_agent_safely", rec)
+    monkeypatch.setattr(ac, "get_agent_config", lambda _a: {})  # unset + disabled
+    ac.set_conversation_init_webhook("agent_x", actor_id="u", org_id="o")
+    assert len(rec.calls) == 1
+    ps = rec.calls[0]["field_patches"]["platform_settings"]
+    wh = ps["workspace_overrides"]["conversation_initiation_client_data_webhook"]
+    assert wh["url"] == ac._CONVERSATION_INIT_WEBHOOK_URL
+    assert wh["url"] == "https://{{system__env_api_host}}/api/elevenlabs/conversation-init"
+    assert ps["overrides"]["enable_conversation_initiation_client_data_from_webhook"] is True
+    assert rec.calls[0]["endpoint_label"] == "provision_webhook"
+
+
+def test_set_conversation_init_webhook_noop_when_already_env_routed(monkeypatch):
+    rec = _RecordingPatch()
+    monkeypatch.setattr(ac, "patch_agent_safely", rec)
+    cfg = _build_current_cfg(
+        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL, webhook_enabled=True
+    )
+    monkeypatch.setattr(ac, "get_agent_config", lambda _a: cfg)
+    ac.set_conversation_init_webhook("agent_x")
+    assert rec.calls == []
+
+
 def test_configure_agent_fresh_full_path(monkeypatch):
     cfg = _build_current_cfg(tool_ids=[], prompt="OLD", client_events=["audio"])
     rec = _wire_configure_agent(monkeypatch, current_cfg=cfg, provisioned=False)
@@ -353,9 +396,7 @@ def test_configure_agent_rerun_skips_prompt(monkeypatch):
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         prompt="customer hand-edited content",
         client_events=["audio"],
-        webhook_url=(
-            "http://localhost:8000/api/elevenlabs/conversation-init"
-        ),
+        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
         webhook_enabled=True,
         override_flags=True,
     )
@@ -377,9 +418,7 @@ def test_configure_agent_adds_only_missing_audio(monkeypatch):
     cfg = _build_current_cfg(
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         client_events=["interruption"],  # missing audio
-        webhook_url=(
-            "http://localhost:8000/api/elevenlabs/conversation-init"
-        ),
+        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
         webhook_enabled=True,
         override_flags=True,
     )
@@ -405,7 +444,7 @@ def test_configure_agent_zero_phones_is_graceful(monkeypatch):
     cfg = _build_current_cfg(
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         client_events=["audio"],
-        webhook_url="http://localhost:8000/api/elevenlabs/conversation-init",
+        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
         webhook_enabled=True,
         override_flags=True,
     )
@@ -472,7 +511,7 @@ def test_configure_agent_sets_override_whitelist_when_absent(monkeypatch):
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         prompt="customer hand-edited content",
         client_events=["audio"],
-        webhook_url="http://localhost:8000/api/elevenlabs/conversation-init",
+        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
         webhook_enabled=True,
         override_flags=False,
     )
@@ -501,7 +540,7 @@ def test_configure_agent_override_whitelist_idempotent(monkeypatch):
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         prompt="x",
         client_events=["audio"],
-        webhook_url="http://localhost:8000/api/elevenlabs/conversation-init",
+        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
         webhook_enabled=True,
         override_flags=True,
     )

@@ -266,6 +266,17 @@ def test_bind_agent_endpoint_writes_fields_and_verifies(monkeypatch):
         lambda pid, env, aid=None: pins.append((pid, env, aid)),
     )
 
+    # bind also additively attaches the 11 tools + the init webhook.
+    attach_calls: list = []
+    monkeypatch.setattr(
+        sa, "attach_hk_tools",
+        lambda agent_id, **k: attach_calls.append(("tools", agent_id)) or [],
+    )
+    monkeypatch.setattr(
+        sa, "set_conversation_init_webhook",
+        lambda agent_id, **k: attach_calls.append(("webhook", agent_id)),
+    )
+
     payload = sa.BindAgentRequest(
         elevenlabsAgentId="agent_rebuilt_by_n8n",
         phoneNumber=PHONE,
@@ -285,6 +296,10 @@ def test_bind_agent_endpoint_writes_fields_and_verifies(monkeypatch):
     # The phone (id supplied) was pinned to uat, carrying the bound agent id.
     assert pins == [(PHONE_ID, "uat", "agent_rebuilt_by_n8n")]
     assert result.environment == "uat"
+
+    # The 11 tools + the conversation-init webhook were attached at bind.
+    assert ("tools", "agent_rebuilt_by_n8n") in attach_calls
+    assert ("webhook", "agent_rebuilt_by_n8n") in attach_calls
 
     # The org row was UPDATED (not configured) with agent id + phone + stamp.
     org_updates = [v for (t, v) in client.store["updates"] if t == "organizations"]
@@ -313,6 +328,9 @@ def _wire_bind_endpoint(monkeypatch, *, el_environment):
     monkeypatch.setattr(sa, "_get_org", lambda oid: dict(existing_org))
     monkeypatch.setattr(sa, "verify_agent_health", lambda *a, **k: dict(_VERIFY_OK))
     monkeypatch.setattr(sa.settings, "el_environment", el_environment)
+    # bind now additively attaches the 11 tools + the init webhook — stub them.
+    monkeypatch.setattr(sa, "attach_hk_tools", lambda *a, **k: [])
+    monkeypatch.setattr(sa, "set_conversation_init_webhook", lambda *a, **k: None)
     return client
 
 
