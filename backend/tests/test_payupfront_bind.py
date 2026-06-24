@@ -151,7 +151,10 @@ def _wire_provisioning(monkeypatch):
     client = FakeClient(reads={"organizations": [], "users": []})
     monkeypatch.setattr(prov, "get_service_client", lambda: client)
 
-    calls = {"configure": 0, "verify": 0, "verify_args": None}
+    calls = {
+        "configure": 0, "verify": 0, "verify_args": None,
+        "attach_tools": 0, "attach_webhook": 0,
+    }
 
     def _configure(*, org_id, agent_id, org_name, **kw):
         calls["configure"] += 1
@@ -162,8 +165,17 @@ def _wire_provisioning(monkeypatch):
         calls["verify_args"] = (org_id, agent_id)
         return dict(_VERIFY_OK)
 
+    def _attach_tools(agent_id, **kw):
+        calls["attach_tools"] += 1
+        return []
+
+    def _set_webhook(agent_id, **kw):
+        calls["attach_webhook"] += 1
+
     monkeypatch.setattr(prov, "configure_agent", _configure)
     monkeypatch.setattr(prov, "verify_agent_health", _verify)
+    monkeypatch.setattr(prov, "attach_hk_tools", _attach_tools)
+    monkeypatch.setattr(prov, "set_conversation_init_webhook", _set_webhook)
     return client, calls
 
 
@@ -182,6 +194,12 @@ def test_bind_only_skips_configure_and_verifies(monkeypatch):
     assert calls["configure"] == 0
     assert calls["verify"] == 1
     assert calls["verify_args"][1] == AGENT_ID
+
+    # The CRM assigns the 11 tools + the init webhook at onboarding (n8n only
+    # owns the post-call webhook); configure_agent stays uncalled so n8n's
+    # prompt is intact.
+    assert calls["attach_tools"] == 1
+    assert calls["attach_webhook"] == 1
 
     # The verify report is surfaced on the response.
     assert resp.agent_health == _VERIFY_OK
@@ -222,6 +240,9 @@ def test_default_path_still_calls_configure_agent(monkeypatch):
     # Default behavior preserved: configure_agent runs, verify does NOT.
     assert calls["configure"] == 1
     assert calls["verify"] == 0
+    # Default path delegates to configure_agent (which attaches internally) —
+    # the bind-only attach shim is not used here.
+    assert calls["attach_tools"] == 0
     assert resp.agent_health is None
 
     # No bind-only fields stamped onto the org insert.

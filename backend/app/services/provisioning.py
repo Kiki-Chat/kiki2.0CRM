@@ -1,10 +1,19 @@
+import logging
+
 from fastapi import HTTPException, status
 
 from datetime import datetime, timezone
 
 from app.db.supabase_client import get_service_client
 from app.schemas.provision import ProvisionRequest, ProvisionResponse
-from app.services.agent_config import configure_agent, verify_agent_health
+from app.services.agent_config import (
+    attach_hk_tools,
+    configure_agent,
+    set_conversation_init_webhook,
+    verify_agent_health,
+)
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_AGENT_CONFIG = {
     "autonomy_level": 1,
@@ -236,13 +245,23 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
 
         # ─── Step B — finalize the ElevenLabs agent ──────────────────────────
         if bind_only:
-            # n8n BIND-ONLY: the agent (prompt + tools + webhook + number) was
-            # built externally by n8n. Do NOT call configure_agent — it would
-            # clobber n8n's prompt/tools/webhook. Just run the READ-ONLY
-            # verify gate and surface the report. A red verify does NOT roll
-            # the org back (the agent is n8n's to fix); it's reported so the
-            # operator can see ok/red, mirroring the configure path's behavior
-            # of never silently claiming a red agent is provisioned.
+            # n8n BIND-ONLY: n8n built the agent (prompt + number) externally,
+            # but the conversation-init webhook + the 11 hk_ tools are OURS to
+            # assign at onboarding (n8n only sets the post-call webhook). Attach
+            # them additively (prompt left untouched) — best-effort so a transient
+            # EL failure doesn't roll the org back; the verify gate below surfaces
+            # any gap. We still do NOT call configure_agent (that would re-apply
+            # and clobber n8n's prompt).
+            try:
+                attach_hk_tools(payload.elevenlabs_agent_id, org_id=org_id)
+                set_conversation_init_webhook(
+                    payload.elevenlabs_agent_id, org_id=org_id
+                )
+            except Exception:  # noqa: BLE001 — verify gate surfaces gaps; don't roll back
+                logger.warning(
+                    "provision bind-only: tool/webhook attach failed for org %s "
+                    "agent %s", org_id, payload.elevenlabs_agent_id, exc_info=True,
+                )
             agent_health = verify_agent_health(org_id, payload.elevenlabs_agent_id)
         else:
             # Runs synchronously inside provision_org so a hard failure (e.g.
