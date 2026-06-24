@@ -89,7 +89,7 @@ const APPT_STATUS: Record<string, { label: string; variant: 'info' | 'warning' |
 }
 const JOB_STATUS: Record<string, { label: string; variant: 'info' | 'warning' | 'success' }> = {
   offen: { label: 'Offen', variant: 'warning' },
-  'läuft': { label: 'Läuft', variant: 'info' },
+  'läuft': { label: 'In Bearbeitung', variant: 'info' },
   abgeschlossen: { label: 'Abgeschlossen', variant: 'success' },
 }
 
@@ -312,8 +312,8 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
     onError: () => flash('Erneut senden fehlgeschlagen.'),
   })
 
-  if (!caseId) return <div className="grid flex-1 place-items-center bg-bg text-[17px] text-muted">Tippen Sie links auf einen Fall.</div>
-  if (isLoading || !data) return <div className="grid flex-1 place-items-center bg-bg text-muted">Lädt…</div>
+  if (!caseId) return <div className="grid flex-1 place-items-center bg-bg text-[17px] text-muted">Tippe links auf einen Vorgang.</div>
+  if (isLoading || !data) return <div className="grid flex-1 place-items-center bg-bg text-muted">Wird geladen…</div>
 
   const cs = data.case
   const firstInq = data.inquiries[0]?.id
@@ -387,7 +387,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
             {currentProject ? (
               <div className="flex flex-wrap items-center gap-2">
                 <button onClick={() => navigate(`/projects/${currentProject.id}`)} className="inline-flex items-center gap-1.5 rounded-lg border border-ai-bg bg-ai-bg px-2.5 py-1 text-xs font-bold text-ai hover:brightness-95"><FolderPlus size={13} /> Projekt {currentProject.number ?? ''} · {currentProject.title}</button>
-                <button onClick={() => setProjOpen((o) => !o)} className="text-xs font-bold text-muted hover:text-body">ändern</button>
+                <button onClick={() => setProjOpen((o) => !o)} className="text-xs font-bold text-muted hover:text-body">Ändern</button>
               </div>
             ) : (
               <button onClick={() => setProjOpen((o) => !o)} className="inline-flex items-center gap-1.5 text-xs font-bold text-green-deep hover:underline"><FolderPlus size={14} /> Zu Projekt hinzufügen</button>
@@ -396,7 +396,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setProjOpen(false)} />
                 <div className="absolute left-0 z-50 mt-1 max-h-64 w-64 overflow-auto rounded-xl border border-border bg-surface p-1.5 shadow-e3">
-                  {currentProject && <button onClick={() => { patchCase.mutate({ project_id: '' }); setProjOpen(false) }} className="block w-full rounded-lg px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">Aus Projekt lösen</button>}
+                  {currentProject && <button onClick={() => { patchCase.mutate({ project_id: '' }); setProjOpen(false) }} className="block w-full rounded-lg px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">Vom Projekt trennen</button>}
                   {customerProjects.map((p) => <button key={p.id} onClick={() => { patchCase.mutate({ project_id: p.id }); setProjOpen(false) }} className="block w-full truncate rounded-lg px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">→ {p.title}</button>)}
                   <button onClick={goNewProject} className="mt-0.5 flex w-full items-center gap-1.5 rounded-lg border-t border-border px-2.5 py-1.5 text-left text-sm font-bold text-green-deep hover:bg-alt"><FolderPlus size={14} /> Neues Projekt erstellen</button>
                 </div>
@@ -405,7 +405,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
           </div>
 
           <div className="mt-[18px] border-t border-border pt-[18px]">
-            <div className="mb-2.5 text-[13px] font-bold text-muted">Wie ist der Stand?</div>
+            <div className="mb-2.5 text-[13px] font-bold text-muted">Status</div>
             <StatusSwitch status={cs.status} onChange={(v) => patchCase.mutate({ status: v })} disabled={patchCase.isPending} />
           </div>
         </div>
@@ -415,8 +415,8 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
           <div className={cn('flex items-center gap-3', decisions.length > 0 && 'mb-4')}>
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-warning-bg text-warning"><Sparkles size={21} /></span>
             <div>
-              <h2 className="font-poster text-[20px] font-extrabold text-text">Was ist zu tun?</h2>
-              <div className="text-[13.5px] text-muted">Kiki hat das für Sie vorbereitet</div>
+              <h2 className="font-poster text-[20px] font-extrabold text-text">Nächste Schritte</h2>
+              <div className="text-[13.5px] text-muted">Kiki hat das für dich vorbereitet</div>
             </div>
           </div>
           {decisions.length ? (
@@ -426,8 +426,8 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
           ) : (
             <div className="py-2 text-center">
               <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-green-tint-100 text-green-deep"><CheckCircle2 size={30} /></span>
-              <div className="mt-3 text-[17px] font-extrabold text-text">Keine offenen Aktionen</div>
-              <div className="mt-1 text-[13px] text-muted">Kiki hat alles im Griff.</div>
+              <div className="mt-3 text-[17px] font-extrabold text-text">Keine offenen Aufgaben</div>
+              <div className="mt-1 text-[13px] text-muted">Kiki meldet sich, sobald etwas reinkommt.</div>
             </div>
           )}
         </div>
@@ -546,7 +546,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
               {data.appointments.length === 0 ? (
                 <p className="text-sm text-muted">Erst einen Termin anlegen — der Techniker-Link gehört zu einem bestätigten Termin.</p>
               ) : confirmedAppts.length === 0 ? (
-                <p className="text-sm text-muted">Der Termin muss erst im Kalender bestätigt werden — danach können Sie den Techniker-Link senden.</p>
+                <p className="text-sm text-muted">Der Termin muss erst im Kalender bestätigt werden — danach kannst du den Techniker-Link senden.</p>
               ) : technicians.length === 0 ? (
                 <p className="text-sm text-muted">Keine Techniker hinterlegt (Mitarbeiter mit Technikerrolle).</p>
               ) : (
@@ -590,7 +590,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                         <td className="whitespace-nowrap px-3 py-2.5 text-right">
                           <div className="inline-flex items-center gap-1.5">
                             <button onClick={() => resendJob.mutate(j)} disabled={!j.appointment_id || !j.employee_id || !!j.submitted_at || resendJob.isPending} title="Link erneut an den Techniker senden" className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-bold text-body hover:bg-alt disabled:opacity-50"><Send size={12} /> Erneut senden</button>
-                            <button onClick={() => copyLink(j.url)} title="Techniker-Link kopieren" className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-bold text-body hover:bg-alt"><Copy size={12} /> Link</button>
+                            <button onClick={() => copyLink(j.url)} title="Techniker-Link kopieren" className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-xs font-bold text-body hover:bg-alt"><Copy size={12} /> Techniker-Link</button>
                           </div>
                         </td>
                       </tr>

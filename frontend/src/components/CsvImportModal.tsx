@@ -123,7 +123,7 @@ const EXPECTED_TYPES: Record<string, string[]> = {
 }
 // Correction action → German sentence for the result report.
 const ACTION_LABEL: Record<string, string> = {
-  phone_salvaged_from_email: 'Telefonnummer aus E-Mail-Feld gerettet',
+  phone_salvaged_from_email: 'Telefonnummer aus E-Mail-Feld übernommen',
   junk_email_dropped: 'Ungültige E-Mail verworfen',
   address_from_notes: 'Adresse aus Notizen übernommen',
 }

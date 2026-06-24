@@ -138,8 +138,8 @@ export function CatalogPage() {
         <div className="flex items-center gap-3">
           <Box size={26} className="text-green-primary" />
           <div>
-            <h1 className="text-2xl font-bold text-text">Artikel & Vorlagen</h1>
-            <p className="mt-0.5 text-sm text-muted">Positionen und Textbausteine verwalten</p>
+            <h1 className="text-2xl font-bold text-text">Artikel & Betriebsmittel</h1>
+            <p className="mt-0.5 text-sm text-muted">Positionen, Textbausteine und Betriebsmittel verwalten</p>
           </div>
         </div>
         {/* Create / import are admin-only (mutations 403 an employee); CSV
@@ -147,10 +147,10 @@ export function CatalogPage() {
         <div className="flex items-center gap-2">
           {tab === 'positions' && (
             <>
-              <button onClick={exportCsv} className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"><Download size={15} /> CSV Export</button>
+              <button onClick={exportCsv} className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"><Download size={15} /> CSV-Export</button>
               {isAdmin && (
                 <>
-                  <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"><Upload size={15} /> CSV Import</button>
+                  <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"><Upload size={15} /> CSV-Import</button>
                   {newBtn('Neue Position')}
                   <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f && confirm(`CSV "${f.name}" importieren?`)) importCsv.mutate(f); e.target.value = '' }} />
                 </>
@@ -315,7 +315,7 @@ function TextModulesTab({ modules, flash, onCreate }: { modules: TextModule[]; f
         <div className="rounded-xl border border-border bg-surface py-20 text-center">
           <FileText size={44} className="mx-auto mb-4 text-faint" strokeWidth={1.5} />
           <div className="text-lg font-bold text-text">Keine Textbausteine vorhanden</div>
-          <p className="mt-1 text-sm text-muted">Erstellen Sie Ihren ersten Textbaustein.</p>
+          <p className="mt-1 text-sm text-muted">Erstelle deinen ersten Textbaustein.</p>
           {isAdmin && <button onClick={onCreate} className="mt-4 inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110">+ Textbaustein erstellen</button>}
         </div>
       )}

@@ -226,7 +226,7 @@ function TriageSection({
               className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-[13px] font-bold text-body transition hover:bg-alt disabled:opacity-50"
             >
               <FolderInput size={16} className="text-green-deep" />
-              <span className="flex-1 text-left">Anderem Fall zuordnen</span>
+              <span className="flex-1 text-left">Anderem Vorgang zuordnen</span>
               <ChevronDown size={16} className={cn('text-faint transition-transform', picking && 'rotate-180')} />
             </button>
             {picking && (
@@ -317,7 +317,7 @@ function ActionsTab({
             </div>
           )}
           <div>
-            <SectionLabel>Aktion erstellen</SectionLabel>
+            <SectionLabel>Aufgabe erstellen</SectionLabel>
             <div className="flex gap-2.5">
               <PrimaryAction icon={CalendarPlus} label="Termin erstellen" tone="green" onClick={onAppointment} />
               <PrimaryAction icon={Receipt} label="Kostenvoranschlag" tone="money" onClick={onKva} disabled={!onKva} />

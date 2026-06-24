@@ -98,10 +98,10 @@ export function RufumleitungGuidePage() {
             <GroupLabel>Schritt für Schritt am iPhone</GroupLabel>
           </div>
           <ol className="space-y-3 text-sm text-body">
-            <Step n={1}>Öffnen Sie die <span className="font-semibold text-text">Einstellungen</span>.</Step>
-            <Step n={2}>Tippen Sie auf <span className="font-semibold text-text">Telefon</span> (bei manchen Tarifen darunter noch <span className="font-semibold text-text">Anrufe</span>).</Step>
-            <Step n={3}>Wählen Sie <span className="font-semibold text-text">Rufweiterleitung</span> und aktivieren Sie den Schalter.</Step>
-            <Step n={4}>Tippen Sie auf <span className="font-semibold text-text">Weiterleiten an</span> und tragen Sie Ihre HeyKiki-Nummer{numHint} ein.</Step>
+            <Step n={1}>Öffne die <span className="font-semibold text-text">Einstellungen</span>.</Step>
+            <Step n={2}>Tippe auf <span className="font-semibold text-text">Telefon</span> (bei manchen Tarifen darunter noch <span className="font-semibold text-text">Anrufe</span>).</Step>
+            <Step n={3}>Wähle <span className="font-semibold text-text">Rufweiterleitung</span> und aktiviere den Schalter.</Step>
+            <Step n={4}>Tippe auf <span className="font-semibold text-text">Weiterleiten an</span> und tragen Sie Ihre HeyKiki-Nummer{numHint} ein.</Step>
           </ol>
         </Card>
 
@@ -111,10 +111,10 @@ export function RufumleitungGuidePage() {
             <GroupLabel>Schritt für Schritt bei Android</GroupLabel>
           </div>
           <ol className="space-y-3 text-sm text-body">
-            <Step n={1}>Öffnen Sie die <span className="font-semibold text-text">Telefon-App</span>.</Step>
-            <Step n={2}>Tippen Sie oben rechts auf das <span className="font-semibold text-text">Menü (⋮)</span> und dann auf <span className="font-semibold text-text">Einstellungen</span>.</Step>
-            <Step n={3}>Wählen Sie <span className="font-semibold text-text">Anrufe</span> bzw. <span className="font-semibold text-text">Anrufkonten</span> und dann <span className="font-semibold text-text">Rufweiterleitung</span>. Bei Samsung: <span className="font-semibold text-text">Einstellungen → Zusätzliche Einstellungen → Rufweiterleitung</span>.</Step>
-            <Step n={4}>Wählen Sie <span className="font-semibold text-text">Immer weiterleiten</span> und tragen Sie Ihre HeyKiki-Nummer{numHint} ein.</Step>
+            <Step n={1}>Öffne die <span className="font-semibold text-text">Telefon-App</span>.</Step>
+            <Step n={2}>Tippe oben rechts auf das <span className="font-semibold text-text">Menü (⋮)</span> und dann auf <span className="font-semibold text-text">Einstellungen</span>.</Step>
+            <Step n={3}>Wähle <span className="font-semibold text-text">Anrufe</span> bzw. <span className="font-semibold text-text">Anrufkonten</span> und dann <span className="font-semibold text-text">Rufweiterleitung</span>. Bei Samsung: <span className="font-semibold text-text">Einstellungen → Zusätzliche Einstellungen → Rufweiterleitung</span>.</Step>
+            <Step n={4}>Wähle <span className="font-semibold text-text">Immer weiterleiten</span> und tragen Sie Ihre HeyKiki-Nummer{numHint} ein.</Step>
           </ol>
           <p className="mt-3 text-xs text-muted">
             Die Bezeichnungen können je nach Hersteller (Samsung, Google, Xiaomi …) leicht abweichen.

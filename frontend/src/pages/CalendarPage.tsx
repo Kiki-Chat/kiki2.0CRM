@@ -795,7 +795,7 @@ function AppointmentDetailModal({
             disabled={del.isPending}
             className="rounded-md border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
           >
-            {del.isPending ? 'Löscht…' : 'Löschen'}
+            {del.isPending ? 'Wird gelöscht…' : 'Löschen'}
           </button>
         </div>
       </div>
@@ -957,14 +957,14 @@ function CreateAppointmentModal({
         emitLiveFillStatus({
           tool: 'create_appointment',
           status: 'done',
-          note: 'Termin live ausgefüllt & gespeichert',
+          note: 'Termin direkt ausgefüllt & gespeichert',
         })
         onCreated(created)
       } catch (e) {
         emitLiveFillStatus({
           tool: 'create_appointment',
           status: 'failed',
-          note: e instanceof Error ? e.message : 'Formular-Ausfüllen fehlgeschlagen',
+          note: e instanceof Error ? e.message : 'Formular konnte nicht ausgefüllt werden',
         })
         onClose()
       } finally {

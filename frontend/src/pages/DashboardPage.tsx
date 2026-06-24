@@ -216,7 +216,7 @@ function HeroDeck() {
 
         <div className="relative mt-3 h-[150px] max-w-[440px]">
         {loading && total === 0 && (
-          <div className="flex h-full items-center justify-center text-sm text-muted">Lädt Entscheidungen…</div>
+          <div className="flex h-full items-center justify-center text-sm text-muted">Entscheidungen werden geladen…</div>
         )}
         {!loading && total === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-1 text-center">

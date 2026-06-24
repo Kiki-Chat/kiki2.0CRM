@@ -57,7 +57,7 @@ const ACTION_LABEL: Record<ActionType, string> = {
   ask_field: 'Feld aus Standard-Ablauf',
   say: 'Hinweis / Ansage',
   goto: 'Weiter zu …',
-  subrule: 'Verschachtelter Fall (Wenn/Sonst)',
+  subrule: 'Verschachtelte Regel (Wenn/Sonst)',
 }
 
 // Visual identity per branch kind — the if / else-if / else MUST look different
@@ -68,19 +68,19 @@ const KIND_META: Record<LogicBranch['kind'], { label: string; badge: string; bor
     label: 'WENN',
     badge: 'bg-info-bg text-info',
     border: 'border-l-[3px] border-l-info',
-    help: 'Der Fall, den Kiki zuerst prüft.',
+    help: 'Die Regel, die Kiki zuerst prüft.',
   },
   sonst_wenn: {
     label: 'ANDERNFALLS, WENN',
     badge: 'bg-warning-bg text-warning',
     border: 'border-l-[3px] border-l-warning',
-    help: 'Wird nur geprüft, wenn der Fall darüber NICHT zutrifft.',
+    help: 'Wird nur geprüft, wenn die Regel darüber NICHT zutrifft.',
   },
   sonst: {
     label: 'IN ALLEN ANDEREN FÄLLEN',
     badge: 'bg-alt text-muted',
     border: 'border-l-[3px] border-l-border',
-    help: 'Greift, wenn keiner der Fälle darüber zutrifft.',
+    help: 'Greift, wenn keine der Regeln darüber zutrifft.',
   },
 }
 
@@ -406,7 +406,7 @@ export function GespraechslogikSection({
         ) : preview ? (
           <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border bg-alt p-3 font-mono text-xs leading-relaxed text-body">{preview}</pre>
         ) : (
-          <p className="text-sm text-faint">Die Vorschau lädt…</p>
+          <p className="text-sm text-faint">Vorschau wird geladen…</p>
         )}
       </Card>
       {kc.element}
@@ -477,7 +477,7 @@ function BranchEditor({ branch, depth, guideFields, onChange, onRemove }: {
         <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-bold tracking-wide', meta.badge)}>{meta.label}</span>
         <span className="hidden text-[11px] text-faint sm:inline">{meta.help}</span>
         {onRemove && (
-          <button onClick={onRemove} title="Fall löschen" className="ml-auto text-muted hover:text-error"><Trash2 size={13} /></button>
+          <button onClick={onRemove} title="Regel löschen" className="ml-auto text-muted hover:text-error"><Trash2 size={13} /></button>
         )}
       </div>
       {branch.kind !== 'sonst' && (

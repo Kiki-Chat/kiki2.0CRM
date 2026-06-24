@@ -33,7 +33,7 @@ export function Topbar({
       <button
         onClick={onToggleCollapse}
         className="hidden rounded-md p-1.5 text-muted hover:bg-alt md:inline-flex"
-        aria-label="Seitenleiste umschalten"
+        aria-label="Seitenleiste ein/aus"
       >
         <ChevronLeft
           size={16}
@@ -51,7 +51,7 @@ export function Topbar({
                 ? 'border-ai/40 bg-ai-bg text-ai'
                 : 'border-border bg-alt text-body hover:bg-ai-bg hover:text-ai',
             )}
-            aria-label="Hey Kiki Assistent umschalten"
+            aria-label="Kiki-Assistent ein/aus"
             aria-pressed={copilotOpen}
             title="Hey Kiki — dein CRM-Assistent"
           >
@@ -63,7 +63,7 @@ export function Topbar({
         <button
           onClick={toggle}
           className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-alt text-body"
-          aria-label="Design umschalten"
+          aria-label="Darstellung wechseln"
         >
           {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
         </button>

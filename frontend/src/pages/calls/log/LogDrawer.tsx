@@ -93,7 +93,7 @@ function AudioPlayer({ callId }: { callId: string }) {
   return (
     <div className="flex flex-col gap-2">
       <ActionBtn variant="secondary" icon={<Play size={15} />} disabled={state === 'loading'} onClick={load}>
-        {state === 'loading' ? 'Lädt Aufnahme…' : 'Aufnahme abspielen'}
+        {state === 'loading' ? 'Aufnahme wird geladen…' : 'Aufnahme abspielen'}
       </ActionBtn>
       {state === 'error' && <span className="text-[12.5px] text-muted">Aufnahme derzeit nicht verfügbar.</span>}
     </div>
@@ -329,7 +329,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
       >
         <div className="px-6 pb-12 pt-5">
           {isLoading || !call ? (
-            <div className="p-10 text-center text-sm text-muted">Lädt…</div>
+            <div className="p-10 text-center text-sm text-muted">Wird geladen…</div>
           ) : (
             <>
               {/* header */}
@@ -552,7 +552,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                     <p className="text-[14px] leading-relaxed text-body">{call.summary || 'Keine Zusammenfassung verfügbar.'}</p>
                     {nextAction && (
                       <div className="mt-3 flex items-start gap-2 rounded-xl bg-surface/60 p-3 text-[13px] text-text">
-                        <span className="whitespace-nowrap font-bold text-ai">Nächste Aktion:</span>
+                        <span className="whitespace-nowrap font-bold text-ai">Nächste Aufgabe:</span>
                         <span>{nextAction}</span>
                       </div>
                     )}

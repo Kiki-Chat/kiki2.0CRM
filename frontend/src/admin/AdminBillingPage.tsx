@@ -114,10 +114,10 @@ export function AdminBillingPage() {
         {ov && (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
             <Stat label="Organisationen" value={ov.total_orgs} />
-            <Stat label="Säumig" value={ov.delinquent_count} tone={ov.delinquent_count ? 'warn' : undefined} />
+            <Stat label="Im Verzug" value={ov.delinquent_count} tone={ov.delinquent_count ? 'warn' : undefined} />
             <Stat label="Nicht verknüpft" value={ov.unlinked_orgs} tone={ov.unlinked_orgs ? 'warn' : undefined} />
-            <Stat label="MRR (geschätzt)" value={fmtCents(ov.mrr_estimate_cents, cur)} />
-            <Stat label="Umsatz YTD" value={fmtCents(ov.revenue_ytd_cents, cur)} />
+            <Stat label="Wiederkehrender Umsatz (geschätzt)" value={fmtCents(ov.mrr_estimate_cents, cur)} />
+            <Stat label="Umsatz lfd. Jahr" value={fmtCents(ov.revenue_ytd_cents, cur)} />
             <Stat label="Aktiv" value={ov.by_status['active'] ?? 0} tone="ok" />
           </div>
         )}
@@ -164,7 +164,7 @@ export function AdminBillingPage() {
                 <th className="px-4 py-2">Methode</th>
                 <th className="px-4 py-2 text-right">Konfidenz</th>
                 <th className="px-4 py-2">Stripe-Kunde</th>
-                <th className="px-4 py-2 text-right">Aktion</th>
+                <th className="px-4 py-2 text-right">Aufgabe</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -199,7 +199,7 @@ export function AdminBillingPage() {
                 </tr>
               ))}
               {(matchesQ.data?.length ?? 0) === 0 && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Keine Vorschläge — „Matcher ausführen" startet einen Probelauf (kein Schreibzugriff auf Stripe).</td></tr>
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">Keine Vorschläge — „Probelauf starten“ testet den Abgleich (kein Schreibzugriff auf Stripe).</td></tr>
               )}
             </tbody>
           </table>
@@ -224,7 +224,7 @@ export function AdminBillingPage() {
                 <tr key={o.org_id} className="hover:bg-slate-800/40">
                   <td className="px-4 py-2">
                     <div className="text-slate-100">{o.org_name ?? '—'}</div>
-                    {o.is_legacy && <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">Legacy (ChatDash)</span>}
+                    {o.is_legacy && <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">Bestandskunden (ChatDash)</span>}
                   </td>
                   <td className="px-4 py-2 text-slate-300">{o.billing_plan_title ?? '—'}</td>
                   <td className="px-4 py-2">

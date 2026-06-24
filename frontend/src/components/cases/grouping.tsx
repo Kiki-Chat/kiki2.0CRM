@@ -81,7 +81,7 @@ export function MoveMenu({
                   Aus Fall lösen
                 </button>
               )}
-              <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Fall verschieben</div>
+              <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Vorgang verschieben</div>
               {others.length > 0 ? (
                 others.map((c) => (
                   <button key={c.id} onClick={() => move.mutate({ case_id: c.id })} className={itemCls}>
@@ -90,7 +90,7 @@ export function MoveMenu({
                   </button>
                 ))
               ) : (
-                <div className="px-2.5 py-1.5 text-xs text-muted">Keine weiteren Fälle dieses Kunden.</div>
+                <div className="px-2.5 py-1.5 text-xs text-muted">Keine weiteren Vorgänge dieses Kunden.</div>
               )}
               <button
                 onClick={() => {
@@ -148,7 +148,7 @@ export function GroupingReviewModal({
     onSuccess: onApplied,
   })
   const tierTag = (t: string) =>
-    t === 'auto' ? <Tag variant="success">sicher</Tag> : t === 'review' ? <Tag variant="warning">prüfen</Tag> : <Tag variant="neutral">unsicher</Tag>
+    t === 'auto' ? <Tag variant="success">sicher</Tag> : t === 'review' ? <Tag variant="warning">Prüfen</Tag> : <Tag variant="neutral">unsicher</Tag>
   return (
     <Modal
       open

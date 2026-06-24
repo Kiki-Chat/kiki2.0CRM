@@ -34,7 +34,7 @@ const fmtTime = (iso: string | null) =>
 
 const STATUS: Record<PortalJob['status'], { label: string; cls: string }> = {
   offen: { label: 'Offen', cls: 'bg-info-bg text-info' },
-  'läuft': { label: 'Läuft', cls: 'bg-warning-bg text-warning' },
+  'läuft': { label: 'In Bearbeitung', cls: 'bg-warning-bg text-warning' },
   abgeschlossen: { label: 'Abgeschlossen', cls: 'bg-green-tint-100 text-green-deep' },
 }
 

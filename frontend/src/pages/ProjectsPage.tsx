@@ -160,7 +160,7 @@ export function ProjectsPage() {
 
               {/* The five linked things */}
               <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted">
-                <Stat icon={<Layers size={14} />} n={p.stats.cases ?? 0} title="Fälle" />
+                <Stat icon={<Layers size={14} />} n={p.stats.cases ?? 0} title="Vorgänge" />
                 <Stat icon={<Phone size={14} />} n={p.stats.calls} title="Anrufe" />
                 <Stat icon={<ClipboardList size={14} />} n={p.stats.inquiries} title="Anfragen" />
                 <Stat icon={<Calendar size={14} />} n={p.stats.appointments} title="Termine" />

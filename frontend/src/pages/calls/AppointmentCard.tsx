@@ -442,7 +442,7 @@ export function AppointmentCard({
               expanded && !confirmedDone && 'rotate-180',
             )}
           />
-          <span className="flex-1 font-medium">Kategorie, Dauer &amp; Zuweisung</span>
+          <span className="flex-1 font-medium">Kategorie, Dauer & Zuweisung</span>
           {(!expanded || confirmedDone) && (
             <span className={cn('text-xs', confirmedDone ? 'text-muted' : 'text-green-deep')}>
               (
@@ -699,7 +699,7 @@ export function AppointmentCard({
                 Im Kalender öffnen → (Ändern/Verschieben dort)
               </button>
             ) : (
-              <div className="mt-0.5">Bleibt als Status in den Aktionen sichtbar.</div>
+              <div className="mt-0.5">Bleibt als Status in den Aufgaben sichtbar.</div>
             )}
           </div>
         )}

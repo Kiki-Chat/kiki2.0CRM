@@ -55,7 +55,7 @@ function FallRedirect() {
 export default function App() {
   return (
     <ChunkErrorBoundary>
-      <Suspense fallback={<div className="flex h-screen items-center justify-center text-muted">Lädt…</div>}>
+      <Suspense fallback={<div className="flex h-screen items-center justify-center text-muted">Wird geladen…</div>}>
         <Routes>
           {/* Super-admin: completely separate React tree (own layout, own login,
               own auth gate). Rendered before /login so /admin/login resolves first. */}

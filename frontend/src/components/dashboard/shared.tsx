@@ -155,7 +155,7 @@ export const tooltipStyle = {
 }
 
 export function DashLoading() {
-  return <div className="rounded-xl border border-border bg-surface p-12 text-center text-sm text-muted">Lädt…</div>
+  return <div className="rounded-xl border border-border bg-surface p-12 text-center text-sm text-muted">Wird geladen…</div>
 }
 export function DashError({ msg }: { msg?: string }) {
   return <div className="rounded-xl border border-border bg-surface p-12 text-center text-sm text-error">Daten konnten nicht geladen werden{msg ? `: ${msg}` : '.'}</div>

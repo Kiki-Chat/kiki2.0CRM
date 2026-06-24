@@ -262,7 +262,7 @@ export function ActionRow({
       <div className="flex items-center gap-1.5 border-t border-border pt-2">
         {!done && !claimed && <TaskBtn icon={UserPlus} label="Übernehmen" onClick={() => onSetState('claimed')} />}
         {!done && <TaskBtn icon={Check} label="Erledigt" variant="accent" onClick={() => onSetState('done')} />}
-        {done && <TaskBtn icon={RotateCcw} label="Wiederöffnen" onClick={() => onSetState('open')} />}
+        {done && <TaskBtn icon={RotateCcw} label="Wieder öffnen" onClick={() => onSetState('open')} />}
         <TaskBtn icon={Trash2} label="Löschen" variant="danger" onClick={() => onSetState('dismissed')} />
       </div>
     </div>
@@ -276,8 +276,8 @@ export function EmptyAktionen() {
         <CheckCircle2 size={26} />
       </span>
       <div>
-        <div className="text-sm font-extrabold text-text">Keine offenen Aktionen</div>
-        <div className="mt-0.5 text-[12.5px] text-muted">Kiki hat alles im Griff.</div>
+        <div className="text-sm font-extrabold text-text">Keine offenen Aufgaben</div>
+        <div className="mt-0.5 text-[12.5px] text-muted">Kiki meldet sich, sobald etwas reinkommt.</div>
       </div>
     </div>
   )

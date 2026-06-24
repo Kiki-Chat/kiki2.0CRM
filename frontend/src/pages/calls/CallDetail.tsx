@@ -179,7 +179,7 @@ export function CallDetail({
   const rightResize = useColumnResize('hk-calls-right-w', 360, { min: 300, max: 600, side: 'right' })
 
   if (!call) {
-    return <div className="flex flex-1 items-center justify-center text-muted">Lädt…</div>
+    return <div className="flex flex-1 items-center justify-center text-muted">Wird geladen…</div>
   }
 
   const appointmentSlot =

@@ -28,7 +28,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { slug: 'verhalten', label: 'Verhalten', icon: Sparkles },
     { slug: 'autonomie', label: 'Autonomie', icon: SlidersHorizontal },
     { slug: 'gespraechsablauf', label: 'Gesprächsablauf', icon: GitBranch },
-    { slug: 'branche-kontext', label: 'Branche & Kontext', icon: BookOpen },
+    { slug: 'branche-kontext', label: 'Gewerk & Wissensbasis', icon: BookOpen },
   ] },
   { label: 'Terminplanung', items: [
     { slug: 'geschaeftszeiten', label: 'Geschäftszeiten', icon: Clock },
@@ -117,7 +117,7 @@ export function KikiZentralePage() {
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-ai-bg"><Bot size={24} className="text-ai" /></div>
           <div>
             <h1 className="text-2xl font-bold text-text">Kiki-Zentrale</h1>
-            <p className="mt-0.5 text-sm text-muted">Vollständige Kontrolle über Ihren KI-Agenten — Verhalten, Sprache, Wissen und mehr.</p>
+            <p className="mt-0.5 text-sm text-muted">Volle Kontrolle über deine KI — Verhalten, Sprache, Wissen und mehr.</p>
           </div>
         </div>
         <button
@@ -170,7 +170,7 @@ export function KikiZentralePage() {
           )}
 
           {isLoading || !data ? (
-            <div className="rounded-xl border border-border bg-surface p-12 text-center text-muted">Lädt…</div>
+            <div className="rounded-xl border border-border bg-surface p-12 text-center text-muted">Wird geladen…</div>
           ) : (
             <SectionContent section={section} data={data} flash={flash} />
           )}
@@ -209,7 +209,7 @@ function GespraechsablaufSection({ data, flash }: { data: KzOverview; flash: (m:
         <PflichtfelderSection data={data} flash={flash} specialCaseFieldKeys={usedFieldKeys} />
       </div>
       <div>
-        <h2 className="mb-1 text-lg font-bold text-text">Ausnahmen &amp; Sonderfälle</h2>
+        <h2 className="mb-1 text-lg font-bold text-text">Ausnahmen & Sonderfälle</h2>
         <p className="mb-3 text-sm text-muted">
           Wenn/Dann-Regeln, die VOR dem Standard-Ablauf greifen. Ein Feld gehört entweder hierher
           oder in den Standard-Ablauf — nie in beide (sonst fragt Kiki doppelt).

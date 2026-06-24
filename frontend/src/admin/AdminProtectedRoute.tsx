@@ -27,7 +27,7 @@ export function AdminProtectedRoute() {
   })
 
   if (loading) {
-    return <div className="flex h-screen items-center justify-center bg-slate-950 text-slate-400">Lädt…</div>
+    return <div className="flex h-screen items-center justify-center bg-slate-950 text-slate-400">Wird geladen…</div>
   }
 
   if (!session) {
@@ -35,7 +35,7 @@ export function AdminProtectedRoute() {
   }
 
   if (me.isLoading) {
-    return <div className="flex h-screen items-center justify-center bg-slate-950 text-slate-400">Lädt…</div>
+    return <div className="flex h-screen items-center justify-center bg-slate-950 text-slate-400">Wird geladen…</div>
   }
 
   if (me.data?.role !== 'super_admin') {

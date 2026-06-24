@@ -38,8 +38,8 @@ export function isGroup(e: NavEntry): e is NavGroupDef {
 }
 
 export const NAV: NavEntry[] = [
-  { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/cases', icon: Layers, label: 'Fälle' },
+  { to: '/', icon: LayoutDashboard, label: 'Übersicht' },
+  { to: '/cases', icon: Layers, label: 'Vorgänge' },
   { to: '/calls', icon: Phone, label: 'Anrufe', badgeKey: 'calls' },
   { to: '/customers', icon: Users, label: 'Kontakte' },
   { to: '/calendar', icon: Calendar, label: 'Kalender' },

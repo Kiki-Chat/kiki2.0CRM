@@ -257,7 +257,7 @@ export function PlanningBoardPage() {
           <LayoutGrid size={26} className="text-green-primary" />
           <div>
             <h1 className="text-2xl font-bold text-text">Planungstafel</h1>
-            <p className="mt-0.5 text-sm text-muted">Termine Fahrzeugen und Werkzeug zuweisen</p>
+            <p className="mt-0.5 text-sm text-muted">Fahrzeuge und Werkzeug für Termine einplanen</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

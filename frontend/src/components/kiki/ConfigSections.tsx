@@ -120,7 +120,7 @@ function FieldDescriptionInput({ field, onSave }: { field: KzRequiredField; onSa
       value={val}
       onChange={(e) => setVal(e.target.value)}
       onBlur={commit}
-      placeholder="Beschreibung für den KI-Agenten (optional)"
+      placeholder="Beschreibung für Kiki (optional)"
       className={cn(inputCls, 'mt-1 text-xs')}
     />
   )
@@ -323,7 +323,7 @@ export function LeitfadenSection({ flash, specialCaseFieldKeys }: Props & {
         />
         <div className="mt-4 space-y-2 border-t border-border pt-4">
           <Field label="Neues Feld"><input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="z. B. Kennzeichen" className={inputCls} /></Field>
-          <Field label="Beschreibung (optional)"><input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Wofür dient das Feld? (wird dem KI-Agenten erklärt)" className={inputCls} /></Field>
+          <Field label="Beschreibung (optional)"><input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Wofür dient das Feld? (wird Kiki erklärt)" className={inputCls} /></Field>
           <div className="flex justify-end">
             <button onClick={() => newLabel.trim() && create.mutate()} disabled={!newLabel.trim() || create.isPending} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
               {create.isPending && <Loader2 size={14} className="animate-spin" />}
@@ -408,7 +408,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
 
       <Card>
         <GroupLabel>Wissens-Text</GroupLabel>
-        <p className="mb-2 text-sm text-muted">Kurze Anweisungen, die dem System-Prompt zur Laufzeit vorangestellt werden.</p>
+        <p className="mb-2 text-sm text-muted">Kurze Anweisungen, die Kiki zu Beginn jedes Gesprächs beachtet.</p>
         <textarea value={knowledge} maxLength={15000} onChange={(e) => setKnowledge(e.target.value)} className={cn(inputCls, 'min-h-[160px]')} />
         <div className="mt-2 flex items-center justify-between">
           <span className="text-xs text-muted">{knowledge.length}/15.000 Zeichen</span>
@@ -421,7 +421,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
 
       <Card>
         <div className="mb-3 flex items-center justify-between">
-          <GroupLabel>Wissens-Quellen (ElevenLabs Wissensdatenbank)</GroupLabel>
+          <GroupLabel>Wissens-Quellen</GroupLabel>
           <div className="flex items-center gap-2">
             <button onClick={() => setUrlOpen(true)} className="flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium text-body hover:bg-alt"><Globe size={14} /> URL</button>
             <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-sm font-semibold text-white hover:brightness-110"><Plus size={14} /> PDF</button>
@@ -440,7 +440,7 @@ export function BrancheKontextSection({ data, flash }: Props) {
                   <div className="truncate text-xs text-muted">{r.source} · {r.chunk_count} Chunks{exists ? ' · Duplikat' : ''}</div>
                 </div>
                 <StatusBadge status={r.status} />
-                <button onClick={() => reindex.mutate(r.id)} title="Neu indizieren" className="text-muted hover:text-body"><RefreshCw size={15} /></button>
+                <button onClick={() => reindex.mutate(r.id)} title="Neu einlesen" className="text-muted hover:text-body"><RefreshCw size={15} /></button>
                 <button onClick={() => delRes.mutate(r.id)} title="Löschen" className="text-muted hover:text-error"><Trash2 size={15} /></button>
               </div>
             )
@@ -510,7 +510,7 @@ export function TerminregelnSection({ data, flash }: Props) {
       </Card>
       <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
         <Info size={16} className="mt-0.5 shrink-0 text-info" />
-        <span>Geschäftszeiten werden in der Kiki-Zentrale unter <a href="/kiki-zentrale/geschaeftszeiten" className="font-medium text-green-deep hover:underline">Geschäftszeiten</a> verwaltet und hier nicht dupliziert.</span>
+        <span>Geschäftszeiten legst du in der Kiki-Zentrale fest unter <a href="/kiki-zentrale/geschaeftszeiten" className="font-medium text-green-deep hover:underline">Geschäftszeiten</a> verwaltet und hier nicht doppelt geführt.</span>
       </div>
       {kc.element}
     </div>
@@ -552,7 +552,7 @@ export function TerminkategorienSection({ flash }: Props) {
       {cats.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-8 text-center">
           <Clock size={22} className="mx-auto text-faint" />
-          <p className="mt-2 text-sm text-muted">Noch keine Kategorien. Lege Termintypen wie „Beratung" oder „Wartung" an.</p>
+          <p className="mt-2 text-sm text-muted">Noch keine Kategorien. Leg Termintypen wie „Beratung“ oder „Wartung“ an.</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -570,7 +570,7 @@ export function TerminkategorienSection({ flash }: Props) {
       )}
       <Modal open={!!edit} onOpenChange={(v) => !v && !saveCat.isPending && !delCat.isPending && setEdit(null)} title={edit?.id ? 'Kategorie bearbeiten' : 'Neue Kategorie'} footer={
         <div className="flex gap-3">
-          {edit?.id && <button disabled={delCat.isPending || saveCat.isPending} onClick={() => kc.confirm(() => delCat.mutate(edit.id!))} className="inline-flex items-center gap-1.5 rounded-md border border-error px-4 py-2.5 text-sm font-medium text-error disabled:opacity-50">{delCat.isPending && <Loader2 size={14} className="animate-spin" />}{delCat.isPending ? 'Löscht…' : 'Löschen'}</button>}
+          {edit?.id && <button disabled={delCat.isPending || saveCat.isPending} onClick={() => kc.confirm(() => delCat.mutate(edit.id!))} className="inline-flex items-center gap-1.5 rounded-md border border-error px-4 py-2.5 text-sm font-medium text-error disabled:opacity-50">{delCat.isPending && <Loader2 size={14} className="animate-spin" />}{delCat.isPending ? 'Wird gelöscht…' : 'Löschen'}</button>}
           <button disabled={saveCat.isPending || delCat.isPending} onClick={() => setEdit(null)} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body disabled:opacity-50">Abbrechen</button>
           <button disabled={!edit?.name?.trim() || saveCat.isPending || delCat.isPending} onClick={() => kc.confirm(() => saveCat.mutate(edit!))} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saveCat.isPending && <Loader2 size={14} className="animate-spin" />}{saveCat.isPending ? 'Speichert…' : 'Speichern'}</button>
         </div>
@@ -687,7 +687,7 @@ export function LeistungsangebotSection({ flash }: Props) {
   return (
     <Card>
       <GroupLabel>Leistungsangebot</GroupLabel>
-      <p className="mb-4 text-sm text-muted">Klicke einen bestehenden Eintrag an, um ihn zwischen angeboten und nicht angeboten zu verschieben. Mit den Buttons unten neue Einträge in die jeweilige Liste aufnehmen.</p>
+      <p className="mb-4 text-sm text-muted">Klick einen bestehenden Eintrag an, um ihn zwischen „angeboten“ und „nicht angeboten“ zu verschieben. Über die Schaltflächen unten nimmst du neue Einträge in die jeweilige Liste auf.</p>
       <div className="flex flex-col gap-6 sm:flex-row">
         <Col title="Angebotene Leistungen" items={offered} green />
         <Col title="Nicht angebotene Leistungen" items={notOffered} />
@@ -967,10 +967,10 @@ export function AusgehendeSection({ data, flash }: Props) {
         </label>
         {f.outbound_recall_on_short_hangup && (
           <div className="mt-3">
-            <Field label="Schwelle „früh aufgelegt&quot; (Sek.)"><input type="number" min={5} max={120} value={f.outbound_short_hangup_seconds} onChange={(e) => set('outbound_short_hangup_seconds', Number(e.target.value))} className={cn(inputCls, 'w-24')} /></Field>
+            <Field label="Schwelle „früh aufgelegt“ (Sek.)"><input type="number" min={5} max={120} value={f.outbound_short_hangup_seconds} onChange={(e) => set('outbound_short_hangup_seconds', Number(e.target.value))} className={cn(inputCls, 'w-24')} /></Field>
           </div>
         )}
-        <p className="mt-2 text-[11px] text-muted">Hinweis: Wiederholungen werden vom geplanten Ausgangsanruf-Lauf ausgelöst (Taktung extern). „0 Wiederholungen&quot; = aus.</p>
+        <p className="mt-2 text-[11px] text-muted">Hinweis: Wiederholungen werden vom geplanten Ausgangsanruf ausgelöst (Taktung extern). „0 Wiederholungen“ = aus.</p>
       </Card>
       <Card>
         <GroupLabel>Zeitfenster</GroupLabel>

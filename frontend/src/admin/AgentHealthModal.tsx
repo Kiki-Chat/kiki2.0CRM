@@ -111,7 +111,7 @@ export function AgentHealthModal({ orgId, orgName, onClose }: Props) {
 
         {/* Loading */}
         {isLoading && (
-          <div className="py-8 text-center text-sm text-slate-400">Lädt…</div>
+          <div className="py-8 text-center text-sm text-slate-400">Wird geladen…</div>
         )}
 
         {/* Error */}

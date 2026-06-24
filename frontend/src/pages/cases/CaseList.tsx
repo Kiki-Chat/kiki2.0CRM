@@ -141,7 +141,7 @@ export function CaseList({ cases, selectedId, onSelect }: {
     <div className="flex w-full flex-shrink-0 flex-col border-r border-border bg-bg md:w-[420px]">
       <div className="px-5 pb-4 pt-6">
         <div className="flex items-baseline gap-2.5">
-          <h1 className="font-poster text-[26px] font-extrabold text-text">Meine Fälle</h1>
+          <h1 className="font-poster text-[26px] font-extrabold text-text">Meine Vorgänge</h1>
           <span className="text-[15px] font-bold text-muted">{filtered.length} von {cases.length}</span>
         </div>
         <div className="relative mt-3.5">
@@ -174,8 +174,8 @@ export function CaseList({ cases, selectedId, onSelect }: {
         ) : (
           <div className="px-5 py-10 text-center">
             <Search size={28} className="mx-auto text-faint" />
-            <div className="mt-2.5 text-[15px] font-bold text-body">Keine Fälle gefunden</div>
-            <div className="mt-1 text-[13.5px] text-muted">Versuchen Sie einen anderen Filter.</div>
+            <div className="mt-2.5 text-[15px] font-bold text-body">Keine Vorgänge gefunden</div>
+            <div className="mt-1 text-[13.5px] text-muted">Versuche einen anderen Filter.</div>
           </div>
         )}
       </div>

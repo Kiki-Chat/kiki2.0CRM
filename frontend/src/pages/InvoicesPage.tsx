@@ -374,7 +374,7 @@ function SendModal({ invoice, onClose, onSent }: { invoice: Invoice; onClose: ()
             ⚠ Für diesen Kunden ist keine E-Mail hinterlegt. Bitte oben eine Empfänger-Adresse eintragen oder beim Kunden ergänzen — sonst kann nichts versendet werden.
           </div>
         )}
-        <div><div className="mb-1 text-xs font-semibold text-body">An</div><input value={to} onChange={(e) => setTo(e.target.value)} placeholder="kunde@example.de" className={ta} /></div>
+        <div><div className="mb-1 text-xs font-semibold text-body">An</div><input value={to} onChange={(e) => setTo(e.target.value)} placeholder="kunde@firma.de" className={ta} /></div>
         <div><div className="mb-1 text-xs font-semibold text-body">Betreff</div><input value={subject} onChange={(e) => setSubject(e.target.value)} className={ta} /></div>
         <div><div className="mb-1 text-xs font-semibold text-body">Nachricht</div><textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={6} className={ta} /></div>
         <label className="flex items-center gap-2 text-sm text-muted"><input type="checkbox" checked disabled className="h-4 w-4 accent-green-primary" /> PDF anhängen</label>

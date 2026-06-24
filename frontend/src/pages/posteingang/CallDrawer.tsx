@@ -62,7 +62,7 @@ function AudioPlayer({ callId }: { callId: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
       <Btn variant="secondary" icon={<Play size={15} />} disabled={state === 'loading'} onClick={load}>
-        {state === 'loading' ? 'Lädt Aufnahme…' : 'Aufnahme abspielen'}
+        {state === 'loading' ? 'Aufnahme wird geladen…' : 'Aufnahme abspielen'}
       </Btn>
       {state === 'error' && (
         <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>Aufnahme derzeit nicht verfügbar.</span>
@@ -82,7 +82,7 @@ export function CallDrawer({ callId, onClose }: { callId: string | null; onClose
       <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(540px, 96%)', background: 'var(--surface)', boxShadow: 'var(--elevation-3)', borderLeft: '1px solid var(--border)', overflowY: 'auto' }}>
         <div style={{ padding: '20px 24px 40px' }}>
           {isLoading || !c ? (
-            <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>Lädt…</div>
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>Wird geladen…</div>
           ) : (
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -118,7 +118,7 @@ export function CallDrawer({ callId, onClose }: { callId: string | null; onClose
               ) : c.unsorted ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 13px', background: 'var(--surface-alt)', borderRadius: 'var(--radius-lg)', marginBottom: 18, fontSize: 12.5, color: 'var(--muted)' }}>
                   <Inbox size={14} style={{ flexShrink: 0 }} />
-                  <span>Noch keinem Fall zugeordnet — im Anruf-Cockpit zuordnen.</span>
+                  <span>Noch keinem Vorgang zugeordnet — im Anruf-Cockpit zuordnen.</span>
                 </div>
               ) : null}
 
@@ -127,7 +127,7 @@ export function CallDrawer({ callId, onClose }: { callId: string | null; onClose
                 <p style={{ margin: '0 0 0', fontSize: 14, lineHeight: 1.55, color: 'var(--body)' }}>{c.summary}</p>
                 {c.nextAction && (
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, color: 'var(--text)', marginTop: 12 }}>
-                    <span style={{ fontFamily: 'var(--font-poster)', fontWeight: 700, color: 'var(--ai)', whiteSpace: 'nowrap' }}>Nächste Aktion:</span>
+                    <span style={{ fontFamily: 'var(--font-poster)', fontWeight: 700, color: 'var(--ai)', whiteSpace: 'nowrap' }}>Nächste Aufgabe:</span>
                     <span>{c.nextAction}</span>
                   </div>
                 )}

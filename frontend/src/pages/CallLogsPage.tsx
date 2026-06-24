@@ -184,7 +184,7 @@ export function CallLogsPage() {
           <div className="rounded-2xl border border-dashed border-border py-16 text-center">
             <Inbox size={28} className="mx-auto mb-3 text-faint" />
             <p className="text-sm font-semibold text-body">Keine Anrufe gefunden</p>
-            <p className="mt-1 text-[13px] text-muted">Passen Sie die Filter an oder setzen Sie sie zurück.</p>
+            <p className="mt-1 text-[13px] text-muted">Passe die Filter an oder setze sie zurück.</p>
           </div>
         ) : (
           <LogTable

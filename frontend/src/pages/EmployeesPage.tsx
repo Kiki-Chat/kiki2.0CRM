@@ -347,7 +347,7 @@ function EmployeesTab({ flash }: { flash: (m: string) => void }) {
                       <Link2 size={13} /> Login
                     </span>
                   ) : (
-                    <span className="text-muted">Kein Login</span>
+                    <span className="text-muted">Kein Zugang</span>
                   )}
                 </td>
                 <td className="px-5 py-3.5">
@@ -429,7 +429,7 @@ function EmployeesTab({ flash }: { flash: (m: string) => void }) {
             {!filtered.length && (
               <tr>
                 <td colSpan={7} className="px-5 py-10 text-center text-muted">
-                  {isLoading ? 'Lädt…' : error ? `Fehler: ${(error as Error).message}` : 'Keine Mitarbeiter.'}
+                  {isLoading ? 'Wird geladen…' : error ? `Fehler: ${(error as Error).message}` : 'Keine Mitarbeiter.'}
                 </td>
               </tr>
             )}
@@ -758,7 +758,7 @@ function NewTechnicianModal({ flash, onClose }: { flash: (m: string) => void; on
           <div className="flex gap-2 rounded-md border border-info/30 bg-info-bg px-3 py-2.5 text-sm text-info">
             <Wrench size={16} className="mt-0.5 shrink-0" />
             <div>
-              Ein Techniker arbeitet vor Ort und braucht <span className="font-medium">keinen Login</span>. Er bekommt
+              Ein Techniker arbeitet vor Ort und braucht <span className="font-medium">keinen Zugang</span>. Er bekommt
               einen persönlichen Link zu seinen Einsätzen — wir brauchen nur Name, E-Mail und Telefon.
             </div>
           </div>
@@ -768,7 +768,7 @@ function NewTechnicianModal({ flash, onClose }: { flash: (m: string) => void; on
           </div>
           <div>
             <div className={labelCls}>E-Mail *</div>
-            <input type="email" name="tech_email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.de" className={inputCls} />
+            <input type="email" name="tech_email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@firma.de" className={inputCls} />
             <p className="mt-1 text-xs text-muted">Für den Portal-Link und die Auftrags-E-Mails.</p>
           </div>
           <div>
@@ -848,7 +848,7 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
           <Check
             checked={loginAccess}
             onChange={setLoginAccess}
-            label="Login-Zugang zu HeyKiki"
+            label="Zugang zu HeyKiki"
             sub="Der Mitarbeiter erhält eine E-Mail-Einladung und kann sich einloggen. Zählt zum Plan-Limit."
           />
         </div>
@@ -858,7 +858,7 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
         </div>
         <div>
           <div className={labelCls}>E-Mail {loginAccess && '*'}</div>
-          <input type="email" name="employee_email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.de" className={inputCls} />
+          <input type="email" name="employee_email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@firma.de" className={inputCls} />
         </div>
         {loginAccess && (
           <div className="flex gap-2 rounded-md border border-info/30 bg-info-bg px-3 py-2.5 text-sm text-info">
@@ -875,13 +875,13 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
             <Radio checked={role === 'employee'} onChange={() => setRole('employee')} label="Mitarbeiter" />
             <Radio checked={role === 'admin'} onChange={() => setRole('admin')} label="Admin" />
           </div>
-          <p className="mt-1 text-xs text-muted">Admins haben automatisch vollen Zugriff auf alle Module.</p>
+          <p className="mt-1 text-xs text-muted">Admins haben automatisch vollen Zugriff auf alle Bereiche.</p>
         </div>
         <Check checked={active} onChange={setActive} label="Konto aktiv" sub="Inaktive Konten können sich nicht einloggen." />
         <Check
           checked={isTechnician}
           onChange={setIsTechnician}
-          label="Techniker / Monteur"
+          label="Techniker"
           sub="Führt die Arbeiten vor Ort aus — erscheint in der Techniker-Auswahl (Zuweisung, Plantafel). Kein Login nötig."
         />
         <ColorPicker value={color} onChange={setColor} />
@@ -993,7 +993,7 @@ function EditEmployeeModal({ employee, onClose }: { employee: Employee; onClose:
         <Check
           checked={isTechnician}
           onChange={setIsTechnician}
-          label="Techniker / Monteur"
+          label="Techniker"
           sub="Führt die Arbeiten vor Ort aus — erscheint in der Techniker-Auswahl (Zuweisung, Plantafel)."
         />
         <ColorPicker value={color} onChange={setColor} />

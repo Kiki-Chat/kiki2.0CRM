@@ -210,7 +210,7 @@ export function AdminOrgFormPage() {
               help="Eindeutige slug-style ID — nicht änderbar nach dem Anlegen."
             />
             <Field
-              label="ElevenLabs Agent ID *"
+              label="Sprach-ID (technisch)"
               value={elevenlabsAgentId}
               onChange={setElevenlabsAgentId}
               required
@@ -219,8 +219,8 @@ export function AdminOrgFormPage() {
               help="NICHT agent_7201… (Produktion)."
             />
             <div className="my-2 h-px bg-slate-800" />
-            <Field label="Admin Login-E-Mail *" value={loginEmail} onChange={setLoginEmail} required type="email" placeholder="admin@firma.de" />
-            <Field label="Admin Login-Passwort *" value={loginPassword} onChange={setLoginPassword} required type="password" placeholder="mind. 8 Zeichen" help="Mindestens 8 Zeichen. Wird per E-Mail an den Admin mitgeteilt." />
+            <Field label="Admin-Anmelde-E-Mail *" value={loginEmail} onChange={setLoginEmail} required type="email" placeholder="admin@firma.de" />
+            <Field label="Admin-Anmelde-Passwort *" value={loginPassword} onChange={setLoginPassword} required type="password" placeholder="mind. 8 Zeichen" help="Mindestens 8 Zeichen. Wird per E-Mail an den Admin mitgeteilt." />
             <Field label="Admin-Name" value={adminName} onChange={setAdminName} placeholder="Max Mustermann" />
             <Field label="Kontakt-E-Mail (optional)" value={contactEmail} onChange={setContactEmail} type="email" placeholder="kontakt@firma.de" help="Falls leer: Login-E-Mail." />
           </>
@@ -229,7 +229,7 @@ export function AdminOrgFormPage() {
             <Field label="Name *" value={editName} onChange={setEditName} required />
             <Field label="Kontakt-E-Mail" value={editEmail} onChange={setEditEmail} type="email" />
             <Field label="Telefonnummer" value={editPhone} onChange={setEditPhone} />
-            <Field label="ElevenLabs Agent ID *" value={editAgentId} onChange={setEditAgentId} required mono help="NICHT agent_7201… (Produktion)." />
+            <Field label="Sprach-ID (technisch)" value={editAgentId} onChange={setEditAgentId} required mono help="NICHT agent_7201… (Produktion)." />
           </>
         )}
 

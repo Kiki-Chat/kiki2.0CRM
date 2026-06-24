@@ -97,7 +97,7 @@ export function PromptEditorSection({ flash }: { flash: (m: string) => void }) {
       </div>
 
       {isLoading ? (
-        <div className="p-12 text-center text-muted">Lädt…</div>
+        <div className="p-12 text-center text-muted">Wird geladen…</div>
       ) : tab === 'edit' ? (
         <>
           <textarea
@@ -111,7 +111,7 @@ export function PromptEditorSection({ flash }: { flash: (m: string) => void }) {
       ) : tab === 'diff' ? (
         <div className="min-h-[400px] overflow-x-auto rounded-md border border-border bg-alt p-3 font-mono text-xs">
           {diffMut.isPending ? (
-            <div className="p-8 text-center text-muted">Diff wird berechnet…</div>
+            <div className="p-8 text-center text-muted">Änderungen werden berechnet…</div>
           ) : diff ? (
             diff.split('\n').map((line, i) => (
               <div

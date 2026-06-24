@@ -186,7 +186,7 @@ export function ProjectFormPage() {
                   <option value="">Kunde suchen…</option>
                   {customers.map((c) => <option key={c.id} value={c.id}>{c.full_name ?? 'Unbenannt'}</option>)}
                 </select>
-                {attachCaseId && <p className="mt-1 text-xs text-muted">Aus dem Fall übernommen — nicht änderbar.</p>}
+                {attachCaseId && <p className="mt-1 text-xs text-muted">Aus dem Vorgang übernommen — nicht änderbar.</p>}
               </div>
               <div>
                 <div className={labelCls}>Beschreibung</div>
@@ -201,7 +201,7 @@ export function ProjectFormPage() {
 
           {/* Budget */}
           <Card title="Budget" icon={<span className="text-green-primary">€</span>}>
-            <p className="mb-3 text-sm text-muted">Legen Sie ein geplantes Budget für das Projekt fest. Das hilft bei der Kostenkontrolle und ermöglicht Vergleiche zwischen geplanten und tatsächlichen Kosten.</p>
+            <p className="mb-3 text-sm text-muted">Lege ein geplantes Budget für das Projekt fest. Das hilft bei der Kostenkontrolle und ermöglicht Vergleiche zwischen geplanten und tatsächlichen Kosten.</p>
             <div>
               <div className={labelCls}>Geplantes Budget (netto)</div>
               <div className="relative">

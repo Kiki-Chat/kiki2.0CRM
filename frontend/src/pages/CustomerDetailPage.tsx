@@ -153,7 +153,7 @@ export function CustomerDetailPage() {
   })
 
   if (isLoading || !customer) {
-    return <div className="flex h-full items-center justify-center text-muted">Lädt…</div>
+    return <div className="flex h-full items-center justify-center text-muted">Wird geladen…</div>
   }
 
   const meta = TYPE_META[customer.customer_type ?? 'new'] ?? TYPE_META.new
@@ -481,7 +481,7 @@ function MoveMenu({ inquiry, cases, onMoved }: { inquiry: Inquiry; cases: CaseRo
                 Aus Fall lösen
               </button>
             )}
-            {others.length > 0 && <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Fall verschieben</div>}
+            {others.length > 0 && <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-faint">In Vorgang verschieben</div>}
             {others.map((c) => (
               <button key={c.id} onClick={() => move.mutate({ case_id: c.id })} className="block w-full truncate rounded px-2.5 py-1.5 text-left text-sm text-body hover:bg-alt">
                 → {c.label || 'Fall'}
@@ -534,7 +534,7 @@ function GroupingReviewModal({
     onSuccess: onApplied,
   })
   const tierTag = (t: string) =>
-    t === 'auto' ? <Tag variant="success">sicher</Tag> : t === 'review' ? <Tag variant="warning">prüfen</Tag> : <Tag variant="neutral">unsicher</Tag>
+    t === 'auto' ? <Tag variant="success">sicher</Tag> : t === 'review' ? <Tag variant="warning">Prüfen</Tag> : <Tag variant="neutral">unsicher</Tag>
   return (
     <Modal
       open

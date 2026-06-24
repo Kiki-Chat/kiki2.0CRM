@@ -134,7 +134,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <div className="mb-8 flex flex-col items-center gap-3">
           <img src="/kiki-logo.jpg" alt="HeyKiki" className="h-12 w-12 rounded-xl object-cover" />
           <div className="text-center">
-            <h1 className="text-xl font-bold text-text">HeyKiki Portal</h1>
+            <h1 className="text-xl font-bold text-text">HeyKiki-Portal</h1>
             <p className="text-sm text-muted">Passwort festlegen</p>
           </div>
         </div>

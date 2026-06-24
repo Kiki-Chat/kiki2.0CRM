@@ -67,9 +67,9 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
     <div className="space-y-4">
       {/* Card 1 — Persona & Stimme (ElevenLabs) */}
       <Card>
-        <GroupLabel>Persona & Stimme</GroupLabel>
+        <GroupLabel>Stimme & Auftreten</GroupLabel>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Persona-Name">
+          <Field label="Name der Stimme">
             <div className="relative">
               <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
               <input value={personaName} onChange={(e) => setPersonaName(e.target.value)} className={cn(inputCls, 'pl-9')} />
@@ -106,7 +106,7 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
           </div>
         </div>
         <div className="mt-4">
-          <Field label="Begrüßungs-Nachricht" hint={`${firstMessage.length}/500 Zeichen`}>
+          <Field label="Begrüßung" hint={`${firstMessage.length}/500 Zeichen`}>
             <textarea
               value={firstMessage}
               maxLength={500}
@@ -119,7 +119,7 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
 
       {/* Card 3 — Begrüßungstext (HeyKiki-seitig) */}
       <Card>
-        <GroupLabel>Begrüßungstext (HeyKiki-seitig)</GroupLabel>
+        <GroupLabel>Begrüßungstext (von HeyKiki vorgegeben)</GroupLabel>
         <textarea value={welcome} onChange={(e) => setWelcome(e.target.value)} className={cn(inputCls, 'min-h-[90px]')} />
         <p className="mt-1 text-xs text-muted">
           Dieser Text wird zusätzlich zur Agenten-Begrüßung verwendet, um die Kontext-Initialisierung zu steuern.

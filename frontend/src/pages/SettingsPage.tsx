@@ -127,7 +127,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { slug: 'email-versand', label: 'E-Mail-Versand', icon: Mail },
     { slug: 'email-vorlagen', label: 'E-Mail-Vorlagen', icon: FileText },
     { slug: 'kalender-sync', label: 'Kalender-Sync', icon: Calendar },
-    { slug: 'google-reviews', label: 'Google Reviews', icon: Star },
+    { slug: 'google-reviews', label: 'Google-Bewertungen', icon: Star },
   ] },
   { label: 'Integrationen', items: [
     { slug: 'pds-software', label: 'PDS-Software', icon: Plug },
@@ -190,7 +190,7 @@ export function SettingsPage() {
     <div className="p-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-text">Einstellungen</h1>
-        <p className="mt-0.5 text-sm text-muted">Verwalten Sie Ihr Unternehmen, Ihre Integrationen und Ihre Benachrichtigungen.</p>
+        <p className="mt-0.5 text-sm text-muted">Verwalte dein Unternehmen, deine Integrationen und deine Benachrichtigungen.</p>
       </div>
 
       {toast && <div className="mb-4 rounded-md bg-green-tint-50 px-3 py-2 text-sm font-medium text-green-deep">{toast}</div>}
@@ -214,7 +214,7 @@ export function SettingsPage() {
         {/* Active section */}
         <div className="min-w-0 flex-1">
           {isLoading || !data ? (
-            <div className="rounded-xl border border-border bg-surface p-12 text-center text-muted">Lädt…</div>
+            <div className="rounded-xl border border-border bg-surface p-12 text-center text-muted">Wird geladen…</div>
           ) : (
             <SectionContent section={section} data={data} flash={flash} />
           )}
@@ -479,7 +479,7 @@ function DesignSection({ org }: { org: Org }) {
           <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" className="hidden" onChange={(e) => uploadLogo(e.target.files)} />
         </div>
       </div>
-      <p className="mt-2 text-xs text-muted">PNG, JPG oder SVG, max. 2 MB. Erscheint in Seitenleiste, Login und Rechnungen/PDFs.</p>
+      <p className="mt-2 text-xs text-muted">PNG, JPG oder SVG, max. 2 MB. Erscheint in Seitenleiste, Anmeldung und Rechnungen/PDFs.</p>
 
       {/* Accent */}
       <div className="my-6 border-t border-border" />
@@ -498,8 +498,8 @@ function DesignSection({ org }: { org: Org }) {
       <div className="mt-4 rounded-lg bg-alt p-4">
         <div className="mb-2 text-xs font-semibold text-muted">Vorschau</div>
         <div className="flex flex-wrap items-center gap-3">
-          <button className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white">Primärer Button</button>
-          <button className="rounded-md border border-green-primary px-4 py-2 text-sm font-semibold text-green-deep">Sekundärer Button</button>
+          <button className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white">Hauptschaltfläche</button>
+          <button className="rounded-md border border-green-primary px-4 py-2 text-sm font-semibold text-green-deep">Zweite Schaltfläche</button>
           <span className="rounded-full bg-green-tint-100 px-2.5 py-0.5 text-xs font-medium text-green-deep">Badge</span>
         </div>
       </div>
@@ -512,7 +512,7 @@ function DesignSection({ org }: { org: Org }) {
       </select>
       <div className="mt-4 rounded-lg bg-alt p-4" style={{ fontFamily: fontStack(font) }}>
         <div className="mb-2 text-xs font-semibold text-muted" style={{ fontFamily: 'Inter, sans-serif' }}>Vorschau</div>
-        <div className="text-2xl font-bold text-text">Dashboard</div>
+        <div className="text-2xl font-bold text-text">Übersicht</div>
         <div className="text-base font-semibold text-body">Rechnungen & Kostenvoranschläge</div>
       </div>
 
@@ -697,7 +697,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                   </div>
                 ))}
               </div>
-              <div className="mt-2 text-xs text-muted">Der Wechsel gilt sofort; die Differenz wird anteilig auf Ihrer nächsten Rechnung verrechnet. Alle Preise zzgl. 19 % MwSt.</div>
+              <div className="mt-2 text-xs text-muted">Der Wechsel gilt sofort; die Differenz wird anteilig auf deiner nächsten Rechnung verrechnet. Alle Preise zzgl. 19 % MwSt.</div>
               {changePlan.isError && <div className="mt-2 text-sm text-error">{(changePlan.error as Error).message}</div>}
             </div>
           )}
@@ -738,7 +738,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       {over && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-bg/40 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
-          <span>Ihr Minutenkontingent ist aufgebraucht. Ihre KI bleibt erreichbar — der <strong>Mehrverbrauch wird nach Tarif berechnet</strong>.</span>
+          <span>Dein Minutenkontingent ist aufgebraucht. Deine KI bleibt erreichbar — der <strong>Mehrverbrauch wird nach Tarif berechnet</strong>.</span>
         </div>
       )}
 
@@ -757,7 +757,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
               <div className="text-lg font-bold leading-tight text-text">{s.used_minutes} Min.</div>
             </div>
             <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-muted">Darüber</div>
+              <div className="text-xs font-bold uppercase tracking-wide text-muted">Mehr als das</div>
               <div className="text-lg font-bold leading-tight text-warning">+{s.minutes_over} Min.</div>
             </div>
             <div>
@@ -771,7 +771,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
               <span className="text-lg font-bold text-text">{fmtCents(s.projected_overage_cents)}</span>
             </div>
           )}
-          <div className="mt-2 text-xs text-muted">Der Mehrverbrauch wird zusätzlich zur Grundgebühr über Ihre nächste Rechnung abgerechnet.</div>
+          <div className="mt-2 text-xs text-muted">Der Mehrverbrauch wird zusätzlich zur Grundgebühr über deine nächste Rechnung abgerechnet.</div>
         </Card>
       )}
 
@@ -807,7 +807,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-sm font-bold text-text">Tarif wählen</div>
-              <div className="text-xs text-muted">Starten Sie Ihr Abonnement — inkl. Testphase. Alle Preise zzgl. 19 % MwSt.</div>
+              <div className="text-xs text-muted">Starte dein Abonnement — inkl. Testphase. Alle Preise zzgl. 19 % MwSt.</div>
             </div>
             <div className="flex items-center gap-1 rounded-lg bg-alt p-1 text-xs font-semibold">
               <button onClick={() => setPlanInterval('month')} className={cn('rounded-md px-3 py-1', planInterval === 'month' ? 'bg-surface text-text shadow' : 'text-muted')}>Monatlich</button>
@@ -836,7 +836,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       {!configured && (
         <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
           <Info size={16} className="mt-0.5 shrink-0 text-info" />
-          <span>Für Fragen zu Ihrem Abonnement wenden Sie sich an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>.</span>
+          <span>Für Fragen zu deinem Abonnement wende dich an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>.</span>
         </div>
       )}
     </div>
@@ -857,21 +857,21 @@ function KiVorschlaegeSection({ ai, flash }: { ai: AiSuggestions; flash: (m: str
   })
   const gen = useMutation({ mutationFn: () => apiFetch<{ message?: string }>('/api/settings/generate-suggestions', { method: 'POST' }), onSuccess: (r) => flash(r?.message || 'Vorschläge werden generiert.') })
   const cards = [
-    { icon: FileText, title: 'KVA-Nachfassen', sub: 'Vorschlag wenn ein gesendeter KVA nicht beantwortet wurde', value: kva, set: setKva, unit: 'Tage ohne Antwort' },
-    { icon: Receipt, title: 'Zahlungserinnerung', sub: 'Vorschlag für Zahlungserinnerung bei überfälligen Rechnungen', value: pay, set: setPay, unit: 'Tage Zahlungsverzug' },
+    { icon: FileText, title: 'KVA-Nachfassen', sub: 'Vorschlag, wenn ein gesendeter Kostenvoranschlag nicht beantwortet wurde', value: kva, set: setKva, unit: 'Tage ohne Antwort' },
+    { icon: Receipt, title: 'Zahlungserinnerung', sub: 'Vorschlag für eine Zahlungserinnerung bei überfälligen Rechnungen', value: pay, set: setPay, unit: 'Tage Zahlungsverzug' },
     { icon: Calendar, title: 'Terminerinnerung', sub: 'Tägliche Übersicht über anstehende Termine', value: appt, set: setAppt, unit: 'Tag(e) vorher' },
-    { icon: Wrench, title: 'Wartungserinnerung', sub: 'Erscheint wenn Wartung laut Wartungsvertrag bald fällig ist', value: maint, set: setMaint, unit: 'Tage vor Fälligkeit' },
+    { icon: Wrench, title: 'Wartungserinnerung', sub: 'Erscheint, wenn die Wartung laut Wartungsvertrag bald fällig ist.', value: maint, set: setMaint, unit: 'Tage vor Fälligkeit' },
   ]
   return (
     <Card>
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-text">KI-Vorschläge</h2>
-          <p className="text-sm text-muted">Automatische Aktionsempfehlungen im Dashboard</p>
+          <p className="text-sm text-muted">Automatische Empfehlungen in der Übersicht</p>
         </div>
         <Toggle on={enabled} onChange={setEnabled} />
       </div>
-      {enabled && <p className="mt-2 text-sm text-muted">Die KI analysiert Ihre Daten täglich um 06:00 Uhr und generiert Aktionsempfehlungen, die im Dashboard-Widget erscheinen.</p>}
+      {enabled && <p className="mt-2 text-sm text-muted">Kiki wertet deine Daten täglich um 06:00 Uhr aus und erstellt Empfehlungen, die in der Übersicht erscheinen.</p>}
       <div className={cn('mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2', !enabled && 'pointer-events-none opacity-50')}>
         {cards.map((c) => (
           <div key={c.title} className="rounded-lg border border-border bg-alt p-4">
@@ -913,7 +913,7 @@ function BenachrichtigungenSection() {
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-green-tint-100"><Bell size={22} className="text-green-deep" /></div>
           <div className="flex-1">
             <h2 className="text-lg font-bold text-text">Push-Benachrichtigungen aktivieren</h2>
-            <p className="mt-1 text-sm text-muted">Erhalten Sie auf diesem Gerät sofort eine Benachrichtigung bei neuen Anrufen, Anfragen und überfälligen Rechnungen.</p>
+            <p className="mt-1 text-sm text-muted">Erhalte auf diesem Gerät sofort eine Benachrichtigung bei neuen Anrufen, Anfragen und überfälligen Rechnungen.</p>
             <div className="mt-4">
               {granted ? (
                 <button disabled className="inline-flex items-center gap-2 rounded-md border border-success/40 bg-success-bg px-4 py-2 text-sm font-semibold text-success"><Check size={15} /> Aktiv</button>
@@ -1142,7 +1142,7 @@ function EmailVersandSection({ config, flash }: { config: EmailConfig | null; fl
         )}
         {provider === 'smtp' && (
           <div className="space-y-4">
-            <Banner>Standardversand über info@kiki-zusammenfassung.de bis eigener SMTP eingetragen.</Banner>
+            <Banner>Standardversand über info@kiki-zusammenfassung.de, bis eine eigene SMTP-Adresse eingetragen ist.</Banner>
             <div className="grid grid-cols-2 gap-4">
               <Field label="SMTP-Server"><input value={host} onChange={(e) => setHost(e.target.value)} className={inputCls} /></Field>
               <Field label="Port"><input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} className={inputCls} /></Field>
@@ -1199,7 +1199,7 @@ function EmailVorlagenSection({ config, flash }: { config: EmailConfig | null; f
   return (
     <div className="space-y-4">
       <Card>
-        <p className="mb-2 text-sm text-body">Verfügbare Platzhalter — klicken Sie auf einen Platzhalter, um ihn in das aktive Feld einzufügen.</p>
+        <p className="mb-2 text-sm text-body">Verfügbare Platzhalter — klicke auf einen Platzhalter, um ihn in das aktive Feld einzufügen.</p>
         <div className="flex flex-wrap gap-1.5">{general.map((t) => <Chip key={t} t={t} />)}</div>
         <div className="mt-2 text-xs text-muted">Rechnungs-Platzhalter:</div>
         <div className="mt-1 flex flex-wrap gap-1.5">{inv.map((t) => <Chip key={t} t={t} />)}</div>
@@ -1232,7 +1232,7 @@ function KalenderSyncSection({ flash }: { flash: (m: string) => void }) {
   const providers = [
     { provider: 'google', name: 'Google Kalender', summary: 'Google-Termine werden als belegte Zeit ins CRM übernommen (Lesen). Eine Übertragung CRM → Google erfolgt nur nach manueller Freigabe je Termin.' },
     { provider: 'microsoft', name: 'Outlook Kalender', summary: 'Termine werden automatisch zwischen CRM und Outlook synchronisiert.' },
-    { provider: 'calendly', name: 'Calendly', summary: 'Eingehende Calendly-Buchungen erscheinen automatisch im CRM-Kalender.' },
+    { provider: 'calendly', name: 'Calendly', summary: 'Eingehende Calendly-Buchungen erscheinen automatisch im Kalender.' },
   ]
   return <div className="space-y-3">{providers.map((p) => <CalendarProviderCard key={p.provider} p={p} flash={flash} />)}</div>
 }
@@ -1327,7 +1327,7 @@ function GoogleReviewsSection({ org }: { org: Org }) {
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warning-bg"><Star size={18} className="text-warning" /></div>
           <div>
-            <h2 className="text-lg font-bold text-text">Google Reviews</h2>
+            <h2 className="text-lg font-bold text-text">Google-Bewertungen</h2>
             <p className="mt-1 text-sm text-muted">{on ? 'Bewertungsanfrage 3 Tage nach Auftragsabschluss versendet.' : 'Kunden nach Auftragsabschluss automatisch um Bewertung bitten — aktuell deaktiviert.'}</p>
           </div>
         </div>
@@ -1433,7 +1433,7 @@ function PasswortSection({ flash }: { flash: (m: string) => void }) {
   return (
     <Card>
       <GroupLabel>Passwort ändern</GroupLabel>
-      <p className="mb-4 text-sm text-muted">Ändern Sie das Passwort für Ihren Firmen-Login.</p>
+      <p className="mb-4 text-sm text-muted">Ändere das Passwort für deinen Firmen-Zugang.</p>
       <div className="max-w-md space-y-4">
         <PwField label="Aktuelles Passwort" value={cur} onChange={setCur} show={showCur} onToggle={() => setShowCur((s) => !s)} />
         <PwField label="Neues Passwort" value={nw} onChange={setNw} show={showNew} onToggle={() => setShowNew((s) => !s)} />
@@ -1441,7 +1441,7 @@ function PasswortSection({ flash }: { flash: (m: string) => void }) {
         {error && <p className="text-sm font-medium text-error">{error}</p>}
       </div>
       <div className="mt-6 flex items-center justify-end border-t border-border pt-4">
-        <button onClick={submit} disabled={changePw.isPending || !cur || !nw || !conf} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{changePw.isPending ? 'Ändert…' : 'Passwort ändern'}</button>
+        <button onClick={submit} disabled={changePw.isPending || !cur || !nw || !conf} className="rounded-md bg-green-primary px-6 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{changePw.isPending ? 'Wird geändert…' : 'Passwort ändern'}</button>
       </div>
     </Card>
   )
@@ -1460,7 +1460,7 @@ function GefahrenzoneSection({ org, flash }: { org: Org; flash: (m: string) => v
   })
   return (
     <div className="rounded-xl border-2 border-dashed border-error/50 p-5">
-      <div className="mb-4 flex items-center gap-2 text-sm font-bold text-error"><AlertTriangle size={16} /> Gefahrenzone — Diese Aktionen können nicht rückgängig gemacht werden.</div>
+      <div className="mb-4 flex items-center gap-2 text-sm font-bold text-error"><AlertTriangle size={16} /> Gefahrenzone — diese Aufgaben lassen sich nicht rückgängig machen.</div>
       <div className="space-y-3">
         <div className="rounded-lg border border-border bg-surface p-4">
           <h3 className="text-sm font-bold text-text">Onboarding zurücksetzen</h3>
@@ -1469,7 +1469,7 @@ function GefahrenzoneSection({ org, flash }: { org: Org; flash: (m: string) => v
         </div>
         <div className="rounded-lg border border-error/40 bg-error-bg/30 p-4">
           <h3 className="text-sm font-bold text-text">Organisation löschen</h3>
-          <p className="mt-1 text-sm text-muted">Löscht unwiderruflich alle Daten: Kunden, Rechnungen, Termine, Mitarbeiter, Fälle.</p>
+          <p className="mt-1 text-sm text-muted">Löscht unwiderruflich alle Daten: Kunden, Rechnungen, Termine, Mitarbeiter, Vorgänge.</p>
           <button onClick={() => { setConfirmName(''); setDelOpen(true) }} className="mt-3 rounded-md bg-error px-4 py-2 text-sm font-semibold text-white hover:brightness-110">Organisation löschen</button>
         </div>
       </div>
@@ -1480,7 +1480,7 @@ function GefahrenzoneSection({ org, flash }: { org: Org; flash: (m: string) => v
           <button onClick={() => setResetOpen(false)} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body">Abbrechen</button>
           <button onClick={() => { setResetOpen(false); flash('Wird in Kürze verfügbar.') }} className="flex-1 rounded-md bg-warning py-2.5 text-sm font-semibold text-white">Zurücksetzen</button>
         </div>
-      }><p className="text-sm text-body">Möchten Sie das Onboarding wirklich zurücksetzen? Branche, Öffnungszeiten und KI-Konfiguration gehen verloren.</p></Modal>
+      }><p className="text-sm text-body">Möchtest du die Einrichtung wirklich zurücksetzen? Branche, Öffnungszeiten und KI-Konfiguration gehen verloren.</p></Modal>
 
       <Modal open={delOpen} onOpenChange={setDelOpen} title="Organisation löschen" footer={
         <div className="flex gap-3">
@@ -1488,7 +1488,7 @@ function GefahrenzoneSection({ org, flash }: { org: Org; flash: (m: string) => v
           <button disabled={confirmName !== (org.name || '') || del.isPending} onClick={() => del.mutate()} className="flex-1 rounded-md bg-error py-2.5 text-sm font-semibold text-white disabled:opacity-50">Endgültig löschen</button>
         </div>
       }>
-        <p className="text-sm text-body">Geben Sie zur Bestätigung den Organisationsnamen <span className="font-bold text-text">{org.name}</span> ein:</p>
+        <p className="text-sm text-body">Gib zur Bestätigung den Organisationsnamen ein <span className="font-bold text-text">{org.name}</span> ein:</p>
         <input value={confirmName} onChange={(e) => setConfirmName(e.target.value)} className={cn(inputCls, 'mt-3')} placeholder={org.name || ''} />
       </Modal>
     </div>

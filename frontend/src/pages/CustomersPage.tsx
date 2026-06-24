@@ -280,11 +280,11 @@ export function CustomersPage() {
           </div>
           <HeaderBtn
             icon={Download}
-            label={exporting ? 'Export…' : 'CSV Export'}
+            label={exporting ? 'Export…' : 'CSV-Export'}
             onClick={exportCsv}
             disabled={exporting}
           />
-          <HeaderBtn icon={Upload} label="CSV Import" onClick={() => setCsvOpen(true)} />
+          <HeaderBtn icon={Upload} label="CSV-Import" onClick={() => setCsvOpen(true)} />
           <button
             onClick={() => setNewOpen(true)}
             className="flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
@@ -377,7 +377,7 @@ export function CustomersPage() {
                 disabled={del.isPending}
                 className="flex items-center gap-2 rounded-md bg-error px-4 py-1.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
               >
-                <Trash2 size={15} /> {del.isPending ? 'Löscht…' : `Löschen (${selected.size})`}
+                <Trash2 size={15} /> {del.isPending ? 'Wird gelöscht…' : `Löschen (${selected.size})`}
               </button>
             </div>
           )}

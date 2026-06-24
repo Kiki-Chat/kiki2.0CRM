@@ -356,7 +356,7 @@ export function CostEstimatesTab({ project }: { project: ProjectLite }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button onClick={() => navigate(newUrl)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110"><Plus size={14} /> Neuer KVA</button>
+        <button onClick={() => navigate(newUrl)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110"><Plus size={14} /> Neuer Kostenvoranschlag</button>
       </div>
       {kvas.length ? (
         <div className="overflow-x-auto rounded-xl border border-border bg-surface">
@@ -633,7 +633,7 @@ export function DocumentsTab({ project }: { project: ProjectLite }) {
         </div>
       )}
 
-      {!docs.length && <EmptyState>Noch keine Dokumente — ziehen Sie Dateien in das Feld oben.</EmptyState>}
+      {!docs.length && <EmptyState>Noch keine Dokumente — zieh Dateien in das Feld oben.</EmptyState>}
     </div>
   )
 }

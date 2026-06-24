@@ -95,7 +95,7 @@ export function Sidebar({
     return children.length ? [{ ...entry, children }] : []
   })
 
-  const email = session?.user.email ?? 'Setup pending'
+  const email = session?.user.email ?? 'Einrichtung offen'
   // Employee badge name comes from the primed ['me'] cache (full_name) — that is
   // the live value right after the user edits their name; the auth-session
   // metadata can be stale (it is not refreshed on a name change). Fall back to

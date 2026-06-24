@@ -146,7 +146,7 @@ export function PersonalSettingsModal({ open, onClose }: { open: boolean; onClos
                 {pwError && <p className="text-xs font-medium text-error">{pwError}</p>}
                 <PwInput label="Neues Passwort" value={nw} onChange={setNw} show={showNew} onToggle={() => setShowNew((s) => !s)} />
                 <PwInput label="Passwort bestätigen" value={conf} onChange={setConf} show={showNew} onToggle={() => setShowNew((s) => !s)} />
-                <button onClick={submitPw} disabled={changePw.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{changePw.isPending ? 'Ändert…' : 'Passwort ändern'}</button>
+                <button onClick={submitPw} disabled={changePw.isPending} className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">{changePw.isPending ? 'Wird geändert…' : 'Passwort ändern'}</button>
               </div>
             )}
           </div>

@@ -22,7 +22,7 @@ export function LoginPage() {
     try {
       await signInWithPassword(email, password)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed')
+      setError(err instanceof Error ? err.message : 'Anmeldung fehlgeschlagen.')
     } finally {
       setBusy(false)
     }
@@ -40,7 +40,7 @@ export function LoginPage() {
       await signInWithMagicLink(email)
       setNotice('Check your email for a magic link.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send link')
+      setError(err instanceof Error ? err.message : 'Link konnte nicht gesendet werden.')
     } finally {
       setBusy(false)
     }
@@ -58,7 +58,7 @@ export function LoginPage() {
       await resetPassword(email)
       setNotice('Check your email for a link to set a new password.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send reset link')
+      setError(err instanceof Error ? err.message : 'Zurücksetz-Link konnte nicht gesendet werden.')
     } finally {
       setBusy(false)
     }
@@ -70,8 +70,8 @@ export function LoginPage() {
         <div className="mb-8 flex flex-col items-center gap-3">
           <img src="/kiki-logo.jpg" alt="HeyKiki" className="h-12 w-12 rounded-xl object-cover" />
           <div className="text-center">
-            <h1 className="text-xl font-bold text-text">HeyKiki Portal</h1>
-            <p className="text-sm text-muted">Sign in to your account</p>
+            <h1 className="text-xl font-bold text-text">HeyKiki-Portal</h1>
+            <p className="text-sm text-muted">Bei deinem Konto anmelden</p>
           </div>
         </div>
 
@@ -84,7 +84,7 @@ export function LoginPage() {
 
         <form onSubmit={handlePassword} className="space-y-4 rounded-lg border border-border bg-surface p-6 shadow-e1">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-body">Email</label>
+            <label className="mb-1.5 block text-sm font-medium text-body">E-Mail</label>
             <input
               type="email"
               value={email}

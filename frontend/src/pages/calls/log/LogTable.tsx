@@ -222,7 +222,7 @@ export function LogTable({
             <th className={cn(th, 'text-center')}>Zuständig</th>
             <th className={cn(th, 'w-1/4')}>Anrufer</th>
             <th className={cn(th, 'w-1/2')}>Betreff</th>
-            <th className={th}>Fall / Anfrage</th>
+            <th className={th}>Vorgang / Anfrage</th>
             <th className={th}>Datum</th>
             <th className={th}>Uhrzeit</th>
             <th className={cn(th, 'pl-6')}>Dauer</th>

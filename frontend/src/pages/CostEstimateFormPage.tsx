@@ -302,7 +302,7 @@ export function CostEstimateFormPage() {
         emitLiveFillStatus({
           tool: 'create_cost_estimate',
           status: 'failed',
-          note: e instanceof Error ? e.message : 'Formular-Ausfüllen fehlgeschlagen',
+          note: e instanceof Error ? e.message : 'Formular konnte nicht ausgefüllt werden',
         })
       } finally {
         setKikiFilling(false)
@@ -428,7 +428,7 @@ export function CostEstimateFormPage() {
                   ))}
                 </select>
                 {inquiryId && (
-                  <p className="mt-1 text-xs text-muted">Der KVA wird automatisch dem Fall dieser Anfrage zugeordnet.</p>
+                  <p className="mt-1 text-xs text-muted">Der Kostenvoranschlag wird automatisch dem Vorgang dieser Anfrage zugeordnet.</p>
                 )}
               </div>
             )}
@@ -443,7 +443,7 @@ export function CostEstimateFormPage() {
                 <select value={validity} onChange={(e) => setValidity(Number(e.target.value))} className={inputCls}>{VALIDITY.map((d) => <option key={d} value={d}>{d} Tage</option>)}</select></div>
               <div><div className={labelCls}>Dokumenttyp</div>
                 <select value={type} onChange={(e) => setType(e.target.value)} className={inputCls}>{DOC_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}</select></div>
-              <div><div className={labelCls}>Ihre Referenz / Auftragsnummer</div>
+              <div><div className={labelCls}>Deine Referenz / Auftragsnummer</div>
                 <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="optional" className={inputCls} /></div>
               <div><div className={labelCls}>Toleranz (%)</div>
                 <input type="number" value={tolerance} disabled={isBinding} onChange={(e) => setTolerance(Number(e.target.value))} className={cn(inputCls, isBinding && 'opacity-50')} /></div>

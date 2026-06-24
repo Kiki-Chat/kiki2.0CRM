@@ -119,7 +119,7 @@ function TechReport({ extras }: { extras: Record<string, unknown> }) {
         <div><span className="font-semibold">Vor-Ort:</span> {rep.site_visit_notes}</div>
       )}
       {rep.experience_good != null && (
-        <div><span className="font-semibold">Erfahrung gut:</span> {rep.experience_good ? 'Ja' : 'Nein'}</div>
+        <div><span className="font-semibold">Lief alles gut:</span> {rep.experience_good ? 'Ja' : 'Nein'}</div>
       )}
       {needs.length > 0 && <div><span className="font-semibold">Benötigt:</span> {needs.join(', ')}</div>}
       <div>
@@ -147,7 +147,7 @@ export function VorgangThreadPage() {
   })
 
   if (isLoading || !data) {
-    return <div className="flex h-full items-center justify-center text-muted">Lädt…</div>
+    return <div className="flex h-full items-center justify-center text-muted">Wird geladen…</div>
   }
 
   const inq = data.inquiry

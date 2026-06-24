@@ -201,7 +201,7 @@ export function Transcript({
         <div className="flex items-center gap-3 border-b border-border bg-alt px-6 py-2.5">
           <Volume2 size={16} className="flex-shrink-0 text-muted" />
           {audioState === 'loading' ? (
-            <span className="text-sm text-muted">Lädt Aufnahme…</span>
+            <span className="text-sm text-muted">Aufnahme wird geladen…</span>
           ) : audioState === 'error' ? (
             <span className="text-xs text-error">Aufnahme nicht verfügbar.</span>
           ) : !audioUrl ? (
@@ -370,7 +370,7 @@ export function NoCallSelected() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted">
       <Phone size={30} className="text-faint" />
-      <span className="text-[13.5px]">Wählen Sie einen Anruf aus.</span>
+      <span className="text-[13.5px]">Wähle einen Anruf aus.</span>
     </div>
   )
 }

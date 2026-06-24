@@ -175,7 +175,7 @@ export function JobLinkPage() {
         <div className="space-y-4 rounded-xl border border-border bg-surface p-4">
           <div className="text-sm font-bold text-text">Einsatzbericht</div>
 
-          <FieldBlock label="War die Erfahrung gut?">
+          <FieldBlock label="Lief alles gut?">
             <div className="flex gap-2">
               {[['Ja', true], ['Nein', false]].map(([label, val]) => (
                 <button
@@ -197,7 +197,7 @@ export function JobLinkPage() {
             <textarea value={extraDemands} onChange={(e) => setExtraDemands(e.target.value)} rows={2} className={inputCls} />
           </FieldBlock>
 
-          <FieldBlock label="Wie war der Vor-Ort-Termin?">
+          <FieldBlock label="Wie war der Termin vor Ort?">
             <textarea value={siteNotes} onChange={(e) => setSiteNotes(e.target.value)} rows={2} className={inputCls} />
           </FieldBlock>
 

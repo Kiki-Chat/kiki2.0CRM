@@ -329,12 +329,12 @@ function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose:
             ⚠ Für diesen Kunden ist keine E-Mail hinterlegt. Bitte oben eine Empfänger-Adresse eintragen oder beim Kunden ergänzen — sonst kann nichts versendet werden.
           </div>
         )}
-        <div><div className="mb-1 text-xs font-semibold text-body">An</div><input value={to} onChange={(e) => setTo(e.target.value)} placeholder="kunde@example.de" className={ta} /></div>
+        <div><div className="mb-1 text-xs font-semibold text-body">An</div><input value={to} onChange={(e) => setTo(e.target.value)} placeholder="kunde@firma.de" className={ta} /></div>
         <div><div className="mb-1 text-xs font-semibold text-body">Betreff</div><input value={subject} onChange={(e) => setSubject(e.target.value)} className={ta} /></div>
         <div><div className="mb-1 text-xs font-semibold text-body">Nachricht</div><textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} className={ta} /></div>
         <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={attachPdf} onChange={(e) => setAttachPdf(e.target.checked)} className="h-4 w-4 accent-green-primary" /> PDF anhängen</label>
         <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={copyToMe} onChange={(e) => setCopyToMe(e.target.checked)} className="h-4 w-4 accent-green-primary" /> Kopie an mich senden</label>
-        <p className="rounded-md bg-info-bg px-3 py-2 text-xs text-info">Hinweis: E-Mail-Versand (SMTP) ist noch nicht konfiguriert — der KVA wird als „Gesendet" markiert.</p>
+        <p className="rounded-md bg-info-bg px-3 py-2 text-xs text-info">Hinweis: E-Mail-Versand (SMTP) ist noch nicht konfiguriert — der Kostenvoranschlag wird als „Gesendet“ markiert.</p>
       </div>
     </Modal>
   )

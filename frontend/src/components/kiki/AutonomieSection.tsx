@@ -17,11 +17,11 @@ type CapKey = 'appointments' | 'kva' | 'projects' | 'invoices'
 const CAPABILITIES: { key: CapKey; label: string; hint: string; backOffice?: boolean; levels: [string, string, string] }[] = [
   { key: 'appointments', label: 'Termine', hint: 'Die Telefon-KI bucht Termine im Gespräch.',
     levels: ['Nur Anfrage aufnehmen — keine Buchung', 'Vorläufig buchen — das Team bestätigt', 'Verbindlich buchen & im Gespräch bestätigen'] },
-  { key: 'kva', label: 'Kostenvoranschläge (KVA)', hint: 'Die Telefon-KI erstellt Kostenvoranschläge.',
+  { key: 'kva', label: 'Kostenvoranschläge', hint: 'Die Telefon-KI erstellt Kostenvoranschläge.',
     levels: ['Nur Anfrage aufnehmen — kein KVA', 'Entwurf erstellen — das Team versendet', 'Entwurf erstellen & direkt an den Kunden senden'] },
-  { key: 'projects', label: 'Fälle & Plantafel', hint: 'Im Hintergrund bei Terminbestätigung.', backOffice: true,
+  { key: 'projects', label: 'Vorgänge & Plantafel', hint: 'Im Hintergrund bei Terminbestätigung.', backOffice: true,
     levels: ['Keinen Fall anlegen', 'Fall als Entwurf bei Terminbestätigung', 'Fall automatisch bei Terminbestätigung'] },
-  { key: 'invoices', label: 'Rechnungen', hint: 'Im Hintergrund bei Fallabschluss.', backOffice: true,
+  { key: 'invoices', label: 'Rechnungen', hint: 'Im Hintergrund bei Vorgangsabschluss.', backOffice: true,
     levels: ['Keine Rechnung anlegen', 'Rechnungsentwurf bei Fallabschluss', 'Rechnung automatisch erstellen (Versand folgt manuell)'] },
 ]
 
@@ -188,17 +188,17 @@ export function AutonomieSection({ data, flash }: { data: KzOverview; flash: (m:
               <tr>
                 <td className="px-3 py-2.5 align-top font-semibold text-text">1</td>
                 <td className="whitespace-nowrap px-3 py-2.5 align-top font-medium text-text">Aus</td>
-                <td className="px-3 py-2.5 text-body">Der Schalter ist aus — Kiki nimmt die Anfrage nur auf, ohne weitere Aktion.</td>
+                <td className="px-3 py-2.5 text-body">Der Schalter ist aus — Kiki nimmt die Anfrage nur auf, ohne weitere Aufgabe.</td>
               </tr>
               <tr>
                 <td className="px-3 py-2.5 align-top font-semibold text-text">2</td>
                 <td className="whitespace-nowrap px-3 py-2.5 align-top font-medium text-text">Halbautomatisch</td>
-                <td className="px-3 py-2.5 text-body">Kiki erledigt die Aufgabe (z. B. Entwurf oder Vorschlag) — Ihr Team bestätigt bzw. gibt sie frei.</td>
+                <td className="px-3 py-2.5 text-body">Kiki erledigt die Aufgabe (z. B. Entwurf oder Vorschlag) — dein Team bestätigt bzw. gibt sie frei.</td>
               </tr>
               <tr>
                 <td className="px-3 py-2.5 align-top font-semibold text-text">3</td>
                 <td className="whitespace-nowrap px-3 py-2.5 align-top font-medium text-text">Vollautomatisch</td>
-                <td className="px-3 py-2.5 text-body">Kiki übernimmt alles automatisch — ohne weitere Bestätigung durch Ihr Team.</td>
+                <td className="px-3 py-2.5 text-body">Kiki übernimmt alles automatisch — ohne weitere Bestätigung durch dein Team.</td>
               </tr>
             </tbody>
           </table>

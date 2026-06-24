@@ -98,7 +98,7 @@ export function VerlaufSection({ flash }: { flash: (m: string) => void }) {
               <th className="px-3 py-2 font-semibold">Geändert von</th>
               <th className="px-3 py-2 font-semibold">Felder</th>
               <th className="px-3 py-2 font-semibold">Status</th>
-              <th className="px-3 py-2 font-semibold">Aktion</th>
+              <th className="px-3 py-2 font-semibold">Aufgabe</th>
             </tr>
           </thead>
           <tbody>
@@ -112,10 +112,10 @@ export function VerlaufSection({ flash }: { flash: (m: string) => void }) {
                   <td className="px-3 py-2"><Tag variant="neutral">{sectionLabel(e.endpoint_label)}</Tag></td>
                   <td className="px-3 py-2 text-body">{e.actor_name ?? '—'}</td>
                   <td className="max-w-[200px] truncate px-3 py-2 font-mono text-xs text-muted">{fields || '—'}</td>
-                  <td className="px-3 py-2">{e.rolled_back ? <Tag variant="warning">Rückgängig</Tag> : ok ? <Tag variant="success">Erfolg</Tag> : <Tag variant="error">Fehler</Tag>}</td>
+                  <td className="px-3 py-2">{e.rolled_back ? <Tag variant="warning">Rückgängig</Tag> : ok ? <Tag variant="success">Erfolgreich</Tag> : <Tag variant="error">Fehler</Tag>}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-3">
-                      <button onClick={() => setDetail(e)} className="text-xs font-medium text-green-deep hover:underline">Diff ansehen</button>
+                      <button onClick={() => setDetail(e)} className="text-xs font-medium text-green-deep hover:underline">Änderungen ansehen</button>
                       {e.snapshot_id && !e.rolled_back && (
                         <button onClick={() => setRestoreSnap(e.snapshot_id)} className="flex items-center gap-1 text-xs font-medium text-green-deep hover:underline"><RotateCcw size={13} /> Wiederherstellen</button>
                       )}
@@ -219,11 +219,11 @@ function SnapshotsView({ onRestore }: { onRestore: (snapshotId: string) => void 
               <th className="px-3 py-2 font-semibold">Sektion</th>
               <th className="px-3 py-2 font-semibold">Gespeichert von</th>
               <th className="px-3 py-2 font-semibold">Status</th>
-              <th className="px-3 py-2 font-semibold">Aktion</th>
+              <th className="px-3 py-2 font-semibold">Aufgabe</th>
             </tr>
           </thead>
           <tbody>
-            {isLoading && <tr><td colSpan={5} className="px-3 py-8 text-center text-muted">Lädt…</td></tr>}
+            {isLoading && <tr><td colSpan={5} className="px-3 py-8 text-center text-muted">Wird geladen…</td></tr>}
             {!isLoading && filtered.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-muted">Keine Stände vorhanden.</td></tr>}
             {filtered.map((s) => (
               <tr key={s.id} className={cn('border-t border-border hover:bg-alt', s.rolled_back && 'opacity-50')}>

@@ -325,7 +325,7 @@ export function InvoiceFormPage() {
         emitLiveFillStatus({
           tool: 'create_invoice',
           status: 'failed',
-          note: e instanceof Error ? e.message : 'Formular-Ausfüllen fehlgeschlagen',
+          note: e instanceof Error ? e.message : 'Formular konnte nicht ausgefüllt werden',
         })
       } finally {
         setKikiFilling(false)
@@ -497,9 +497,9 @@ export function InvoiceFormPage() {
               </div>
             )}
             {!!customerId && (
-              <div className="mt-3"><div className={labelCls}>Aus KVA übernehmen (optional)</div>
+              <div className="mt-3"><div className={labelCls}>Aus Kostenvoranschlag übernehmen (optional)</div>
                 <select value="" onChange={(e) => { if (e.target.value) importKva(e.target.value); e.currentTarget.value = '' }} className={inputCls}>
-                  <option value="">KVA übernehmen…</option>
+                  <option value="">Kostenvoranschlag übernehmen…</option>
                   {selectableKvas.map((k) => <option key={k.id} value={k.id}>{k.number} — {k.subject || 'KVA'} ({money(k.total ?? 0)}) · {KVA_STATUS_DE[k.status] ?? k.status}</option>)}
                 </select>
                 {kvaId && <p className="mt-1 text-xs text-green-deep">Positionen aus {estimates.find((e) => e.id === kvaId)?.number ?? 'KVA'} übernommen.</p>}
@@ -523,7 +523,7 @@ export function InvoiceFormPage() {
                   {PAYMENT_TERMS.map((d) => <option key={d} value={d}>{d} Tage</option>)}
                   <option value={0}>Sofort</option>
                 </select></div>
-              <div className="col-span-2"><div className={labelCls}>Ihre Referenz / Auftragsnummer</div>
+              <div className="col-span-2"><div className={labelCls}>Deine Referenz / Auftragsnummer</div>
                 <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="optional" className={inputCls} /></div>
               <div><div className={labelCls}>Skonto (%)</div>
                 <input type="number" value={skontoPct || ''} onChange={(e) => setSkontoPct(Number(e.target.value))} placeholder="z. B. 2" className={inputCls} /></div>

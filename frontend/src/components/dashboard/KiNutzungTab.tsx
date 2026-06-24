@@ -123,7 +123,7 @@ export function KiNutzungTab() {
 
       <div className={cn('flex items-start gap-3 rounded-xl border border-border bg-alt p-4 text-sm text-muted')}>
         <Hourglass size={16} className="mt-0.5 shrink-0 text-faint" />
-        <span>Für Änderungen am Kontingent oder Tarif wenden Sie sich bitte an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>. Detaillierte Abrechnungen erscheinen ab dem nächsten Update direkt hier.</span>
+        <span>Für Änderungen am Kontingent oder Tarif wende dich bitte an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>. Detaillierte Abrechnungen erscheinen ab dem nächsten Update direkt hier.</span>
       </div>
     </div>
   )

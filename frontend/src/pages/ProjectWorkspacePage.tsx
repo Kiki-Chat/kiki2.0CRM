@@ -81,7 +81,7 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 
 const TABS: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'overview', label: 'Übersicht', icon: LayoutDashboard },
-  { key: 'cases', label: 'Fälle', icon: Layers },
+  { key: 'cases', label: 'Vorgänge', icon: Layers },
   { key: 'calls', label: 'Anrufe', icon: Phone },
   { key: 'inquiries', label: 'Anfragen', icon: ClipboardList },
   { key: 'appointments', label: 'Termine', icon: Calendar },
@@ -367,7 +367,7 @@ function CasesTab({ project }: { project: Project }) {
   return (
     <div className="mx-auto max-w-4xl space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold text-text">Fälle in diesem Projekt <span className="text-muted">({members.length})</span></h3>
+        <h3 className="text-sm font-bold text-text">Vorgänge in diesem Projekt <span className="text-muted">({members.length})</span></h3>
         <div className="relative">
           <button onClick={() => setAdding((o) => !o)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-1.5 text-sm font-semibold text-white hover:brightness-105">
             <Plus size={15} /> Fall hinzufügen
@@ -376,13 +376,13 @@ function CasesTab({ project }: { project: Project }) {
             <>
               <div className="fixed inset-0 z-10" onClick={() => setAdding(false)} />
               <div className="absolute right-0 z-20 mt-1 max-h-80 w-80 overflow-auto rounded-xl border border-border bg-surface p-1.5 shadow-e3">
-                <div className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wide text-faint">Fall des Kunden zuordnen</div>
+                <div className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wide text-faint">Vorgang des Kunden zuordnen</div>
                 {candidates.length ? candidates.map((c) => (
                   <button key={c.id} onClick={() => attach.mutate(c.id)} className="block w-full rounded-lg px-2.5 py-2 text-left hover:bg-alt">
                     <div className="truncate text-sm font-semibold text-text">{c.title || 'Fall'}</div>
                     <div className="truncate text-xs text-muted">{c.customer_name ?? '—'} · {c.number} · {c.stats.calls} Anrufe · {c.stats.inquiries} Anfragen</div>
                   </button>
-                )) : <p className="px-2.5 py-3 text-xs text-muted">Keine freien Fälle für diesen Kunden.</p>}
+                )) : <p className="px-2.5 py-3 text-xs text-muted">Keine freien Vorgänge für diesen Kunden.</p>}
               </div>
             </>
           )}
