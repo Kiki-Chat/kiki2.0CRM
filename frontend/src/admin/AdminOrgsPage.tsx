@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2, MinusCircle, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, CheckCircle2, MinusCircle, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -225,6 +225,13 @@ export function AdminOrgsPage() {
                           title="Bearbeiten"
                         >
                           <Pencil size={13} /> Bearbeiten
+                        </button>
+                        <button
+                          onClick={() => navigate(`/admin/orgs/${o.id}/migration`)}
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"
+                          title="Migration (intern): übernommene Daten + Prompt-Abweichung"
+                        >
+                          <ArrowLeftRight size={13} /> Migration
                         </button>
                         <button
                           onClick={() => setDisabled.mutate({ id: o.id, disabled: !disabled })}

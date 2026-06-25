@@ -31,6 +31,7 @@ from app.services.agent_config import (
     verify_agent_health,
 )
 from app.services.history_import import import_agent_history
+from app.services.prompt_diff import classify_agent_prompt
 from app.services.provisioning import provision_org
 
 logger = logging.getLogger(__name__)
@@ -808,6 +809,116 @@ async def org_agent_health(
         )
     report = await run_in_threadpool(verify_agent_health, org_id, agent_id)
     return AgentHealthReport(**report)
+
+
+# ─── Migration overview (super-admin only — internal, not shown to org admins) ─
+class MigrationHistory(BaseModel):
+    """How much of an existing customer's history has been pulled into the CRM."""
+
+    calls: int = 0
+    customers: int = 0
+    inquiries: int = 0
+    cases: int = 0
+    appointments: int = 0
+    last_call_at: str | None = None
+
+
+class MigrationPromptDiff(BaseModel):
+    """Read-only divergence of the live prompt vs. the CRM's standard template
+    (see services/prompt_diff.py). Visibility only — nothing is ported."""
+
+    available: bool = False
+    error: str | None = None
+    status: str | None = None
+    coverage_pct: float = 0.0
+    live_chars: int = 0
+    template_chars: int = 0
+    added_count: int = 0
+    removed_count: int = 0
+    sample_added: list[str] = []
+    sample_removed: list[str] = []
+
+
+class MigrationOverview(BaseModel):
+    org_id: str
+    name: str | None = None
+    agent_id: str | None = None
+    history: MigrationHistory
+    prompt: MigrationPromptDiff
+
+
+def _migration_history(org_id: str) -> dict:
+    """Per-org migrated-record counts for the Migration view. Each query is
+    org-scoped + count-only; a missing table just reads 0 (never raises)."""
+    client = get_service_client()
+
+    def _count(table: str) -> int:
+        try:
+            res = (
+                client.table(table)
+                .select("id", count="exact", head=True)
+                .eq("org_id", org_id)
+                .execute()
+            )
+            return int(getattr(res, "count", 0) or 0)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    last_call_at: str | None = None
+    try:
+        rows = (
+            client.table("calls")
+            .select("created_at")
+            .eq("org_id", org_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        last_call_at = rows[0].get("created_at") if rows else None
+    except Exception:  # noqa: BLE001
+        last_call_at = None
+
+    return {
+        "calls": _count("calls"),
+        "customers": _count("customers"),
+        "inquiries": _count("inquiries"),
+        "cases": _count("cases"),
+        "appointments": _count("appointments"),
+        "last_call_at": last_call_at,
+    }
+
+
+@router.get("/orgs/{org_id}/migration", response_model=MigrationOverview)
+async def org_migration_overview(
+    org_id: str,
+    _user: CurrentUser = Depends(require_super_admin),
+) -> MigrationOverview:
+    """Super-admin-only migration overview for an existing customer: how many
+    calls/customers/cases have been pulled in, plus a READ-ONLY classification
+    of how far the agent's live prompt diverges from the CRM standard template.
+
+    Internal to us (never exposed to org admins). Nothing is ported here — this
+    is the visibility surface for planning a future smooth migration."""
+    org = await run_in_threadpool(_get_org, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation nicht gefunden.")
+    agent_id = org.get("elevenlabs_agent_id")
+    history = await run_in_threadpool(_migration_history, org_id)
+    if agent_id:
+        prompt = await run_in_threadpool(
+            classify_agent_prompt, org_id, agent_id, org.get("name") or "", org
+        )
+    else:
+        prompt = {"available": False, "error": "Keine Sprach-ID hinterlegt."}
+    return MigrationOverview(
+        org_id=org_id,
+        name=org.get("name"),
+        agent_id=agent_id,
+        history=MigrationHistory(**history),
+        prompt=MigrationPromptDiff(**prompt),
+    )
 
 
 @router.patch("/users/{user_id}/role")
