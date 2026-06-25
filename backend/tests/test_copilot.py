@@ -317,3 +317,51 @@ def test_cap_disabled_no_429(monkeypatch):
         assert _usage_mod.within_cap("any-org") is True
     finally:
         settings.copilot_monthly_cost_cap_usd = original_cap
+
+
+# ─── Copilot appointment idempotency (duplicate-event guard) ─────────────────
+class _DupChain:
+    def __init__(self, data):
+        self._data = data
+
+    def select(self, *a, **k): return self
+    def eq(self, *a, **k): return self
+    def neq(self, *a, **k): return self
+    def is_(self, *a, **k): return self
+    def order(self, *a, **k): return self
+    def limit(self, *a, **k): return self
+
+    def execute(self):
+        from unittest.mock import MagicMock
+        return MagicMock(data=self._data)
+
+
+class _DupClient:
+    def __init__(self, data):
+        self._data = data
+
+    def table(self, _name):
+        return _DupChain(self._data)
+
+
+def test_find_duplicate_appointment_matches_same_slot_and_title(monkeypatch):
+    """An existing non-cancelled appt at the same slot (±2 min, tz-agnostic) with
+    the same title is detected as a duplicate so a re-confirmed create is a no-op."""
+    existing = [{
+        "id": "appt-existing", "title": "Weihnachtsfeier",
+        "scheduled_at": "2026-12-22T09:00:00+00:00",  # == 10:00 Berlin
+        "duration_minutes": 60, "status": "pending", "customer_id": "cust-1",
+    }]
+    monkeypatch.setattr(tools, "get_service_client", lambda: _DupClient(existing))
+    # Same slot expressed in Berlin local time + same title → duplicate.
+    hit = tools._find_duplicate_appointment("org-1", "cust-1", "2026-12-22T10:00:00+01:00", "Weihnachtsfeier")
+    assert hit and hit["id"] == "appt-existing"
+    # A different title at the same slot is NOT a duplicate.
+    assert tools._find_duplicate_appointment("org-1", "cust-1", "2026-12-22T10:00:00+01:00", "Heizungswartung") is None
+    # A far-apart slot is NOT a duplicate.
+    assert tools._find_duplicate_appointment("org-1", "cust-1", "2026-12-22T14:00:00+01:00", "Weihnachtsfeier") is None
+
+
+def test_find_duplicate_appointment_none_when_empty(monkeypatch):
+    monkeypatch.setattr(tools, "get_service_client", lambda: _DupClient([]))
+    assert tools._find_duplicate_appointment("org-1", "cust-1", "2026-12-22T10:00:00+01:00", "X") is None

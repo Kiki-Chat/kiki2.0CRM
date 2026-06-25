@@ -238,6 +238,50 @@ def _set_inquiry_status(user: CurrentUser, args: dict) -> dict:
     return {"updated": True, "status": status} if rows else {"error": "Anfrage nicht gefunden."}
 
 
+def _parse_dt(value: str | None):
+    """Best-effort ISO → aware datetime; None on failure."""
+    if not value:
+        return None
+    from datetime import datetime, timezone
+
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _find_duplicate_appointment(
+    org_id: str, customer_id: str | None, scheduled_at: str, title: str
+) -> dict | None:
+    """Return an existing non-cancelled appointment for the same customer whose
+    slot is within ±2 minutes and whose title matches (case-insensitive) — the
+    copilot's idempotency guard against a re-confirmed identical create. Matching
+    is done on PARSED datetimes so a tz/format difference never hides a duplicate."""
+    target = _parse_dt(scheduled_at)
+    if target is None:
+        return None
+    q = (
+        get_service_client()
+        .table("appointments")
+        .select("id, title, scheduled_at, duration_minutes, status, customer_id")
+        .eq("org_id", org_id)
+        .neq("status", "cancelled")
+    )
+    q = q.eq("customer_id", customer_id) if customer_id else q.is_("customer_id", "null")
+    rows = q.order("created_at", desc=True).limit(50).execute().data or []
+    norm_title = (title or "").strip().casefold()
+    for r in rows:
+        rt = _parse_dt(r.get("scheduled_at"))
+        if rt is None:
+            continue
+        if abs((rt - target).total_seconds()) > 120:
+            continue
+        if (r.get("title") or "").strip().casefold() == norm_title:
+            return r
+    return None
+
+
 def _create_appointment(user: CurrentUser, args: dict) -> dict:
     from app.api.routes import appointments as appt_routes
     from app.schemas.admin import AppointmentCreate
@@ -252,6 +296,16 @@ def _create_appointment(user: CurrentUser, args: dict) -> dict:
         if "id" not in resolved:
             return resolved  # not found / ambiguous → ask which customer
         customer_id = resolved["id"]
+    # Idempotency: the copilot is stateless across turns and can RE-PROPOSE an
+    # identical create (it can't see that an earlier card was already confirmed) —
+    # confirming twice would otherwise insert a duplicate event. Return any existing
+    # non-cancelled appointment with the same customer + same slot (±2 min) + same
+    # title instead of inserting a second one.
+    existing = _find_duplicate_appointment(
+        user.org_id, customer_id, scheduled_at, (args.get("title") or "").strip()
+    )
+    if existing:
+        return {"appointment": existing, "deduped": True}
     try:
         payload = AppointmentCreate(
             customer_id=customer_id, title=args.get("title"),
