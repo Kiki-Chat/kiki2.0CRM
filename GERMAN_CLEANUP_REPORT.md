@@ -11,7 +11,11 @@ An earlier version of this report claimed "Sie→Du done" after the *first* pass
 - **Live preview review** (rendered the app on :5199) found ~18 missed Sie strings (admin gates, error messages, Rufumleitung guide, form subtitles, invoice/email templates) + the `KVA-2026` placeholder → fixed (`edb4c0a`).
 - **Comprehensive *unfiltered* scan** then found **14 more** (DashboardPage, CostEstimatesPage email, projectTabs, RufumleitungGuidePage ×3, SetPasswordPage, CalendarPage, Modals, CustomerFormModal, AgentSyncBanner, `KVA-Platzhalter`/`KVA-E-Mail`) → fixed (`7810123`).
 
-**Final verified tally (unfiltered scan, frontend + backend written docs): formal Sie/Ihr = 0 · KVA/Kostenvoranschlag word = 0 · Fall/Fälle UI = 0.** Technician `JobLinkPage` source-verified (`Abgeschlossen`, `Vorgang`, 0 Sie). Lesson: the unfiltered scan + render is the source of truth, not a filtered grep.
+**Round 3 — rendered admin/employee/technician audit (preview on :5173).** The admin "gate" turned out to be a **CORS/port issue** (backend allows `localhost:5173`; preview was on `:5199`) — the `govindyadav0703` account IS `org_admin` (`/api/me` → 200, role `org_admin`). On :5173 the admin content rendered, and per-screen `preview_eval` text audits caught **~30 more misses** the earlier filtered greps left: admin `Kalender-Sync`→`Kalender-Abgleich`; employee `Login`-badge→`Zugang`, "Kein Login nötig"→"Keine Anmeldung nötig", **"Quota überschritten"→"Kontingent überschritten"** (Luca's #1 flagged error), `Module`→`Bereiche`, `CSV Import`→`CSV-Import`; and **~20 backend written-Sie** (employee_invite email, cost-estimate/invoice/billing/cases/settings/appointments route emails+errors, kiki_zentrale validation, common.py auth, ratelimit). All fixed.
+
+**FINAL verified tally (unfiltered, frontend + backend): formal Sie/Ihr = 0 · KVA/Kostenvoranschlag word = 0 · Fall/Fälle UI = 0 · Denglisch (Login/Sync/Quota/Module/Monteur) = 0.** Rendered-verified: admin Settings (du subtitle, Kalender-Abgleich, du email templates), employee Mitarbeiter (ZUGANG column, Techniker roles), technician JobLinkPage (source: Abgeschlossen/Vorgang/0 Sie). Phone-persona Sie (what Kiki *says* on calls — pds/identify/transfer/inquiries/conversation_init + prompts) deliberately left for the brand decision.
+
+**Lesson learned: a narrow/filtered grep is NOT verification. Unfiltered scan + rendered audit is.**
 
 ---
 
