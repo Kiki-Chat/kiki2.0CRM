@@ -132,12 +132,30 @@ export function MyAbsencePage() {
   )
 }
 
+interface EmpLite {
+  id: string
+  display_name: string
+  is_active?: boolean
+  open_tickets?: number
+}
+
 function ApplyModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [type, setType] = useState('vacation')
   const [from, setFrom] = useState(todayYmd())
   const [until, setUntil] = useState(todayYmd())
   const [reason, setReason] = useState('')
+  const [substitute, setSubstitute] = useState('')
   const [error, setError] = useState<string | null>(null)
+
+  // Colleagues who could stand in — each shown with their current open-ticket
+  // load so the requester picks someone who isn't already overloaded.
+  const { data: employees = [] } = useQuery({
+    queryKey: ['absence-substitute-candidates'],
+    queryFn: () => apiFetch<EmpLite[]>('/api/employees'),
+  })
+  const candidates = employees.filter((e) => e.is_active !== false)
+  // A substitute is mandatory for planned vacation; illness can be unplanned.
+  const substituteRequired = type === 'vacation'
 
   const save = useMutation({
     mutationFn: () =>
@@ -149,6 +167,7 @@ function ApplyModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
           ends_at: new Date(`${until}T23:59:59`).toISOString(),
           all_day: true,
           reason: reason || null,
+          substitute_employee_id: substitute || null,
         }),
       }),
     onSuccess: onSaved,
@@ -167,7 +186,7 @@ function ApplyModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
             Abbrechen
           </button>
           <button
-            disabled={!from || !until || save.isPending}
+            disabled={!from || !until || (substituteRequired && !substitute) || save.isPending}
             onClick={() => save.mutate()}
             className="flex-1 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
           >
@@ -197,6 +216,24 @@ function ApplyModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => 
             <label className="mb-1 block text-sm font-medium text-body">Bis</label>
             <input type="date" value={until} min={from} onChange={(e) => setUntil(e.target.value)} className={inputCls} />
           </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-body">
+            Vertretung{substituteRequired ? '' : ' (optional)'}
+          </label>
+          <select value={substitute} onChange={(e) => setSubstitute(e.target.value)} className={inputCls}>
+            <option value="">Vertretung wählen…</option>
+            {candidates.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.display_name} · {e.open_tickets ?? 0} offene Tickets
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-muted">
+            {substituteRequired
+              ? 'Für Urlaub erforderlich. Die offenen Tickets je Person helfen bei der Auswahl.'
+              : 'Optional – wer übernimmt während der Abwesenheit?'}
+          </p>
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium text-body">Grund (optional)</label>

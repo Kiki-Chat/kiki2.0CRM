@@ -54,6 +54,7 @@ interface Employee {
   technician_portal_url?: string | null
   present: boolean
   absence_type: string | null
+  open_tickets?: number
 }
 
 type Tab = 'employees' | 'overview' | 'calendar' | 'applications'
@@ -92,6 +93,8 @@ interface Absence {
   reason: string | null
   status: string
   internal_note: string | null
+  substitute_employee_id: string | null
+  substitute_name: string | null
 }
 
 function AbsenceLegend() {
@@ -1279,6 +1282,13 @@ function AntraegeTab() {
     queryKey: ['absences-pending'],
     queryFn: () => apiFetch<Absence[]>('/api/employees/absences/pending'),
   })
+  // The substitute's current open-ticket load, so the approver sees at a glance
+  // whether the proposed stand-in is already overloaded before approving.
+  const { data: roster = [] } = useQuery({
+    queryKey: ['employees-full'],
+    queryFn: () => apiFetch<Employee[]>('/api/employees'),
+  })
+  const ticketsById = new Map(roster.map((e) => [e.id, e.open_tickets ?? 0]))
   const review = useMutation({
     mutationFn: ({ id, action, note }: { id: string; action: 'approve' | 'reject'; note?: string }) =>
       apiFetch(`/api/employees/absences/${id}/${action}`, {
@@ -1317,6 +1327,20 @@ function AntraegeTab() {
               <div className="mt-0.5 text-sm text-muted">
                 {fmtAbsenceRange(a)}
                 {a.reason ? ` · ${a.reason}` : ''}
+              </div>
+              <div className="mt-1 text-xs">
+                {a.substitute_name ? (
+                  <span className="text-body">
+                    Vertretung: <span className="font-medium">{a.substitute_name}</span>
+                    {a.substitute_employee_id != null && (
+                      <span className="ml-1 rounded-full bg-alt px-1.5 py-0.5 text-[11px] text-muted">
+                        {ticketsById.get(a.substitute_employee_id) ?? 0} offene Tickets
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-warning">Keine Vertretung angegeben</span>
+                )}
               </div>
             </div>
             <div className="flex flex-shrink-0 items-center gap-2">

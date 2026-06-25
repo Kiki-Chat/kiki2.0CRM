@@ -63,6 +63,8 @@ class AbsenceCreate(BaseModel):
     all_day: bool = True
     reason: str | None = None
     internal_note: str | None = None
+    # Optional stand-in covering the absence (Vertretung); validated same-org.
+    substitute_employee_id: str | None = None
 
 
 class AbsenceApply(BaseModel):
@@ -74,6 +76,9 @@ class AbsenceApply(BaseModel):
     ends_at: str
     all_day: bool = True
     reason: str | None = None
+    # Chosen stand-in (Vertretung). For vacation the UI requires it; illness can be
+    # unplanned, so it stays optional at the schema layer.
+    substitute_employee_id: str | None = None
 
 
 class AbsenceReview(BaseModel):
