@@ -62,8 +62,8 @@ export function RufumleitungGuidePage() {
 
       <p className="mb-6 text-sm text-body">
         Damit Kiki deine Anrufe entgegennimmt, leite deine bestehende Geschäftsnummer auf deine
-        HeyKiki-Nummer um. Eingehende Anrufe landen dann automatisch bei Kiki — Ihre gewohnte Nummer
-        bleibt unverändert und Sie müssen sie nirgends ändern.
+        HeyKiki-Nummer um. Eingehende Anrufe landen dann automatisch bei Kiki — deine gewohnte Nummer
+        bleibt unverändert und du musst sie nirgends ändern.
       </p>
 
       <div className="mb-6 flex gap-3 rounded-lg border border-info/30 bg-info-bg px-4 py-3 text-sm text-info">
@@ -88,7 +88,7 @@ export function RufumleitungGuidePage() {
 
       <div className="space-y-4">
         <p className="text-sm text-muted">
-          Am einfachsten richten Sie die Rufumleitung direkt in den Einstellungen Ihres Telefons ein
+          Am einfachsten richtest du die Rufumleitung direkt in den Einstellungen deines Telefons ein
           („Immer weiterleiten"). Klappt das bei deinem Gerät nicht, nutze die Codes weiter unten.
         </p>
 

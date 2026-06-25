@@ -1203,7 +1203,7 @@ function EmailVorlagenSection({ config, flash }: { config: EmailConfig | null; f
         <div className="flex flex-wrap gap-1.5">{general.map((t) => <Chip key={t} t={t} />)}</div>
         <div className="mt-2 text-xs text-muted">Rechnungs-Platzhalter:</div>
         <div className="mt-1 flex flex-wrap gap-1.5">{inv.map((t) => <Chip key={t} t={t} />)}</div>
-        <div className="mt-2 text-xs text-muted">KVA-Platzhalter:</div>
+        <div className="mt-2 text-xs text-muted">Angebot-Platzhalter:</div>
         <div className="mt-1 flex flex-wrap gap-1.5">{kva.map((t) => <Chip key={t} t={t} />)}</div>
       </Card>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -1215,7 +1215,7 @@ function EmailVorlagenSection({ config, flash }: { config: EmailConfig | null; f
           </div>
         </Card>
         <Card>
-          <h3 className="mb-3 text-sm font-bold text-text">KVA-E-Mail</h3>
+          <h3 className="mb-3 text-sm font-bold text-text">Angebot-E-Mail</h3>
           <Field label="Betreff"><input value={kvaSub} onChange={(e) => setKvaSub(e.target.value)} className={inputCls} /></Field>
           <div className="mt-3"><div className={labelCls}>Nachricht</div>
             <textarea data-field="kvaBody" onFocus={(e) => (lastFocused.current = e.currentTarget)} value={kvaBody} onChange={(e) => setKvaBody(e.target.value)} placeholder="Hallo {kundename}, anbei erhältst du unser Angebot {kvanummer}…" className={ta} />

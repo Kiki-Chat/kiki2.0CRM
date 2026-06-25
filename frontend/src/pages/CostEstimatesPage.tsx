@@ -289,7 +289,7 @@ function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose:
   const [subject, setSubject] = useState(`Ihr Angebot ${estimate.number ?? ''}`)
   const [message, setMessage] = useState(
     `Sehr geehrte Damen und Herren,\n\nanbei erhältst du unser Angebot ${estimate.number ?? ''}. ` +
-      `Bei Fragen stehen wir Ihnen gerne zur Verfügung.\n\nMit freundlichen Grüßen`,
+      `Bei Fragen stehen wir dir gerne zur Verfügung.\n\nMit freundlichen Grüßen`,
   )
   const [copyToMe, setCopyToMe] = useState(false)
   const [attachPdf, setAttachPdf] = useState(true)

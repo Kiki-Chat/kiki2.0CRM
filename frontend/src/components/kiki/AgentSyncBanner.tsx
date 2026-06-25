@@ -127,7 +127,7 @@ export function AgentDriftBanner() {
       <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-bg/60 px-4 py-2.5 text-sm font-medium text-warning">
         <AlertTriangle size={16} className="mt-0.5 shrink-0" />
         <span className="flex-1">
-          Der Prompt wurde manuell bearbeitet und folgt nicht mehr Ihren Einstellungen. Zuletzt
+          Der Prompt wurde manuell bearbeitet und folgt nicht mehr deinen Einstellungen. Zuletzt
           geänderte Einstellungen sind am Telefon noch nicht aktiv.
         </span>
         <button

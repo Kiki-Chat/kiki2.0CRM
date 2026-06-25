@@ -176,7 +176,7 @@ export function CustomerFormModal({
           />
           <p className="mt-1 text-xs text-faint">
             Wird automatisch mit „KI-"-Präfix vergeben (eindeutig system­generiert, kollidiert
-            nie mit Ihren eigenen Nummern). Manuelles Überschreiben nur bei Datenübernahme.
+            nie mit deinen eigenen Nummern). Manuelles Überschreiben nur bei Datenübernahme.
           </p>
         </Field>
         <Field label="Kundentyp">

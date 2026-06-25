@@ -509,7 +509,7 @@ export function TeamTab({ project }: { project: ProjectLite }) {
       </div>
       {hasNoCases && (
         <div className="rounded-xl border border-border bg-alt px-4 py-3 text-sm text-muted">
-          Fügen Sie dem Projekt zuerst einen Vorgang hinzu, um Mitarbeiter zuzuweisen.
+          Füge dem Projekt zuerst einen Vorgang hinzu, um Mitarbeiter zuzuweisen.
         </div>
       )}
       {team.length ? (

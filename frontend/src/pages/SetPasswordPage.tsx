@@ -62,7 +62,7 @@ export function SetPasswordPage() {
       <Shell>
         <div className="rounded-lg border border-border bg-surface p-6 text-center shadow-e1">
           <p className="text-sm font-medium text-success">
-            Passwort gesetzt. Sie werden angemeldet…
+            Passwort gesetzt. Du wirst angemeldet…
           </p>
         </div>
       </Shell>

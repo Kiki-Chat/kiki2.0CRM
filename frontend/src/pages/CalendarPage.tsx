@@ -1030,7 +1030,7 @@ function CreateAppointmentModal({
         {overlapCount > 0 && (
           <div className="rounded-md bg-warning-bg px-3 py-2 text-sm text-warning">
             Zur gewählten Zeit {overlapCount === 1 ? 'existiert bereits 1 Termin' : `existieren bereits ${overlapCount} Termine`}.
-            Ob parallele Termine zulässig sind, regeln die Terminregeln („Parallele Termine“) — Sie können trotzdem speichern.
+            Ob parallele Termine zulässig sind, regeln die Terminregeln („Parallele Termine“) — du kannst trotzdem speichern.
           </div>
         )}
         <div>

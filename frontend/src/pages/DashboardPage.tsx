@@ -109,7 +109,7 @@ function OverviewTab() {
   if (!isSupabaseConfigured) {
     return (
       <Card className="text-sm text-muted">
-        Verbinden Sie Supabase und die Backend-API, um Live-Daten zu laden.
+        Verbinde Supabase und die Backend-API, um Live-Daten zu laden.
       </Card>
     )
   }
@@ -187,7 +187,7 @@ function HeroDeck() {
             <p className="text-sm font-bold text-text">
               {total === 0
                 ? 'Alles erledigt 🎉'
-                : `${total} ${total === 1 ? `${taskNoun} wartet` : `${taskNounPl} warten`} auf Sie`}
+                : `${total} ${total === 1 ? `${taskNoun} wartet` : `${taskNounPl} warten`} auf dich`}
             </p>
             <p className="mt-0.5 text-[11px] font-medium text-muted">
               {callsCount} Anrufe · {casesCount} Vorgänge · {total} offen

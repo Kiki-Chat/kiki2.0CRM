@@ -330,7 +330,7 @@ export function RescheduleApprovalModal({
         </div>
         {overdue && (
           <div className="rounded-md bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
-            Diese Anfrage ist überfällig — der Kunde wartet auf Ihre Entscheidung.
+            Diese Anfrage ist überfällig — der Kunde wartet auf deine Entscheidung.
           </div>
         )}
         <p className="text-xs text-muted">
