@@ -133,3 +133,45 @@ def test_unmatched_reschedule_excludes_matched_appointment_change():
 
 def test_unmatched_reschedule_empty_when_no_rows():
     assert ax._unmatched_reschedule(_FakeClient({"inquiries": []}), ORG) == []
+
+
+# ─── _reschedule_pending (orange "Termin verschoben" card, L2 human final say) ─
+def test_reschedule_pending_surfaces_recently_rescheduled_confirmed_appt():
+    """A CONFIRMED appointment with a recent rescheduled_at must surface as kind
+    'reschedule_pending' (high priority, the NEW slot as due_at) so the handler can
+    give the final say after the outbound confirmation call."""
+    appts = [
+        {
+            "id": "appt-9",
+            "inquiry_id": "inq-9",
+            "customer_id": "cust-1",
+            "title": "Heizungswartung",
+            "scheduled_at": "2026-06-22T12:30:00+00:00",
+            "rescheduled_at": "2026-06-21T09:00:00+00:00",
+            "created_at": "2026-06-10T08:00:00+00:00",
+            "status": "confirmed",
+            "source_conversation_id": None,
+        },
+    ]
+    customers = [{"id": "cust-1", "full_name": "Max Mustermann"}]
+    client = _FakeClient({"appointments": appts, "customers": customers, "inquiries": [], "calls": []})
+
+    out = ax._reschedule_pending(client, ORG)
+
+    assert len(out) == 1
+    row = out[0]
+    assert row["kind"] == "reschedule_pending"
+    assert row["id"] == "appt-9"
+    assert row["customer_name"] == "Max Mustermann"
+    assert row["priority"] == "high"
+    assert row["due_at"] == "2026-06-22T12:30:00+00:00"  # the NEW slot
+    assert "verschoben" in row["summary"].lower()
+    # Scoped to this org, only CONFIRMED appts, only those rescheduled recently.
+    rec = client.recorder
+    assert any(c["method"] == "eq" and c["args"] == ("org_id", ORG) for c in rec)
+    assert any(c["method"] == "eq" and c["args"] == ("status", "confirmed") for c in rec)
+    assert any(c["method"] == "gte" and c["args"][0] == "rescheduled_at" for c in rec)
+
+
+def test_reschedule_pending_empty_when_no_rows():
+    assert ax._reschedule_pending(_FakeClient({"appointments": []}), ORG) == []

@@ -64,10 +64,18 @@ def test_reschedule_proposes_alternative_time():
     assert "hk_getAvailableAppointments" in prompt and "hk_changeAppointment" in prompt
 
 
-def test_reschedule_without_alternative_is_graceful():
+def test_reschedule_without_alternative_states_new_time_and_confirms_first():
+    # Definite-move case (manual calendar/copilot reschedule): scheduled_at IS the
+    # NEW committed time. The call must STATE that new time (10:00 Berlin) and ask
+    # the customer to confirm it — NOT frame it as a slot to abandon and immediately
+    # offer fresh slots (the reported bug).
     c = _content("appointment_reschedule", _APPT)  # no alternative_start_time
     fm = c["conversation_config_override"]["agent"]["first_message"]
-    assert "verschieben" in fm  # still a coherent opener
+    assert "10:00" in fm  # states the NEW time
+    assert "neue Termin" in fm  # asks whether the new appointment fits
+    prompt = c["conversation_config_override"]["agent"]["prompt"]["prompt"]
+    # Alternatives are offered ONLY on decline ("erst DANN") — never up front.
+    assert "erst DANN" in prompt and "hk_getAvailableAppointments" in prompt
 
 
 def test_appointment_occasions_are_never_swept_and_email_always():

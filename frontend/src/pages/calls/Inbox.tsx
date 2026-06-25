@@ -167,6 +167,7 @@ const KIND_ICON: Record<ActionItem['kind'], LucideIcon> = {
   invoice_pending_payment: Receipt,
   callback_owed: Phone,
   alt_time_proposal: CalendarClock,
+  reschedule_pending: CalendarClock,
   appointment_cancelled: CalendarX,
 }
 // Lifecycle colour scheme: confirmation (open) → green, reschedule → orange,
@@ -181,6 +182,7 @@ const KIND_TONE: Record<ActionItem['kind'], { tile: string; tag: 'info' | 'ai' |
   invoice_pending_payment: { tile: 'bg-warning-bg text-warning', tag: 'warning' },
   callback_owed: { tile: 'bg-warning-bg text-warning', tag: 'warning' },
   alt_time_proposal: { tile: 'bg-orange-100 text-orange-700', tag: 'warning' },
+  reschedule_pending: { tile: 'bg-orange-100 text-orange-700', tag: 'warning' },
   appointment_cancelled: { tile: 'bg-slate-700 text-white', tag: 'neutral' },
 }
 

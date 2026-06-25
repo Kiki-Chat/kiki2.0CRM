@@ -55,6 +55,7 @@ ActionKind = Literal[
     "invoice_pending_payment",
     "callback_owed",
     "alt_time_proposal",
+    "reschedule_pending",
     "appointment_cancelled",
     "reschedule_unmatched",
 ]
@@ -134,6 +135,11 @@ def _termin_anfrage(client, org_id: str) -> list[dict[str, Any]]:
         )
         .eq("org_id", org_id)
         .eq("status", "pending")
+        # Pending appts that already carry a reschedule proposal marker are surfaced
+        # by `_alt_time_proposal` instead — exclude them here so a single appointment
+        # never appears as BOTH a Terminbestätigung and an Alternativtermin card.
+        .is_("alternative_proposed_at", "null")
+        .is_("customer_proposed_at", "null")
         .order("scheduled_at")
         .execute()
         .data
@@ -628,6 +634,62 @@ def _unmatched_reschedule(client, org_id: str) -> list[dict[str, Any]]:
     return out
 
 
+def _reschedule_pending(client, org_id: str) -> list[dict[str, Any]]:
+    """CONFIRMED appointments a human just rescheduled — awaiting the customer's
+    OK on the new time (orange "Terminverschiebung" card). At L2 the person behind
+    the CRM has the LAST SAY: an outbound call states the new slot and asks the
+    customer to confirm/decline (see services/outbound_occasions._render_appointment_
+    reschedule, case B), and THIS card keeps the move visible so the handler can
+    finalise it — mark Erledigt once the customer agreed, or cancel it (→ slate
+    appointment_cancelled card) if the customer rejects every offered time.
+
+    Sourced from `rescheduled_at` (stamped by routes/appointments._patch on every
+    time edit) within the last 14 days. Restricted to status='confirmed' so it
+    never overlaps the pending `termin_anfrage` card or the proposal-marker
+    `alt_time_proposal` card (those cover the not-yet-confirmed lifecycle)."""
+    cutoff = _iso_minus_days(14)
+    rows = (
+        client.table("appointments")
+        .select(
+            "id, inquiry_id, customer_id, title, scheduled_at, rescheduled_at, "
+            "created_at, status, source_conversation_id"
+        )
+        .eq("org_id", org_id)
+        .eq("status", "confirmed")
+        .gte("rescheduled_at", cutoff)
+        .order("rescheduled_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        return []
+    name_by_cust = _customer_name_map(
+        client, org_id, [r.get("customer_id") for r in rows]
+    )
+    call_by_appt = _resolve_call_ids(client, org_id, rows)
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
+        title = r.get("title") or "Termin"
+        out.append(
+            {
+                "kind": "reschedule_pending",
+                "id": r["id"],
+                "inquiry_id": r.get("inquiry_id"),
+                "call_id": call_by_appt.get(r["id"]),
+                "customer_name": nm,
+                "customer_id": r.get("customer_id"),
+                "summary": f"Termin verschoben: {title} — Kundenbestätigung ausstehend",
+                "created_at": r.get("created_at"),
+                # the NEW slot the customer is being asked to confirm
+                "due_at": r.get("scheduled_at"),
+                "priority": "high",
+            }
+        )
+    return out
+
+
 def _appointment_cancelled(client, org_id: str) -> list[dict[str, Any]]:
     """Recently-cancelled appointments — kept visible so the team is INFORMED instead
     of the worklist item silently vanishing on cancel. Windowed to the last 14 days
@@ -753,7 +815,12 @@ def _apply_task_states(client, org_id: str, items: list[dict]) -> list[dict]:
 
 
 # Action kinds whose `id` is an appointment id (used for employee scoping).
-_APPT_KINDS = {"termin_anfrage", "alt_time_proposal", "appointment_cancelled"}
+_APPT_KINDS = {
+    "termin_anfrage",
+    "alt_time_proposal",
+    "reschedule_pending",
+    "appointment_cancelled",
+}
 
 
 def _scope_items(items: list[dict], scope) -> list[dict]:
@@ -787,6 +854,7 @@ def _aggregate(org_id: str, scope=None) -> list[dict[str, Any]]:
     items.extend(_invoice_pending_payment(client, org_id))
     items.extend(_callback_owed(client, org_id))
     items.extend(_alt_time_proposal(client, org_id))
+    items.extend(_reschedule_pending(client, org_id))
     items.extend(_unmatched_reschedule(client, org_id))
     items.extend(_appointment_cancelled(client, org_id))
 

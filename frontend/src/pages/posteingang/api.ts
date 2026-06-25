@@ -17,6 +17,7 @@ export type ActionKind =
   | 'invoice_pending_payment'
   | 'callback_owed'
   | 'alt_time_proposal'
+  | 'reschedule_pending'
   | 'appointment_cancelled'
   | 'reschedule_unmatched'
 
@@ -156,6 +157,7 @@ const KIND_CFG: Record<
   invoice_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: (a) => `Rechnung an ${a.customer_name || 'Kunde'} senden?`, primary: 'Rechnung senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `Rechnung jetzt an ${c} senden`, assignable: false },
   invoice_pending_payment: { type: 'kva', accent: 'var(--warning)', label: 'Zahlung', variant: 'warning', title: () => 'Zahlung eingegangen?', primary: 'Als bezahlt', secondary: null, tertiary: null, reco: (_n, c) => `Zahlungseingang für ${c} prüfen`, assignable: false },
   alt_time_proposal: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschieben', variant: 'warning', title: () => 'Neuen Termin annehmen?', primary: 'Annehmen', secondary: null, tertiary: 'Ablehnen', reco: () => 'Vorgeschlagenen Termin annehmen', assignable: false },
+  reschedule_pending: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschoben', variant: 'warning', title: () => 'Verschiebung – Kunde einverstanden?', primary: 'Bestätigt', secondary: null, tertiary: 'Stornieren', reco: () => 'Kunde hat dem neuen Termin zugestimmt → erledigen; sonst stornieren', assignable: false },
   appointment_cancelled: { type: 'storno', accent: 'var(--error)', label: 'Storno', variant: 'error', title: () => 'Termin storniert', primary: 'Verstanden', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
   callback_owed: { type: 'rueckruf', accent: 'var(--green-primary)', label: 'Rückruf', variant: 'green', title: (a) => `Rückruf an ${a.customer_name || 'Kunde'}?`, primary: 'Erledigt', secondary: 'Zuweisen', tertiary: null, reco: (n) => `${n} den Rückruf zuweisen`, assignable: true },
   kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: (a) => `Angebot an ${a.customer_name || 'Kunde'} senden?`, primary: 'Angebot senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `Angebot jetzt an ${c} senden`, assignable: false },
@@ -440,6 +442,13 @@ export function usePosteingangActions() {
       // 'Zur Kenntnis' just acknowledges it — DON'T POST /reject (requires
       // status='pending' → always 409; would also double-fire a customer cancel).
       await done()
+    } else if (d.kind === 'reschedule_pending') {
+      // L2 last say on a human-initiated reschedule whose outbound call asked the
+      // customer to confirm the new slot. 'Bestätigt' → the appt already sits at
+      // the new time, just acknowledge. 'Stornieren' → cancel it (the customer
+      // rejected every offered time); it then surfaces as the slate cancelled card.
+      if (choice === 'tertiary') await apiFetch(`/api/appointments/${id}/cancel`, { method: 'POST' })
+      else await done()
     } else if (d.kind === 'reschedule_unmatched') {
       await done()
     } else if (d.kind === 'callback_owed') {

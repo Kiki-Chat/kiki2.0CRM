@@ -102,6 +102,7 @@ export interface ActionItem {
     | 'invoice_pending_payment'
     | 'callback_owed'
     | 'alt_time_proposal'
+    | 'reschedule_pending'
     | 'appointment_cancelled'
   id: string
   inquiry_id: string | null
@@ -177,6 +178,7 @@ export const ACTION_KIND_LABEL: Record<ActionItem['kind'], string> = {
   invoice_pending_payment: 'Zahlung offen',
   callback_owed: 'Rückruf',
   alt_time_proposal: 'Alternativtermin',
+  reschedule_pending: 'Termin verschoben',
   appointment_cancelled: 'Termin storniert',
 }
 
