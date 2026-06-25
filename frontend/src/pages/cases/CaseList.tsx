@@ -149,7 +149,7 @@ export function CaseList({ cases, selectedId, onSelect }: {
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name suchen…" className="w-full rounded-xl border border-border bg-surface py-3 pl-11 pr-3.5 text-[15.5px] text-text outline-none focus:border-green-primary" />
         </div>
         <div className="mt-3 flex gap-2.5">
-          <Dropdown icon={Layers} value={statusF} onChange={setStatusF} allLabel="Alle Status" options={statusOpts} />
+          <Dropdown icon={Layers} value={statusF} onChange={setStatusF} allLabel="Status: alle" options={statusOpts} />
           <Dropdown icon={User} value={contactF} onChange={setContactF} allLabel="Alle Kontakte" options={contactOpts} />
         </div>
         {activeFilters > 0 && (

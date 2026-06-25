@@ -591,7 +591,7 @@ export function CustomersPage() {
             </label>
             {isFetching && (
               <span className="flex items-center gap-1 text-faint">
-                <Loader2 size={13} className="animate-spin" /> Lädt…
+                <Loader2 size={13} className="animate-spin" /> Wird geladen…
               </span>
             )}
           </div>

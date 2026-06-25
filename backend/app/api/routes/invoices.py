@@ -128,7 +128,7 @@ def _create(org_id: str, user_id: str | None, payload: InvoiceUpsert) -> dict:
     # payload.case_id is the grouping pointer → the `cases` table (FL-).
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
     validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Angebot")
-    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Vorgang")
 
     # INV-009: a Angebot may be converted into a Rechnung exactly once. If the source
     # estimate is already invoiced (or carries a back-link to an invoice), block
@@ -229,7 +229,7 @@ def _update(org_id: str, inv_id: str, payload: InvoiceUpsert) -> dict | None:
     # payload.case_id is the grouping pointer → the `cases` table (FL-).
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
     validate_fk_in_org(client, table="cost_estimates", fk_id=payload.kva_id, org_id=org_id, label="Angebot")
-    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Vorgang")
     row = _build_row(org_id, payload, None)
     row.pop("created_by", None)
     row["updated_at"] = _now()
@@ -381,7 +381,7 @@ def _build_invoice_email(
             firmenname=org_name, kundename=cust_name, rechnungsnummer=number, kvanummer=number,
         )
     else:
-        greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
+        greeting = f"Hallo {cust_name}," if cust_name else "Hallo,"
         body_text = (
             f"{greeting}\n\n"
             f"anbei senden wir dir die Rechnung {number}.\n\n"

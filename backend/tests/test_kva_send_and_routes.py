@@ -311,7 +311,7 @@ def test_route_draft_cost_estimate_returns_service_dict(monkeypatch):
     with exactly the service's payload."""
     canned = {
         "success": True, "id": "ce-1", "number": "KVA-2026-00001",
-        "status": "draft", "message": "Kostenvoranschlag wurde erstellt.",
+        "status": "draft", "message": "Angebot wurde erstellt.",
     }
     seen: dict = {}
 
@@ -515,7 +515,7 @@ def test_route_send_cost_estimate_returns_service_dict(monkeypatch):
     """POST /api/elevenlabs/tools/send-cost-estimate returns the service dict 1:1."""
     canned = {
         "success": True, "id": "ce-1", "number": "KVA-2026-00001",
-        "status": "sent", "message": "Der Kostenvoranschlag wurde per E-Mail versendet.",
+        "status": "sent", "message": "Das Angebot wurde per E-Mail versendet.",
     }
     seen: dict = {}
 

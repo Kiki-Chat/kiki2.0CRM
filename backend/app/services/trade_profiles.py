@@ -30,8 +30,8 @@ TRADE_PROFILES: dict[str, dict] = {
             "„Zeigt das Gerät eine Fehleranzeige oder einen Code?“",
         ],
         "selfhelp": [
-            "„Prüfen Sie bitte einmal den Druck am Manometer — ist er im grünen Bereich?“",
-            "„Haben Sie schon versucht, den Heizkörper zu entlüften?“",
+            "„Prüf bitte einmal den Druck am Manometer — ist er im grünen Bereich?“",
+            "„Hast du schon versucht, den Heizkörper zu entlüften?“",
         ],
         "emergency": [
             "Rohrbruch / unkontrolliert austretendes Wasser",
@@ -50,7 +50,7 @@ TRADE_PROFILES: dict[str, dict] = {
             "„Riecht es irgendwo verschmort?“",
         ],
         "selfhelp": [
-            "„Werfen Sie einen Blick auf den Sicherungskasten — ist eine Sicherung rausgesprungen?“",
+            "„Wirf einen Blick auf den Sicherungskasten — ist eine Sicherung rausgesprungen?“",
         ],
         "emergency": [
             "Kabelbrand / Brandgeruch aus einer Steckdose",
@@ -89,7 +89,7 @@ TRADE_PROFILES: dict[str, dict] = {
         "label": "Schlüsseldienst / Schließtechnik",
         "match": ["schlüssel", "schluessel", "schließ", "schliess", "aufsperr"],
         "diagnostics": [
-            "„Sind Sie ausgesperrt oder klemmt das Schloss?“",
+            "„Bist du ausgesperrt oder klemmt das Schloss?“",
             "„Steckt der Schlüssel noch oder ist er abgebrochen?“",
             "„Ist eine Person oder ein Tier eingeschlossen?“",
         ],
@@ -176,7 +176,7 @@ TRADE_PROFILES: dict[str, dict] = {
         "diagnostics": [
             "„Springt das Fahrzeug an bzw. ist es noch fahrbereit?“",
             "„Leuchtet eine Warnleuchte im Display?“",
-            "„Stehen Sie sicher oder sind Sie liegengeblieben?“",
+            "„Stehest du sicher oder bist du liegengeblieben?“",
         ],
         "selfhelp": [],
         "emergency": [
@@ -209,7 +209,7 @@ TRADE_PROFILES: dict[str, dict] = {
             "„Wird eine Fehlermeldung angezeigt?“",
         ],
         "selfhelp": [
-            "„Haben Sie das Gerät schon einmal neu gestartet?“",
+            "„Hast du das Gerät schon einmal neu gestartet?“",
         ],
         "emergency": [],
     },
@@ -229,7 +229,7 @@ TRADE_PROFILES: dict[str, dict] = {
 GENERIC_PROFILE: dict = {
     "label": "Handwerk / Dienstleistung",
     "diagnostics": [
-        "„Können Sie das Problem genauer beschreiben — was genau funktioniert nicht?“",
+        "„Kannst du das Problem genauer beschreiben — was genau funktioniert nicht?“",
         "„Seit wann besteht das Problem?“",
         "„Ist etwas beschädigt oder sicherheitsrelevant?“",
     ],

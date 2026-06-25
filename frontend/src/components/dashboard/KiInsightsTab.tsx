@@ -58,7 +58,7 @@ export function KiInsightsTab() {
         <DashKpi label="Inaktive Kunden" value={k.inactive_customers_count} icon={UserX} />
       </KpiRow>
 
-      <Panel title="Aktionsempfehlungen">
+      <Panel title="Empfehlungen">
         {data.suggestions.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-14 text-center">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-success-bg">

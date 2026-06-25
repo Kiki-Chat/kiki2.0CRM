@@ -43,12 +43,12 @@ def _send_technician_welcome(org_id, company, name, to_email, portal_url) -> Non
         body_text = (
             f"{greeting}\n\nDu wurdest als Techniker bei {company} hinzugefügt. Über deinen "
             f"persönlichen Link siehst du alle deine Einsätze (aktuelle und vergangene) — ganz "
-            f"ohne Login:\n\n{portal_url}\n\nTipp: Speichere den Link als Lesezeichen auf deinem Handy."
+            f"ohne Zugang:\n\n{portal_url}\n\nTipp: Speichere den Link als Lesezeichen auf deinem Handy."
         )
         body_html = (
             f"<p>{g_esc}</p><p>Du wurdest als Techniker bei <strong>{c_esc}</strong> hinzugefügt. "
             f"Über deinen persönlichen Link siehst du alle deine Einsätze (aktuelle und vergangene) "
-            f'— ganz ohne Login:</p><p><a href="{url_esc}">{url_esc}</a></p>'
+            f'— ganz ohne Zugang:</p><p><a href="{url_esc}">{url_esc}</a></p>'
             f"<p>Tipp: Speichere den Link als Lesezeichen auf deinem Handy.</p>"
         )
         send_email(
@@ -233,7 +233,7 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
             )
     if payload.login_access:
         if not payload.email:
-            raise HTTPException(status_code=400, detail="E-Mail ist für den Login erforderlich")
+            raise HTTPException(status_code=400, detail="E-Mail ist für den Zugang erforderlich")
         existing = (
             client.table("users").select("id").eq("email", payload.email).limit(1).execute().data
         )
@@ -256,7 +256,7 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
             except Exception:  # noqa: BLE001
                 log.exception("employee recreate: profile/auth update failed (user %s)", user_id)
                 warning = (
-                    "Login wiederverwendet, aber das Profil konnte nicht vollständig "
+                    "Zugang wiederverwendet, aber das Profil konnte nicht vollständig "
                     "aktualisiert werden."
                 )
             try:
@@ -277,7 +277,7 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
             except Exception:  # noqa: BLE001
                 log.exception("employee recreate: invite email failed (user %s)", user_id)
                 warning = ((warning + " ") if warning else "") + (
-                    "Login aktualisiert, aber die Einladungs-E-Mail konnte nicht "
+                    "Zugang aktualisiert, aber die Einladungs-E-Mail konnte nicht "
                     "gesendet werden."
                 )
         else:
@@ -307,7 +307,7 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                 user_id = None
                 link = None
                 warning = (
-                    "Mitarbeiter angelegt, aber der Login-Zugang konnte nicht "
+                    "Mitarbeiter angelegt, aber der Zugang konnte nicht "
                     "erstellt werden. Du kannst die Einladung später erneut "
                     "senden oder ein Passwort manuell setzen."
                 )
@@ -323,7 +323,7 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                 except Exception:  # noqa: BLE001
                     log.exception("employee create: welcome email failed (email %s)", payload.email)
                     warning = (
-                        "Login erstellt, aber die Willkommens-E-Mail konnte nicht "
+                        "Zugang erstellt, aber die Willkommens-E-Mail konnte nicht "
                         "gesendet werden. Bitte die Einladung erneut senden "
                         "oder ein Passwort manuell setzen."
                     )
@@ -589,7 +589,7 @@ async def set_password(
         raise HTTPException(status_code=404, detail="Employee not found")
     if result == "no_login":
         raise HTTPException(
-            status_code=400, detail="Dieser Mitarbeiter hat keinen Login-Zugang"
+            status_code=400, detail="Dieser Mitarbeiter hat keinen Zugang"
         )
     return {"success": True}
 

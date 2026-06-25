@@ -118,7 +118,7 @@ export function JobLinkPage() {
     return (
       <Shell>
         <div className="flex items-center justify-center gap-2 p-10 text-muted">
-          <Loader2 size={18} className="animate-spin" /> Lädt…
+          <Loader2 size={18} className="animate-spin" /> Wird geladen…
         </div>
       </Shell>
     )

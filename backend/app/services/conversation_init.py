@@ -115,9 +115,9 @@ def conversation_init(org_id: str, caller_id: str | None) -> dict:
     except Exception:  # noqa: BLE001
         company = "uns"
     variables["voicemailMessage"] = (
-        f"Guten Tag, hier ist der Telefonassistent von {company}. Wir können Ihren "
-        "Anruf gerade nicht persönlich entgegennehmen. Bitte hinterlassen Sie Ihren "
-        "Namen und Ihr Anliegen — wir melden uns schnellstmöglich zurück. Auf Wiederhören!"
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Wir können deinen "
+        "Anruf gerade nicht persönlich entgegennehmen. Bitte hinterlasse deinen "
+        "Namen und dein Anliegen — wir melden uns schnellstmöglich zurück. Auf Wiederhören!"
     )
 
     result: dict = {

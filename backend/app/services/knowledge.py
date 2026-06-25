@@ -66,7 +66,7 @@ def _no_answer() -> dict:
         "source": "none",
         "followUp": True,
         "message": "Dazu habe ich keine direkte Auskunft. Ein Kollege meldet sich "
-        "dazu bei Ihnen — ich kann gern Ihr Anliegen und eine Rückrufnummer "
+        "dazu bei dir — ich kann gern dein Anliegen und eine Rückrufnummer "
         "aufnehmen.",
     }
 

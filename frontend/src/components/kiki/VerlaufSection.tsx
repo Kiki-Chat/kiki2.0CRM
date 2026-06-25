@@ -160,7 +160,7 @@ export function VerlaufSection({ flash }: { flash: (m: string) => void }) {
         open={!!restoreSnap}
         onOpenChange={(v) => !v && setRestoreSnap(null)}
         title="Auf diesen Stand zurücksetzen?"
-        message="Der Agent wird auf den gespeicherten Stand zurückgesetzt. Der aktuelle Stand wird zuvor gesichert."
+        message="Kiki wird auf den gespeicherten Stand zurückgesetzt. Der aktuelle Stand wird zuvor gesichert."
         confirmLabel="Wiederherstellen"
         busy={rollback.isPending}
         onConfirm={() => restoreSnap && rollback.mutate(restoreSnap)}

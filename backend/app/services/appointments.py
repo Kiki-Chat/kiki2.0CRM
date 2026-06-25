@@ -379,7 +379,7 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
             "success": True,
             "slots": [],
             "message": "Im gewünschten Zeitraum sind leider keine Termine frei. "
-            "Bitte fragen Sie nach einem größeren Zeitfenster.",
+            "Bitte frag nach einem größeren Zeitfenster.",
         }
     first = slots[0]
     return {
@@ -402,7 +402,7 @@ def _book_success(appt_id, customer_id, inquiry_id, dt, emp_name) -> dict:
         "displayTime": fmt_time(dt),
         "employeeName": emp_name,
         "message": f"Termin gebucht für {fmt_date(dt)} um {fmt_time(dt)} Uhr. "
-        "Sie erhalten eine Bestätigung.",
+        "Du erhältst eine Bestätigung.",
     }
 
 
@@ -420,7 +420,7 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
         return {
             "success": False,
             "error": "INVALID_DATE",
-            "message": "Ich konnte das Datum nicht verstehen. Bitte nennen Sie "
+            "message": "Ich konnte das Datum nicht verstehen. Bitte nenne "
             "Datum und Uhrzeit noch einmal.",
         }
 
@@ -494,7 +494,7 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
             "success": False,
             "error": "DAY_FULL",
             "message": "An diesem Tag sind keine weiteren Termine möglich. Bitte "
-            "fragen Sie nach freien Terminen an einem anderen Tag.",
+            "frag nach freien Terminen an einem anderen Tag.",
         }
     conflicts = _slot_conflicts(
         _appt_intervals(same_day), dt, duration_minutes, rules["buffer_minutes"]
@@ -504,7 +504,7 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
             "success": False,
             "error": "SLOT_TAKEN",
             "message": "Dieser Termin ist leider nicht mehr verfügbar. Bitte fragen "
-            "Sie erneut nach freien Terminen.",
+            "dich erneut nach freien Terminen.",
         }
 
     number = gen_inquiry_number(client, org_id)
@@ -540,7 +540,7 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
             "appointmentId": None,
             "customerId": customer["id"],
             "inquiryId": inquiry["id"],
-            "message": "Ihr Anliegen wurde notiert — das Team meldet sich bei Ihnen.",
+            "message": "Dein Anliegen wurde notiert — das Team meldet sich bei dir.",
         }
 
     # ── Levels 2 & 3: create the appointment as a reservation (status='pending'). ──
@@ -638,7 +638,7 @@ def _do_cancel(client, appt: dict, reason: str | None) -> dict:
         "success": True,
         "appointmentId": appt["id"],
         "cancelledDatetime": appt["scheduled_at"],
-        "message": f"Ihr Termin {when} wurde storniert.".replace("  ", " "),
+        "message": f"Dein Termin {when} wurde storniert.".replace("  ", " "),
     }
 
 
@@ -689,8 +689,8 @@ def cancel_appointment(org_id: str, payload: CancelAppointmentRequest) -> dict:
             return {
                 "success": False,
                 "error": "DATE_CONFIRMATION_REQUIRED",
-                "message": "Zur Sicherheit nennen Sie mir bitte das Datum des Termins, "
-                "den Sie stornieren möchten.",
+                "message": "Zur Sicherheit nenne mir bitte das Datum des Termins, "
+                "den du stornieren möchtest.",
             }
         matching = [
             a for a in appts
@@ -704,13 +704,13 @@ def cancel_appointment(org_id: str, payload: CancelAppointmentRequest) -> dict:
                 "success": False,
                 "error": "NO_APPOINTMENT_FOUND",
                 "message": "An diesem Datum wurde kein Termin gefunden. Bitte prüfen "
-                "Sie das Datum.",
+                "nenne das Datum.",
             }
         return {
             "success": False,
             "error": "MULTIPLE_MATCHES",
-            "message": "Es gibt mehrere Termine an diesem Datum. Bitte nennen Sie "
-            "zusätzlich Ihre Telefonnummer zur eindeutigen Zuordnung.",
+            "message": "Es gibt mehrere Termine an diesem Datum. Bitte nenne "
+            "zusätzlich deine Telefonnummer zur eindeutigen Zuordnung.",
         }
 
     return {
@@ -799,8 +799,8 @@ def _record_unmatched_change_request(
         "success": True,
         "changeRequestId": change["id"],
         "status": "FORWARDED_TO_TEAM",
-        "message": "Ich habe Ihren Terminänderungswunsch an das Team weitergegeben — "
-        "es prüft den Termin und meldet sich zur Bestätigung bei Ihnen.",
+        "message": "Ich habe deinen Terminänderungswunsch an das Team weitergegeben — "
+        "es prüft den Termin und meldet sich zur Bestätigung bei dir.",
     }
 
 
@@ -874,8 +874,8 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
                 return {
                     "success": False,
                     "error": "DATE_CONFIRMATION_REQUIRED",
-                    "message": "Sie haben mehrere bevorstehende Termine. Welchen möchten "
-                    "Sie verschieben? Bitte nennen Sie mir das Datum des Termins.",
+                    "message": "Du hast mehrere bevorstehende Termine. Welchen möchtest "
+                    "du verschieben? Bitte nenne mir das Datum des Termins.",
                 }
             matching = [
                 a for a in rows
@@ -887,13 +887,13 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
                     "success": False,
                     "error": "NO_APPOINTMENT_FOUND",
                     "message": "An diesem Datum wurde kein Termin gefunden. Bitte prüfen "
-                    "Sie das Datum.",
+                    "nenne das Datum.",
                 }
             if len(matching) > 1:
                 return {
                     "success": False,
                     "error": "MULTIPLE_MATCHES",
-                    "message": "Es gibt mehrere Termine an diesem Datum. Bitte nennen Sie "
+                    "message": "Es gibt mehrere Termine an diesem Datum. Bitte nenne "
                     "zusätzlich die Uhrzeit zur eindeutigen Zuordnung.",
                 }
             appt = matching[0]
@@ -903,7 +903,7 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
         return {
             "success": False,
             "error": "INVALID_DATE",
-            "message": "Ich konnte das neue Datum nicht verstehen. Bitte nennen Sie "
+            "message": "Ich konnte das neue Datum nicht verstehen. Bitte nenne "
             "es noch einmal.",
         }
 
@@ -978,8 +978,8 @@ def change_appointment(org_id: str, payload: ChangeAppointmentRequest) -> dict:
         "originalDatetime": appt["scheduled_at"],
         "requestedDatetime": new_dt.isoformat(),
         "status": "PENDING_CONFIRMATION",
-        "message": f"Ihre Umbuchungsanfrage für {fmt_date(new_dt)} um "
-        f"{fmt_time(new_dt)} Uhr wurde aufgenommen. Sie werden zur Bestätigung "
+        "message": f"Deine Umbuchungsanfrage für {fmt_date(new_dt)} um "
+        f"{fmt_time(new_dt)} Uhr wurde aufgenommen. Du wirst zur Bestätigung "
         "kontaktiert.",
     }
 

@@ -25,7 +25,7 @@ def _create(org_id: str, payload: InquiryCreate) -> dict:
     client = get_service_client()
     # FK hardening: a customer_id / case_id from the body must belong to this org.
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
-    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Vorgang")
     row = {
         "org_id": org_id,
         "customer_id": payload.customer_id,
@@ -52,7 +52,7 @@ def _update(user: CurrentUser, inquiry_id: str, payload: InquiryUpdate) -> dict 
     # FK hardening: case_id / assigned_employee_id from the body must be same-org.
     # (The dedicated /assign route already validates the employee; the generic
     # PATCH path did not — close that gap here.)
-    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Vorgang")
     validate_fk_in_org(
         client, table="employees", fk_id=payload.assigned_employee_id,
         org_id=org_id, label="Mitarbeiter", require_active=True,

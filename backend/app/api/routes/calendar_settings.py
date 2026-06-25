@@ -53,7 +53,7 @@ async def sync_calendar(user: CurrentUser = Depends(require_org)) -> dict:
     if cal_provider != "google":
         raise HTTPException(
             status_code=501,
-            detail=f"Kalender-Sync für '{cal_provider}' ist noch nicht verfügbar (nur Google).",
+            detail=f"Kalender-Abgleich für '{cal_provider}' ist noch nicht verfügbar (nur Google).",
         )
     try:
         return await run_in_threadpool(calendar_sync.pull_google_events, user.org_id)
@@ -63,7 +63,7 @@ async def sync_calendar(user: CurrentUser = Depends(require_org)) -> dict:
             detail=f"Google-Kalender ist nicht verbunden — bitte erneut verbinden. ({exc})",
         )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=f"Kalender-Sync fehlgeschlagen: {exc}")
+        raise HTTPException(status_code=502, detail=f"Kalender-Abgleich fehlgeschlagen: {exc}")
 
 
 @router.get("/sync-status")

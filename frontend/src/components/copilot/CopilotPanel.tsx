@@ -426,7 +426,7 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
         'lg:static lg:z-auto lg:w-[400px] lg:max-w-none lg:shrink-0 lg:shadow-none',
         'print:hidden',
       )}
-      aria-label="Hey Kiki Assistent"
+      aria-label="Kiki-Assistent"
     >
       {/* Header */}
       <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-sidebar px-4">

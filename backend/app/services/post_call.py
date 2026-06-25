@@ -22,6 +22,20 @@ def _now_iso_ms() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def _sanitize_el_summary(text: str | None) -> str | None:
+    """Light cleanup of ElevenLabs summary/title before storage."""
+    if not text or not text.strip():
+        return text
+    t = text.strip()
+    t = re.sub(r"\bthe user\b", "Der Kunde", t, flags=re.I)
+    t = re.sub(r"\bthe agent\b", "Kiki", t, flags=re.I)
+    t = re.sub(r"\bAI agent\b", "Kiki", t, flags=re.I)
+    t = re.sub(r"\bagent\b", "Kiki", t, flags=re.I)
+    t = re.sub(r"\buser\b", "Kunde", t, flags=re.I)
+    t = re.sub(r"\bKostenvoranschlag\b", "Angebot", t, flags=re.I)
+    return t
+
+
 def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None:
     """At autonomy level 3, auto-confirm the appointments this call just booked.
 
@@ -488,8 +502,8 @@ def _process_one(data: dict | None, fmt: str) -> dict:
         "duration_seconds": metadata.get("call_duration_secs"),
         "status": "completed",
         "transcript": trimmed,
-        "summary": analysis.get("transcript_summary"),
-        "summary_title": analysis.get("call_summary_title"),
+        "summary": _sanitize_el_summary(analysis.get("transcript_summary")),
+        "summary_title": _sanitize_el_summary(analysis.get("call_summary_title")),
         "data_collection": dc,
     }
     # Idempotent on conversation_id (unique). Update on conflict, no duplicates.
@@ -608,7 +622,7 @@ def _process_one(data: dict | None, fmt: str) -> dict:
             "call_id": call_log_id,
             "conversation_id": conversation_id,
             "caller_number": caller_number,
-            "summary_title": analysis.get("call_summary_title"),
+            "summary_title": _sanitize_el_summary(analysis.get("call_summary_title")),
         },
     )
 

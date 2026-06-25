@@ -412,7 +412,7 @@ async def get_call_audio(call_id: str, user: CurrentUser = Depends(require_org))
     if not conversation_id:
         raise HTTPException(status_code=404, detail="No conversation id for this call")
     if not settings.elevenlabs_api_key:
-        raise HTTPException(status_code=503, detail="ElevenLabs API key not configured")
+        raise HTTPException(status_code=503, detail="Sprachdienst ist nicht konfiguriert.")
 
     url = f"https://api.elevenlabs.io/v1/convai/conversations/{conversation_id}/audio"
     # Classify upstream failures so the client gets an accurate status instead of a
@@ -422,11 +422,11 @@ async def get_call_audio(call_id: str, user: CurrentUser = Depends(require_org))
             resp = await client.get(url, headers={"xi-api-key": settings.elevenlabs_api_key})
     except httpx.TimeoutException as exc:
         raise HTTPException(
-            status_code=504, detail="Zeitüberschreitung beim Laden der Aufnahme von ElevenLabs."
+            status_code=504, detail="Zeitüberschreitung beim Laden der Aufnahme."
         ) from exc
     except httpx.RequestError as exc:
         raise HTTPException(
-            status_code=502, detail="Aufnahme konnte nicht von ElevenLabs geladen werden."
+            status_code=502, detail="Aufnahme konnte nicht geladen werden."
         ) from exc
     if resp.status_code != 200:
         raise HTTPException(

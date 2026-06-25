@@ -202,10 +202,9 @@ def build_pdf(org: dict, customer: dict | None, ce: dict, totals: dict) -> bytes
         subtitle = ""
 
     legal = (
-        f"Dieses Angebot ist gemäß § 632 Abs. 3 BGB unverbindlich. "
-        f"Der tatsächliche Preis kann nach Leistungserbringung um bis zu {tol}% von der "
-        "Schätzung abweichen. Bei voraussichtlicher wesentlicher Überschreitung werden "
-        "wir dich unverzüglich informieren (§ 650c BGB)."
+        f"Dieses Angebot ist unverbindlich. Der genannte Preis kann je nach "
+        f"tatsächlichem Aufwand um bis zu {tol}% abweichen. Bei voraussichtlicher "
+        "wesentlicher Abweichung informieren wir dich unverzüglich."
         if doc_type == "kva" and not binding
         else "Vielen Dank für dein Vertrauen."
     )
@@ -497,7 +496,7 @@ def _send_draft_kva(client, org_id: str, row: dict) -> bool:
         number = row.get("number") or "—"
         cust_name = (customer or {}).get("full_name") or ""
         subject = f"Angebot {number} von {org_name}"
-        greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
+        greeting = f"Hallo {cust_name}," if cust_name else "Hallo,"
         body_text = (
             f"{greeting}\n\n"
             f"anbei senden wir dir das Angebot {number}.\n\n"
@@ -698,7 +697,7 @@ def send_cost_estimate(org_id: str, payload) -> dict:
         return {
             "success": False,
             "needsEmail": True,
-            "message": "Mir fehlt noch Ihre E-Mail-Adresse, an die ich das Angebot senden kann.",
+            "message": "Mir fehlt noch deine E-Mail-Adresse, an die ich das Angebot senden kann.",
         }
 
     sent = _send_draft_kva(client, org_id, row)

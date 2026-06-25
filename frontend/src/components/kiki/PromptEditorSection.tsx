@@ -176,7 +176,7 @@ export function PromptEditorSection({ flash }: { flash: (m: string) => void }) {
         open={!!restoreSnap}
         onOpenChange={(v) => !v && setRestoreSnap(null)}
         title="Version wiederherstellen?"
-        message="Der Agent wird auf diese frühere Prompt-Version zurückgesetzt. Der aktuelle Stand wird zuvor als Snapshot gesichert."
+        message="Kiki wird auf diese frühere Prompt-Version zurückgesetzt. Der aktuelle Stand wird zuvor als Snapshot gesichert."
         confirmLabel="Wiederherstellen"
         busy={restore.isPending}
         onConfirm={() => restoreSnap && restore.mutate(restoreSnap)}

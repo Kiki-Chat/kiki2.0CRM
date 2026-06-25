@@ -367,7 +367,7 @@ async def import_history(
     if not agent_id:
         raise HTTPException(
             status_code=400,
-            detail="Diese Organisation hat keine ElevenLabs Agent ID hinterlegt.",
+            detail="Diese Organisation hat keine Sprach-ID hinterlegt.",
         )
     counters = await run_in_threadpool(import_agent_history, org_id, agent_id)
     return {"success": True, "org_id": org_id, **counters}
@@ -455,7 +455,7 @@ async def sync_agent_config(
     if not agent_id:
         raise HTTPException(
             status_code=400,
-            detail="Diese Organisation hat keine ElevenLabs Agent ID hinterlegt.",
+            detail="Diese Organisation hat keine Sprach-ID hinterlegt.",
         )
     org_name = (org.get("name") or "").strip()
     if not org_name:
@@ -581,7 +581,7 @@ async def bind_agent(
     if not agent_id:
         raise HTTPException(
             status_code=400,
-            detail="Es wurde keine ElevenLabs Agent ID übergeben.",
+            detail="Es wurde keine Sprach-ID übergeben.",
         )
 
     def _bind() -> None:
@@ -748,7 +748,7 @@ async def org_agent_health(
                 AgentHealthCheck(
                     name="no_agent",
                     ok=False,
-                    detail="Diese Organisation hat keine ElevenLabs Agent ID hinterlegt.",
+                    detail="Diese Organisation hat keine Sprach-ID hinterlegt.",
                 )
             ],
         )

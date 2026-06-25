@@ -31,7 +31,7 @@ def render_occasion_email(occasion: str, record: dict, customer: dict | None, or
     """Return ``(subject, body_html)`` for one of the existing 7 occasions."""
     company = org.get("name") or "Dein Dienstleister"
     name = (customer or {}).get("full_name") or ""
-    greet = f"Sehr geehrte/r {name}," if name else "Guten Tag,"
+    greet = f"Hallo {name}," if name else "Hallo,"
     sign = f"Mit freundlichen Grüßen\n{company}"
     r = record or {}
 
