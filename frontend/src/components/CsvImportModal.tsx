@@ -362,7 +362,7 @@ export function CsvImportModal({
                   übersprungen.{' '}
                   {entity === 'customers'
                     ? 'Importierte Kunden werden als „Stammkunde“ markiert.'
-                    : 'Mitarbeiter werden ohne Login angelegt — Einladung anschließend einzeln senden.'}
+                    : 'Mitarbeiter werden ohne Anmeldung angelegt — Einladung anschließend einzeln senden.'}
                 </p>
               </div>
             )}

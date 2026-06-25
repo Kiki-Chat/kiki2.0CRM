@@ -32,7 +32,7 @@ export function KiNutzungTab() {
   const est = k.estimated_days_remaining
   let restLabel = 'Innerhalb des Kontingents'
   let restColor = 'text-success'
-  if (k.over_quota) { restLabel = 'Quota überschritten'; restColor = 'text-error' }
+  if (k.over_quota) { restLabel = 'Kontingent überschritten'; restColor = 'text-error' }
   else if (est !== null && est < 30) {
     restLabel = `Reicht für ~${est} Tage`
     restColor = est <= 5 ? 'text-error' : est <= 10 ? 'text-warning' : 'text-success'

@@ -344,7 +344,7 @@ function EmployeesTab({ flash }: { flash: (m: string) => void }) {
                 <td className="px-5 py-3.5">
                   {e.has_login ? (
                     <span className="inline-flex items-center gap-1 text-green-deep">
-                      <Link2 size={13} /> Login
+                      <Link2 size={13} /> Zugang
                     </span>
                   ) : (
                     <span className="text-muted">Kein Zugang</span>
@@ -466,7 +466,7 @@ function PermissionsModal({ employee, onClose }: { employee: Employee; onClose: 
           <Shield size={18} className="mt-0.5 shrink-0" />
           <div>
             <span className="font-bold">Admin-Konto:</span> Administratoren haben automatisch Vollzugriff
-            auf alle Module. Die Berechtigungen können nicht eingeschränkt werden.
+            auf alle Bereiche. Die Berechtigungen können nicht eingeschränkt werden.
           </div>
         </div>
       ) : (
@@ -748,7 +748,7 @@ function NewTechnicianModal({ flash, onClose }: { flash: (m: string) => void; on
               </button>
             </div>
             <p className="mt-1 text-xs text-muted">
-              Über diesen Link sieht der Techniker alle seine Einsätze — ganz ohne Login. Du kannst ihn auch per WhatsApp teilen.
+              Über diesen Link sieht der Techniker alle seine Einsätze — ganz ohne Anmeldung. Du kannst ihn auch per WhatsApp teilen.
             </p>
           </div>
         </div>
@@ -882,7 +882,7 @@ function NewEmployeeModal({ flash, onClose }: { flash: (m: string) => void; onCl
           checked={isTechnician}
           onChange={setIsTechnician}
           label="Techniker"
-          sub="Führt die Arbeiten vor Ort aus — erscheint in der Techniker-Auswahl (Zuweisung, Plantafel). Kein Login nötig."
+          sub="Führt die Arbeiten vor Ort aus — erscheint in der Techniker-Auswahl (Zuweisung, Plantafel). Keine Anmeldung nötig."
         />
         <ColorPicker value={color} onChange={setColor} />
         <div className="border-t border-border pt-4">
@@ -970,7 +970,7 @@ function EditEmployeeModal({ employee, onClose }: { employee: Employee; onClose:
       <div className="space-y-4">
         {employee.is_org_owner && (
           <div className="rounded-md bg-warning-bg px-3 py-2 text-sm text-warning">
-            Der Organisationsinhaber muss den Login-Zugang behalten.
+            Der Organisationsinhaber muss den Zugang behalten.
           </div>
         )}
         {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}

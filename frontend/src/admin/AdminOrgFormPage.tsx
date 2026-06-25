@@ -222,7 +222,7 @@ export function AdminOrgFormPage() {
             <Field label="Admin-Anmelde-E-Mail *" value={loginEmail} onChange={setLoginEmail} required type="email" placeholder="admin@firma.de" />
             <Field label="Admin-Anmelde-Passwort *" value={loginPassword} onChange={setLoginPassword} required type="password" placeholder="mind. 8 Zeichen" help="Mindestens 8 Zeichen. Wird per E-Mail an den Admin mitgeteilt." />
             <Field label="Admin-Name" value={adminName} onChange={setAdminName} placeholder="Max Mustermann" />
-            <Field label="Kontakt-E-Mail (optional)" value={contactEmail} onChange={setContactEmail} type="email" placeholder="kontakt@firma.de" help="Falls leer: Login-E-Mail." />
+            <Field label="Kontakt-E-Mail (optional)" value={contactEmail} onChange={setContactEmail} type="email" placeholder="kontakt@firma.de" help="Falls leer: Anmelde-E-Mail." />
           </>
         ) : (
           <>

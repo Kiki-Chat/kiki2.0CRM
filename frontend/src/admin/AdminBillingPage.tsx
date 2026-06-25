@@ -216,7 +216,7 @@ export function AdminBillingPage() {
                 <th className="px-4 py-2">Status</th>
                 <th className="px-4 py-2 text-right">Kontingent</th>
                 <th className="px-4 py-2">Periode bis</th>
-                <th className="px-4 py-2">Sync</th>
+                <th className="px-4 py-2">Abgleich</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">

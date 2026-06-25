@@ -777,7 +777,7 @@ function AppointmentDetailModal({
             </div>
             <p className="mt-1.5 text-xs text-muted">
               Der Techniker erhält per E-Mail einen Link mit allen Einsatzdaten und füllt dort den
-              Einsatzbericht aus (Start/Ende, Fragen, Fotos) — ohne Login. Der Bericht erscheint im Vorgang.
+              Einsatzbericht aus (Start/Ende, Fragen, Fotos) — ohne Anmeldung. Der Bericht erscheint im Vorgang.
             </p>
             {dispatchMsg && <p className="mt-1 text-xs font-medium text-green-deep">{dispatchMsg}</p>}
           </div>

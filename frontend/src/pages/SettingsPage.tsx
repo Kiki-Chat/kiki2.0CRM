@@ -126,7 +126,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   { label: 'Kommunikation', items: [
     { slug: 'email-versand', label: 'E-Mail-Versand', icon: Mail },
     { slug: 'email-vorlagen', label: 'E-Mail-Vorlagen', icon: FileText },
-    { slug: 'kalender-sync', label: 'Kalender-Sync', icon: Calendar },
+    { slug: 'kalender-sync', label: 'Kalender-Abgleich', icon: Calendar },
     { slug: 'google-reviews', label: 'Google-Bewertungen', icon: Star },
   ] },
   { label: 'Integrationen', items: [
