@@ -169,12 +169,14 @@ def test_kva_to_send_returns_draft_rows_with_summary():
     assert "KVA-2026-00010" in out[0]["summary"]
     # Due_at is null for KVA-to-send (no scheduled date).
     assert out[0]["due_at"] is None
-    # Status filter pinned to 'draft' AND a created_at upper bound (<= now-24h).
+    # Status filter pinned to 'draft'. The old 24h grace window was DROPPED (Amber:
+    # a manually-created draft must surface in the call-log panel immediately), so
+    # there must be NO created_at upper bound anymore.
     assert any(
         c["method"] == "eq" and c["args"] == ("status", "draft")
         for c in client.recorder
     )
-    assert any(c["method"] == "lte" for c in client.recorder)
+    assert not any(c["method"] == "lte" for c in client.recorder)
 
 
 # ─── kva_pending_acceptance ─────────────────────────────────────────────────

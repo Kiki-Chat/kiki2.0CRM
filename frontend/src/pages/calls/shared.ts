@@ -94,12 +94,16 @@ export interface Employee {
 export interface ActionItem {
   kind:
     | 'termin_anfrage'
+    | 'appointment_confirmed'
     | 'kva_suggested'
     | 'kva_to_send'
     | 'kva_pending_acceptance'
+    | 'kva_accepted'
+    | 'kva_closed'
     | 'invoice_suggested'
     | 'invoice_to_send'
     | 'invoice_pending_payment'
+    | 'invoice_cancelled'
     | 'callback_owed'
     | 'alt_time_proposal'
     | 'reschedule_pending'
@@ -170,12 +174,16 @@ export const COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#
 // stays language-neutral.
 export const ACTION_KIND_LABEL: Record<ActionItem['kind'], string> = {
   termin_anfrage: 'Terminbestätigung',
+  appointment_confirmed: 'Termin bestätigt',
   kva_suggested: 'Angebot erstellen',
   kva_to_send: 'Angebot senden',
   kva_pending_acceptance: 'Angebot-Antwort offen',
+  kva_accepted: 'Angebot angenommen',
+  kva_closed: 'Angebot abgelehnt',
   invoice_suggested: 'Rechnung erstellen',
   invoice_to_send: 'Rechnung senden',
   invoice_pending_payment: 'Zahlung offen',
+  invoice_cancelled: 'Rechnung storniert',
   callback_owed: 'Rückruf',
   alt_time_proposal: 'Alternativtermin',
   reschedule_pending: 'Termin verschoben',

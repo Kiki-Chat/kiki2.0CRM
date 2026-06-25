@@ -167,7 +167,9 @@ export function AssigneeDot({
   )
 }
 
-const TYPE_VARIANT: Record<DecisionType, 'info' | 'green' | 'error' | 'ai' | 'warning'> = { termin: 'info', rueckruf: 'green', storno: 'error', kva: 'ai', reschedule: 'warning' }
+// storno (cancellations / rejected offers / cancelled invoices) reads SLATE/neutral,
+// not red — Amber's call. These are informational terminal cards, not destructive prompts.
+const TYPE_VARIANT: Record<DecisionType, 'info' | 'green' | 'error' | 'ai' | 'warning' | 'neutral'> = { termin: 'info', rueckruf: 'green', storno: 'neutral', kva: 'ai', reschedule: 'warning' }
 export function TypeTag({ type, label }: { type: DecisionType; label: string }) {
   return <Tag variant={TYPE_VARIANT[type]}>{label}</Tag>
 }

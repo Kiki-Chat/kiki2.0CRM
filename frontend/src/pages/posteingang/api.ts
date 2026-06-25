@@ -9,12 +9,16 @@ import { relativeTimeDe } from '../../lib/datetime'
 
 export type ActionKind =
   | 'termin_anfrage'
+  | 'appointment_confirmed'
   | 'kva_suggested'
   | 'kva_to_send'
   | 'kva_pending_acceptance'
+  | 'kva_accepted'
+  | 'kva_closed'
   | 'invoice_suggested'
   | 'invoice_to_send'
   | 'invoice_pending_payment'
+  | 'invoice_cancelled'
   | 'callback_owed'
   | 'alt_time_proposal'
   | 'reschedule_pending'
@@ -159,6 +163,10 @@ const KIND_CFG: Record<
   alt_time_proposal: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschieben', variant: 'warning', title: () => 'Neuen Termin annehmen?', primary: 'Annehmen', secondary: null, tertiary: 'Ablehnen', reco: () => 'Vorgeschlagenen Termin annehmen', assignable: false },
   reschedule_pending: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschoben', variant: 'warning', title: () => 'Verschiebung – Kunde einverstanden?', primary: 'Bestätigt', secondary: null, tertiary: 'Stornieren', reco: () => 'Kunde hat dem neuen Termin zugestimmt → erledigen; sonst stornieren', assignable: false },
   appointment_cancelled: { type: 'storno', accent: '#475569', label: 'Storno', variant: 'neutral', title: () => 'Termin storniert', primary: 'Verstanden', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
+  appointment_confirmed: { type: 'termin', accent: 'var(--green-primary)', label: 'Bestätigt', variant: 'green', title: () => 'Termin bestätigt', primary: 'Verstanden', secondary: null, tertiary: 'Stornieren', reco: () => 'Termin ist bestätigt — bei Bedarf stornieren', assignable: false },
+  kva_accepted: { type: 'kva', accent: 'var(--green-primary)', label: 'Angenommen', variant: 'green', title: () => 'Angebot angenommen — Rechnung erstellen?', primary: 'Rechnung erstellen', secondary: null, tertiary: 'Später', reco: (_n, c) => `Angenommenes Angebot für ${c} in eine Rechnung umwandeln`, assignable: false },
+  kva_closed: { type: 'storno', accent: '#475569', label: 'Abgelehnt', variant: 'neutral', title: () => 'Angebot abgelehnt', primary: 'Verstanden', secondary: null, tertiary: null, reco: () => 'Angebot abgelehnt — ggf. nachfassen', assignable: false },
+  invoice_cancelled: { type: 'storno', accent: '#475569', label: 'Storniert', variant: 'neutral', title: () => 'Rechnung storniert', primary: 'Verstanden', secondary: null, tertiary: null, reco: () => 'Rechnung storniert — Team informieren', assignable: false },
   callback_owed: { type: 'rueckruf', accent: 'var(--green-primary)', label: 'Rückruf', variant: 'green', title: (a) => `Rückruf an ${a.customer_name || 'Kunde'}?`, primary: 'Erledigt', secondary: 'Zuweisen', tertiary: null, reco: (n) => `${n} den Rückruf zuweisen`, assignable: true },
   kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: (a) => `Angebot an ${a.customer_name || 'Kunde'} senden?`, primary: 'Angebot senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `Angebot jetzt an ${c} senden`, assignable: false },
   kva_pending_acceptance: { type: 'kva', accent: 'var(--ai)', label: 'KVA-Antwort', variant: 'ai', title: () => 'Kundenantwort erfassen', primary: 'Angenommen', secondary: null, tertiary: 'Abgelehnt', reco: () => 'Antwort des Kunden eintragen', assignable: false },
@@ -214,7 +222,10 @@ export function buildDecisions(actions: RawAction[], employees: Employee[], meta
           (a.call_id ? `&call_id=${a.call_id}` : '')
         : a.kind === 'invoice_suggested'
           ? `/invoices/new?customer_id=${a.customer_id ?? ''}` + (a.call_id ? `&call_id=${a.call_id}` : '')
-          : null
+          : a.kind === 'kva_accepted'
+            // accepted offer → pre-fill a new invoice from it (id = the cost_estimate id)
+            ? `/invoices/new?customer_id=${a.customer_id ?? ''}&cost_estimate_id=${a.id}`
+            : null
     return {
       actionKey: a.action_key,
       kind: a.kind,
@@ -449,9 +460,18 @@ export function usePosteingangActions() {
       // rejected every offered time); it then surfaces as the slate cancelled card.
       if (choice === 'tertiary') await apiFetch(`/api/appointments/${id}/cancel`, { method: 'POST' })
       else await done()
+    } else if (d.kind === 'appointment_confirmed') {
+      // Post-confirm 'Bestätigt' stage (stays 40 days). 'Stornieren' → cancel the
+      // appointment (→ slate cancelled card); 'Verstanden' just acknowledges/dismisses.
+      if (choice === 'tertiary') await apiFetch(`/api/appointments/${id}/cancel`, { method: 'POST' })
+      else await done()
     } else if (d.kind === 'reschedule_unmatched') {
       await done()
     } else if (d.kind === 'callback_owed') {
+      await done()
+    } else if (d.kind === 'kva_accepted' || d.kind === 'kva_closed' || d.kind === 'invoice_cancelled') {
+      // kva_accepted 'primary' navigates to the pre-filled invoice via d.route;
+      // reaching here ('Später') or the informational slate cards just acknowledge.
       await done()
     } else if (d.kind === 'kva_to_send') {
       if (choice === 'primary') await apiFetch(`/api/cost-estimates/${id}/send`, { method: 'POST', body: JSON.stringify({ copy_to_me: false }) })

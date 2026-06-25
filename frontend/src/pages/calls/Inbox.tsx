@@ -159,12 +159,16 @@ export function CallRow({
 
 const KIND_ICON: Record<ActionItem['kind'], LucideIcon> = {
   termin_anfrage: Calendar,
+  appointment_confirmed: CheckCircle2,
   kva_suggested: Receipt,
   kva_to_send: Receipt,
   kva_pending_acceptance: Receipt,
+  kva_accepted: Receipt,
+  kva_closed: Receipt,
   invoice_suggested: Receipt,
   invoice_to_send: Receipt,
   invoice_pending_payment: Receipt,
+  invoice_cancelled: Receipt,
   callback_owed: Phone,
   alt_time_proposal: CalendarClock,
   reschedule_pending: CalendarClock,
@@ -174,12 +178,16 @@ const KIND_ICON: Record<ActionItem['kind'], LucideIcon> = {
 // cancelled → dark.
 const KIND_TONE: Record<ActionItem['kind'], { tile: string; tag: 'info' | 'ai' | 'warning' | 'success' | 'neutral' }> = {
   termin_anfrage: { tile: 'bg-green-tint-100 text-green-deep', tag: 'success' },
+  appointment_confirmed: { tile: 'bg-green-tint-100 text-green-deep', tag: 'success' },
   kva_suggested: { tile: 'bg-ai-bg text-ai', tag: 'ai' },
   kva_to_send: { tile: 'bg-ai-bg text-ai', tag: 'ai' },
   kva_pending_acceptance: { tile: 'bg-ai-bg text-ai', tag: 'ai' },
+  kva_accepted: { tile: 'bg-green-tint-100 text-green-deep', tag: 'success' },
+  kva_closed: { tile: 'bg-slate-700 text-white', tag: 'neutral' },
   invoice_suggested: { tile: 'bg-ai-bg text-ai', tag: 'ai' },
   invoice_to_send: { tile: 'bg-ai-bg text-ai', tag: 'ai' },
   invoice_pending_payment: { tile: 'bg-warning-bg text-warning', tag: 'warning' },
+  invoice_cancelled: { tile: 'bg-slate-700 text-white', tag: 'neutral' },
   callback_owed: { tile: 'bg-warning-bg text-warning', tag: 'warning' },
   alt_time_proposal: { tile: 'bg-orange-100 text-orange-700', tag: 'warning' },
   reschedule_pending: { tile: 'bg-orange-100 text-orange-700', tag: 'warning' },

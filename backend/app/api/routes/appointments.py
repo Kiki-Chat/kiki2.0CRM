@@ -168,6 +168,10 @@ def _create(user: CurrentUser, payload: AppointmentCreate) -> dict:
         client, user=user, current_assignee_id=None,
         new_assignee_id=payload.assigned_employee_id,
     )
+    # Default to 'confirmed' (calendar / planning-board). The call-log create modal
+    # passes 'pending' so the new appointment enters the open-action confirmation
+    # stage. Only these two are accepted from the create path.
+    status = payload.status if payload.status in ("pending", "confirmed") else "confirmed"
     row = {
         "org_id": org_id,
         "customer_id": payload.customer_id,
@@ -180,7 +184,7 @@ def _create(user: CurrentUser, payload: AppointmentCreate) -> dict:
         "category": payload.category,
         "color": payload.color,
         "assigned_employee_id": payload.assigned_employee_id,
-        "status": "confirmed",
+        "status": status,
         "notes": payload.notes,
     }
     return client.table("appointments").insert(row).execute().data[0]

@@ -47,12 +47,16 @@ router = APIRouter(prefix="/api/actions", tags=["actions"])
 # updated in lockstep.
 ActionKind = Literal[
     "termin_anfrage",
+    "appointment_confirmed",
     "kva_suggested",
     "kva_to_send",
     "kva_pending_acceptance",
+    "kva_accepted",
+    "kva_closed",
     "invoice_suggested",
     "invoice_to_send",
     "invoice_pending_payment",
+    "invoice_cancelled",
     "callback_owed",
     "alt_time_proposal",
     "reschedule_pending",
@@ -68,6 +72,12 @@ def _iso_minus_hours(hours: int) -> str:
 
 def _iso_minus_days(days: int) -> str:
     return _iso_minus_hours(days * 24)
+
+
+# How long terminal / informational lifecycle cards linger in the call-log panel
+# before they auto-drop (confirmed appts, cancelled appts, rejected offers,
+# cancelled invoices). Set to 40 days per Amber.
+_TERMINAL_DAYS = 40
 
 
 def _customer_name_map(client, org_id: str, ids: list[str]) -> dict[str, str | None]:
@@ -176,8 +186,8 @@ def _termin_anfrage(client, org_id: str) -> list[dict[str, Any]]:
 
 
 def _kva_to_send(client, org_id: str) -> list[dict[str, Any]]:
-    """Draft Angebote older than 24h — assumed to have stalled and need sending."""
-    cutoff = _iso_minus_hours(24)
+    """Draft Angebote awaiting send. Surfaces IMMEDIATELY on creation (no grace
+    window) so a manually-created draft reflects in the call-log panel at once."""
     rows = (
         client.table("cost_estimates")
         .select(
@@ -186,7 +196,6 @@ def _kva_to_send(client, org_id: str) -> list[dict[str, Any]]:
         )
         .eq("org_id", org_id)
         .eq("status", "draft")
-        .lte("created_at", cutoff)
         .order("created_at", desc=True)
         .execute()
         .data
@@ -393,14 +402,13 @@ def _invoice_suggested(client, org_id: str) -> list[dict[str, Any]]:
 
 
 def _invoice_to_send(client, org_id: str) -> list[dict[str, Any]]:
-    """Draft invoices older than 24h — assumed ready to send (mirrors kva_to_send)."""
-    cutoff = _iso_minus_hours(24)
+    """Draft invoices awaiting send. Surfaces IMMEDIATELY on creation (no grace
+    window), mirroring kva_to_send."""
     rows = (
         client.table("invoices")
         .select("id, customer_id, number, total, created_at, status")
         .eq("org_id", org_id)
         .eq("status", "draft")
-        .lte("created_at", cutoff)
         .order("created_at", desc=True)
         .execute()
         .data
@@ -634,6 +642,173 @@ def _unmatched_reschedule(client, org_id: str) -> list[dict[str, Any]]:
     return out
 
 
+def _appointment_confirmed(client, org_id: str) -> list[dict[str, Any]]:
+    """CONFIRMED appointments (created within 40 days) — kept visible in the call-log
+    panel as the 'Bestätigt' stage so the lifecycle stays one synchronized worklist
+    (Amber: a confirmed appointment must not silently vanish from the open actions;
+    a manual call-log create lands 'pending' then moves here on confirm). Excludes
+    rows recently rescheduled — those are the orange `reschedule_pending` card — so a
+    single appointment never appears twice."""
+    cutoff = _iso_minus_days(_TERMINAL_DAYS)
+    rows = (
+        client.table("appointments")
+        .select(
+            "id, inquiry_id, customer_id, title, scheduled_at, rescheduled_at, "
+            "created_at, status, source_conversation_id"
+        )
+        .eq("org_id", org_id)
+        .eq("status", "confirmed")
+        .gte("created_at", cutoff)
+        .order("scheduled_at")
+        .execute()
+        .data
+        or []
+    )
+    # Drop rows already surfaced by `_reschedule_pending` (confirmed + recent reschedule).
+    rows = [r for r in rows if not (r.get("rescheduled_at") and r["rescheduled_at"] >= cutoff)]
+    if not rows:
+        return []
+    name_by_cust = _customer_name_map(client, org_id, [r.get("customer_id") for r in rows])
+    call_by_appt = _resolve_call_ids(client, org_id, rows)
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
+        title = r.get("title") or "Termin"
+        out.append(
+            {
+                "kind": "appointment_confirmed",
+                "id": r["id"],
+                "inquiry_id": r.get("inquiry_id"),
+                "call_id": call_by_appt.get(r["id"]),
+                "customer_name": nm,
+                "customer_id": r.get("customer_id"),
+                "summary": f"Termin bestätigt: {title}",
+                "created_at": r.get("created_at"),
+                "due_at": r.get("scheduled_at"),
+                "priority": "normal",
+            }
+        )
+    return out
+
+
+def _kva_accepted(client, org_id: str) -> list[dict[str, Any]]:
+    """Accepted Angebote not yet turned into an invoice — the natural next step is
+    'Rechnung erstellen'. Drops off once the offer is invoiced (status='invoiced')."""
+    rows = (
+        client.table("cost_estimates")
+        .select("id, inquiry_id, customer_id, number, total, created_at, status, accepted_at")
+        .eq("org_id", org_id)
+        .eq("status", "accepted")
+        .order("accepted_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    name_by_cust = _customer_name_map(client, org_id, [r.get("customer_id") for r in rows])
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
+        num = r.get("number") or "Angebot"
+        out.append(
+            {
+                "kind": "kva_accepted",
+                "id": r["id"],
+                "inquiry_id": r.get("inquiry_id"),
+                "call_id": None,
+                "customer_name": nm,
+                "customer_id": r.get("customer_id"),
+                "summary": f"{num} angenommen — Rechnung erstellen",
+                "created_at": r.get("created_at"),
+                "due_at": None,
+                "priority": "normal",
+            }
+        )
+    return out
+
+
+def _kva_closed(client, org_id: str) -> list[dict[str, Any]]:
+    """Rejected/expired Angebote within the last 40 days — informational terminal card
+    (slate) so the team knows to follow up or re-quote. Auto-drops after 40 days."""
+    cutoff = _iso_minus_days(_TERMINAL_DAYS)
+    rows = (
+        client.table("cost_estimates")
+        .select(
+            "id, inquiry_id, customer_id, number, status, "
+            "rejected_at, updated_at, created_at"
+        )
+        .eq("org_id", org_id)
+        .in_("status", ["rejected", "expired"])
+        .order("created_at", desc=True)
+        .limit(200)
+        .execute()
+        .data
+        or []
+    )
+
+    def _closed_ts(r: dict) -> str:
+        return r.get("rejected_at") or r.get("updated_at") or r.get("created_at") or ""
+
+    rows = [r for r in rows if _closed_ts(r) >= cutoff]
+    if not rows:
+        return []
+    name_by_cust = _customer_name_map(client, org_id, [r.get("customer_id") for r in rows])
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        nm = name_by_cust.get(r.get("customer_id")) or "Unbekannter Kunde"
+        num = r.get("number") or "Angebot"
+        label = "abgelehnt" if r.get("status") == "rejected" else "abgelaufen"
+        out.append(
+            {
+                "kind": "kva_closed",
+                "id": r["id"],
+                "inquiry_id": r.get("inquiry_id"),
+                "call_id": None,
+                "customer_name": nm,
+                "customer_id": r.get("customer_id"),
+                "summary": f"{num} {label} — ggf. nachfassen",
+                "created_at": r.get("created_at"),
+                "due_at": None,
+                "priority": "normal",
+            }
+        )
+    return out
+
+
+def _invoice_cancelled(client, org_id: str) -> list[dict[str, Any]]:
+    """Cancelled invoices within the last 40 days — informational terminal card
+    (slate), mirroring `appointment_cancelled`."""
+    cutoff = _iso_minus_days(_TERMINAL_DAYS)
+    rows = (
+        client.table("invoices")
+        .select("id, customer_id, number, status, cancelled_at, created_at")
+        .eq("org_id", org_id)
+        .eq("status", "cancelled")
+        .gte("cancelled_at", cutoff)
+        .order("cancelled_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        return []
+    name_by = _customer_name_map(client, org_id, [r.get("customer_id") for r in rows])
+    return [
+        {
+            "kind": "invoice_cancelled",
+            "id": r["id"],
+            "inquiry_id": None,
+            "call_id": None,
+            "customer_name": name_by.get(r.get("customer_id")) or "Unbekannter Kunde",
+            "customer_id": r.get("customer_id"),
+            "summary": f"{r.get('number') or 'Rechnung'} storniert — Team informieren",
+            "created_at": r.get("created_at"),
+            "due_at": None,
+            "priority": "normal",
+        }
+        for r in rows
+    ]
+
+
 def _reschedule_pending(client, org_id: str) -> list[dict[str, Any]]:
     """CONFIRMED appointments a human just rescheduled — awaiting the customer's
     OK on the new time (orange "Terminverschiebung" card). At L2 the person behind
@@ -644,10 +819,10 @@ def _reschedule_pending(client, org_id: str) -> list[dict[str, Any]]:
     appointment_cancelled card) if the customer rejects every offered time.
 
     Sourced from `rescheduled_at` (stamped by routes/appointments._patch on every
-    time edit) within the last 14 days. Restricted to status='confirmed' so it
+    time edit) within the last 40 days. Restricted to status='confirmed' so it
     never overlaps the pending `termin_anfrage` card or the proposal-marker
     `alt_time_proposal` card (those cover the not-yet-confirmed lifecycle)."""
-    cutoff = _iso_minus_days(14)
+    cutoff = _iso_minus_days(_TERMINAL_DAYS)
     rows = (
         client.table("appointments")
         .select(
@@ -692,13 +867,13 @@ def _reschedule_pending(client, org_id: str) -> list[dict[str, Any]]:
 
 def _appointment_cancelled(client, org_id: str) -> list[dict[str, Any]]:
     """Recently-cancelled appointments — kept visible so the team is INFORMED instead
-    of the worklist item silently vanishing on cancel. Windowed to the last 14 days
+    of the worklist item silently vanishing on cancel. Windowed to the last 40 days
     (no dismissal table); the team can re-book from the customer card if needed.
 
     Sourced from cancelled_at (set on /cancel + the agent cancel tool), so only NEW
     cancellations appear — a staff 'Ablehnen' of a pending request (rejected_at) is a
     different lifecycle event and is not surfaced here."""
-    cutoff = _iso_minus_days(14)
+    cutoff = _iso_minus_days(_TERMINAL_DAYS)
     rows = (
         client.table("appointments")
         .select(
@@ -817,6 +992,7 @@ def _apply_task_states(client, org_id: str, items: list[dict]) -> list[dict]:
 # Action kinds whose `id` is an appointment id (used for employee scoping).
 _APPT_KINDS = {
     "termin_anfrage",
+    "appointment_confirmed",
     "alt_time_proposal",
     "reschedule_pending",
     "appointment_cancelled",
@@ -846,12 +1022,16 @@ def _aggregate(org_id: str, scope=None) -> list[dict[str, Any]]:
     client = get_service_client()
     items: list[dict[str, Any]] = []
     items.extend(_termin_anfrage(client, org_id))
+    items.extend(_appointment_confirmed(client, org_id))
     items.extend(_kva_suggested(client, org_id))
     items.extend(_kva_to_send(client, org_id))
     items.extend(_kva_pending_acceptance(client, org_id))
+    items.extend(_kva_accepted(client, org_id))
+    items.extend(_kva_closed(client, org_id))
     items.extend(_invoice_suggested(client, org_id))
     items.extend(_invoice_to_send(client, org_id))
     items.extend(_invoice_pending_payment(client, org_id))
+    items.extend(_invoice_cancelled(client, org_id))
     items.extend(_callback_owed(client, org_id))
     items.extend(_alt_time_proposal(client, org_id))
     items.extend(_reschedule_pending(client, org_id))

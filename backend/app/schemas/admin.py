@@ -241,6 +241,10 @@ class AppointmentCreate(BaseModel):
     notes: str | None = None
     inquiry_id: str | None = None
     case_id: str | None = None  # grouping ticket (Fall) — FK → cases (was project_id)
+    # Optional initial status. Default (None) → 'confirmed' (calendar / planning-board
+    # creates). The call-log create-appointment modal passes 'pending' so the new
+    # appointment enters the "Bestätigung ausstehend" stage in the open-action panel.
+    status: str | None = None
 
 
 class CaseUpsert(BaseModel):

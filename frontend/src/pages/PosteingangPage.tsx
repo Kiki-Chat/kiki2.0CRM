@@ -72,7 +72,7 @@ function DecisionCard({
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px 16px', flexWrap: 'wrap', borderTop: '1px solid var(--border-faint)' }}>
-        <Btn variant={d.type === 'storno' ? 'danger' : 'primary'} onClick={() => onResolve('primary')} disabled={needsAssignee} title={needsAssignee ? 'Erst zuweisen, dann bestätigen' : undefined}>{d.primary}</Btn>
+        <Btn variant={d.type === 'storno' ? 'secondary' : 'primary'} onClick={() => onResolve('primary')} disabled={needsAssignee} title={needsAssignee ? 'Erst zuweisen, dann bestätigen' : undefined}>{d.primary}</Btn>
         {d.secondary && <Btn variant="secondary" onClick={() => onResolve('secondary')}>{d.secondary}</Btn>}
         {d.tertiary && <Btn variant="ghost" onClick={() => onResolve('tertiary')}>{d.tertiary}</Btn>}
         {needsAssignee && <span style={{ fontSize: 12, color: 'var(--warning)', fontWeight: 600 }}>Erst zuweisen</span>}

@@ -44,6 +44,7 @@ class _FakeChain:
     def lte(self, *a, **k): return self._rec("lte", *a, **k)
     def ilike(self, *a, **k): return self._rec("ilike", *a, **k)
     def order(self, *a, **k): return self._rec("order", *a, **k)
+    def limit(self, *a, **k): return self._rec("limit", *a, **k)
 
     @property
     def not_(self):  # postgrest exposes `.not_.is_(col, val)`
@@ -175,3 +176,69 @@ def test_reschedule_pending_surfaces_recently_rescheduled_confirmed_appt():
 
 def test_reschedule_pending_empty_when_no_rows():
     assert ax._reschedule_pending(_FakeClient({"appointments": []}), ORG) == []
+
+
+# ─── _appointment_confirmed (green "Bestätigt" stage, persists 40d) ──────────
+def test_appointment_confirmed_surfaces_confirmed_excludes_recent_reschedule():
+    appts = [
+        {"id": "a-conf", "inquiry_id": "i1", "customer_id": "c1", "title": "Wartung",
+         "scheduled_at": "2099-01-02T10:00:00+00:00", "rescheduled_at": None,
+         "created_at": "2099-01-01T08:00:00+00:00", "status": "confirmed", "source_conversation_id": None},
+        # recently rescheduled → belongs to reschedule_pending, must be excluded here
+        {"id": "a-resched", "inquiry_id": "i2", "customer_id": "c1", "title": "Reparatur",
+         "scheduled_at": "2099-01-03T10:00:00+00:00", "rescheduled_at": "2099-01-02T09:00:00+00:00",
+         "created_at": "2099-01-01T08:00:00+00:00", "status": "confirmed", "source_conversation_id": None},
+    ]
+    client = _FakeClient({"appointments": appts, "customers": [{"id": "c1", "full_name": "Max"}],
+                          "inquiries": [], "calls": []})
+    out = ax._appointment_confirmed(client, ORG)
+    ids = [r["id"] for r in out]
+    assert "a-conf" in ids and "a-resched" not in ids
+    row = next(r for r in out if r["id"] == "a-conf")
+    assert row["kind"] == "appointment_confirmed" and "bestätigt" in row["summary"].lower()
+    assert row["priority"] == "normal"
+    rec = client.recorder
+    assert any(c["method"] == "eq" and c["args"] == ("status", "confirmed") for c in rec)
+    assert any(c["method"] == "gte" and c["args"][0] == "created_at" for c in rec)
+
+
+# ─── _kva_accepted (green → "Rechnung erstellen") ───────────────────────────
+def test_kva_accepted_surfaces_accepted_offers():
+    ce = [{"id": "ce1", "inquiry_id": "i1", "customer_id": "c1", "number": "AG-001",
+           "total": 100, "created_at": "2026-06-01T00:00:00+00:00", "status": "accepted",
+           "accepted_at": "2026-06-02T00:00:00+00:00"}]
+    client = _FakeClient({"cost_estimates": ce, "customers": [{"id": "c1", "full_name": "Max"}]})
+    out = ax._kva_accepted(client, ORG)
+    assert len(out) == 1 and out[0]["kind"] == "kva_accepted"
+    assert "angenommen" in out[0]["summary"].lower()
+    assert any(c["method"] == "eq" and c["args"] == ("status", "accepted") for c in client.recorder)
+
+
+# ─── _kva_closed (slate informational, 40d window) ──────────────────────────
+def test_kva_closed_surfaces_recent_rejection():
+    ce = [{"id": "ce2", "inquiry_id": "i1", "customer_id": "c1", "number": "AG-002",
+           "status": "rejected", "rejected_at": "2099-01-01T00:00:00+00:00",
+           "updated_at": None, "created_at": "2099-01-01T00:00:00+00:00"}]
+    client = _FakeClient({"cost_estimates": ce, "customers": [{"id": "c1", "full_name": "Max"}]})
+    out = ax._kva_closed(client, ORG)
+    assert len(out) == 1 and out[0]["kind"] == "kva_closed"
+    assert "abgelehnt" in out[0]["summary"].lower()
+
+
+def test_kva_closed_drops_old_closures():
+    ce = [{"id": "ce3", "customer_id": "c1", "number": "AG-003", "status": "rejected",
+           "rejected_at": "2000-01-01T00:00:00+00:00", "updated_at": None,
+           "created_at": "2000-01-01T00:00:00+00:00"}]
+    client = _FakeClient({"cost_estimates": ce, "customers": []})
+    assert ax._kva_closed(client, ORG) == []  # closed >40d ago → dropped
+
+
+# ─── _invoice_cancelled (slate informational) ───────────────────────────────
+def test_invoice_cancelled_surfaces_cancelled():
+    inv = [{"id": "inv1", "customer_id": "c1", "number": "R-001", "status": "cancelled",
+            "cancelled_at": "2099-01-01T00:00:00+00:00", "created_at": "2099-01-01T00:00:00+00:00"}]
+    client = _FakeClient({"invoices": inv, "customers": [{"id": "c1", "full_name": "Max"}]})
+    out = ax._invoice_cancelled(client, ORG)
+    assert len(out) == 1 and out[0]["kind"] == "invoice_cancelled"
+    assert "storniert" in out[0]["summary"].lower()
+    assert any(c["method"] == "eq" and c["args"] == ("status", "cancelled") for c in client.recorder)
