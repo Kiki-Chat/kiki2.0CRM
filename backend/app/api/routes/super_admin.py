@@ -24,8 +24,10 @@ from app.services.agent_config import (
     attach_hk_tools,
     configure_agent,
     fetch_phone_meta_for_agent,
+    lookup_inbound_number,
     set_conversation_init_webhook,
     set_phone_environment,
+    sync_inbound_number,
     verify_agent_health,
 )
 from app.services.history_import import import_agent_history
@@ -371,6 +373,58 @@ async def import_history(
         )
     counters = await run_in_threadpool(import_agent_history, org_id, agent_id)
     return {"success": True, "org_id": org_id, **counters}
+
+
+# ─── Inbound HeyKiki-number sync (auto-fill from the Sprach-ID) ──────────────
+class LookupPhoneRequest(BaseModel):
+    """Body for POST /api/super-admin/lookup-agent-phone — read-only pre-create
+    lookup so the create form can auto-fill the number from the entered agent id
+    before an org row exists."""
+
+    agent_id: str = Field(..., alias="agentId")
+    model_config = {"populate_by_name": True, "extra": "ignore"}
+
+
+class PhoneLookupResponse(BaseModel):
+    phone_number: str | None = None
+    phone_number_id: str | None = None
+
+
+@router.post("/lookup-agent-phone", response_model=PhoneLookupResponse)
+async def lookup_agent_phone(
+    payload: LookupPhoneRequest,
+    _user: CurrentUser = Depends(require_super_admin),
+) -> PhoneLookupResponse:
+    """Read-only: return the inbound HeyKiki number bound to ``agentId`` in
+    ElevenLabs so the create/edit form can auto-fill it from the Sprach-ID.
+    Returns ``phone_number=null`` (200, not an error) when no number is bound."""
+    agent_id = (payload.agent_id or "").strip()
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="Sprach-ID fehlt.")
+    meta = await run_in_threadpool(lookup_inbound_number, agent_id)
+    return PhoneLookupResponse(**meta)
+
+
+@router.post("/orgs/{org_id}/sync-phone", response_model=PhoneLookupResponse)
+async def sync_org_phone(
+    org_id: str,
+    _user: CurrentUser = Depends(require_super_admin),
+) -> PhoneLookupResponse:
+    """Fetch the inbound HeyKiki number from the org's Sprach-ID and persist it
+    on ``organizations.phone_number`` (+ the EL phone_number_id). Self-heals
+    orgs whose number was never synced; surfaced as a 'Synchronisieren' button
+    in the admin so editing/saving clears the phone health problem."""
+    org = await run_in_threadpool(_get_org, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation nicht gefunden.")
+    agent_id = org.get("elevenlabs_agent_id")
+    if not agent_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Diese Organisation hat keine Sprach-ID hinterlegt.",
+        )
+    meta = await run_in_threadpool(sync_inbound_number, org_id, agent_id)
+    return PhoneLookupResponse(**meta)
 
 
 # ─── B.7: manual agent-config sync (backfill for pre-Wave-1 orgs) ───────────

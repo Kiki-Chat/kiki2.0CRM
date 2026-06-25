@@ -316,6 +316,39 @@ def _store_phone_on_org(
     db.table("organizations").update(patch).eq("id", str(org_id)).execute()
 
 
+def lookup_inbound_number(agent_id: str) -> dict:
+    """Read-only: return the inbound HeyKiki number bound to ``agent_id`` in
+    ElevenLabs, WITHOUT touching the DB. Used by the super-admin create form to
+    auto-fill the number from the entered Sprach-ID before an org row exists.
+
+    Returns ``{"phone_number", "phone_number_id"}`` with ``phone_number=None``
+    when the agent has no number bound (the caller surfaces that to the user)."""
+    try:
+        meta = fetch_phone_meta_for_agent(agent_id)
+    except HTTPException:
+        return {"phone_number": None, "phone_number_id": None}
+    return {
+        "phone_number": meta.get("phone_number"),
+        "phone_number_id": meta.get("phone_number_id"),
+    }
+
+
+def sync_inbound_number(org_id: str | UUID, agent_id: str) -> dict:
+    """Fetch the inbound HeyKiki number bound to ``agent_id`` and PERSIST it on
+    the org (``organizations.phone_number`` + ``elevenlabs_phone_number_id``).
+
+    This is the "auto-sync from the Sprach-ID" the number settings rely on: the
+    HeyKiki number is owned by ElevenLabs (the agent's bound Twilio number), so
+    the org row is just a cache that we refresh from the source of truth. A
+    no-op when the agent has no number bound (so a not-yet-assigned agent keeps
+    whatever fallback number the admin typed). Returns the same shape as
+    ``lookup_inbound_number``."""
+    meta = lookup_inbound_number(agent_id)
+    if meta.get("phone_number"):
+        _store_phone_on_org(org_id, meta["phone_number"], meta.get("phone_number_id"))
+    return meta
+
+
 def set_phone_environment(
     phone_number_id: str, environment: str, agent_id: str | None = None
 ) -> None:
@@ -1526,6 +1559,23 @@ def _fetch_provisioned_at(org_id: str | UUID) -> str | None:
     return rows[0].get("agent_provisioned_at") if rows else None
 
 
+def _fetch_org_phone(org_id: str | UUID) -> str | None:
+    """The HeyKiki number stored on the org row (the synced inbound number).
+    Used as the phone_bound fallback so a number on record satisfies the check
+    even if a transient ElevenLabs phone-list read fails."""
+    db = get_service_client()
+    rows = (
+        db.table("organizations")
+        .select("phone_number")
+        .eq("id", str(org_id))
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return (rows[0].get("phone_number") or None) if rows else None
+
+
 def verify_agent_health(org_id: str | UUID, agent_id: str) -> dict:
     """Read-only post-provision verify gate (2.1).
 
@@ -1653,21 +1703,29 @@ def verify_agent_health(org_id: str | UUID, agent_id: str) -> dict:
         else "Path-A Override-Flags (prompt/first_message/language) sind nicht alle aktiv.",
     ))
 
-    # phone_bound — a phone number is bound to the agent in ElevenLabs.
+    # phone_bound — a HeyKiki number is reachable. Satisfied by EITHER a number
+    # bound live to the agent in ElevenLabs (authoritative) OR a number already
+    # stored on the org row (the synced HeyKiki number). The stored fallback is
+    # why editing/syncing the number in the admin clears this check, and why a
+    # transient phone-list read failure no longer red-flags a configured org.
+    # Read-only: the org-row sync happens on create/edit/explicit sync, not here.
+    stored_phone = _fetch_org_phone(org_id)
+    live_phone: str | None = None
+    phone_err: str | None = None
     try:
-        phone_meta = fetch_phone_meta_for_agent(agent_id)
-        phone_no = phone_meta.get("phone_number")
-        checks.append(_check(
-            "phone_bound",
-            bool(phone_no),
-            f"Telefonnummer: {phone_no}" if phone_no else NO_PHONE_MESSAGE,
-        ))
+        live_phone = fetch_phone_meta_for_agent(agent_id).get("phone_number")
     except HTTPException:
-        checks.append(_check("phone_bound", False, NO_PHONE_MESSAGE))
+        pass  # no number bound — fall back to the stored number, if any
     except Exception as exc:  # noqa: BLE001
-        checks.append(_check(
-            "phone_bound", False, f"Telefon-Prüfung fehlgeschlagen: {str(exc)[:150]}"
-        ))
+        phone_err = str(exc)[:150]
+    chosen = live_phone or stored_phone
+    if chosen:
+        detail = f"Telefonnummer: {chosen}" + ("" if live_phone else " (aus Org-Datensatz)")
+    elif phone_err:
+        detail = f"Telefon-Prüfung fehlgeschlagen: {phone_err}"
+    else:
+        detail = NO_PHONE_MESSAGE
+    checks.append(_check("phone_bound", bool(chosen), detail))
 
     return {
         "ok": all(c["ok"] for c in checks),

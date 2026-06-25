@@ -255,7 +255,7 @@ def test_sync_agent_config_400_when_org_has_no_agent_id(monkeypatch):
             )
         )
     assert exc.value.status_code == 400
-    assert "Agent ID" in exc.value.detail
+    assert "Sprach-ID" in exc.value.detail
 
 
 def test_sync_agent_config_happy_path_returns_summary(monkeypatch):

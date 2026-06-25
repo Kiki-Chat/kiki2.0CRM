@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -45,6 +45,7 @@ export function AdminOrgFormPage() {
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
   const [elevenlabsAgentId, setElevenlabsAgentId] = useState('')
+  const [createPhone, setCreatePhone] = useState('')
   const [adminName, setAdminName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
 
@@ -56,6 +57,37 @@ export function AdminOrgFormPage() {
 
   const [createResult, setCreateResult] = useState<CreateOrgResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Inbound HeyKiki-number auto-fill: read the number bound to the entered
+  // Sprach-ID from ElevenLabs so the admin never types it by hand (it's the
+  // agent's live number — the source of truth). Used by both create and edit.
+  const [phoneLookupBusy, setPhoneLookupBusy] = useState(false)
+  const [phoneLookupMsg, setPhoneLookupMsg] = useState<string | null>(null)
+  const lookupPhone = async (agentId: string, setter: (v: string) => void) => {
+    const aid = agentId.trim()
+    setPhoneLookupMsg(null)
+    if (!aid) {
+      setPhoneLookupMsg('Bitte zuerst die Sprach-ID eingeben.')
+      return
+    }
+    setPhoneLookupBusy(true)
+    try {
+      const r = await apiFetch<{ phone_number: string | null }>(
+        '/api/super-admin/lookup-agent-phone',
+        { method: 'POST', body: JSON.stringify({ agentId: aid }) },
+      )
+      if (r.phone_number) {
+        setter(r.phone_number)
+        setPhoneLookupMsg(`Nummer aus ElevenLabs übernommen: ${r.phone_number}`)
+      } else {
+        setPhoneLookupMsg('Für diese Sprach-ID ist in ElevenLabs keine Nummer gebunden.')
+      }
+    } catch (e) {
+      setPhoneLookupMsg((e as Error).message)
+    } finally {
+      setPhoneLookupBusy(false)
+    }
+  }
 
   const detailQuery = useQuery({
     queryKey: ['admin', 'org', id],
@@ -94,6 +126,7 @@ export function AdminOrgFormPage() {
           loginEmail,
           loginPassword,
           elevenlabsAgentId,
+          phoneNumber: createPhone.trim(),
           adminName: adminName || undefined,
           contactEmail: contactEmail || undefined,
         }),
@@ -121,6 +154,10 @@ export function AdminOrgFormPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'orgs'] })
       qc.invalidateQueries({ queryKey: ['admin', 'org', id] })
+      // Refresh the agent-health board + this org's detail so a phone change is
+      // reflected immediately (without this the Kiki-Status badge stayed red on
+      // a 60s stale cache even after the number was fixed).
+      qc.invalidateQueries({ queryKey: ['admin', 'agent-health'] })
       navigate('/admin/orgs')
     },
     onError: (e: Error) => setError(e.message),
@@ -218,6 +255,21 @@ export function AdminOrgFormPage() {
               mono
               help="NICHT agent_7201… (Produktion)."
             />
+            <div>
+              <Field
+                label="Telefonnummer *"
+                value={createPhone}
+                onChange={setCreatePhone}
+                required
+                type="tel"
+                placeholder="+49 …"
+                help="Die HeyKiki-Nummer dieses Agents — hol sie automatisch aus der Sprach-ID."
+              />
+              <HoleNummerButton onClick={() => lookupPhone(elevenlabsAgentId, setCreatePhone)} busy={phoneLookupBusy} />
+              {phoneLookupMsg && (
+                <p className="mt-1 text-xs text-slate-400">{phoneLookupMsg}</p>
+              )}
+            </div>
             <div className="my-2 h-px bg-slate-800" />
             <Field label="Admin-Anmelde-E-Mail *" value={loginEmail} onChange={setLoginEmail} required type="email" placeholder="admin@firma.de" />
             <Field label="Admin-Anmelde-Passwort *" value={loginPassword} onChange={setLoginPassword} required type="password" placeholder="mind. 8 Zeichen" help="Mindestens 8 Zeichen. Wird per E-Mail an den Admin mitgeteilt." />
@@ -228,7 +280,14 @@ export function AdminOrgFormPage() {
           <>
             <Field label="Name *" value={editName} onChange={setEditName} required />
             <Field label="Kontakt-E-Mail" value={editEmail} onChange={setEditEmail} type="email" />
-            <Field label="Telefonnummer" value={editPhone} onChange={setEditPhone} />
+            <div>
+              <Field label="Telefonnummer (HeyKiki-Nummer)" value={editPhone} onChange={setEditPhone} type="tel" placeholder="+49 …" />
+              <HoleNummerButton onClick={() => lookupPhone(editAgentId, setEditPhone)} busy={phoneLookupBusy} />
+              {phoneLookupMsg && (
+                <p className="mt-1 text-xs text-slate-400">{phoneLookupMsg}</p>
+              )}
+              <p className="mt-1 text-xs text-slate-500">Wird aus der Sprach-ID synchronisiert. Speichern übernimmt den Wert.</p>
+            </div>
             <Field label="Sprach-ID (technisch)" value={editAgentId} onChange={setEditAgentId} required mono help="NICHT agent_7201… (Produktion)." />
           </>
         )}
@@ -251,6 +310,19 @@ export function AdminOrgFormPage() {
         </div>
       </form>
     </div>
+  )
+}
+
+function HoleNummerButton({ onClick, busy }: { onClick: () => void; busy: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700 disabled:opacity-50"
+    >
+      <RefreshCw size={12} className={busy ? 'animate-spin' : ''} /> Aus ElevenLabs holen
+    </button>
   )
 }
 

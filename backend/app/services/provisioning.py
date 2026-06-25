@@ -203,15 +203,17 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
         # so the prompt's company profile reflects it. Optional.
         if payload.address and payload.address.strip():
             org_row["address"] = {"raw": payload.address.strip()}
+        # Persist the inbound HeyKiki number from the form on BOTH paths. On the
+        # default path configure_agent() re-syncs it from the agent's live EL
+        # binding (the source of truth) right after; the typed value is the
+        # fallback used when no number is bound to the agent yet.
+        if payload.phone_number is not None and payload.phone_number.strip():
+            org_row["phone_number"] = payload.phone_number.strip()
+        if payload.elevenlabs_phone_number_id is not None:
+            org_row["elevenlabs_phone_number_id"] = payload.elevenlabs_phone_number_id
         if bind_only:
-            # Store the n8n-bound number + its EL phone_number_id (needed for
-            # outbound) and stamp provisioned now — the agent is already live.
-            if payload.phone_number is not None:
-                org_row["phone_number"] = payload.phone_number
-            if payload.elevenlabs_phone_number_id is not None:
-                org_row["elevenlabs_phone_number_id"] = (
-                    payload.elevenlabs_phone_number_id
-                )
+            # n8n already bound the number + built the agent → stamp provisioned
+            # now (the agent is already live; configure_agent is skipped below).
             org_row["agent_provisioned_at"] = datetime.now(timezone.utc).isoformat()
 
         org_res = (

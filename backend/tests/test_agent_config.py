@@ -133,6 +133,60 @@ def test_phone_meta_surfaces_environment(monkeypatch):
     assert meta["environment"] == "uat"
 
 
+# ─── lookup_inbound_number / sync_inbound_number ─────────────────────────────
+def test_lookup_inbound_number_returns_bound_number(monkeypatch):
+    monkeypatch.setattr(
+        ac, "_list_phone_numbers",
+        lambda: [
+            {"phone_number": "+4925197593899", "phone_number_id": "phnum_1",
+             "assigned_agent": {"agent_id": AGENT_ID}},
+        ],
+    )
+    assert ac.lookup_inbound_number(AGENT_ID) == {
+        "phone_number": "+4925197593899",
+        "phone_number_id": "phnum_1",
+    }
+
+
+def test_lookup_inbound_number_none_when_unbound(monkeypatch):
+    # No phone bound → graceful {None, None} (so the form shows a hint, not a 500).
+    monkeypatch.setattr(ac, "_list_phone_numbers", lambda: [])
+    assert ac.lookup_inbound_number(AGENT_ID) == {
+        "phone_number": None,
+        "phone_number_id": None,
+    }
+
+
+def test_sync_inbound_number_persists_when_bound(monkeypatch):
+    monkeypatch.setattr(
+        ac, "_list_phone_numbers",
+        lambda: [
+            {"phone_number": "+4930111", "phone_number_id": "phnum_9",
+             "assigned_agent": {"agent_id": AGENT_ID}},
+        ],
+    )
+    stored: dict = {}
+    monkeypatch.setattr(
+        ac, "_store_phone_on_org",
+        lambda org_id, phone, pid=None: stored.update(org=org_id, phone=phone, pid=pid),
+    )
+    out = ac.sync_inbound_number(ORG_ID, AGENT_ID)
+    assert out["phone_number"] == "+4930111"
+    assert stored == {"org": ORG_ID, "phone": "+4930111", "pid": "phnum_9"}
+
+
+def test_sync_inbound_number_noop_when_unbound(monkeypatch):
+    # No number bound → never writes a null over the admin's typed fallback.
+    monkeypatch.setattr(ac, "_list_phone_numbers", lambda: [])
+    calls = {"n": 0}
+    monkeypatch.setattr(
+        ac, "_store_phone_on_org", lambda *a, **k: calls.update(n=calls["n"] + 1)
+    )
+    out = ac.sync_inbound_number(ORG_ID, AGENT_ID)
+    assert out == {"phone_number": None, "phone_number_id": None}
+    assert calls["n"] == 0
+
+
 def test_phone_meta_environment_none_when_unpinned(monkeypatch):
     monkeypatch.setattr(
         ac, "_list_phone_numbers",

@@ -57,10 +57,22 @@ def _green_config() -> dict:
     return cfg
 
 
-def _stub_green_environment(monkeypatch, *, config: dict, phone: str | None = "+4925197593899"):
-    """Wire up verify_agent_health's external reads against a given config + phone."""
+def _stub_green_environment(
+    monkeypatch,
+    *,
+    config: dict,
+    phone: str | None = "+4925197593899",
+    stored_phone: str | None = None,
+):
+    """Wire up verify_agent_health's external reads against a given config + phone.
+
+    ``phone`` is the number bound LIVE to the agent in ElevenLabs; ``stored_phone``
+    is the number cached on the org row (organizations.phone_number). Either one
+    satisfies phone_bound — the stored fallback is mocked here so the verify tests
+    stay hermetic (no live DB read)."""
     monkeypatch.setattr(ac, "get_agent_config", lambda agent_id: copy.deepcopy(config))
     monkeypatch.setattr(ac, "_fetch_provisioned_at", lambda org_id: "2026-06-17T10:00:00+00:00")
+    monkeypatch.setattr(ac, "_fetch_org_phone", lambda org_id: stored_phone)
     # Tool resolution → all hk_* names map to tool_<name>.
     monkeypatch.setattr(
         ac, "_fetch_workspace_tools", lambda: {n: f"tool_{n}" for n in ac.HK_TOOL_NAMES}
@@ -196,7 +208,10 @@ def test_verify_red_override_flags_off(monkeypatch):
 
 
 def test_verify_red_no_phone(monkeypatch):
-    _stub_green_environment(monkeypatch, config=_green_config(), phone=None)
+    # No live EL number AND no number stored on the org → phone_bound red.
+    _stub_green_environment(
+        monkeypatch, config=_green_config(), phone=None, stored_phone=None
+    )
     report = ac.verify_agent_health(ORG_ID, AGENT_ID)
     assert report["ok"] is False
     phone = _check_by_name(report, "phone_bound")
@@ -205,6 +220,21 @@ def test_verify_red_no_phone(monkeypatch):
     # Everything else stays green — only the phone check is red.
     others = [c for c in report["checks"] if c["name"] != "phone_bound"]
     assert all(c["ok"] for c in others)
+
+
+def test_verify_phone_from_stored_record(monkeypatch):
+    # No number bound live in EL, but one is cached on the org row (synced from
+    # the Sprach-ID / typed at create) → phone_bound GREEN. This is the #2 fix:
+    # editing/syncing the number resolves the phone health problem.
+    _stub_green_environment(
+        monkeypatch, config=_green_config(), phone=None, stored_phone="+4930123456"
+    )
+    report = ac.verify_agent_health(ORG_ID, AGENT_ID)
+    phone = _check_by_name(report, "phone_bound")
+    assert phone["ok"] is True
+    assert "+4930123456" in phone["detail"]
+    assert "Org-Datensatz" in phone["detail"]  # signals it came from the cache
+    assert report["ok"] is True
 
 
 def test_verify_unreachable_agent_all_red(monkeypatch):
