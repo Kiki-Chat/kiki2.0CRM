@@ -187,7 +187,7 @@ export function EmployeesPage() {
                 onClick={() => setCsvOpen(true)}
                 className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-body hover:bg-alt"
               >
-                <Upload size={15} /> CSV Import
+                <Upload size={15} /> CSV-Import
               </button>
               <button
                 onClick={() => setTechOpen(true)}
