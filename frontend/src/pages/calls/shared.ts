@@ -169,9 +169,9 @@ export const COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#
 // stays language-neutral.
 export const ACTION_KIND_LABEL: Record<ActionItem['kind'], string> = {
   termin_anfrage: 'Terminbestätigung',
-  kva_suggested: 'KVA erstellen',
-  kva_to_send: 'KVA senden',
-  kva_pending_acceptance: 'KVA-Antwort offen',
+  kva_suggested: 'Angebot erstellen',
+  kva_to_send: 'Angebot senden',
+  kva_pending_acceptance: 'Angebot-Antwort offen',
   invoice_suggested: 'Rechnung erstellen',
   invoice_to_send: 'Rechnung senden',
   invoice_pending_payment: 'Zahlung offen',

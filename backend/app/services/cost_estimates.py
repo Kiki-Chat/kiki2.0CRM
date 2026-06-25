@@ -675,7 +675,7 @@ def send_cost_estimate(org_id: str, payload) -> dict:
     if not kva_on or _kva_level(cfg_row) != 3:
         return {
             "success": False,
-            "message": "Der Kostenvoranschlag wird vom Team geprüft und per E-Mail versendet.",
+            "message": "Das Angebot wird vom Team geprüft und per E-Mail versendet.",
         }
 
     row = _fetch_kva_to_send(
@@ -688,7 +688,7 @@ def send_cost_estimate(org_id: str, payload) -> dict:
     if not row:
         return {
             "success": False,
-            "message": "Ich konnte den Kostenvoranschlag nicht finden — das Team kümmert sich darum.",
+            "message": "Ich konnte das Angebot nicht finden — das Team kümmert sich darum.",
         }
 
     # A real recipient email is required (placeholder @temp.local never gets mail).
@@ -698,7 +698,7 @@ def send_cost_estimate(org_id: str, payload) -> dict:
         return {
             "success": False,
             "needsEmail": True,
-            "message": "Mir fehlt noch Ihre E-Mail-Adresse, an die ich den Kostenvoranschlag senden kann.",
+            "message": "Mir fehlt noch Ihre E-Mail-Adresse, an die ich das Angebot senden kann.",
         }
 
     sent = _send_draft_kva(client, org_id, row)
@@ -708,7 +708,7 @@ def send_cost_estimate(org_id: str, payload) -> dict:
             "id": row["id"],
             "number": row.get("number"),
             "status": "sent",
-            "message": "Der Kostenvoranschlag wurde per E-Mail versendet.",
+            "message": "Das Angebot wurde per E-Mail versendet.",
         }
     return {
         "success": False,

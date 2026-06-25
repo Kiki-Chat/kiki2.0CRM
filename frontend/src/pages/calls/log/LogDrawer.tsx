@@ -415,10 +415,10 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                   >
                     <FileText size={16} className="flex-shrink-0 text-ai" />
                     <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-bold text-ai">Kostenvoranschlag erwähnt</div>
-                      <div className="text-[11.5px] text-muted">Im Anruf nach einem KVA gefragt — vorausgefüllt erstellen.</div>
+                      <div className="text-[13px] font-bold text-ai">Angebot erwähnt</div>
+                      <div className="text-[11.5px] text-muted">Im Anruf nach einem Angebot gefragt — vorausgefüllt erstellen.</div>
                     </div>
-                    <span className="flex-shrink-0 rounded-lg bg-ai px-2.5 py-1 text-[12px] font-bold text-white">KVA erstellen</span>
+                    <span className="flex-shrink-0 rounded-lg bg-ai px-2.5 py-1 text-[12px] font-bold text-white">Angebot erstellen</span>
                   </button>
                 )}
                 {call.enrichment?.intent?.wants_invoice && (
@@ -489,7 +489,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                         Termin
                       </ActionBtn>
                       <ActionBtn variant="secondary" className="flex-1" icon={<FileText size={15} />} disabled={!call.customer_id} onClick={goKva}>
-                        KVA
+                        Angebot
                       </ActionBtn>
                       <ActionBtn variant="secondary" className="flex-1" icon={<Receipt size={15} />} disabled={!call.customer_id} onClick={goInvoice}>
                         Rechnung
@@ -556,7 +556,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                     <Inbox size={13} /> Nicht zugeordnet
                   </div>
                   <p className="mb-3 text-[13px] text-body">
-                    Dieser Anruf gehört noch zu keinem Vorgang. Ordnen Sie ihn zu oder legen Sie einen neuen an.
+                    Dieser Anruf gehört noch zu keinem Vorgang. Ordne ihn zu oder lege einen neuen an.
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     <ActionBtn
