@@ -167,7 +167,9 @@ export function GespraechslogikSection({
     queryKey: ['kiki-zentrale', 'conversation-logic'],
     queryFn: () => apiFetch<{ enabled: boolean; logic: LogicDoc }>(`${KZ}/conversation-logic`),
   })
-  const [enabled, setEnabled] = useState(true)
+  // Default OFF: a fresh org starts collapsed/off (the server returns enabled:false
+  // when no logic was ever configured). The toggle reveals the editor when turned on.
+  const [enabled, setEnabled] = useState(false)
   const [blocks, setBlocks] = useState<LogicRule[]>([])
   const [dirty, setDirty] = useState(false)
   const [preview, setPreview] = useState('')
@@ -186,7 +188,9 @@ export function GespraechslogikSection({
     .map((f) => ({ field_key: f.field_key, label: f.label, activeInStandard: f.is_active }))
 
   // Tell the page which fields the Sonderfälle own (either/or with the Standard).
-  const usedKeys = collectUsedFieldKeys(blocks).join(',')
+  // Only when the logic is ON — disabled rules don't reach the prompt, so they
+  // must not claim fields away from the Standard-Ablauf.
+  const usedKeys = (enabled ? collectUsedFieldKeys(blocks) : []).join(',')
   useEffect(() => {
     onUsedFieldsChange?.(usedKeys ? usedKeys.split(',') : [])
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -219,9 +223,12 @@ export function GespraechslogikSection({
   useEffect(() => {
     const t = setTimeout(async () => {
       try {
+        // Honest preview: when the logic is OFF, the agent prompt receives NO
+        // Sonderfälle, so the preview shows only the Standard-Ablauf — exactly
+        // what {{KZ_CONVERSATION_LOGIC}} will contain (empty) on the agent.
         const res = await apiFetch<{ text: string }>(`${KZ}/gespraechsablauf/preview`, {
           method: 'POST',
-          body: JSON.stringify({ logic: { version: 1, blocks } }),
+          body: JSON.stringify({ logic: { version: 1, blocks: enabled ? blocks : [] } }),
         })
         setPreview(res.text)
         setPreviewError(null)
@@ -230,7 +237,7 @@ export function GespraechslogikSection({
       }
     }, 500)
     return () => clearTimeout(t)
-  }, [blocks])
+  }, [blocks, enabled])
 
   // Natural-language path: describe the rules, the AI builds the tree. The
   // result lands in the SAME local editor state (review + Speichern), so the
@@ -290,6 +297,10 @@ export function GespraechslogikSection({
         </div>
       </Card>
 
+      {/* The editor (AI-generate + Wenn/Dann rules) is only shown when the logic
+          is ON — turning the toggle off collapses it to just the switch + preview. */}
+      {enabled && (
+        <>
       <Card>
         <div className="mb-1 flex items-center gap-2">
           <Sparkles size={15} className="text-ai" />
@@ -387,13 +398,18 @@ export function GespraechslogikSection({
         >
           <Plus size={14} /> Neue Regel
         </button>
-        <SaveBar
-          onReset={() => { if (data) { setEnabled(data.enabled); setBlocks(withIds(data.logic).blocks) } setDirty(false) }}
-          onSave={() => kc.confirm(() => save.mutate())}
-          saving={save.isPending}
-          disabled={!dirty}
-        />
       </Card>
+        </>
+      )}
+
+      {/* Save bar stays OUTSIDE the collapsed region so the on/off toggle can
+          always be saved — even when the rule editor is hidden. */}
+      <SaveBar
+        onReset={() => { if (data) { setEnabled(data.enabled); setBlocks(withIds(data.logic).blocks) } setDirty(false) }}
+        onSave={() => kc.confirm(() => save.mutate())}
+        saving={save.isPending}
+        disabled={!dirty}
+      />
 
       <Card>
         <GroupLabel>So liest Kiki das Gespräch (Sonderfälle + Standard-Ablauf)</GroupLabel>

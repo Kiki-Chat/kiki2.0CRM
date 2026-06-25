@@ -63,6 +63,26 @@ export function AgentSyncBanner() {
     )
   }
 
+  // Manual-mode block: the save succeeded in the DB but was NOT pushed to the
+  // agent because the prompt sits behind a manual override (prompt_manual_override).
+  // This is the fix for IF/THEN (and every config section) silently never reaching
+  // the live ElevenLabs prompt — warn instead of the old false green "applied",
+  // and offer the same force-resync the drift banner uses (no blind "Erneut
+  // versuchen", which would just re-hit the override and block again).
+  if (data.status === 'failed' && data.error === 'manual_override') {
+    return (
+      <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-bg/60 px-4 py-2.5 text-sm font-medium text-warning">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <span className="flex-1">
+          Gespeichert, aber <strong>nicht an Kiki übertragen</strong> — der Prompt ist im manuellen
+          Modus und folgt deinen Einstellungen nicht mehr. Synchronisiere, damit die Änderung am
+          Telefon aktiv wird.
+        </span>
+        <ForceResyncButton />
+      </div>
+    )
+  }
+
   if (data.status === 'failed') {
     return (
       <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-error/30 bg-error-bg/60 px-4 py-2.5 text-sm font-medium text-error">
@@ -94,23 +114,14 @@ export function AgentSyncBanner() {
   return null
 }
 
-const DRIFT_POLL_MS = 60_000
-
-// Drift banner — the live prompt was edited manually (prompt_manual_override),
-// so the saved Kiki-Zentrale settings no longer reach the phone. Polls GET
-// /drift; when drift=true, offers a one-click force-resync that REPLACES the
-// manual edit. Gated behind a ConfirmDialog so the destructive overwrite is
-// conscious. Reuses the same banner styling + ['kiki-zentrale'] invalidation.
-export function AgentDriftBanner() {
+// Shared force-resync action (warning tone): re-renders the prompt from the saved
+// settings and pushes it, BYPASSING the manual-override gate. Destructive (it
+// REPLACES any manual prompt edit), so it's gated behind a ConfirmDialog. Used by
+// both the manual-mode sync warning (immediate, after a blocked save) and the
+// drift banner (persistent reminder).
+function ForceResyncButton() {
   const qc = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const { data } = useQuery({
-    queryKey: ['kiki-zentrale', 'drift'],
-    queryFn: fetchDrift,
-    refetchInterval: DRIFT_POLL_MS,
-    refetchIntervalInBackground: true,
-  })
-
   const resync = useMutation({
     mutationFn: forceResync,
     onSuccess: () => {
@@ -119,26 +130,15 @@ export function AgentDriftBanner() {
       qc.invalidateQueries({ queryKey: ['kiki-zentrale'] })
     },
   })
-
-  if (!data?.drift) return null
-
   return (
     <>
-      <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-bg/60 px-4 py-2.5 text-sm font-medium text-warning">
-        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-        <span className="flex-1">
-          Der Prompt wurde manuell bearbeitet und folgt nicht mehr deinen Einstellungen. Zuletzt
-          geänderte Einstellungen sind am Telefon noch nicht aktiv.
-        </span>
-        <button
-          onClick={() => setConfirmOpen(true)}
-          disabled={resync.isPending}
-          className="shrink-0 rounded-md border border-warning/40 bg-surface px-3 py-1 text-xs font-semibold text-warning hover:bg-warning-bg disabled:opacity-50"
-        >
-          {resync.isPending ? 'Wird synchronisiert…' : 'Mit Einstellungen synchronisieren'}
-        </button>
-      </div>
-
+      <button
+        onClick={() => setConfirmOpen(true)}
+        disabled={resync.isPending}
+        className="shrink-0 rounded-md border border-warning/40 bg-surface px-3 py-1 text-xs font-semibold text-warning hover:bg-warning-bg disabled:opacity-50"
+      >
+        {resync.isPending ? 'Wird synchronisiert…' : 'Mit Einstellungen synchronisieren'}
+      </button>
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={(v) => !v && setConfirmOpen(false)}
@@ -150,5 +150,34 @@ export function AgentDriftBanner() {
         onConfirm={() => resync.mutate()}
       />
     </>
+  )
+}
+
+const DRIFT_POLL_MS = 60_000
+
+// Drift banner — the live prompt was edited manually (prompt_manual_override),
+// so the saved Kiki-Zentrale settings no longer reach the phone. Polls GET
+// /drift; when drift=true, offers a one-click force-resync that REPLACES the
+// manual edit. Gated behind a ConfirmDialog so the destructive overwrite is
+// conscious. Reuses the same banner styling + ['kiki-zentrale'] invalidation.
+export function AgentDriftBanner() {
+  const { data } = useQuery({
+    queryKey: ['kiki-zentrale', 'drift'],
+    queryFn: fetchDrift,
+    refetchInterval: DRIFT_POLL_MS,
+    refetchIntervalInBackground: true,
+  })
+
+  if (!data?.drift) return null
+
+  return (
+    <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning-bg/60 px-4 py-2.5 text-sm font-medium text-warning">
+      <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+      <span className="flex-1">
+        Der Prompt wurde manuell bearbeitet und folgt nicht mehr deinen Einstellungen. Zuletzt
+        geänderte Einstellungen sind am Telefon noch nicht aktiv.
+      </span>
+      <ForceResyncButton />
+    </div>
   )
 }

@@ -330,6 +330,31 @@ def test_repush_bg_swallows_errors(monkeypatch):
     kz._repush_bg("org1", "user1", "kz_emergency")   # must NOT raise
 
 
+def test_repush_bg_manual_override_resolves_as_not_applied(monkeypatch):
+    # manual_override means the saved config did NOT reach the agent — it must
+    # resolve the sync banner as failed (ok=False) with the 'manual_override'
+    # sentinel, NOT a false green "applied". This is the IF/THEN-silent-push fix.
+    seen = {}
+    monkeypatch.setattr(kz.ac, "rerender_and_push_for_org",
+                        lambda **k: {"updated": False, "reason": "manual_override"})
+    monkeypatch.setattr(kz.ac, "finish_sync",
+                        lambda org, seq, **k: seen.update(k))
+    kz._repush_bg("org1", "user1", "kz_conversation_logic", seq=7)
+    assert seen["ok"] is False
+    assert seen["reason"] == "manual_override"
+
+
+def test_repush_bg_no_agent_stays_benign_success(monkeypatch):
+    # no_agent / superseded remain benign no-ops (nothing to push is not a failure).
+    seen = {}
+    monkeypatch.setattr(kz.ac, "rerender_and_push_for_org",
+                        lambda **k: {"updated": False, "reason": "no_agent"})
+    monkeypatch.setattr(kz.ac, "finish_sync",
+                        lambda org, seq, **k: seen.update(k))
+    kz._repush_bg("org1", "user1", "kz_categories", seq=3)
+    assert seen["ok"] is True
+
+
 # ─── provisioning._seed_required_fields (new-org defaults) ────────────────────
 def test_seed_required_fields_inserts_name_phone_address():
     client = FakeClient({"agent_required_fields": []})

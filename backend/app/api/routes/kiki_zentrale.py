@@ -90,9 +90,12 @@ def _repush_bg(org_id: str, user_id: str | None, endpoint_label: str, seq: int =
         reason = result.get("reason")
         # 'superseded' = a newer save already owns the latest state and pushed it
         # — a benign no-op, not a failure (its own finish_sync resolves the banner).
-        ok = bool(result.get("updated")) or reason in (
-            "manual_override", "no_agent", "superseded",
-        )
+        # 'manual_override' is NOT benign: the saved change did NOT reach the agent
+        # (the prompt is in manual mode). Resolve it as failed with the
+        # 'manual_override' sentinel so the sync banner warns + offers a resync
+        # instead of a false green "applied" — the bug where IF/THEN (and every
+        # other config section) silently never reached the live ElevenLabs prompt.
+        ok = bool(result.get("updated")) or reason in ("no_agent", "superseded")
         # Notdienst-/Telefon-saves also reconfigure the native transfer_to_number
         # system tool (the actual call-bridge mechanism), not just the prompt.
         if endpoint_label in ("kz_emergency", "kz_phone", "kz_retry"):
@@ -960,9 +963,21 @@ async def get_conversation_logic(user: CurrentUser = Depends(require_org)) -> di
             .select("conversation_logic, conversation_logic_enabled")
             .eq("org_id", user.org_id).limit(1).execute().data or [{}]
         )[0]
+        raw_logic = row.get("conversation_logic")
+        saved_enabled = row.get("conversation_logic_enabled")
+        # Default OFF for a FRESH org only: a never-configured org has
+        # conversation_logic IS NULL (the column is nullable with no default,
+        # unlike conversation_logic_enabled which defaults true). Such orgs start
+        # collapsed/off. Orgs that already saved logic keep their stored flag, so
+        # an existing customer's active rules are never silently disabled.
+        enabled = (
+            (saved_enabled if saved_enabled is not None else True)
+            if raw_logic is not None
+            else False
+        )
         return {
-            "enabled": row.get("conversation_logic_enabled", True),
-            "logic": row.get("conversation_logic") or {"version": 1, "blocks": []},
+            "enabled": enabled,
+            "logic": raw_logic or {"version": 1, "blocks": []},
         }
 
     return await run_in_threadpool(_do)
