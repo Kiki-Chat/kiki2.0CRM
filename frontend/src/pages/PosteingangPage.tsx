@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { initials } from '../lib/utils'
 import { useMe } from '../lib/useMe'
 import { Avatar } from './calls/atoms'
+import { ActionDrawer } from './posteingang/ActionDrawer'
 import { AssigneeDot, Btn, ProgressMeter, SectionHead, TypeTag } from './posteingang/parts'
 import { type DecisionVM, usePosteingang, usePosteingangActions } from './posteingang/api'
 
@@ -18,11 +19,13 @@ function DecisionCard({
   employees,
   onAssign,
   onResolve,
+  onOpen,
 }: {
   d: DecisionVM
   employees: Parameters<typeof AssigneeDot>[0]['employees']
   onAssign: (inquiryId: string, employeeId: string | null) => void
   onResolve: (c: 'primary' | 'secondary' | 'tertiary') => void
+  onOpen: () => void
 }) {
   const [hover, setHover] = useState(false)
   const assignee = d.assigneeId ? employees.find((e) => e.id === d.assigneeId) : null
@@ -40,7 +43,8 @@ function DecisionCard({
     >
       <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: d.accent }} />
       <div style={{ padding: '17px 20px 0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 14 }}>
+        {/* Header is clickable → opens the "open action" drawer (call context + buttons). */}
+        <div onClick={onOpen} title="Details & Anruf ansehen" style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 14, cursor: 'pointer' }}>
           <Avatar employeeId={d.custId} text={initials(d.customer)} size={40} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: 'var(--font-poster)', fontSize: 15.5, fontWeight: 700, color: 'var(--text)' }}>{d.customer}</div>
@@ -72,10 +76,22 @@ function DecisionCard({
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 20px 16px', flexWrap: 'wrap', borderTop: '1px solid var(--border-faint)' }}>
-        <Btn variant={d.type === 'storno' ? 'danger' : 'primary'} onClick={() => onResolve('primary')} disabled={needsAssignee} title={needsAssignee ? 'Erst zuweisen, dann bestätigen' : undefined}>{d.primary}</Btn>
-        {d.secondary && <Btn variant="secondary" onClick={() => onResolve('secondary')}>{d.secondary}</Btn>}
-        {d.tertiary && <Btn variant="ghost" onClick={() => onResolve('tertiary')}>{d.tertiary}</Btn>}
-        {needsAssignee && <span style={{ fontSize: 12, color: 'var(--warning)', fontWeight: 600 }}>Erst zuweisen</span>}
+        {d.notify ? (
+          // Notification card: a single neutral "check" link — NO direct decision.
+          (d.opensDrawer || d.route) ? (
+            <Btn variant="secondary" onClick={onOpen}>{d.cardCta} →</Btn>
+          ) : (
+            <span style={{ fontSize: 12.5, color: 'var(--muted)', fontWeight: 600 }}>Nur zur Information</span>
+          )
+        ) : (
+          <>
+            <Btn variant={d.type === 'storno' ? 'danger' : 'primary'} onClick={() => onResolve('primary')} disabled={needsAssignee} title={needsAssignee ? 'Erst zuweisen, dann bestätigen' : undefined}>{d.primary}</Btn>
+            {d.secondary && <Btn variant="secondary" onClick={() => onResolve('secondary')}>{d.secondary}</Btn>}
+            {d.tertiary && <Btn variant="ghost" onClick={() => onResolve('tertiary')}>{d.tertiary}</Btn>}
+            {needsAssignee && <span style={{ fontSize: 12, color: 'var(--warning)', fontWeight: 600 }}>Erst zuweisen</span>}
+            <button type="button" onClick={onOpen} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'var(--font-poster)', fontSize: 12.5, fontWeight: 700, color: 'var(--green-deep)' }}>Details →</button>
+          </>
+        )}
       </div>
     </div>
   )
@@ -95,6 +111,8 @@ export function PosteingangPage() {
     ? 'Kiki hat deine Anrufe bearbeitet und in Vorgänge sortiert. Hier triffst du die offenen Entscheidungen — die Vorgänge selbst findest du unter „Vorgänge".'
     : 'Das sind deine offenen Aufgaben — was Kiki für dich vorbereitet hat und worauf du reagieren musst. Die Vorgänge selbst findest du unter „Vorgänge".'
   const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
+  // The decision currently expanded in the "open action" drawer (by action_key).
+  const [openKey, setOpenKey] = useState<string | null>(null)
   // Optimistic assignee overrides per inquiry: assigneeId on a decision is derived
   // from the windowed calls list, so a fresh assignment may not be reflected by the
   // refetch. Override locally so the assign-then-confirm gating updates immediately.
@@ -114,6 +132,7 @@ export function PosteingangPage() {
   const total = decisions.length
   const doneCount = total - liveDecisions.length
   const allDone = liveDecisions.length === 0
+  const openDecision = openKey ? liveDecisions.find((d) => d.actionKey === openKey) ?? null : null
 
   const resolve = (d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') => {
     // AI-suggested KVA/Rechnung: open the pre-filled create-form instead of POSTing.
@@ -121,12 +140,19 @@ export function PosteingangPage() {
       navigate(d.route)
       return
     }
+    setOpenKey(null) // close the drawer if the action came from there
     setResolvedKeys((s) => new Set(s).add(d.actionKey))
     actions.resolve(d, choice).catch(() => setResolvedKeys((s) => { const n = new Set(s); n.delete(d.actionKey); return n }))
   }
   const onAssign = (inquiryId: string, employeeId: string | null) => {
     setAssignOverrides((m) => new Map(m).set(inquiryId, employeeId))
     actions.assignInquiry.mutate({ inquiryId, employeeId })
+  }
+  // Appointment + suggestion cards open the drawer; notification cards link
+  // straight to the document/caller.
+  const handleOpen = (d: DecisionVM) => {
+    if (d.opensDrawer) setOpenKey(d.actionKey)
+    else if (d.route) navigate(d.route)
   }
 
   return (
@@ -168,11 +194,19 @@ export function PosteingangPage() {
           <SectionHead icon={Inbox} color="var(--error)" label={isAdmin ? 'Jetzt entscheiden' : 'Zu erledigen'} trailing={<ProgressMeter done={doneCount} total={total} />} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {liveDecisions.map((d) => (
-              <DecisionCard key={d.actionKey} d={d} employees={employees} onAssign={onAssign} onResolve={(c) => resolve(d, c)} />
+              <DecisionCard key={d.actionKey} d={d} employees={employees} onAssign={onAssign} onResolve={(c) => resolve(d, c)} onOpen={() => handleOpen(d)} />
             ))}
           </div>
         </>
       )}
+
+      <ActionDrawer
+        decision={openDecision}
+        employees={employees}
+        onResolve={resolve}
+        onAssign={onAssign}
+        onClose={() => setOpenKey(null)}
+      />
     </div>
   )
 }

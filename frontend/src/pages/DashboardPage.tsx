@@ -13,6 +13,7 @@ import { apiFetch } from '../lib/api'
 import { isSupabaseConfigured } from '../lib/env'
 import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
+import { ActionDrawer } from './posteingang/ActionDrawer'
 import { usePosteingang, usePosteingangActions, type DecisionVM } from './posteingang/api'
 
 // The overview tab leads with the "Jetzt entscheiden" decision deck (the pending
@@ -136,12 +137,12 @@ const TYPE_ICON: Record<string, typeof Phone> = {
 function HeroDeck() {
   const navigate = useNavigate()
   const { isAdmin } = useMe()
-  const { decisions, callsCount, loading } = usePosteingang()
+  const { decisions, callsCount, loading, employees } = usePosteingang()
   // Employee portal: frame the deck as the person's own to-do list ("Aufgaben");
   // for the admin/company login it stays the org decision queue ("Entscheidungen").
   const taskNoun = isAdmin ? 'Entscheidung' : 'Aufgabe'
   const taskNounPl = isAdmin ? 'Entscheidungen' : 'Aufgaben'
-  const { resolve } = usePosteingangActions()
+  const { resolve, assignInquiry } = usePosteingangActions()
   const { data: cases } = useQuery({
     queryKey: ['cases'],
     queryFn: () => apiFetch<{ id: string }[]>('/api/cases'),
@@ -150,10 +151,38 @@ function HeroDeck() {
   })
   const [index, setIndex] = useState(0)
   const [busy, setBusy] = useState(false)
+  // Resolved cards vanish IMMEDIATELY (optimistic) instead of waiting for the 30s
+  // refetch — so every button has a visible effect. assignOverrides reflects a
+  // fresh assignment right away (assigneeId is derived from a windowed calls list
+  // the refetch may lag), so the assign-then-confirm gate updates instantly.
+  const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
+  const [assignOverrides, setAssignOverrides] = useState<Map<string, string | null>>(new Map())
+  // The decision currently expanded in the "open action" drawer (by action_key).
+  const [openKey, setOpenKey] = useState<string | null>(null)
 
-  const total = decisions.length
+  const liveDecisions = decisions
+    .filter((d) => !resolvedKeys.has(d.actionKey))
+    .map((d) =>
+      d.inquiryId && assignOverrides.has(d.inquiryId)
+        ? { ...d, assigneeId: assignOverrides.get(d.inquiryId) ?? null }
+        : d,
+    )
+  const total = liveDecisions.length
   const casesCount = cases?.length ?? 0
   const i = total ? Math.min(index, total - 1) : 0
+  const openDecision = openKey ? liveDecisions.find((d) => d.actionKey === openKey) ?? null : null
+
+  function onAssign(inquiryId: string, employeeId: string | null) {
+    setAssignOverrides((m) => new Map(m).set(inquiryId, employeeId))
+    assignInquiry.mutate({ inquiryId, employeeId })
+  }
+
+  // Opening a card: appointment + suggestion kinds open the ActionDrawer; a
+  // notification with a document/caller link navigates straight there.
+  function handleOpen(d: DecisionVM) {
+    if (d.opensDrawer) setOpenKey(d.actionKey)
+    else if (d.route) navigate(d.route)
+  }
 
   async function act(d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') {
     if (busy) return
@@ -162,13 +191,19 @@ function HeroDeck() {
       navigate(d.route)
       return
     }
+    // Optimistically drop the card + close the drawer, then resolve. On failure,
+    // restore the card so nothing is silently lost.
+    setResolvedKeys((s) => new Set(s).add(d.actionKey))
+    setOpenKey(null)
+    setIndex((x) => Math.max(0, x - (i >= total - 1 ? 1 : 0)))
     setBusy(true)
     try {
       await resolve(d, choice)
+    } catch {
+      setResolvedKeys((s) => { const n = new Set(s); n.delete(d.actionKey); return n })
     } finally {
       setBusy(false)
     }
-    setIndex((x) => Math.max(0, Math.min(x, total - 2)))
   }
 
   return (
@@ -230,11 +265,15 @@ function HeroDeck() {
             <p className="text-xs text-muted">Kiki hat alles abgearbeitet — neue Anrufe erscheinen hier automatisch.</p>
           </div>
         )}
-        {decisions.map((d, j) => {
+        {liveDecisions.map((d, j) => {
           const p = j - i
           if (p < 0 || p > 2) return null
           const Icon = TYPE_ICON[d.type] ?? Sparkles
           const front = p === 0
+          // A Termin tied to an inquiry must be assigned before it can be confirmed
+          // (assign ≠ confirm). The dashboard card has no inline assign control, so
+          // the primary button routes into the drawer (where assignment lives).
+          const needsAssignee = d.kind === 'termin_anfrage' && !!d.inquiryId && !d.assigneeId
           return (
             <div
               key={d.actionKey}
@@ -248,55 +287,80 @@ function HeroDeck() {
                 pointerEvents: front ? 'auto' : 'none',
               }}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold"
-                  style={{ color: d.accent, backgroundColor: `color-mix(in srgb, ${d.accent} 12%, transparent)` }}
-                >
-                  <Icon size={12} /> {d.typeLabel}
-                </span>
-                {d.caseTicket && <span className="truncate font-mono text-[11px] text-muted">{d.caseTicket}</span>}
-              </div>
-              <p className="mt-1.5 truncate text-sm font-bold text-text">{d.title}</p>
-              <p className="mt-0.5 truncate text-[11px] text-muted">
-                {d.customer}
-                {d.caseName ? ` · ${d.caseName}` : ''}
-              </p>
-              {front && (
-                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                  <button
-                    disabled={busy}
-                    onClick={() => act(d, 'primary')}
-                    className="rounded-lg px-3 py-1.5 text-xs font-bold text-white transition disabled:opacity-50"
-                    style={{ backgroundColor: d.accent }}
+              {/* Subject region — appointment/suggestion cards open the action
+                  drawer; notification cards link straight to the document/caller. */}
+              <div
+                onClick={front ? () => handleOpen(d) : undefined}
+                className={front ? 'cursor-pointer' : undefined}
+                title={front ? (d.notify ? d.cardCta : 'Details & Anruf ansehen') : undefined}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold"
+                    style={{ color: d.accent, backgroundColor: `color-mix(in srgb, ${d.accent} 12%, transparent)` }}
                   >
-                    {d.primary}
-                  </button>
-                  {d.secondary && (
-                    <button
-                      disabled={busy}
-                      onClick={() => act(d, 'secondary')}
-                      className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-text transition hover:border-green-tint-200 disabled:opacity-50"
-                    >
-                      {d.secondary}
-                    </button>
-                  )}
-                  {d.tertiary && (
-                    <button
-                      disabled={busy}
-                      onClick={() => act(d, 'tertiary')}
-                      className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-muted transition hover:text-text disabled:opacity-50"
-                    >
-                      {d.tertiary}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => navigate('/posteingang')}
-                    className="ml-auto self-center text-xs font-medium text-muted hover:text-text"
-                  >
-                    Alle ansehen →
-                  </button>
+                    <Icon size={12} /> {d.typeLabel}
+                  </span>
+                  {d.caseTicket && <span className="truncate font-mono text-[11px] text-muted">{d.caseTicket}</span>}
                 </div>
+                <p className="mt-1.5 truncate text-sm font-bold text-text">{d.title}</p>
+                <p className="mt-0.5 truncate text-[11px] text-muted">
+                  {d.customer}
+                  {d.caseName ? ` · ${d.caseName}` : ''}
+                </p>
+              </div>
+              {front && (
+                d.notify ? (
+                  // Notification card: a single neutral "check" link — NO decision.
+                  <div className="mt-2.5 flex items-center gap-1.5">
+                    {(d.opensDrawer || d.route) ? (
+                      <button
+                        onClick={() => handleOpen(d)}
+                        className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-text transition hover:border-green-tint-200"
+                      >
+                        {d.cardCta} →
+                      </button>
+                    ) : (
+                      <span className="text-xs font-medium text-muted">Nur zur Information</span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    <button
+                      disabled={busy}
+                      onClick={() => (needsAssignee ? setOpenKey(d.actionKey) : act(d, 'primary'))}
+                      title={needsAssignee ? 'Erst zuweisen — im Detail öffnen' : undefined}
+                      className="rounded-lg px-3 py-1.5 text-xs font-bold text-white transition disabled:opacity-50"
+                      style={{ backgroundColor: d.accent }}
+                    >
+                      {d.primary}
+                    </button>
+                    {d.secondary && (
+                      <button
+                        disabled={busy}
+                        onClick={() => act(d, 'secondary')}
+                        className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-text transition hover:border-green-tint-200 disabled:opacity-50"
+                      >
+                        {d.secondary}
+                      </button>
+                    )}
+                    {d.tertiary && (
+                      <button
+                        disabled={busy}
+                        onClick={() => act(d, 'tertiary')}
+                        className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-muted transition hover:text-text disabled:opacity-50"
+                      >
+                        {d.tertiary}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setOpenKey(d.actionKey)}
+                      className="ml-auto self-center text-xs font-semibold text-green-deep hover:underline"
+                    >
+                      Details →
+                    </button>
+                  </div>
+                )
               )}
             </div>
           )
@@ -307,6 +371,14 @@ function HeroDeck() {
         src={kikiAvatar}
         alt="Kiki"
         className="kiki-live pointer-events-none absolute bottom-0 right-[-24px] hidden h-[280px] w-auto select-none lg:block xl:right-2"
+      />
+      <ActionDrawer
+        decision={openDecision}
+        employees={employees}
+        busy={busy}
+        onResolve={act}
+        onAssign={onAssign}
+        onClose={() => setOpenKey(null)}
       />
     </section>
   )
