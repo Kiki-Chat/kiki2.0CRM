@@ -23,7 +23,7 @@ export type ActionKind =
 
 export type DecisionType = 'termin' | 'rueckruf' | 'storno' | 'kva' | 'reschedule'
 export type VStatus = 'open' | 'in_progress' | 'completed'
-type TagVariant = 'info' | 'green' | 'error' | 'warning' | 'ai'
+type TagVariant = 'info' | 'green' | 'error' | 'warning' | 'ai' | 'neutral'
 
 export interface RawAction {
   action_key: string
@@ -158,7 +158,7 @@ const KIND_CFG: Record<
   invoice_pending_payment: { type: 'kva', accent: 'var(--warning)', label: 'Zahlung', variant: 'warning', title: () => 'Zahlung eingegangen?', primary: 'Als bezahlt', secondary: null, tertiary: null, reco: (_n, c) => `Zahlungseingang für ${c} prüfen`, assignable: false },
   alt_time_proposal: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschieben', variant: 'warning', title: () => 'Neuen Termin annehmen?', primary: 'Annehmen', secondary: null, tertiary: 'Ablehnen', reco: () => 'Vorgeschlagenen Termin annehmen', assignable: false },
   reschedule_pending: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschoben', variant: 'warning', title: () => 'Verschiebung – Kunde einverstanden?', primary: 'Bestätigt', secondary: null, tertiary: 'Stornieren', reco: () => 'Kunde hat dem neuen Termin zugestimmt → erledigen; sonst stornieren', assignable: false },
-  appointment_cancelled: { type: 'storno', accent: 'var(--error)', label: 'Storno', variant: 'error', title: () => 'Termin storniert', primary: 'Verstanden', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
+  appointment_cancelled: { type: 'storno', accent: '#475569', label: 'Storno', variant: 'neutral', title: () => 'Termin storniert', primary: 'Verstanden', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
   callback_owed: { type: 'rueckruf', accent: 'var(--green-primary)', label: 'Rückruf', variant: 'green', title: (a) => `Rückruf an ${a.customer_name || 'Kunde'}?`, primary: 'Erledigt', secondary: 'Zuweisen', tertiary: null, reco: (n) => `${n} den Rückruf zuweisen`, assignable: true },
   kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: (a) => `Angebot an ${a.customer_name || 'Kunde'} senden?`, primary: 'Angebot senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `Angebot jetzt an ${c} senden`, assignable: false },
   kva_pending_acceptance: { type: 'kva', accent: 'var(--ai)', label: 'KVA-Antwort', variant: 'ai', title: () => 'Kundenantwort erfassen', primary: 'Angenommen', secondary: null, tertiary: 'Abgelehnt', reco: () => 'Antwort des Kunden eintragen', assignable: false },
