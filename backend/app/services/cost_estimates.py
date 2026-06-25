@@ -614,3 +614,103 @@ def draft_cost_estimate(org_id: str, payload) -> dict:
         "status": status,
         "message": message,
     }
+
+
+def _kva_level(cfg_row: dict) -> int:
+    """KVA autonomy level (1/2/3), legacy kiki_level fallback, default 2."""
+    try:
+        return int(cfg_row.get("kva_level") or cfg_row.get("kiki_level") or 2)
+    except (TypeError, ValueError):
+        return 2
+
+
+def _fetch_kva_to_send(
+    client, org_id: str, *, cost_estimate_id=None, number=None, customer_id=None
+) -> dict | None:
+    """Resolve which KVA to (re)send: by id, then by number, then the customer's
+    most recent KVA. Always org-scoped and type='kva'."""
+    base = client.table("cost_estimates").select("*").eq("org_id", org_id).eq("type", "kva")
+    if cost_estimate_id:
+        rows = base.eq("id", cost_estimate_id).limit(1).execute().data
+    elif number:
+        rows = base.eq("number", number).limit(1).execute().data
+    elif customer_id:
+        rows = (
+            base.eq("customer_id", customer_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+        )
+    else:
+        rows = []
+    return rows[0] if rows else None
+
+
+def send_cost_estimate(org_id: str, payload) -> dict:
+    """hk_sendKVA handler: email an EXISTING Kostenvoranschlag to the customer.
+
+    GATED to the fully-automatic KVA autonomy level (L3) — Amber's decision
+    2026-06-22: only a level-3 org sends KVAs straight to the customer; at L1/L2
+    the team reviews and sends, so the tool declines with a German note the agent
+    can speak. Resolves the KVA by costEstimateId → number → the customer's most
+    recent KVA, then reuses the existing _send_draft_kva send path (PDF render +
+    email + status='sent' stamp). Never raises.
+
+    Returns {success, message[, id, number, status, needsEmail]}."""
+    client = get_service_client()
+    cfg = (
+        client.table("agent_configs")
+        .select("kva_enabled, kva_level, kva_automation_enabled, kiki_level")
+        .eq("org_id", org_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    cfg_row = cfg[0] if cfg else {}
+    kva_on = cfg_row.get("kva_enabled")
+    if kva_on is None:
+        kva_on = cfg_row.get("kva_automation_enabled")
+    # Only the fully-automatic level may send directly; otherwise the team handles it.
+    if not kva_on or _kva_level(cfg_row) != 3:
+        return {
+            "success": False,
+            "message": "Der Kostenvoranschlag wird vom Team geprüft und per E-Mail versendet.",
+        }
+
+    row = _fetch_kva_to_send(
+        client,
+        org_id,
+        cost_estimate_id=payload.cost_estimate_id,
+        number=payload.number,
+        customer_id=payload.customer_id,
+    )
+    if not row:
+        return {
+            "success": False,
+            "message": "Ich konnte den Kostenvoranschlag nicht finden — das Team kümmert sich darum.",
+        }
+
+    # A real recipient email is required (placeholder @temp.local never gets mail).
+    customer = fetch_customer(client, org_id, row.get("customer_id"))
+    to_email = ((customer or {}).get("email") or "").strip()
+    if not to_email or to_email.endswith("@temp.local"):
+        return {
+            "success": False,
+            "needsEmail": True,
+            "message": "Mir fehlt noch Ihre E-Mail-Adresse, an die ich den Kostenvoranschlag senden kann.",
+        }
+
+    sent = _send_draft_kva(client, org_id, row)
+    if sent:
+        return {
+            "success": True,
+            "id": row["id"],
+            "number": row.get("number"),
+            "status": "sent",
+            "message": "Der Kostenvoranschlag wurde per E-Mail versendet.",
+        }
+    return {
+        "success": False,
+        "message": "Das Versenden hat gerade nicht geklappt — das Team kümmert sich darum.",
+    }

@@ -4,6 +4,32 @@
 > system prompt so a stronger/lower-latency model (we're on Gemini 3.5 Flash for
 > latency) has less to chew through per turn, while keeping behaviour identical.
 
+> **2026-06-22 UPDATE — verified against ElevenLabs docs + OpenAI/Anthropic token
+> accounting. Lever ranking corrected; implementation started on branch
+> `feature/prompt-engine-optimization`. See `OVERNIGHT_IMPLEMENTATION.md` +
+> `DEFERRED_SPECS.md`.**
+>
+> - **CORRECTION to Lever A (MCP/tools):** moving tool guidance out of the prompt does
+>   **NOT** cut per-turn tokens by itself — ElevenLabs serializes every enabled tool's
+>   name+description+schema alongside the system prompt **every turn** (orchestration-engine
+>   blog, verbatim), exactly like function-calling. Relocation ≈ 0 token saving unless the
+>   tool becomes *conditionally* loaded. So **A is demoted**; the real per-turn savings come
+>   from **D (dedupe), E (conditional render), and deletion** — those remove tokens; A only
+>   relocates them. Verbose tool descriptions are still worth doing — for *selection
+>   reliability*, not size.
+> - **Re-ordered levers by verified impact:** D (dedupe, ~zero risk) → E (conditional render)
+>   → B (KB offload) → C (per-call tiered injection) → A (tool descriptions, needs live EL +
+>   eval).
+> - **No per-conversation prompt cache** is documented on ElevenLabs (only billing line-items),
+>   so you can't lean on caching to offset a fat prompt; latency-to-first-token + instruction
+>   adherence are the real costs.
+> - **Multiplier discovered:** `transfer_to_agent` is a self-transfer, so the outbound→inbound
+>   handoff leg **inherits the full stored inbound prompt** — slimming inbound benefits 3 paths
+>   (pure inbound, re-render, every outbound handoff), not 2.
+> - **Shipped so far (branch, green, 968 tests):** dedup double-rendered KZ_EMERGENCY +
+>   BUSINESS_HOURS (D); outbound prose tool-list → pointer + mailbox compress; onboarding now
+>   attaches system tools (was a real gap); additive outbound emergency escalation.
+
 ## 1. The problem
 - The 11Labs system prompt is the single biggest input on every turn. The template
   alone is ~906 lines / ~56k chars (**~14k tokens**); fully rendered for a real org

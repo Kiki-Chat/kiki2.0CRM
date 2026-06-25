@@ -114,7 +114,7 @@ def create_checkout_session(
     ]
     sub_data: dict = {"metadata": {"heykiki_org_id": _org(db, org_id).get("heykiki_org_id"), "org_id": str(org_id)}}
 
-    base = (settings.billing_portal_return_url or settings.frontend_public_url.rstrip("/") + "/settings/abrechnung").split("?")[0]
+    base = (settings.billing_portal_return_url or settings.public_app_url + "/settings/abrechnung").split("?")[0]
     success_url = f"{base}?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{base}?checkout=cancel"
 

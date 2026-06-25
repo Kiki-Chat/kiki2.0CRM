@@ -44,8 +44,10 @@ from app.api.routes.tools import (
     draft_cost_estimate,
     get_available_slots,
     identify_customer,
+    ping,
     query_knowledge_base,
     search_inquiries,
+    send_cost_estimate,
     transfer_call,
     update_customer,
 )
@@ -162,6 +164,8 @@ app.include_router(search_inquiries.router)
 app.include_router(query_knowledge_base.router)
 app.include_router(transfer_call.router)
 app.include_router(draft_cost_estimate.router)
+app.include_router(send_cost_estimate.router)
+app.include_router(ping.router)
 
 # Conversation Initiation Webhook (fires on call connect, before the agent speaks).
 app.include_router(conversation_init.router)

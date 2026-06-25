@@ -191,6 +191,26 @@ export function InvoiceFormPage() {
           const derived = [cs.number, cs.title].filter(Boolean).join(' – ')
           if (derived) setSubject((prev) => prev || derived)
         }
+
+        // AI pre-fill from the originating call (?call_id=): subject + first position
+        // from the extracted service / problem, so the invoice isn't empty.
+        const qCallId = params.get('call_id') || ''
+        if (qCallId) {
+          const c = await apiFetch<{
+            summary_title?: string | null
+            data_collection?: Record<string, string> | null
+            enrichment?: { prefill?: { service_description?: string | null; problem?: string | null } } | null
+          }>(`/api/calls/${qCallId}`)
+          const pf = c.enrichment?.prefill
+          const dc = c.data_collection || {}
+          const svc = pf?.service_description || dc.issue_summary || c.summary_title || ''
+          const descr = svc || pf?.problem || dc.ultimate_summary || ''
+          if (svc) setSubject((prev) => prev || svc)
+          if (descr)
+            setPositions((rows) =>
+              rows.length === 1 && !rows[0].description ? [{ ...rows[0], description: descr }] : rows,
+            )
+        }
       } catch {
         // Non-fatal: form still usable without prefill
       }

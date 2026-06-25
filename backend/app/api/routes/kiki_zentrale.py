@@ -1654,6 +1654,16 @@ def _force_resync_bg(org_id: str, user_id: str | None, seq: int) -> None:
         )
         reason = result.get("reason")
         ok = bool(result.get("updated")) or reason in ("no_agent", "superseded")
+        # Drift-recovery must also re-push the native system tools (transfer_to_number
+        # / transfer_to_agent / voicemail_detection), not just the prompt (2026-06-22):
+        # previously force-resync fixed prompt drift while leaving a stale or missing
+        # call-bridge tool untouched, so an operator hitting "Force Resync" to repair a
+        # divergent agent would still be left with a broken transfer. Mirrors the
+        # _repush_bg behavior for kz_emergency/kz_phone/kz_retry.
+        tool_result = ac.sync_system_tools_for_org(org_id)
+        tool_reason = tool_result.get("reason")
+        if not tool_result.get("updated") and tool_reason not in ("no_agent", None):
+            ok, reason = False, f"system_tools: {tool_reason}"
         ac.finish_sync(org_id, seq, ok=ok, reason=reason)
     except Exception as exc:  # noqa: BLE001
         logger.warning(

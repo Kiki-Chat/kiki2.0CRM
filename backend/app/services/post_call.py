@@ -563,6 +563,15 @@ def _process_one(data: dict | None, fmt: str) -> dict:
 
         safe_auto_log_call(client, org_id, upserted[0])
 
+    # AI enrichment (our-LLM-over-transcript): structured bullet summary + intent
+    # flags (KVA/Rechnung/Termin) + pre-fill fields. Powers the bullet summary,
+    # smarter form pre-fill, and the kva_suggested/invoice_suggested Open Actions.
+    # Best-effort, no-op without OPENAI_API_KEY — never breaks ingest.
+    if call_log_id:
+        from app.services.call_enrichment import safe_enrich
+
+        safe_enrich(client, org_id, upserted[0])
+
     # Category back-fill: when the agent booked without (or with an unknown)
     # `kategorie`, classify the call summary against the org's Terminkategorien
     # so the Offene-Aktion card arrives pre-filled. Best-effort, never breaks

@@ -142,6 +142,14 @@ class DraftCostEstimateRequest(ToolRequestBase):
     notes: str | None = None
 
 
+# 12. sendCostEstimate (hk_sendKVA) — email an EXISTING KVA to the customer.
+# Resolution priority: costEstimateId → number → the customer's most recent KVA.
+class SendCostEstimateRequest(ToolRequestBase):
+    cost_estimate_id: str | None = Field(default=None, alias="costEstimateId")
+    number: str | None = None
+    customer_id: str | None = Field(default=None, alias="customerId")
+
+
 # Conversation Initiation Webhook (fires when the call connects, before the agent
 # speaks). ElevenLabs sends Twilio-style fields.
 class ConversationInitRequest(BaseModel):

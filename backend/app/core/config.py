@@ -3,6 +3,15 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Canonical public base URL of the customer-facing CRM frontend. EVERY link
+# emailed to a human (employee set-password/login link, technician job link,
+# Stripe billing-portal return) is built from this. Override per environment via
+# the FRONTEND_PUBLIC_URL env var — this is the ONLY place the default lives, so a
+# missing/empty env var can never emit a localhost or stale link in production.
+# Tracks the CURRENT live frontend domain; the FRONTEND_PUBLIC_URL env var is the
+# lever to flip it (crm.kikichat.de today → crm.heykiki.de after the migration).
+DEFAULT_PUBLIC_APP_URL = "https://crm.kikichat.de"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -78,11 +87,22 @@ class Settings(BaseSettings):
     # Used to build OAuth redirect URIs at runtime. Must match the value
     # registered with Google + Azure (see §1.4 / §2.1 of P1.8_OAUTH_SETUP.md).
     backend_public_url: str = "http://localhost:8000"
-    # Public URL of the customer frontend. Used to build the employee
-    # set-password link (Wave 2 invite email → {frontend}/set-password). For
-    # the link to resolve, this path must be on Supabase Auth's Redirect-URL
-    # allow-list. Set FRONTEND_PUBLIC_URL in Railway to the prod frontend.
-    frontend_public_url: str = "http://localhost:5173"
+    # Which ElevenLabs ENVIRONMENT this backend represents. Each deployment sets
+    # its own: the UAT Railway service sets EL_ENVIRONMENT=uat, the prod service
+    # sets EL_ENVIRONMENT=production. Returned by the conversation-init webhook so
+    # ElevenLabs resolves {{system__env_api_host}} (a shared tool's URL host) to
+    # THIS backend. Default 'uat' is the safe choice — a mis-set backend routes to
+    # UAT, never accidentally to prod. The `production` env always exists in EL; a
+    # `uat` environment must be created in the EL workspace.
+    el_environment: str = "uat"
+    # Public base URL of the customer CRM frontend — used for EVERY link emailed
+    # to a human (employee set-password/login link, technician job link, Stripe
+    # billing return). Env-overridable via FRONTEND_PUBLIC_URL; set it in Railway
+    # to the live domain. For the set-password/recovery link to resolve, the URL
+    # must also be on Supabase Auth's Redirect-URL allow-list. Defaults to the live
+    # domain so a missing env var never emits a localhost/stale link. Read it via
+    # the `public_app_url` property (trims the slash + guards an empty value).
+    frontend_public_url: str = DEFAULT_PUBLIC_APP_URL
 
     # ── Brevo SMTP relay (P1.8 Phase 3 / Wave 1.2) ─────────────────────────
     # Final fallback in the email_send.py chain when an org has no OAuth and
@@ -168,6 +188,14 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.strip().lower() in ("production", "prod")
+
+    @property
+    def public_app_url(self) -> str:
+        """Public frontend base URL for emailed links, trailing slash trimmed.
+        Falls back to DEFAULT_PUBLIC_APP_URL when FRONTEND_PUBLIC_URL is present
+        but empty, so a misconfigured env var never yields a relative/localhost
+        link. This is the single accessor every link builder should use."""
+        return (self.frontend_public_url or DEFAULT_PUBLIC_APP_URL).rstrip("/")
 
 
 @lru_cache

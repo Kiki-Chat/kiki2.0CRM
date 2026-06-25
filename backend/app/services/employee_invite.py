@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 
 def _set_password_redirect() -> str:
-    return f"{settings.frontend_public_url.rstrip('/')}/set-password"
+    return f"{settings.public_app_url}/set-password"
 
 
 def revoke_user_sessions(user_id: str) -> None:

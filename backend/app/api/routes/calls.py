@@ -211,7 +211,20 @@ def _detail(org_id: str, call_id: str) -> dict | None:
     # Enrich the single detail row too (inquiry + case fields) so the Call Logs chip
     # can resolve the Fall (case number/label), not just the inquiry.
     _enrich_calls_with_inquiries(client, org_id, rows)
-    return rows[0]
+    # Lazy AI-enrichment back-fill: calls ingested before enrichment existed (or
+    # whose ingest-time pass failed) get their bullet summary + intent the first
+    # time they're opened. Best-effort, no-op without OPENAI_API_KEY.
+    row = rows[0]
+    if not row.get("enrichment") and row.get("transcript"):
+        try:
+            from app.services.call_enrichment import safe_enrich
+
+            enriched = safe_enrich(client, org_id, row)
+            if enriched:
+                row["enrichment"] = enriched
+        except Exception:  # noqa: BLE001 — detail must never fail on enrichment
+            pass
+    return row
 
 
 @router.get("")

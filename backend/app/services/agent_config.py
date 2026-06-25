@@ -66,6 +66,11 @@ from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.services.common import format_address
 from app.services.scheduling import WEEKDAY_KEYS, normalize_business_hours
+from app.services.trade_profiles import (
+    default_emergency_keywords,
+    render_trade_diagnostics,
+    render_trade_selfhelp,
+)
 from app.services.elevenlabs_agent import (
     CLIENT_EVENTS_PATH,
     OVERRIDES_WHITELIST_AGENT_PATH,
@@ -104,17 +109,35 @@ HK_TOOL_NAMES: list[str] = [
 
 # Conversation-initiation client-data webhook route on this backend.
 # Verified live at backend/app/api/routes/conversation_init.py (router prefix
-# "/api/elevenlabs", path "/conversation-init"). Built at runtime from
-# ``settings.backend_public_url`` so it follows local vs. prod automatically.
+# "/api/elevenlabs", path "/conversation-init").
 _CONVERSATION_INIT_PATH = "/api/elevenlabs/conversation-init"
 
-# Production backend public URL — the conversation-initiation webhook on a
-# live agent MUST point here (verify_agent_health's webhook_url_is_prod check).
-# Defined explicitly per the Batch-2 contract; the configured
-# ``settings.backend_public_url`` follows local-vs-prod for the WRITE side, while
-# this constant is the read-side assertion target for the prod health board.
-_PROD_BACKEND_URL = "https://backend-production-3f88a.up.railway.app"
+# The conversation-init webhook URL we write onto every agent. Host is the
+# ElevenLabs env-var placeholder so the SAME webhook resolves to the correct
+# backend per the call's environment (the phone-number ``environment`` pin →
+# ``api_host``) — no per-environment agent duplication. ``https://`` MUST be
+# literal before any ``{{...}}`` per EL's URL rules.
+_CONVERSATION_INIT_WEBHOOK_URL = "https://{{system__env_api_host}}" + _CONVERSATION_INIT_PATH
+
+# verify_agent_health's webhook_url_is_prod check accepts the env-routed URL (the
+# correct target going forward) OR a legacy hardcoded backend host, so agents not
+# yet re-synced don't red-flag during the migration. (3f88a = UAT, 7bca =
+# production — the old ``_PROD_BACKEND_URL`` was mislabeled at 3f88a.)
+_UAT_BACKEND_URL = "https://backend-production-3f88a.up.railway.app"
+_PROD_BACKEND_URL = "https://backend-production-7bca.up.railway.app"
 _PROD_WEBHOOK_URL = f"{_PROD_BACKEND_URL}{_CONVERSATION_INIT_PATH}"
+_ACCEPTED_WEBHOOK_URLS = frozenset({
+    _CONVERSATION_INIT_WEBHOOK_URL,
+    f"{_UAT_BACKEND_URL}{_CONVERSATION_INIT_PATH}",
+    _PROD_WEBHOOK_URL,
+})
+
+# Unrendered CRM template tokens are UPPER_SNAKE ({{COMPANY_NAME}}, {{KZ_EMERGENCY}},
+# {{TRADE_SELFHELP_EXAMPLES}}, …) and MUST be gone after render. ElevenLabs dynamic
+# variables are lowercase ({{system__time}}, {{system__caller_id}}, {{customer_name}}, …)
+# and legitimately REMAIN in the prompt — EL fills them per call — so the verify gate
+# must NOT flag them. (The old "any '{{'" rule false-positived every agent.)
+_CRM_TOKEN_RE = re.compile(r"\{\{\s*[A-Z][A-Z0-9_]*\s*\}\}")
 
 # Actionable German message surfaced when an agent has no phone bound (2.3).
 NO_PHONE_MESSAGE = (
@@ -240,8 +263,8 @@ def _list_phone_numbers() -> list[dict]:
 
 
 def fetch_phone_meta_for_agent(agent_id: str) -> dict:
-    """Return ``{"phone_number", "phone_number_id"}`` for the Twilio number
-    bound to ``agent_id`` in ElevenLabs.
+    """Return ``{"phone_number", "phone_number_id", "environment"}`` for the
+    Twilio number bound to ``agent_id`` in ElevenLabs.
 
     ``phone_number_id`` is the ElevenLabs resource id — the
     ``agent_phone_number_id`` the outbound-call API requires, distinct from the
@@ -271,6 +294,9 @@ def fetch_phone_meta_for_agent(agent_id: str) -> dict:
     return {
         "phone_number": chosen.get("phone_number"),
         "phone_number_id": chosen.get("phone_number_id"),
+        # The environment this number is pinned to in ElevenLabs (drives
+        # {{system__env_api_host}} routing). ``None`` → EL default 'production'.
+        "environment": (chosen.get("assigned_agent") or {}).get("environment"),
     }
 
 
@@ -288,6 +314,42 @@ def _store_phone_on_org(
     if phone_number_id:
         patch["elevenlabs_phone_number_id"] = phone_number_id
     db.table("organizations").update(patch).eq("id", str(org_id)).execute()
+
+
+def set_phone_environment(
+    phone_number_id: str, environment: str, agent_id: str | None = None
+) -> None:
+    """Pin an ElevenLabs phone number to an ENVIRONMENT (env-var routing).
+
+    Sets the phone's ``environment`` via ``PATCH /v1/convai/phone-numbers/{id}``
+    so ElevenLabs resolves ``{{system__env_api_host}}`` (shared tools + the
+    conversation-init webhook) to the matching backend for every call on this
+    number. A phone *resource* write — distinct from agent config — so it goes
+    direct (like ``_list_phone_numbers``), NOT through ``patch_agent_safely``.
+
+    PATCH is partial; we carry the current ``agent_id`` when supplied as the
+    safe mirror of the webhook-PATCH lesson (EL has rejected sibling-less
+    patches). Raises ``ElevenLabsWriteError`` on a non-2xx response.
+    """
+    key = settings.elevenlabs_api_key or os.environ.get("ELEVENLABS_API_KEY", "")
+    if not key:
+        raise ElevenLabsWriteError(
+            "ELEVENLABS_API_KEY not configured; cannot set phone environment."
+        )
+    body: dict[str, Any] = {"environment": environment}
+    if agent_id:
+        body["agent_id"] = agent_id
+    with httpx.Client(base_url=EL_BASE, timeout=_TIMEOUT) as c:
+        r = c.patch(
+            f"/v1/convai/phone-numbers/{phone_number_id}",
+            headers={"xi-api-key": key},
+            json=body,
+        )
+    if r.status_code not in (200, 204):
+        raise ElevenLabsWriteError(
+            f"PATCH /v1/convai/phone-numbers/{phone_number_id} failed: "
+            f"{r.status_code} {r.text[:300]}"
+        )
 
 
 # ─── B.3 Prompt template ─────────────────────────────────────────────────────
@@ -764,13 +826,15 @@ def render_emergency_block(cfg: dict) -> str:
     kws = cfg.get("emergency_keywords")
     kws = [str(k).strip() for k in kws if str(k).strip()] if isinstance(kws, list) else []
     if not kws:
-        kws = list(_DEFAULT_EMERGENCY_KEYWORDS)
+        # Trade-aware fallback (generic for unrecognised trades) instead of the old
+        # SHK-only default list — so each genre gets sensible emergency keywords until
+        # the org configures its own.
+        kws = default_emergency_keywords(cfg.get("trade"))
 
     lines = ["  Ein NOTFALL liegt nur bei einem dieser Fälle vor:"]
     lines += [f"  - {k}" for k in kws]
     lines.append(
-        "  Tropfender Wasserhahn, gelegentliches Gluckern, geplante Wartung oder "
-        "Beratung"
+        "  Kleinere, nicht akute Probleme, geplante Wartung oder Beratung"
     )
     lines.append(
         "  sind KEINE Notfälle — auch wenn der Anrufer es so nennt. Bei "
@@ -789,7 +853,7 @@ def render_emergency_block(cfg: dict) -> str:
     else:
         active = (
             "  Der Notdienst greift bei einem bestätigten Notfall JEDERZEIT — auch "
-            "INNERHALB der Geschäftszeiten (z. B. Gasgeruch, Rohrbruch). Ein per "
+            "INNERHALB der Geschäftszeiten. Ein per "
             "Notfall-Stichwort bestätigter Notfall wird also unabhängig von der "
             "Uhrzeit sofort weitergeleitet."
         )
@@ -985,6 +1049,36 @@ def _emergency_windows_str(windows: Any) -> str:
     return ", ".join(parts)
 
 
+# ─── Feature-region conditional rendering ────────────────────────────────────
+# The template can wrap a whole feature's prose in HTML-comment markers:
+#   <!-- FEAT:notdienst -->  …emitted only when the feature is ON…  <!-- /FEAT:notdienst -->
+# render_prompt_for_org strips the markers when the feature is ON — leaving the
+# content BYTE-IDENTICAL to the pre-marker template, so any org that currently has
+# the feature on sees zero change — and removes the ENTIRE region when the feature is
+# OFF, so a disabled capability leaves no footprint and cannot interfere with the rest
+# of the prompt. Each feature is independent (its own marker name). To gate a new
+# region: wrap it in the template + add one entry to the map in render_prompt_for_org.
+def _apply_feature_regions(text: str, features: dict[str, bool]) -> str:
+    """Strip ``<!-- FEAT:name -->…<!-- /FEAT:name -->`` regions per ``features``.
+
+    ON  → drop just the two marker lines (content kept, byte-identical to no-marker).
+    OFF → drop the whole region between and including the markers.
+    Raises if any ``<!-- FEAT: -->`` marker survives unprocessed (its feature name was
+    never registered) — that would otherwise leak a raw comment into the live prompt."""
+    for name, enabled in features.items():
+        open_m = re.escape(f"<!-- FEAT:{name} -->")
+        close_m = re.escape(f"<!-- /FEAT:{name} -->")
+        if enabled:
+            text = re.sub(open_m + r"\n?", "", text)
+            text = re.sub(close_m + r"\n?", "", text)
+        else:
+            text = re.sub(open_m + r".*?" + close_m + r"\n?", "", text, flags=re.DOTALL)
+    leftover = sorted(set(re.findall(r"<!-- /?FEAT:[^>]+-->", text)))
+    if leftover:
+        raise RuntimeError(f"unprocessed feature-region marker(s): {leftover}")
+    return text
+
+
 def render_prompt_for_org(
     org_name: str, org: dict | None = None, org_id: str | UUID | None = None
 ) -> str:
@@ -1031,6 +1125,12 @@ def render_prompt_for_org(
             org_name, trade, address, phone, mgmt_name
         ),
         "SERVICE_AREA": _render_service_area(),
+        # Trade-aware intake examples (universal across crafts/genres): the org's
+        # trade selects an appropriate diagnostic + self-help set, generic fallback
+        # for anything unrecognised — so a car mechanic / locksmith / IT firm is
+        # never shown plumbing examples. See app/services/trade_profiles.py.
+        "TRADE_DIAGNOSTIC_EXAMPLES": render_trade_diagnostics(trade),
+        "TRADE_SELFHELP_EXAMPLES": render_trade_selfhelp(trade),
         "BUSINESS_HOURS": _render_business_hours(kz_cfg.get("scheduling")),
         "KZ_REQUIRED_FIELDS": render_required_fields_block(required_fields, kz_cfg),
         # The problem detail is now a reorderable required field (field_key
@@ -1050,6 +1150,15 @@ def render_prompt_for_org(
         "KZ_AUTONOMY": render_autonomy_block(kz_cfg),
         "KZ_PRICE_INFO": render_price_info_block(kz_cfg),
     }
+    # Conditionally render feature regions BEFORE token substitution, so a disabled
+    # feature's region (and anything inside it) leaves no trace. Byte-identical when
+    # ON. Currently gated: Notdienst (the emergency-transfer procedure) — when no
+    # emergency service is configured, the agent isn't told to transfer to a Notdienst
+    # number that doesn't exist; the {{KZ_EMERGENCY}} block still renders its short
+    # "kein Notdienst aktiv → Anliegen aufnehmen" fallback.
+    text = _apply_feature_regions(
+        text, {"notdienst": bool(kz_cfg.get("emergency_enabled"))}
+    )
     for key, value in tokens.items():
         text = text.replace("{{" + key + "}}", value)
 
@@ -1114,6 +1223,86 @@ def _stamp_agent_provisioned(org_id: str | UUID) -> None:
     ).eq("id", str(org_id)).execute()
 
 
+# ─── Reusable additive steps (shared by configure_agent + the bind path) ─────
+def attach_hk_tools(
+    agent_id: str,
+    *,
+    actor_id: str | UUID | None = None,
+    org_id: str | UUID | None = None,
+) -> list[str]:
+    """Additively merge the 11 ``hk_*`` tool ids onto the agent (step B.2).
+
+    Returns the ids newly added (``[]`` when all were already present).
+    Idempotent. Raises HTTPException(400) if a required workspace tool is
+    missing. Goes through ``patch_agent_safely`` (snapshot/verify/rollback).
+    """
+    tool_map = _resolve_hk_tool_ids(HK_TOOL_NAMES)
+    required_ids = list(tool_map.values())
+    current = get_agent_config(agent_id)
+    current_ids = _get_path(current, TOOL_IDS_PATH) or []
+    to_add = [tid for tid in required_ids if tid not in current_ids]
+    if to_add:
+        patch_agent_safely(
+            agent_id=agent_id,
+            field_patches={
+                "conversation_config": {"agent": {"prompt": {"tool_ids": required_ids}}}
+            },
+            merge_arrays=[TOOL_IDS_PATH],
+            actor_id=actor_id,
+            org_id=org_id,
+            endpoint_label="provision_tools",
+        )
+    return to_add
+
+
+def set_conversation_init_webhook(
+    agent_id: str,
+    *,
+    actor_id: str | UUID | None = None,
+    org_id: str | UUID | None = None,
+) -> None:
+    """Point the agent's conversation-init webhook at the env-routed URL and
+    enable it (step B.4).
+
+    ElevenLabs validates the full webhook object on PATCH — a partial
+    ``{url: ...}`` resets siblings and trips "Field required" on
+    request_headers — so we carry the existing ``request_headers`` (preserving
+    the X-HeyKiki-Secret). Idempotent: no write when the URL already matches and
+    the toggle is on. Goes through ``patch_agent_safely``.
+    """
+    current = get_agent_config(agent_id)
+    cur_webhook = (
+        _get_path(
+            current,
+            "platform_settings.workspace_overrides."
+            "conversation_initiation_client_data_webhook",
+        )
+        or {}
+    )
+    cur_url = cur_webhook.get("url")
+    cur_headers = cur_webhook.get("request_headers") or {}
+    cur_enabled = bool(_get_path(current, WEBHOOK_ENABLED_PATH))
+    needs_url = cur_url != _CONVERSATION_INIT_WEBHOOK_URL
+    needs_toggle = not cur_enabled
+    if needs_url or needs_toggle:
+        webhook_patch: dict = {}
+        if needs_url:
+            webhook_patch.setdefault("workspace_overrides", {})[
+                "conversation_initiation_client_data_webhook"
+            ] = {"url": _CONVERSATION_INIT_WEBHOOK_URL, "request_headers": cur_headers}
+        if needs_toggle:
+            webhook_patch.setdefault("overrides", {})[
+                "enable_conversation_initiation_client_data_from_webhook"
+            ] = True
+        patch_agent_safely(
+            agent_id=agent_id,
+            field_patches={"platform_settings": webhook_patch},
+            actor_id=actor_id,
+            org_id=org_id,
+            endpoint_label="provision_webhook",
+        )
+
+
 # ─── Public entry point ──────────────────────────────────────────────────────
 def configure_agent(
     *,
@@ -1175,6 +1364,8 @@ def configure_agent(
         "webhook_enabled": False,
         "audio_ok": False,
         "overrides_whitelist_enabled": False,
+        "system_tools_synced": False,
+        "system_tools_reason": None,
     }
     is_first_run = not _is_agent_already_provisioned(org_id)
 
@@ -1206,25 +1397,9 @@ def configure_agent(
         )
 
     # ─── B.2 Tools (additive merge of tool_ids) ──────────────────────────────
-    tool_map = _resolve_hk_tool_ids(HK_TOOL_NAMES)
-    required_ids = list(tool_map.values())
-    current = get_agent_config(agent_id)
-    current_ids = _get_path(current, TOOL_IDS_PATH) or []
-    to_add = [tid for tid in required_ids if tid not in current_ids]
-    if to_add:
-        patch_agent_safely(
-            agent_id=agent_id,
-            field_patches={
-                "conversation_config": {
-                    "agent": {"prompt": {"tool_ids": required_ids}}
-                }
-            },
-            merge_arrays=[TOOL_IDS_PATH],
-            actor_id=actor_id,
-            org_id=org_id,
-            endpoint_label="provision_tools",
-        )
-    summary["tools_attached"] = to_add
+    summary["tools_attached"] = attach_hk_tools(
+        agent_id, actor_id=actor_id, org_id=org_id
+    )
 
     # ─── B.3 Prompt (FIRST run only) ─────────────────────────────────────────
     if is_first_run:
@@ -1253,45 +1428,7 @@ def configure_agent(
         summary["prompt_skipped_reason"] = "already_provisioned"
 
     # ─── B.4 Webhook (conversation initiation client data) ───────────────────
-    # ElevenLabs validates the full webhook object on PATCH — sending a
-    # partial {url: ...} resets siblings and trips "Field required" on
-    # request_headers. So we always carry the existing request_headers in
-    # the patch body to preserve them. Empty {} is a valid default.
-    webhook_url = f"{settings.backend_public_url.rstrip('/')}{_CONVERSATION_INIT_PATH}"
-    current = get_agent_config(agent_id)
-    cur_webhook = (
-        _get_path(
-            current,
-            "platform_settings.workspace_overrides."
-            "conversation_initiation_client_data_webhook",
-        )
-        or {}
-    )
-    cur_url = cur_webhook.get("url")
-    cur_headers = cur_webhook.get("request_headers") or {}
-    cur_enabled = bool(_get_path(current, WEBHOOK_ENABLED_PATH))
-    needs_url = cur_url != webhook_url
-    needs_toggle = not cur_enabled
-    if needs_url or needs_toggle:
-        webhook_patch: dict = {}
-        if needs_url:
-            # Carry existing request_headers so EL doesn't reject the PATCH
-            # for "Field required: request_headers". Preserves the
-            # X-HeyKiki-Secret value already wired on the agent.
-            webhook_patch.setdefault("workspace_overrides", {})[
-                "conversation_initiation_client_data_webhook"
-            ] = {"url": webhook_url, "request_headers": cur_headers}
-        if needs_toggle:
-            webhook_patch.setdefault("overrides", {})[
-                "enable_conversation_initiation_client_data_from_webhook"
-            ] = True
-        patch_agent_safely(
-            agent_id=agent_id,
-            field_patches={"platform_settings": webhook_patch},
-            actor_id=actor_id,
-            org_id=org_id,
-            endpoint_label="provision_webhook",
-        )
+    set_conversation_init_webhook(agent_id, actor_id=actor_id, org_id=org_id)
     summary["webhook_enabled"] = True
 
     # ─── B.5 Audio in client_events ──────────────────────────────────────────
@@ -1344,6 +1481,23 @@ def configure_agent(
             endpoint_label="provision_overrides_whitelist",
         )
     summary["overrides_whitelist_enabled"] = True
+
+    # ─── B.7 System tools (transfer_to_number / voicemail_detection /
+    #         transfer_to_agent) ───────────────────────────────────────────────
+    # Onboarding gap fix (2026-06-22): previously the native system tools were
+    # attached ONLY on a later Notdienst/Telefon save (sync_system_tools_for_org
+    # had a single caller in kiki_zentrale._repush_bg). A freshly-provisioned org
+    # therefore had NO transfer_to_number/transfer_to_agent/voicemail_detection on
+    # its agent until someone re-saved a Kiki-Zentrale screen — so the prompt could
+    # already say "leite weiter" with no bridge behind it, and outbound→inbound
+    # handoff (transfer_to_agent) was unavailable. Attaching them here means every
+    # org that comes through provisioning has the full system-tool set from day one,
+    # built from whatever Kiki-Zentrale defaults/numbers exist at provision time.
+    # sync_system_tools_for_org is best-effort (never raises) and idempotent, so it
+    # is safe to call on first run AND re-runs; it returns a categorized result.
+    sys_tools_result = sync_system_tools_for_org(org_id)
+    summary["system_tools_synced"] = bool(sys_tools_result.get("updated"))
+    summary["system_tools_reason"] = sys_tools_result.get("reason")
 
     # ─── Stamp the org so re-runs skip the prompt step. ──────────────────────
     if is_first_run:
@@ -1440,14 +1594,16 @@ def verify_agent_health(org_id: str | UUID, agent_id: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         checks.append(_check("hk_tools_attached", False, f"Tool-Prüfung fehlgeschlagen: {str(exc)[:150]}"))
 
-    # webhook_url_is_prod — the conversation-init webhook points at prod.
+    # webhook_url_is_prod — the conversation-init webhook points at the
+    # env-routed URL (or a tolerated legacy backend host during migration).
     cur_url = _get_path(cfg, WEBHOOK_URL_PATH)
+    url_ok = cur_url in _ACCEPTED_WEBHOOK_URLS
     checks.append(_check(
         "webhook_url_is_prod",
-        cur_url == _PROD_WEBHOOK_URL,
+        url_ok,
         f"Webhook-URL: {cur_url or '—'}"
-        if cur_url == _PROD_WEBHOOK_URL
-        else f"Webhook-URL ist nicht die Produktions-URL (ist: {cur_url or '—'}).",
+        if url_ok
+        else f"Webhook-URL ist nicht env-geroutet/bekannt (ist: {cur_url or '—'}).",
     ))
 
     # webhook_enabled — the init-webhook toggle is on.
@@ -1469,14 +1625,20 @@ def verify_agent_health(org_id: str | UUID, agent_id: str) -> dict:
         else "'audio' fehlt in client_events — Kiki bliebe im Anruf stumm.",
     ))
 
-    # prompt_rendered — non-empty AND no unsubstituted '{{' template tokens.
+    # prompt_rendered — non-empty AND no UNRENDERED CRM token. Our tokens are
+    # UPPER_SNAKE ({{COMPANY_NAME}}, {{KZ_EMERGENCY}}, …) and must be substituted;
+    # EL dynamic variables ({{system__time}}, {{customer_name}}, …) are lowercase
+    # and legitimately REMAIN (EL fills them per call) — flagging any '{{' wrongly
+    # red-flagged every agent on its {{system__*}} variables.
     prompt = (_get_path(cfg, PROMPT_PATH) or "").strip()
-    has_unsubstituted = "{{" in prompt
-    prompt_ok = bool(prompt) and not has_unsubstituted
+    leftover = sorted(set(_CRM_TOKEN_RE.findall(prompt)))
+    prompt_ok = bool(prompt) and not leftover
     if not prompt:
         prompt_detail = "Prompt ist leer."
-    elif has_unsubstituted:
-        prompt_detail = "Prompt enthält nicht ersetzte '{{…}}'-Platzhalter."
+    elif leftover:
+        prompt_detail = (
+            "Prompt enthält nicht ersetzte Platzhalter: " + ", ".join(leftover)
+        )
     else:
         prompt_detail = "Prompt ist gesetzt und vollständig ersetzt."
     checks.append(_check("prompt_rendered", prompt_ok, prompt_detail))

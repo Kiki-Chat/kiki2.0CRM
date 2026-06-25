@@ -40,6 +40,12 @@ interface Position {
   is_labor: boolean
 }
 interface CustomerOption { id: string; full_name: string | null }
+// Minimal call shape for ?call_id= pre-fill (subject + first position).
+interface CallPrefill {
+  summary_title: string | null
+  data_collection: Record<string, string> | null
+  enrichment: { prefill?: { service_description?: string | null; problem?: string | null } } | null
+}
 interface Inquiry { id: string; number: string | null; subject: string | null; title: string | null; status: string }
 interface CatalogItem { id: string; name: string; description: string | null; unit_price: number; unit: string | null }
 
@@ -119,6 +125,15 @@ export function CostEstimateFormPage() {
   })
   const inquiries = (customerDetail?.inquiries ?? []).filter((i) => i.status !== 'deleted')
 
+  // AI pre-fill from the originating call (?call_id=): pull the enrichment +
+  // extracted fields so the KVA opens with the work described, not empty.
+  const callId = params.get('call_id') || ''
+  const { data: callPrefill } = useQuery({
+    queryKey: ['kva-call-prefill', callId],
+    queryFn: () => apiFetch<CallPrefill>(`/api/calls/${callId}`),
+    enabled: !!callId && !isEdit,
+  })
+
   // Edit mode: load existing estimate.
   const { data: existing } = useQuery({
     queryKey: ['cost-estimate', id],
@@ -160,6 +175,24 @@ export function CostEstimateFormPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inquiryId, inquiries, isEdit])
+
+  // Pre-fill subject + first position from the call (AI-extracted service / problem).
+  const callPrefilled = useRef(false)
+  useEffect(() => {
+    if (isEdit || callPrefilled.current || !callPrefill) return
+    const pf = callPrefill.enrichment?.prefill
+    const dc = callPrefill.data_collection || {}
+    const svc = pf?.service_description || dc.issue_summary || callPrefill.summary_title || ''
+    const descr = svc || pf?.problem || dc.ultimate_summary || ''
+    if (!svc && !descr) return
+    callPrefilled.current = true
+    if (svc) setSubject((v) => v || svc)
+    if (descr)
+      setPositions((rows) =>
+        rows.length === 1 && !rows[0].description ? [{ ...rows[0], description: descr }] : rows,
+      )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callPrefill, isEdit])
 
   // Kept current every render so the async live-fill script reads the LATEST
   // defaults at save time (its closure would otherwise see the first render's).

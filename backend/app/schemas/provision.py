@@ -10,6 +10,17 @@ class ProvisionRequest(BaseModel):
     admin_name: str | None = Field(default=None, alias="adminName")
     contact_email: EmailStr | None = Field(default=None, alias="contactEmail")
 
+    # ── Onboarding-form company details (additive, optional) ──────────────────
+    # `trade` is the craft/genre the client picks in the onboarding form. It drives
+    # the UNIVERSAL trade profile (diagnostic examples + emergency-keyword fallback,
+    # see services/trade_profiles.py) so the agent fits any genre — stored on
+    # agent_configs.trade so the prompt render AND the Kiki-Zentrale edit menu read
+    # the same value. `address` is the company address → organizations.address so it
+    # surfaces in the prompt's company profile. Both optional; the legacy path (no
+    # trade/address) is unchanged → generic profile.
+    trade: str | None = Field(default=None, alias="trade")
+    address: str | None = Field(default=None, alias="address")
+
     # ── n8n BIND-ONLY seam (additive, opt-in) ─────────────────────────────────
     # When ``agent_externally_managed=True`` the ElevenLabs agent (prompt + tools
     # + webhook + number) is built EXTERNALLY by n8n; provision_org must BIND the

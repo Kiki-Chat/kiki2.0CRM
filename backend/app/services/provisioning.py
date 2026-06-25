@@ -1,10 +1,19 @@
+import logging
+
 from fastapi import HTTPException, status
 
 from datetime import datetime, timezone
 
 from app.db.supabase_client import get_service_client
 from app.schemas.provision import ProvisionRequest, ProvisionResponse
-from app.services.agent_config import configure_agent, verify_agent_health
+from app.services.agent_config import (
+    attach_hk_tools,
+    configure_agent,
+    set_conversation_init_webhook,
+    verify_agent_health,
+)
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_AGENT_CONFIG = {
     "autonomy_level": 1,
@@ -190,6 +199,10 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
             "elevenlabs_agent_id": payload.elevenlabs_agent_id,
             "email": payload.contact_email,
         }
+        # Onboarding-form company address → organizations.address (JSONB {raw}),
+        # so the prompt's company profile reflects it. Optional.
+        if payload.address and payload.address.strip():
+            org_row["address"] = {"raw": payload.address.strip()}
         if bind_only:
             # Store the n8n-bound number + its EL phone_number_id (needed for
             # outbound) and stamp provisioned now — the agent is already live.
@@ -218,9 +231,12 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
             }
         ).execute()
 
-        client.table("agent_configs").insert(
-            {"org_id": org_id, **DEFAULT_AGENT_CONFIG}
-        ).execute()
+        agent_cfg_row = {"org_id": org_id, **DEFAULT_AGENT_CONFIG}
+        # Onboarding-form trade/genre → agent_configs.trade. Drives the universal
+        # trade profile in the prompt; editable later in Kiki-Zentrale (/context).
+        if payload.trade and payload.trade.strip():
+            agent_cfg_row["trade"] = payload.trade.strip()
+        client.table("agent_configs").insert(agent_cfg_row).execute()
 
         # Seed the 3 mandatory identification fields so every newly-provisioned
         # org has its required-field set from day one (migration 0015 only seeded
@@ -229,13 +245,23 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
 
         # ─── Step B — finalize the ElevenLabs agent ──────────────────────────
         if bind_only:
-            # n8n BIND-ONLY: the agent (prompt + tools + webhook + number) was
-            # built externally by n8n. Do NOT call configure_agent — it would
-            # clobber n8n's prompt/tools/webhook. Just run the READ-ONLY
-            # verify gate and surface the report. A red verify does NOT roll
-            # the org back (the agent is n8n's to fix); it's reported so the
-            # operator can see ok/red, mirroring the configure path's behavior
-            # of never silently claiming a red agent is provisioned.
+            # n8n BIND-ONLY: n8n built the agent (prompt + number) externally,
+            # but the conversation-init webhook + the 11 hk_ tools are OURS to
+            # assign at onboarding (n8n only sets the post-call webhook). Attach
+            # them additively (prompt left untouched) — best-effort so a transient
+            # EL failure doesn't roll the org back; the verify gate below surfaces
+            # any gap. We still do NOT call configure_agent (that would re-apply
+            # and clobber n8n's prompt).
+            try:
+                attach_hk_tools(payload.elevenlabs_agent_id, org_id=org_id)
+                set_conversation_init_webhook(
+                    payload.elevenlabs_agent_id, org_id=org_id
+                )
+            except Exception:  # noqa: BLE001 — verify gate surfaces gaps; don't roll back
+                logger.warning(
+                    "provision bind-only: tool/webhook attach failed for org %s "
+                    "agent %s", org_id, payload.elevenlabs_agent_id, exc_info=True,
+                )
             agent_health = verify_agent_health(org_id, payload.elevenlabs_agent_id)
         else:
             # Runs synchronously inside provision_org so a hard failure (e.g.

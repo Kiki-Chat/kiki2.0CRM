@@ -4,6 +4,7 @@
 // and resolve through the real appointment/Angebot endpoints.
 import { Check, Folder, Inbox } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { initials } from '../lib/utils'
 import { useMe } from '../lib/useMe'
@@ -82,6 +83,7 @@ function DecisionCard({
 
 export function PosteingangPage() {
   const { isAdmin } = useMe()
+  const navigate = useNavigate()
   const { loading, error, employees, decisions, vorgaenge, callsCount } = usePosteingang()
   const actions = usePosteingangActions()
   // Employee portal: this is the person's personal to-do list ("Meine Aufgaben"),
@@ -114,6 +116,11 @@ export function PosteingangPage() {
   const allDone = liveDecisions.length === 0
 
   const resolve = (d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') => {
+    // AI-suggested KVA/Rechnung: open the pre-filled create-form instead of POSTing.
+    if (choice === 'primary' && d.route) {
+      navigate(d.route)
+      return
+    }
     setResolvedKeys((s) => new Set(s).add(d.actionKey))
     actions.resolve(d, choice).catch(() => setResolvedKeys((s) => { const n = new Set(s); n.delete(d.actionKey); return n }))
   }

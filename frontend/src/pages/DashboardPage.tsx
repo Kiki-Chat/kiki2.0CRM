@@ -157,6 +157,11 @@ function HeroDeck() {
 
   async function act(d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') {
     if (busy) return
+    // AI-suggested KVA/Rechnung: open the pre-filled create-form instead of POSTing.
+    if (choice === 'primary' && d.route) {
+      navigate(d.route)
+      return
+    }
     setBusy(true)
     try {
       await resolve(d, choice)

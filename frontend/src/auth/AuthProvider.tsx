@@ -11,7 +11,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
 
 import { customerSupabase } from '../lib/supabase'
-import { isSupabaseConfigured } from '../lib/env'
+import { env, isSupabaseConfigured } from '../lib/env'
 
 interface AuthContextValue {
   session: Session | null
@@ -92,7 +92,7 @@ export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthConte
           // localhost. Pin it to the origin the user is actually on so prod
           // links return to prod. The origin must also be in Supabase Auth's
           // "Redirect URLs" allowlist or Supabase silently rejects it.
-          options: { emailRedirectTo: window.location.origin },
+          options: { emailRedirectTo: env.appUrl || window.location.origin },
         })
         if (error) throw error
       },
@@ -107,7 +107,7 @@ export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthConte
         // recovery session to /set-password, where updateUser() sets the new
         // password (no old password required).
         const { error } = await client.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin,
+          redirectTo: env.appUrl || window.location.origin,
         })
         if (error) throw error
       },
