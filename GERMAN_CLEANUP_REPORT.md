@@ -4,7 +4,14 @@
 **Sources:** `Kiki-CRM-Texte-korrigiert.xlsx` (156 string corrections) + `HeyKiki-UI-Texte-Amber.docx` (8 global rules, 21 screens, bugs, features)
 **Tooling note:** the extraction/import scripts in `scripts/i18n_cleanup/` are **git-excluded** — never committed. Only product changes are committed.
 
-**Status: 8 code phases + report committed · 102 files · ~660 lines · frontend `tsc -b` clean · backend suite 967 passed** (the single failure is a network-only env artifact — a test makes a real HTTP call to the dummy `SUPABASE_URL`).
+**Status: committed · frontend `tsc -b` clean · backend suite 967 passed** (the single failure is a network-only env artifact — a test makes a real HTTP call to the dummy `SUPABASE_URL`).
+
+## ⚠️ Verification correction (honesty note)
+An earlier version of this report claimed "Sie→Du done" after the *first* pass. That was wrong — the first pass used a **narrow grep filter** and missed instances. Two later rounds caught them:
+- **Live preview review** (rendered the app on :5199) found ~18 missed Sie strings (admin gates, error messages, Rufumleitung guide, form subtitles, invoice/email templates) + the `KVA-2026` placeholder → fixed (`edb4c0a`).
+- **Comprehensive *unfiltered* scan** then found **14 more** (DashboardPage, CostEstimatesPage email, projectTabs, RufumleitungGuidePage ×3, SetPasswordPage, CalendarPage, Modals, CustomerFormModal, AgentSyncBanner, `KVA-Platzhalter`/`KVA-E-Mail`) → fixed (`7810123`).
+
+**Final verified tally (unfiltered scan, frontend + backend written docs): formal Sie/Ihr = 0 · KVA/Kostenvoranschlag word = 0 · Fall/Fälle UI = 0.** Technician `JobLinkPage` source-verified (`Abgeschlossen`, `Vorgang`, 0 Sie). Lesson: the unfiltered scan + render is the source of truth, not a filtered grep.
 
 ---
 
