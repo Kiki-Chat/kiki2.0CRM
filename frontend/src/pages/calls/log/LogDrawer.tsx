@@ -481,7 +481,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                     <Inbox size={13} /> Nicht zugeordnet
                   </div>
                   <p className="mb-3 text-[13px] text-body">
-                    Dieser Anruf gehört noch zu keinem Vorgang. Ordnen Sie ihn zu oder legen Sie einen neuen an.
+                    Dieser Anruf gehört noch zu keinem Vorgang. Ordne ihn zu oder lege einen neuen an.
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     <ActionBtn

@@ -61,7 +61,7 @@ export function RufumleitungGuidePage() {
       </div>
 
       <p className="mb-6 text-sm text-body">
-        Damit Kiki Ihre Anrufe entgegennimmt, leiten Sie Ihre bestehende Geschäftsnummer auf Ihre
+        Damit Kiki deine Anrufe entgegennimmt, leite deine bestehende Geschäftsnummer auf deine
         HeyKiki-Nummer um. Eingehende Anrufe landen dann automatisch bei Kiki — Ihre gewohnte Nummer
         bleibt unverändert und Sie müssen sie nirgends ändern.
       </p>
@@ -71,12 +71,12 @@ export function RufumleitungGuidePage() {
         <span>
           {heyKiki ? (
             <>
-              Ihre HeyKiki-Nummer: <span className="font-semibold">{heyKiki}</span> — sie ist unten bereits in die
+              Deine HeyKiki-Nummer: <span className="font-semibold">{heyKiki}</span> — sie ist unten bereits in die
               Codes eingesetzt.
             </>
           ) : (
             <>
-              Ihre HeyKiki-Nummer finden Sie in{' '}
+              Deine HeyKiki-Nummer findest du in{' '}
               <Link to="/kiki-zentrale/telefon" className="font-semibold underline hover:opacity-80">
                 Kiki-Zentrale → Telefon
               </Link>
@@ -101,7 +101,7 @@ export function RufumleitungGuidePage() {
             <Step n={1}>Öffne die <span className="font-semibold text-text">Einstellungen</span>.</Step>
             <Step n={2}>Tippe auf <span className="font-semibold text-text">Telefon</span> (bei manchen Tarifen darunter noch <span className="font-semibold text-text">Anrufe</span>).</Step>
             <Step n={3}>Wähle <span className="font-semibold text-text">Rufweiterleitung</span> und aktiviere den Schalter.</Step>
-            <Step n={4}>Tippe auf <span className="font-semibold text-text">Weiterleiten an</span> und tragen Sie Ihre HeyKiki-Nummer{numHint} ein.</Step>
+            <Step n={4}>Tippe auf <span className="font-semibold text-text">Weiterleiten an</span> und trage deine HeyKiki-Nummer{numHint} ein.</Step>
           </ol>
         </Card>
 
@@ -114,7 +114,7 @@ export function RufumleitungGuidePage() {
             <Step n={1}>Öffne die <span className="font-semibold text-text">Telefon-App</span>.</Step>
             <Step n={2}>Tippe oben rechts auf das <span className="font-semibold text-text">Menü (⋮)</span> und dann auf <span className="font-semibold text-text">Einstellungen</span>.</Step>
             <Step n={3}>Wähle <span className="font-semibold text-text">Anrufe</span> bzw. <span className="font-semibold text-text">Anrufkonten</span> und dann <span className="font-semibold text-text">Rufweiterleitung</span>. Bei Samsung: <span className="font-semibold text-text">Einstellungen → Zusätzliche Einstellungen → Rufweiterleitung</span>.</Step>
-            <Step n={4}>Wähle <span className="font-semibold text-text">Immer weiterleiten</span> und tragen Sie Ihre HeyKiki-Nummer{numHint} ein.</Step>
+            <Step n={4}>Wähle <span className="font-semibold text-text">Immer weiterleiten</span> und trage deine HeyKiki-Nummer{numHint} ein.</Step>
           </ol>
           <p className="mt-3 text-xs text-muted">
             Die Bezeichnungen können je nach Hersteller (Samsung, Google, Xiaomi …) leicht abweichen.

@@ -151,7 +151,7 @@ export function CostEstimatesPage() {
             <div className="mb-1 text-xs font-medium text-muted">Angebotsnummer</div>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-              <input value={num} onChange={(e) => setNum(e.target.value)} placeholder="z.B. KVA-2026-00001" className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-text outline-none focus:border-green-primary" />
+              <input value={num} onChange={(e) => setNum(e.target.value)} placeholder="z.B. AG-2026-00001" className="w-full rounded-md border border-border bg-alt py-2 pl-9 pr-3 text-sm text-text outline-none focus:border-green-primary" />
             </div>
           </div>
           <div>
@@ -288,7 +288,7 @@ function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose:
   const [to, setTo] = useState(estimate.customer_email ?? '')
   const [subject, setSubject] = useState(`Ihr Angebot ${estimate.number ?? ''}`)
   const [message, setMessage] = useState(
-    `Sehr geehrte Damen und Herren,\n\nanbei erhalten Sie unser Angebot ${estimate.number ?? ''}. ` +
+    `Sehr geehrte Damen und Herren,\n\nanbei erhältst du unser Angebot ${estimate.number ?? ''}. ` +
       `Bei Fragen stehen wir Ihnen gerne zur Verfügung.\n\nMit freundlichen Grüßen`,
   )
   const [copyToMe, setCopyToMe] = useState(false)

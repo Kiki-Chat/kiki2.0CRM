@@ -331,10 +331,10 @@ function StatusSelect({ inv, onChange, readOnly }: { inv: Invoice; onChange: (s:
 
 function SendModal({ invoice, onClose, onSent }: { invoice: Invoice; onClose: () => void; onSent: () => void }) {
   const [to, setTo] = useState(invoice.customer_email ?? '')
-  const [subject, setSubject] = useState(`Ihre Rechnung ${invoice.number ?? ''}`)
+  const [subject, setSubject] = useState(`Deine Rechnung ${invoice.number ?? ''}`)
   const [message, setMessage] = useState(
     `Sehr geehrte/r ${invoice.customer_name ?? 'Damen und Herren'},\n\n` +
-      `anbei erhalten Sie Ihre Rechnung ${invoice.number ?? ''} über ${money(invoice.total)}, ` +
+      `anbei erhältst du deine Rechnung ${invoice.number ?? ''} über ${money(invoice.total)}, ` +
       `fällig am ${fmtDate(invoice.due_date)}.\n\nMit freundlichen Grüßen`,
   )
   const [copyToMe, setCopyToMe] = useState(true)

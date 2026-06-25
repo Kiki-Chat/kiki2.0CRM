@@ -461,7 +461,7 @@ export function InvoiceFormPage() {
         <button onClick={() => navigate('/invoices')} className="rounded-md p-1.5 text-muted hover:bg-alt"><ArrowLeft size={20} /></button>
         <div>
           <h1 className="text-2xl font-bold text-text">{isEdit ? `${loadedNumber ?? 'Rechnung'} bearbeiten` : 'Neue Rechnung'}</h1>
-          <p className="mt-0.5 text-sm text-muted">{isEdit ? 'Rechnung bearbeiten' : 'Erstellen Sie eine neue Rechnung'}</p>
+          <p className="mt-0.5 text-sm text-muted">{isEdit ? 'Rechnung bearbeiten' : 'Erstelle eine neue Rechnung'}</p>
         </div>
       </div>
 

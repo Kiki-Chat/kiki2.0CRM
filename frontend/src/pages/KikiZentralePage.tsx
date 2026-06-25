@@ -93,7 +93,7 @@ export function KikiZentralePage() {
           <h2 className="text-lg font-bold text-text">Nur für Administratoren</h2>
           <p className="mt-1.5 text-sm text-muted">
             Die Kiki-Zentrale (KI-Konfiguration) ist nur für Administratoren
-            zugänglich. Bitte wenden Sie sich an Ihren Administrator.
+            zugänglich. Bitte wende dich an deinen Administrator.
           </p>
         </div>
       </div>

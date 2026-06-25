@@ -48,7 +48,7 @@ export function ProtectedRoute() {
             <div>
               <h1 className="text-lg font-bold text-text">Diese Organisation ist deaktiviert</h1>
               <p className="mt-1 text-sm text-muted">
-                Bitte wenden Sie sich an HeyKiki Support, um Ihren Zugang wieder freizuschalten.
+                Bitte wende dich an den HeyKiki Support, um deinen Zugang wieder freizuschalten.
               </p>
             </div>
             <button

@@ -392,7 +392,7 @@ export function CostEstimateFormPage() {
         <button onClick={() => navigate('/cost-estimates')} className="rounded-md p-1.5 text-muted hover:bg-alt"><ArrowLeft size={20} /></button>
         <div>
           <h1 className="text-2xl font-bold text-text">{isEdit ? `${loadedNumber ?? 'Angebot'} bearbeiten` : 'Neuer Angebot'}</h1>
-          <p className="mt-0.5 text-sm text-muted">{isEdit ? 'Angebot bearbeiten' : 'Erstellen Sie einen neuen Angebot'}</p>
+          <p className="mt-0.5 text-sm text-muted">{isEdit ? 'Angebot bearbeiten' : 'Erstelle ein neues Angebot'}</p>
         </div>
       </div>
 

@@ -179,7 +179,7 @@ export function SettingsPage() {
           <h2 className="text-lg font-bold text-text">Nur für Administratoren</h2>
           <p className="mt-1.5 text-sm text-muted">
             Die Unternehmenseinstellungen sind nur für Administratoren zugänglich. Bitte
-            wenden Sie sich an Ihren Administrator, wenn Sie Änderungen benötigen.
+            wende dich an deinen Administrator, wenn du Änderungen benötigst.
           </p>
         </div>
       </div>
@@ -1211,14 +1211,14 @@ function EmailVorlagenSection({ config, flash }: { config: EmailConfig | null; f
           <h3 className="mb-3 text-sm font-bold text-text">Rechnungs-E-Mail</h3>
           <Field label="Betreff"><input value={invSub} onChange={(e) => setInvSub(e.target.value)} className={inputCls} /></Field>
           <div className="mt-3"><div className={labelCls}>Nachricht</div>
-            <textarea data-field="invBody" onFocus={(e) => (lastFocused.current = e.currentTarget)} value={invBody} onChange={(e) => setInvBody(e.target.value)} placeholder="Sehr geehrte/r {kundename}, anbei erhalten Sie Ihre Rechnung {rechnungsnummer}…" className={ta} />
+            <textarea data-field="invBody" onFocus={(e) => (lastFocused.current = e.currentTarget)} value={invBody} onChange={(e) => setInvBody(e.target.value)} placeholder="Hallo {kundename}, anbei erhältst du deine Rechnung {rechnungsnummer}…" className={ta} />
           </div>
         </Card>
         <Card>
           <h3 className="mb-3 text-sm font-bold text-text">KVA-E-Mail</h3>
           <Field label="Betreff"><input value={kvaSub} onChange={(e) => setKvaSub(e.target.value)} className={inputCls} /></Field>
           <div className="mt-3"><div className={labelCls}>Nachricht</div>
-            <textarea data-field="kvaBody" onFocus={(e) => (lastFocused.current = e.currentTarget)} value={kvaBody} onChange={(e) => setKvaBody(e.target.value)} placeholder="Sehr geehrte/r {kundename}, anbei erhalten Sie unser Angebot {kvanummer}…" className={ta} />
+            <textarea data-field="kvaBody" onFocus={(e) => (lastFocused.current = e.currentTarget)} value={kvaBody} onChange={(e) => setKvaBody(e.target.value)} placeholder="Hallo {kundename}, anbei erhältst du unser Angebot {kvanummer}…" className={ta} />
           </div>
         </Card>
       </div>

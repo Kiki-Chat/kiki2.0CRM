@@ -78,7 +78,7 @@ export function SetPasswordPage() {
             <p className="text-sm text-muted">Link wird überprüft…</p>
           ) : (
             <p className="text-sm text-error">
-              Dieser Link ist ungültig oder abgelaufen. Bitte fordern Sie bei Ihrem
+              Dieser Link ist ungültig oder abgelaufen. Bitte fordere bei deinem
               Administrator eine neue Einladung an.
             </p>
           )}
@@ -91,7 +91,7 @@ export function SetPasswordPage() {
     <Shell>
       <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-border bg-surface p-6 shadow-e1">
         <p className="text-sm text-muted">
-          Bitte vergeben Sie ein persönliches Passwort für Ihren Zugang.
+          Bitte vergib ein persönliches Passwort für deinen Zugang.
         </p>
         <div>
           <label className="mb-1.5 block text-sm font-medium text-body">Neues Passwort</label>

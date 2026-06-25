@@ -139,7 +139,7 @@ export function EmployeesPage() {
           <h2 className="text-lg font-bold text-text">Nur für Administratoren</h2>
           <p className="mt-1.5 text-sm text-muted">
             Die Mitarbeiterverwaltung ist nur für Administratoren zugänglich. Bitte
-            wenden Sie sich an Ihren Administrator, wenn Sie Änderungen benötigen.
+            wende dich an deinen Administrator, wenn du Änderungen benötigst.
           </p>
         </div>
       </div>

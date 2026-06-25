@@ -253,7 +253,7 @@ export function AdminOrgsPage() {
               {data.orgs.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-4 py-12 text-center text-slate-500">
-                    Keine Organisationen — legen Sie die erste an.
+                    Keine Organisationen — lege die erste an.
                   </td>
                 </tr>
               )}
