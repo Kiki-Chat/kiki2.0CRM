@@ -129,12 +129,12 @@ def enforce_self_assignment(
     if current_assignee_id and current_assignee_id != my_id:
         raise HTTPException(
             status_code=403,
-            detail="Sie können nur Ihre eigenen Aufgaben verwalten.",
+            detail="Du kannst nur deine eigenen Aufgaben verwalten.",
         )
     if new_assignee_id and new_assignee_id != my_id:
         raise HTTPException(
             status_code=403,
-            detail="Sie können Aufgaben nur sich selbst zuweisen.",
+            detail="Du kannst Aufgaben nur dir selbst zuweisen.",
         )
 
 

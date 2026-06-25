@@ -330,7 +330,7 @@ def _change_plan(org_id: str, actor_id: str, body: ChangePlanRequest) -> Billing
         raise HTTPException(
             status_code=400,
             detail="Ein Tarifwechsel ist nur als Upgrade möglich. Für ein Downgrade "
-            "oder eine Kündigung wenden Sie sich bitte an info@kikichat.de.",
+            "oder eine Kündigung wende dich bitte an info@kikichat.de.",
         )
     try:
         change_subscription_plan(org_id, target, actor_id=actor_id)

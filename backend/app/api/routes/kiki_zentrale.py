@@ -388,7 +388,7 @@ class PhoneUpdate(BaseModel):
         if not self._looks_like_phone(s):
             raise HTTPException(
                 status_code=422,
-                detail="Bitte geben Sie eine gültige Telefonnummer im Format +49 ... ein.",
+                detail="Bitte gib eine gültige Telefonnummer im Format +49 ... ein.",
             )
         return s
 
@@ -818,7 +818,7 @@ async def save_leitfaden(
         raise HTTPException(
             status_code=422,
             detail="Preisauskunft kann nicht aktiviert werden: Es sind keine Artikel "
-            "mit Preisen hinterlegt. Bitte pflegen Sie zuerst Preise im Menü „Artikel“.",
+            "mit Preisen hinterlegt. Bitte pflege zuerst Preise im Menü „Artikel“.",
         )
     await _schedule_repush(background, user, "kz_leitfaden")
     return {"success": True}
@@ -947,7 +947,7 @@ def _validate_logic_or_422(raw: dict) -> str:
         raise HTTPException(
             status_code=422,
             detail=f"Die Gesprächslogik ist zu lang ({len(compiled)} Zeichen, "
-            f"max. {MAX_COMPILED_CHARS}). Bitte kürzen Sie Bedingungen oder Aktionen.",
+            f"max. {MAX_COMPILED_CHARS}). Bitte kürze Bedingungen oder Aktionen.",
         )
     return compiled
 
@@ -1050,7 +1050,7 @@ async def generate_conversation_logic(
     enforce_rate_limit("rule_generate", user.org_id, max_calls=6, per_seconds=60)
     description = (payload.description or "").strip()
     if len(description) < 10:
-        raise HTTPException(status_code=422, detail="Bitte beschreiben Sie Ihre Regeln etwas ausführlicher.")
+        raise HTTPException(status_code=422, detail="Bitte beschreibe deine Regeln etwas ausführlicher.")
     if len(description) > 4000:
         raise HTTPException(status_code=422, detail="Die Beschreibung ist zu lang (max. 4000 Zeichen).")
 
@@ -1363,7 +1363,7 @@ async def update_price_info(
             raise HTTPException(
                 status_code=422,
                 detail="Preisauskunft kann nicht aktiviert werden: Es sind keine "
-                "Artikel mit Preisen hinterlegt. Bitte pflegen Sie zuerst Preise "
+                "Artikel mit Preisen hinterlegt. Bitte pflege zuerst Preise "
                 "im Menü „Artikel“.",
             )
 

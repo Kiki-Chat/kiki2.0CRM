@@ -259,7 +259,7 @@ def _load_link(token: str) -> dict:
         raise JobLinkError("Dieser Auftrags-Link ist ungültig.")
     link = rows[0]
     if link.get("revoked_at"):
-        raise JobLinkError("Dieser Auftrags-Link wurde ersetzt — bitte den neuesten Link aus Ihrer E-Mail verwenden.")
+        raise JobLinkError("Dieser Auftrags-Link wurde ersetzt — bitte den neuesten Link aus deiner E-Mail verwenden.")
     if _is_expired(link.get("expires_at")):
         raise JobLinkError("Dieser Link ist abgelaufen.")
     return link
@@ -449,9 +449,9 @@ def submit_job(
     finished = bool(report.get("job_finished"))
     description = (report.get("description") or "").strip()
     if not description:
-        raise JobLinkError("Bitte beschreiben Sie kurz, was vor Ort gemacht wurde.")
+        raise JobLinkError("Bitte beschreibe kurz, was vor Ort gemacht wurde.")
     if not (link.get("photo_paths") or []):
-        raise JobLinkError("Bitte laden Sie mindestens ein Foto hoch.")
+        raise JobLinkError("Bitte lade mindestens ein Foto hoch.")
     clean = {
         "experience_good": report.get("experience_good"),
         "extra_demands": (report.get("extra_demands") or "").strip() or None,

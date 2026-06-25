@@ -38,8 +38,8 @@ def enforce_rate_limit(
         if len(q) >= max_calls:
             raise HTTPException(
                 status_code=429,
-                detail="Zu viele Anfragen — bitte warten Sie einen Moment und "
-                "versuchen Sie es erneut.",
+                detail="Zu viele Anfragen — bitte warte einen Moment und "
+                "versuche es erneut.",
             )
         q.append(now)
 

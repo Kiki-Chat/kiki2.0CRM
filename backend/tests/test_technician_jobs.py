@@ -92,7 +92,7 @@ def test_submitted_link_still_viewable_after_close(monkeypatch):
 
 def test_submit_requires_description(monkeypatch):
     _patch_client(monkeypatch, _ctx_tables(_link_row()))
-    with pytest.raises(tj.JobLinkError, match="beschreiben"):
+    with pytest.raises(tj.JobLinkError, match="beschreib"):
         tj.submit_job("tok", {"description": "  ", "job_finished": False})
 
 

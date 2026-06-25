@@ -162,7 +162,7 @@ async def propose_cases(customer_id: str, user: CurrentUser = Depends(require_or
         if not ai_usage.within_cap(user.org_id):
             raise HTTPException(
                 status_code=429,
-                detail="Das monatliche KI-Budget Ihrer Organisation ist erreicht — "
+                detail="Das monatliche KI-Budget deiner Organisation ist erreicht — "
                 "die automatische Vorgangs-Gruppierung ist bis zum Monatswechsel pausiert.",
             )
         client = get_service_client()

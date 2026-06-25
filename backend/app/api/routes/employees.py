@@ -308,7 +308,7 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
                 link = None
                 warning = (
                     "Mitarbeiter angelegt, aber der Login-Zugang konnte nicht "
-                    "erstellt werden. Sie können die Einladung später erneut "
+                    "erstellt werden. Du kannst die Einladung später erneut "
                     "senden oder ein Passwort manuell setzen."
                 )
             if user_id and link:

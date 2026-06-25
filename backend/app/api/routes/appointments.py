@@ -783,7 +783,7 @@ def _build_job_email(url: str, emp: dict, job: dict) -> tuple[str, str]:
     lines = [
         f"Hallo {emp.get('display_name') or ''},".strip(),
         "",
-        f"für Sie wurde ein Einsatz geplant{' bei ' + c['name'] if c.get('name') else ''}:",
+        f"für dich wurde ein Einsatz geplant{' bei ' + c['name'] if c.get('name') else ''}:",
         f"• Termin: {a.get('title') or 'Termin'} — {when} ({a.get('duration_minutes') or 60} Min)",
     ]
     if c.get("address"):
@@ -794,7 +794,7 @@ def _build_job_email(url: str, emp: dict, job: dict) -> tuple[str, str]:
         lines.append(f"• Hinweise: {a['notes']}")
     lines += [
         "",
-        "Über diesen Link starten Sie den Einsatz und füllen danach den kurzen Einsatzbericht aus (inkl. Fotos):",
+        "Über diesen Link startest du den Einsatz und füllst danach den kurzen Einsatzbericht aus (inkl. Fotos):",
         url,
         "",
         "Der Link gilt nur für diesen Einsatz.",

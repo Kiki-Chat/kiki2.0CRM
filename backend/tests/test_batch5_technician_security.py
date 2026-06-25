@@ -284,7 +284,7 @@ def test_public_job_get_rate_limited(monkeypatch):
     for _ in range(61):
         last = client.get("/api/public/jobs/sometoken")
     assert last.status_code == 429
-    assert "warten" in last.json()["detail"].lower()
+    assert "warte" in last.json()["detail"].lower()
     ratelimit.reset()
 
 

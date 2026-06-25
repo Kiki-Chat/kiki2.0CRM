@@ -97,11 +97,11 @@ def build_welcome_email_html(
     body = (
         f'<h2 style="margin: 0 0 16px 0; color: #03423A; font-size: 18px; '
         f'font-family: \'Segoe UI\', Tahoma, Geneva, Verdana, Arial, sans-serif;">{greeting}</h2>'
-        f'<p style="{p}">Sie wurden von <strong>{_html.escape(company)}</strong> zum '
+        f'<p style="{p}">Du wurdest von <strong>{_html.escape(company)}</strong> zum '
         f'HeyKiki-Portal eingeladen.</p>'
-        f'<p style="{p}">Ihre Anmelde-E-Mail (Login-ID):<br>'
+        f'<p style="{p}">Deine Anmelde-E-Mail (Anmelde-ID):<br>'
         f'<strong>{_html.escape(login_email)}</strong></p>'
-        f'<p style="{p}">Bitte legen Sie über den folgenden sicheren Link Ihr '
+        f'<p style="{p}">Bitte lege über den folgenden sicheren Link dein '
         f'persönliches Passwort fest:</p>'
         f'<p style="text-align: center; margin: 26px 0;">'
         f'<a href="{set_password_link}" style="display: inline-block; '
@@ -110,8 +110,8 @@ def build_welcome_email_html(
         f'font-family: \'Segoe UI\', Tahoma, Geneva, Verdana, Arial, sans-serif;">'
         f'Passwort festlegen</a></p>'
         f'<p style="{p} font-size: 12px; color: #888888;">Aus Sicherheitsgründen '
-        f'enthält diese E-Mail kein Passwort. Sie vergeben Ihr Passwort selbst über '
-        f'den Link oben. Falls Sie diese Einladung nicht erwartet haben, können Sie '
+        f'enthält diese E-Mail kein Passwort. Du vergibst dein Passwort selbst über '
+        f'den Link oben. Falls du diese Einladung nicht erwartet hast, kannst du '
         f'diese E-Mail ignorieren.</p>'
     )
     return email_templates.render_email(company_name=company, body_html=body)

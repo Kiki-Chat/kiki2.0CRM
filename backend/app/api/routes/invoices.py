@@ -384,8 +384,8 @@ def _build_invoice_email(
         greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
         body_text = (
             f"{greeting}\n\n"
-            f"anbei senden wir Ihnen die Rechnung {number}.\n\n"
-            f"Bei Rückfragen stehen wir Ihnen gerne zur Verfügung.\n\n"
+            f"anbei senden wir dir die Rechnung {number}.\n\n"
+            f"Bei Rückfragen stehen wir dir gerne zur Verfügung.\n\n"
             f"Mit freundlichen Grüßen\n{org_name}"
         )
     body_html = email_templates.render_message_email(

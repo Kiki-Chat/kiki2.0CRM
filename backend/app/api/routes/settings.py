@@ -313,12 +313,12 @@ async def email_test(user: CurrentUser = Depends(require_org_admin)) -> dict:
                     company_name=org.get("name"),
                     message_text=(
                         "Dies ist eine Test-E-Mail von HeyKiki.\n\n"
-                        "Ihre E-Mail-Konfiguration funktioniert."
+                        "Deine E-Mail-Konfiguration funktioniert."
                     ),
                 ),
                 body_text=(
                     "Dies ist eine Test-E-Mail von HeyKiki. "
-                    "Ihre E-Mail-Konfiguration funktioniert."
+                    "Deine E-Mail-Konfiguration funktioniert."
                 ),
                 reply_to=org.get("email"),
             )
