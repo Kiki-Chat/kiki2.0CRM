@@ -590,3 +590,19 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .emrg-glow { animation: none; }
 }
+
+/* Tentative calendar suggestions ("Vorschlag" — agent-booked pending slots
+   awaiting confirmation): dashed outline + hatched fill + reduced opacity so they
+   read as not-yet-confirmed next to solid confirmed events. */
+.fc-event.cal-tentative {
+  opacity: 0.7;
+  border-style: dashed !important;
+  border-width: 2px !important;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 5px,
+    rgba(255, 255, 255, 0.28) 5px,
+    rgba(255, 255, 255, 0.28) 10px
+  );
+}

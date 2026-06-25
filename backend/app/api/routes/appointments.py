@@ -60,7 +60,10 @@ def _list(org_id: str, frm: str | None, to: str | None) -> list[dict]:
         .select(
             "id, title, scheduled_at, duration_minutes, status, category, color, "
             "location, notes, customer_id, inquiry_id, assigned_employee_id, "
-            "vehicle_id, tool_id, source, google_event_id"
+            "vehicle_id, tool_id, source, google_event_id, "
+            # Linking for the tentative "Vorschlag" events (agent-booked pending
+            # slots surface on the calendar and deep-link back to their call/Fall).
+            "source_conversation_id, case_id"
         )
         .eq("org_id", org_id)
     )
@@ -98,12 +101,45 @@ def _list(org_id: str, frm: str | None, to: str | None) -> list[dict]:
         ):
             employees[e["id"]] = e.get("display_name")
 
+    # Resolve a call_id for PENDING ("Vorschlag") appointments so the calendar's
+    # tentative event can deep-link to the originating call. Preferred path: the
+    # linked inquiry's call_id; else the agent-booking conversation
+    # (source_conversation_id -> calls.elevenlabs_conversation_id). Bounded to the
+    # pending rows in the visible window so it's a cheap pair of lookups.
+    pending = [a for a in appts if a.get("status") == "pending"]
+    call_by_appt: dict[str, str] = {}
+    if pending:
+        inq_ids = [a["inquiry_id"] for a in pending if a.get("inquiry_id")]
+        conv_ids = [a["source_conversation_id"] for a in pending if a.get("source_conversation_id")]
+        inq_call: dict[str, str] = {}
+        if inq_ids:
+            for row in (
+                client.table("inquiries").select("id, call_id")
+                .eq("org_id", org_id).in_("id", list(set(inq_ids))).execute().data or []
+            ):
+                if row.get("call_id"):
+                    inq_call[row["id"]] = row["call_id"]
+        conv_call: dict[str, str] = {}
+        if conv_ids:
+            for row in (
+                client.table("calls").select("id, elevenlabs_conversation_id")
+                .eq("org_id", org_id).in_("elevenlabs_conversation_id", list(set(conv_ids)))
+                .execute().data or []
+            ):
+                if row.get("elevenlabs_conversation_id"):
+                    conv_call[row["elevenlabs_conversation_id"]] = row["id"]
+        for a in pending:
+            cid = inq_call.get(a.get("inquiry_id")) or conv_call.get(a.get("source_conversation_id"))
+            if cid:
+                call_by_appt[a["id"]] = cid
+
     for a in appts:
         cust = customers.get(a.get("customer_id"))
         a["customer_name"] = cust.get("full_name") if cust else None
         a["customer_phone"] = cust.get("phone") if cust else None
         a["customer_address"] = format_address(cust.get("address")) if cust else None
         a["employee_name"] = employees.get(a.get("assigned_employee_id"))
+        a["call_id"] = call_by_appt.get(a["id"])
     return appts
 
 

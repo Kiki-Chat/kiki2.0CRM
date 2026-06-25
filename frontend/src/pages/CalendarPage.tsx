@@ -43,6 +43,10 @@ interface Appointment {
   customer_phone: string | null
   customer_address: string | null
   employee_name: string | null
+  // Linking for tentative "Vorschlag" (pending) suggestions surfaced on the grid.
+  source_conversation_id?: string | null
+  case_id?: string | null
+  call_id?: string | null
 }
 interface Employee {
   id: string
@@ -74,7 +78,7 @@ interface ProjectRow {
   end_date: string | null
 }
 const STATUS_LABEL: Record<string, string> = {
-  pending: 'Offen',
+  pending: 'Vorschlag',
   confirmed: 'Bestätigt',
   cancelled: 'Storniert',
   completed: 'Erledigt',
@@ -198,10 +202,11 @@ export function CalendarPage() {
     () =>
       appointments
         .filter((a) => {
-          // Pending appointments are requests awaiting confirmation — they live in
-          // the call's "Offene Aktionen" card, not the calendar. Only confirmed
-          // (and imported) appointments appear here.
-          if (!a.scheduled_at || a.status === 'cancelled' || a.status === 'pending') return false
+          // Pending appointments are tentative "Vorschläge" (e.g. a slot the caller
+          // asked Kiki for) — shown on the grid as a distinct, non-draggable event
+          // so the team can confirm/adjust them in place, deep-linked to the call.
+          // Cancelled and time-less rows still never render.
+          if (!a.scheduled_at || a.status === 'cancelled') return false
           // Google-imported events are external "blocked time" — always shown,
           // independent of the employee filter (they block everyone).
           if (a.source === 'google_import') return true
@@ -214,13 +219,14 @@ export function CalendarPage() {
           const start = new Date(a.scheduled_at!)
           const end = new Date(start.getTime() + (a.duration_minutes ?? 60) * 60000)
           const isGoogle = a.source === 'google_import'
+          const isTentative = a.status === 'pending'
           const color = isGoogle ? GOOGLE_BLOCK_COLOR : colorFor(a.assigned_employee_id)
           const base = a.title ?? 'Termin'
           const title = isGoogle
             ? `🔒 ${a.title ?? 'Google-Termin'}`
             : a.customer_name
-              ? `${base} · ${a.customer_name}`
-              : base
+              ? `${(isTentative ? '✎ ' : '') + base} · ${a.customer_name}`
+              : (isTentative ? '✎ ' : '') + base
           return {
             id: a.id,
             title,
@@ -228,7 +234,11 @@ export function CalendarPage() {
             end: end.toISOString(),
             backgroundColor: color,
             borderColor: color,
-            editable: !isGoogle, // Google blocks are read-only (no drag/resize)
+            // Google blocks AND tentative suggestions are read-only on the grid:
+            // a drag must never silently mutate an unconfirmed slot (confirm/adjust
+            // happens via the detail modal). Confirmed CRM events stay draggable.
+            editable: !isGoogle && !isTentative,
+            classNames: isTentative ? ['cal-tentative'] : [],
             extendedProps: { appt: a },
           }
         }),
@@ -631,6 +641,7 @@ function AppointmentDetailModal({
   onReschedule: () => void
 }) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const start = appt.scheduled_at ? new Date(appt.scheduled_at) : null
   const loc = locStr(appt.location)
   const [pushMsg, setPushMsg] = useState<string | null>(null)
@@ -672,6 +683,13 @@ function AppointmentDetailModal({
     mutationFn: () => apiFetch(`/api/appointments/${appt.id}/cancel`, { method: 'POST' }),
     onSuccess: afterMutate,
     onError: (e: unknown) => setPushMsg(e instanceof Error ? e.message : 'Stornieren fehlgeschlagen.'),
+  })
+  // Confirm a tentative "Vorschlag" (pending) straight from the calendar. Backend
+  // requires an assigned employee + a concrete time (else 409, surfaced here).
+  const confirm = useMutation({
+    mutationFn: () => apiFetch(`/api/appointments/${appt.id}/confirm`, { method: 'POST' }),
+    onSuccess: afterMutate,
+    onError: (e: unknown) => setPushMsg(e instanceof Error ? e.message : 'Bestätigen fehlgeschlagen.'),
   })
   const del = useMutation({
     mutationFn: () => apiFetch(`/api/appointments/${appt.id}`, { method: 'DELETE' }),
@@ -720,6 +738,31 @@ function AppointmentDetailModal({
         {appt.customer_address && <DetailRow label="Adresse">{appt.customer_address}</DetailRow>}
         {loc && <DetailRow label="Ort">{loc}</DetailRow>}
         {appt.notes && <DetailRow label="Notizen">{appt.notes}</DetailRow>}
+        {appt.status === 'pending' && (
+          <div className="rounded-md border border-dashed border-orange-300 bg-orange-50 px-3 py-2.5">
+            <p className="text-xs font-medium text-orange-800">
+              Terminvorschlag — vom Kunden gewünscht, noch nicht bestätigt. Bitte prüfen und bestätigen
+              oder den Termin anpassen.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => confirm.mutate()}
+                disabled={confirm.isPending}
+                className="rounded-md bg-green-primary px-3 py-1.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-60"
+              >
+                {confirm.isPending ? 'Wird bestätigt…' : 'Bestätigen'}
+              </button>
+              {appt.call_id && (
+                <button
+                  onClick={() => { onClose(); navigate(`/calls?call_id=${appt.call_id}`) }}
+                  className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-body hover:bg-alt"
+                >
+                  Zum Anruf
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
           {pushable && (
             alreadyPushed ? (
