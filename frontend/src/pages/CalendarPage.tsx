@@ -53,6 +53,9 @@ interface Employee {
 interface CustomerOption {
   id: string
   full_name: string | null
+  // Adresse and the appointment's Ort are the same place — carried here so the
+  // create form can prefill the Ort from the customer's stored address.
+  address?: { raw?: string } | string | null
 }
 // ─── Constants ───────────────────────────────────────────────────────────────
 const EMP_COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#0891B2', '#65A30D']
@@ -422,6 +425,13 @@ export function CalendarPage() {
             onClick={() => {
               const d = new Date()
               d.setHours(9, 0, 0, 0)
+              // 9:00 today may already be in the past — backdating is rejected,
+              // so default to the next full hour from now in that case.
+              if (d.getTime() <= Date.now()) {
+                d.setTime(Date.now())
+                d.setMinutes(0, 0, 0)
+                d.setHours(d.getHours() + 1)
+              }
               setCreateAt(d)
             }}
             className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
@@ -717,8 +727,11 @@ function AppointmentDetailModal({
         )}
         {appt.customer_name && <DetailRow label="Kunde">{appt.customer_name}</DetailRow>}
         {appt.customer_phone && <DetailRow label="Telefon">{appt.customer_phone}</DetailRow>}
-        {appt.customer_address && <DetailRow label="Adresse">{appt.customer_address}</DetailRow>}
-        {loc && <DetailRow label="Ort">{loc}</DetailRow>}
+        {/* Adresse and Ort are the same place: show ONE row. The appointment's
+            own location wins; fall back to the customer's stored address. */}
+        {(loc ?? appt.customer_address) && (
+          <DetailRow label="Adresse">{loc ?? appt.customer_address}</DetailRow>
+        )}
         {appt.notes && <DetailRow label="Notizen">{appt.notes}</DetailRow>}
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
           {pushable && (
@@ -866,10 +879,29 @@ function CreateAppointmentModal({
   })
   const customers = customerData?.customers ?? []
 
+  // No backdating: block saving a NEW appointment whose date/time is already in
+  // the past (the server rejects it with 422 too). Edits are exempt so a past
+  // appointment stays editable.
+  const isPast = useMemo(() => {
+    if (edit || !date || !time) return false
+    return new Date(`${date}T${time}`).getTime() <= Date.now()
+  }, [edit, date, time])
+
   // Hey-Kiki takeover: fill the form visibly (customer → title typed →
   // employee), then save with the exact same payload that was animated.
   const [kikiFilling, setKikiFilling] = useState(false)
   const liveFillStarted = useRef(false)
+
+  // Adresse → Ort: when a customer is selected, prefill the Ort from their stored
+  // address so the user never re-types an address the customer already has. Only
+  // fills an EMPTY field (never stomps a typed/edited Ort), and stays out of the
+  // way of the Kiki live-fill takeover (which drives the field itself).
+  useEffect(() => {
+    if (kikiFilling || !customerId) return
+    const addr = locStr(customers.find((c) => c.id === customerId)?.address ?? null)
+    if (addr) setLocation((prev) => (prev.trim() ? prev : addr))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId, customerData])
   useEffect(() => {
     if (!liveFill || liveFillStarted.current || edit || !customerData) return
     liveFillStarted.current = true
@@ -1003,7 +1035,7 @@ function CreateAppointmentModal({
       footer={
         <div className="flex gap-3">
           <button
-            disabled={!date || create.isPending || kikiFilling}
+            disabled={!date || isPast || create.isPending || kikiFilling}
             onClick={() => create.mutate()}
             className="flex-1 rounded-md bg-green-primary py-2.5 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
           >
@@ -1027,6 +1059,11 @@ function CreateAppointmentModal({
           </div>
         )}
         {error && <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">{error}</div>}
+        {isPast && (
+          <div className="rounded-md bg-error-bg px-3 py-2 text-sm text-error">
+            Dieser Termin liegt in der Vergangenheit. Bitte Datum und Uhrzeit in der Zukunft wählen.
+          </div>
+        )}
         {overlapCount > 0 && (
           <div className="rounded-md bg-warning-bg px-3 py-2 text-sm text-warning">
             Zur gewählten Zeit {overlapCount === 1 ? 'existiert bereits 1 Termin' : `existieren bereits ${overlapCount} Termine`}.
@@ -1056,7 +1093,13 @@ function CreateAppointmentModal({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <div className="mb-1.5 text-xs font-semibold text-body">Datum *</div>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
+            <input
+              type="date"
+              value={date}
+              min={edit ? undefined : ymd(new Date())}
+              onChange={(e) => setDate(e.target.value)}
+              className={inputCls}
+            />
           </div>
           <div>
             <div className="mb-1.5 text-xs font-semibold text-body">Uhrzeit *</div>
@@ -1087,13 +1130,16 @@ function CreateAppointmentModal({
           </div>
         </div>
         <div>
-          <div className="mb-1.5 text-xs font-semibold text-body">Ort</div>
+          <div className="mb-1.5 text-xs font-semibold text-body">Adresse</div>
           <input
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            placeholder="Adresse"
+            placeholder="Straße, Nr., PLZ Ort"
             className={inputCls}
           />
+          <p className="mt-1 text-[11px] text-muted">
+            Wird mit der Kundenadresse synchronisiert.
+          </p>
         </div>
       </div>
     </Modal>

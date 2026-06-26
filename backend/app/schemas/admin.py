@@ -147,6 +147,11 @@ class AppointmentPatch(BaseModel):
     scheduled_at: str | None = None
     duration_minutes: int | None = None
     category: str | None = None
+    # Ort/Adresse — the calendar edit form sends this; without the field the
+    # PATCH silently dropped it (extra='ignore'), so editing a location never
+    # persisted. The route normalises a string into {"raw": ...} and syncs it
+    # back to the customer's address (location and address are the same place).
+    location: str | None = None
     notes: str | None = None
 
     model_config = {"extra": "ignore"}
