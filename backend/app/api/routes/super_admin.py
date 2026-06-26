@@ -355,14 +355,20 @@ class RoleChange(BaseModel):
 
 
 # ─── Manual re-trigger for the post-provision history import (P0.9) ─────────
-@router.post("/orgs/{org_id}/import-history")
+@router.post("/orgs/{org_id}/import-history", status_code=202)
 async def import_history(
     org_id: str,
+    background_tasks: BackgroundTasks,
     _user: CurrentUser = Depends(require_super_admin),
 ) -> dict:
     """Re-trigger the historical EL-conversation import for an existing org.
-    Idempotent via the P0.2 SELECT-first dedup, so re-runs only process
-    newly-appeared conversations."""
+
+    Scheduled as a BackgroundTask and returns 202 IMMEDIATELY — a large
+    back-catalogue (hundreds of calls) can take minutes, so running it inline
+    would time the request out (the "internal error" on big agents). The import
+    is resilient + resumable (existing-id skip + P0.2 dedup), so re-triggering is
+    always safe and only processes newly-appeared conversations. Progress shows
+    up in the org's Call Logs / Migration view as rows land."""
     org = await run_in_threadpool(_get_org, org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organisation nicht gefunden.")
@@ -372,8 +378,13 @@ async def import_history(
             status_code=400,
             detail="Diese Organisation hat keine Sprach-ID hinterlegt.",
         )
-    counters = await run_in_threadpool(import_agent_history, org_id, agent_id)
-    return {"success": True, "org_id": org_id, **counters}
+    background_tasks.add_task(import_agent_history, org_id, agent_id)
+    return {
+        "success": True,
+        "org_id": org_id,
+        "status": "scheduled",
+        "detail": "Der Anrufverlauf wird im Hintergrund importiert und erscheint nach und nach.",
+    }
 
 
 # ─── Inbound HeyKiki-number sync (auto-fill from the Sprach-ID) ──────────────

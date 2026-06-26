@@ -71,21 +71,23 @@ def test_list_conversation_ids_stops_at_page_guard(monkeypatch):
 
 
 def test_list_conversation_ids_stops_on_non_200(monkeypatch):
-    """API error mid-pagination stops cleanly (returns what was already yielded)."""
+    """A persistent API error mid-pagination stops cleanly after the retries
+    (returns what was already yielded), never raising."""
+    monkeypatch.setattr(hi.time, "sleep", lambda *a, **k: None)  # no real backoff sleeps
+
     def _client_factory(**kw):
         client = MagicMock()
-        responses = [
-            MagicMock(status_code=200, json=MagicMock(return_value={
-                "conversations": [{"conversation_id": "c_1"}],
-                "next_cursor": "k", "has_more": True,
-            })),
-            MagicMock(status_code=500, json=MagicMock(return_value={}), text="server error"),
-        ]
         call_idx = {"n": 0}
         def _get(path, headers=None, params=None):
-            r = responses[call_idx["n"]]
+            n = call_idx["n"]
             call_idx["n"] += 1
-            return r
+            if n == 0:
+                return MagicMock(status_code=200, json=MagicMock(return_value={
+                    "conversations": [{"conversation_id": "c_1"}],
+                    "next_cursor": "k", "has_more": True,
+                }))
+            # Page 2 keeps 500-ing → _get_with_retry exhausts its retries → stop.
+            return MagicMock(status_code=500, json=MagicMock(return_value={}), text="server error")
         client.get.side_effect = _get
         client.__enter__.return_value = client
         client.__exit__.return_value = False
@@ -101,11 +103,16 @@ def test_list_conversation_ids_stops_on_non_200(monkeypatch):
 def test_import_agent_history_no_api_key(monkeypatch):
     monkeypatch.setattr(hi.settings, "elevenlabs_api_key", "")
     result = hi.import_agent_history("org_x", "agent_x")
-    assert result == {"imported": 0, "skipped": 0, "errors": 1, "reason": "no_api_key"}
+    assert result == {
+        "imported": 0, "skipped": 0, "errors": 1, "seen": 0, "more": False,
+        "reason": "no_api_key",
+    }
 
 
 def test_import_agent_history_counts_processed_skipped_errors(monkeypatch):
     monkeypatch.setattr(hi.settings, "elevenlabs_api_key", "fake")
+    # Nothing imported yet → every listed id is "new" (offline: no real DB read).
+    monkeypatch.setattr(hi, "_existing_conversation_ids", lambda oid: set())
 
     # List returns 4 conversation ids
     monkeypatch.setattr(
@@ -143,6 +150,7 @@ def test_import_agent_history_unknown_agent_counted_as_error(monkeypatch):
     happen for a fresh provision but defends against config drift) is
     treated as an error and logged."""
     monkeypatch.setattr(hi.settings, "elevenlabs_api_key", "fake")
+    monkeypatch.setattr(hi, "_existing_conversation_ids", lambda oid: set())
     monkeypatch.setattr(hi, "_list_conversation_ids", lambda a: iter(["c_1"]))
     monkeypatch.setattr(hi, "_fetch_conversation", lambda c: {"conversation_id": c})
     # _process_one returns the status='skipped' with skip_reason='unknown_agent'
@@ -157,3 +165,43 @@ def test_import_agent_history_unknown_agent_counted_as_error(monkeypatch):
     # (the unknown_agent SkipReason is opaque to import_agent_history — it
     # only inspects status. That's intentional — _process_one owns the
     # categorization.)
+
+
+def test_import_skips_existing_without_fetching(monkeypatch):
+    """Already-imported conversations are skipped WITHOUT a re-fetch — what makes
+    a re-trigger on a big agent cheap + resumable."""
+    monkeypatch.setattr(hi.settings, "elevenlabs_api_key", "fake")
+    monkeypatch.setattr(hi, "_existing_conversation_ids", lambda oid: {"c_old"})
+    monkeypatch.setattr(hi, "_list_conversation_ids", lambda a: iter(["c_old", "c_new"]))
+    fetched: list[str] = []
+    def _fetch(cid):
+        fetched.append(cid)
+        return {"conversation_id": cid}
+    monkeypatch.setattr(hi, "_fetch_conversation", _fetch)
+    monkeypatch.setattr(hi, "_process_one", lambda d, fmt: {"status": "processed"})
+
+    result = hi.import_agent_history("org_x", "agent_x")
+    assert fetched == ["c_new"]          # c_old was NOT re-fetched
+    assert result["imported"] == 1
+    assert result["skipped"] == 1
+    assert result["seen"] == 2
+    assert result["more"] is False
+
+
+def test_import_per_run_cap_sets_more(monkeypatch):
+    """The per-run cap stops a single pass early (large back-catalogue) and flags
+    more=True so the caller knows to re-trigger to continue."""
+    monkeypatch.setattr(hi.settings, "elevenlabs_api_key", "fake")
+    monkeypatch.setattr(hi, "_existing_conversation_ids", lambda oid: set())
+    monkeypatch.setattr(hi, "_list_conversation_ids", lambda a: iter([f"c_{i}" for i in range(5)]))
+    fetched: list[str] = []
+    def _fetch(cid):
+        fetched.append(cid)
+        return {"conversation_id": cid}
+    monkeypatch.setattr(hi, "_fetch_conversation", _fetch)
+    monkeypatch.setattr(hi, "_process_one", lambda d, fmt: {"status": "processed"})
+
+    result = hi.import_agent_history("org_x", "agent_x", max_new=2)
+    assert result["imported"] == 2
+    assert result["more"] is True
+    assert len(fetched) == 2             # stopped at the cap — didn't fetch the rest
