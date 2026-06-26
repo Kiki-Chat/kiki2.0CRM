@@ -32,7 +32,7 @@ MAX_PDF_BYTES = 20 * 1024 * 1024
 _CONFIG_COLS = (
     "kiki_level, appointments_enabled, appointments_level, kva_enabled, kva_level, "
     "projects_enabled, projects_level, invoices_enabled, invoices_level, "
-    "welcome_message, trade, knowledge_text, problem_description, "
+    "welcome_message, custom_instructions, trade, knowledge_text, problem_description, "
     "prompt_manual_override, forwarding_number, "
     "incoming_forwarding_number, scheduling_enabled, buffer_minutes, "
     "max_appointments_per_day, parallel_slots, lead_time_hours, lead_time_days, lead_time_only_weekdays, "
@@ -144,11 +144,24 @@ class VerhaltenUpdate(BaseModel):
     invoices_level: int | None = None
     welcome_message: str | None = None
     welcome_messages: list[dict] | None = None  # 20 — time-based variants [{from,to,message}]
+    # "Anweisungen für Kiki" — ChatGPT/Claude-style free-text custom instructions.
+    # Stored raw; sanitized + length-capped at render (render_custom_instructions_block).
+    custom_instructions: str | None = None
     persona_name: str | None = None     # ElevenLabs `name`
     first_message: str | None = None    # ElevenLabs
     voice_id: str | None = None         # ElevenLabs
     language: str | None = None         # ElevenLabs
     model_config = {"extra": "ignore"}
+
+    @field_validator("custom_instructions", mode="before")
+    @classmethod
+    def _cap_custom_instructions(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 2000:
+            raise ValueError("Die Anweisungen für Kiki dürfen höchstens 2000 Zeichen lang sein.")
+        return v
 
 
 class PromptUpdate(BaseModel):
@@ -591,7 +604,7 @@ async def update_verhalten(
     supa = {
         k: data[k]
         for k in (
-            "kiki_level", "welcome_message", "welcome_messages",
+            "kiki_level", "welcome_message", "welcome_messages", "custom_instructions",
             "appointments_enabled", "appointments_level",
             "reschedule_request_timeout_hours",
             "kva_enabled", "kva_level",

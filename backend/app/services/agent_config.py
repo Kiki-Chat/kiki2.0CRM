@@ -168,7 +168,7 @@ _PROMPT_TOKENS = [
     "SERVICE_AREA", "BUSINESS_HOURS",
     "KZ_REQUIRED_FIELDS", "KZ_PROBLEM_DESCRIPTION", "KZ_APPOINTMENT_CATEGORIES",
     "KZ_SCHEDULING_RULES", "KZ_EMERGENCY", "KZ_STAFF_TRANSFER", "KZ_AUTONOMY",
-    "KZ_PRICE_INFO",
+    "KZ_PRICE_INFO", "KZ_CUSTOM_INSTRUCTIONS",
 ]
 
 
@@ -500,7 +500,8 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
             # affected orgs silently got NO transfer tool + a "leite NICHT weiter"
             # prompt on real emergencies).
             "emergency_surcharge_text, forwarding_number, incoming_forwarding_number, "
-            "price_info_enabled, conversation_logic, conversation_logic_enabled"
+            "price_info_enabled, conversation_logic, conversation_logic_enabled, "
+            "custom_instructions"
         )
         .eq("org_id", str(org_id))
         .limit(1)
@@ -1112,6 +1113,44 @@ def _apply_feature_regions(text: str, features: dict[str, bool]) -> str:
     return text
 
 
+_CUSTOM_INSTRUCTIONS_MAX = 1500
+
+
+def sanitize_custom_instructions(raw: str | None) -> str:
+    """Make customer-authored "Anweisungen für Kiki" safe to drop into the system
+    prompt. This is free text a customer typed, so we harden the STRUCTURE (the
+    semantic-injection layer is the future native Manipulation guardrail):
+      * strip ``{{…}}`` so they can't inject EL/CRM placeholders,
+      * demote markdown headers / region markers (``#``, ``==``, ``<!--``) so they
+        can't forge a new prompt section,
+      * collapse runaway blank lines and hard-cap the length.
+    Returns ``""`` for empty/whitespace input."""
+    if not raw:
+        return ""
+    text = re.sub(r"\{\{[^}]*\}\}", "", raw)
+    out_lines: list[str] = []
+    for ln in text.splitlines():
+        s = re.sub(r"^\s*#{1,6}\s*", "", ln.rstrip())   # '# Header' → 'Header'
+        s = re.sub(r"^\s*={2,}\s*|\s*={2,}\s*$", "", s)  # '== X ==' → 'X'
+        s = s.replace("<!--", "").replace("-->", "")
+        out_lines.append(s)
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(out_lines)).strip()
+    if len(text) > _CUSTOM_INSTRUCTIONS_MAX:
+        text = text[:_CUSTOM_INSTRUCTIONS_MAX].rstrip() + "…"
+    return text
+
+
+def render_custom_instructions_block(cfg: dict) -> str:
+    """``{{KZ_CUSTOM_INSTRUCTIONS}}`` — the org's free-text "Anweisungen für Kiki"
+    (ChatGPT/Claude-style custom instructions). Renders a sanitized, bounded
+    ``# Besondere Hinweise`` section, or ``""`` when none is set (so an org with no
+    custom instructions leaves no trace in the prompt — no orphan header)."""
+    text = sanitize_custom_instructions(cfg.get("custom_instructions"))
+    if not text:
+        return ""
+    return "# Besondere Hinweise\n\n" + text + "\n"
+
+
 def render_prompt_for_org(
     org_name: str, org: dict | None = None, org_id: str | UUID | None = None
 ) -> str:
@@ -1182,6 +1221,7 @@ def render_prompt_for_org(
         "KZ_STAFF_TRANSFER": render_staff_transfer_block(kz_cfg),
         "KZ_AUTONOMY": render_autonomy_block(kz_cfg),
         "KZ_PRICE_INFO": render_price_info_block(kz_cfg),
+        "KZ_CUSTOM_INSTRUCTIONS": render_custom_instructions_block(kz_cfg),
     }
     # Conditionally render feature regions BEFORE token substitution, so a disabled
     # feature's region (and anything inside it) leaves no trace. Byte-identical when

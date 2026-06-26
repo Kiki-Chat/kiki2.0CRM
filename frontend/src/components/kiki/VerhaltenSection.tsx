@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Languages, Mic, Play, Plus, User, X } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { Languages, Mic, Play, Plus, Sparkles, User, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { apiFetch } from '../../lib/api'
 import { KZ, KZ_STALE, type KzOverview, type KzVoice } from '../../lib/kikiApi'
@@ -12,12 +12,24 @@ const LANGUAGES: [string, string][] = [
   ['de', 'Deutsch'], ['en', 'Englisch'], ['fr', 'Französisch'], ['es', 'Spanisch'], ['it', 'Italienisch'],
 ]
 
+// Rotating placeholder examples for "Anweisungen für Kiki" — like ChatGPT/Claude's
+// custom-instructions box. Domain-relevant (tradesperson phone agent) so they read
+// as real suggestions, not lorem ipsum. Cycled every few seconds while the field is empty.
+const CUSTOM_INSTRUCTION_EXAMPLES = [
+  'Erwähne, dass wir ein Familienbetrieb in dritter Generation sind.',
+  'Sprich Anrufer besonders herzlich und geduldig an.',
+  'Weise bei Heizungsausfall im Winter auf unseren Notdienst hin.',
+  'Frag Neukunden kurz, wie sie auf uns aufmerksam geworden sind.',
+  'Erwähne, dass wir auch Wartungsverträge anbieten.',
+  'Halte dich kurz — unsere Kunden mögen es zügig.',
+]
+
 export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m: string) => void }) {
   const qc = useQueryClient()
   const agent = data.agent
   const cfg = data.config
 
-  const [welcome, setWelcome] = useState(cfg.welcome_message ?? '')
+  const [customInstructions, setCustomInstructions] = useState(cfg.custom_instructions ?? '')
   const [welcomeMsgs, setWelcomeMsgs] = useState<{ from?: string; to?: string; message?: string }[]>(cfg.welcome_messages ?? [])
   const [personaName, setPersonaName] = useState(agent.persona_name ?? '')
   const [language, setLanguage] = useState(agent.language ?? 'de')
@@ -25,6 +37,16 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
   const [firstMessage, setFirstMessage] = useState(agent.first_message ?? '')
   const [confirmOpen, setConfirmOpen] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  // Cycle the "Anweisungen für Kiki" placeholder examples (only visible while empty).
+  const [exampleIdx, setExampleIdx] = useState(0)
+  useEffect(() => {
+    const t = setInterval(
+      () => setExampleIdx((i) => (i + 1) % CUSTOM_INSTRUCTION_EXAMPLES.length),
+      3800,
+    )
+    return () => clearInterval(t)
+  }, [])
 
   const { data: voicesData } = useQuery({
     queryKey: ['kiki-zentrale', 'voices'],
@@ -37,7 +59,7 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
 
   const save = useMutation({
     mutationFn: () => {
-      const body: Record<string, unknown> = { welcome_message: welcome, welcome_messages: welcomeMsgs }
+      const body: Record<string, unknown> = { custom_instructions: customInstructions, welcome_messages: welcomeMsgs }
       if (personaName !== (agent.persona_name ?? '')) body.persona_name = personaName
       if (firstMessage !== (agent.first_message ?? '')) body.first_message = firstMessage
       if (voiceId !== (agent.voice_id ?? '')) body.voice_id = voiceId
@@ -106,7 +128,7 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
           </div>
         </div>
         <div className="mt-4">
-          <Field label="Begrüßung" hint={`${firstMessage.length}/500 Zeichen`}>
+          <Field label="Begrüßung — was Kiki zu Beginn sagt" hint={`${firstMessage.length}/500 Zeichen`}>
             <textarea
               value={firstMessage}
               maxLength={500}
@@ -117,21 +139,32 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
         </div>
       </Card>
 
-      {/* Card 3 — Begrüßungstext (HeyKiki-seitig) */}
+      {/* Card 2 — Anweisungen für Kiki (free-text custom instructions, Claude/ChatGPT-style) */}
       <Card>
-        <GroupLabel>Begrüßungstext (von HeyKiki vorgegeben)</GroupLabel>
-        <textarea value={welcome} onChange={(e) => setWelcome(e.target.value)} className={cn(inputCls, 'min-h-[90px]')} />
-        <p className="mt-1 text-xs text-muted">
-          Dieser Text wird zusätzlich zu Kikis Begrüßung verwendet, um den Gesprächseinstieg zu steuern.
+        <div className="mb-1 flex items-center gap-2">
+          <Sparkles size={15} className="text-ai" />
+          <GroupLabel>Anweisungen für Kiki</GroupLabel>
+        </div>
+        <p className="mb-2 text-xs text-muted">
+          Kiki berücksichtigt diese Hinweise in jedem Gespräch — z. B. besondere Umgangsformen oder
+          worauf sie hinweisen soll. Kurz halten; feste Verbote regelst du besser über die Gesprächslogik.
         </p>
+        <textarea
+          value={customInstructions}
+          maxLength={2000}
+          onChange={(e) => setCustomInstructions(e.target.value)}
+          placeholder={`z. B. „${CUSTOM_INSTRUCTION_EXAMPLES[exampleIdx]}“`}
+          className={cn(inputCls, 'min-h-[110px]')}
+        />
+        <div className="mt-1 text-right text-xs text-faint">{customInstructions.length}/2000 Zeichen</div>
       </Card>
 
-      {/* Card 4 — Zeitabhängige Begrüßung (topic 20) */}
+      {/* Card 3 — Zeitabhängige Begrüßung (topic 20) */}
       <Card>
         <GroupLabel>Zeitabhängige Begrüßung (optional)</GroupLabel>
         <p className="mb-3 text-xs text-muted">
-          Unterschiedliche Begrüßungen je Tageszeit. Bei eingehenden Anrufen wählt Kiki automatisch die passende
-          Variante (sonst gilt die Standard-Begrüßung von Kiki oben).
+          Überschreibt die Begrüßung oben im jeweiligen Zeitfenster. Bei eingehenden Anrufen wählt Kiki
+          automatisch die passende Variante (sonst gilt die Begrüßung oben).
         </p>
         <div className="space-y-2">
           {welcomeMsgs.length === 0 && <p className="text-sm text-faint">Keine zeitabhängigen Begrüßungen.</p>}
@@ -154,7 +187,7 @@ export function VerhaltenSection({ data, flash }: { data: KzOverview; flash: (m:
       <div className="flex items-center justify-between rounded-xl border border-border bg-surface px-6 py-4">
         <button
           onClick={() => {
-            setWelcome(cfg.welcome_message ?? ''); setWelcomeMsgs(cfg.welcome_messages ?? [])
+            setCustomInstructions(cfg.custom_instructions ?? ''); setWelcomeMsgs(cfg.welcome_messages ?? [])
             setPersonaName(agent.persona_name ?? ''); setLanguage(agent.language ?? 'de')
             setVoiceId(agent.voice_id ?? ''); setFirstMessage(agent.first_message ?? '')
           }}

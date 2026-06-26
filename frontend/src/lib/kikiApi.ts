@@ -17,6 +17,7 @@ export interface KzConfig {
   invoices_enabled: boolean
   invoices_level: number
   welcome_message: string | null
+  custom_instructions: string | null
   trade: string | null
   knowledge_text: string
   forwarding_number: string | null

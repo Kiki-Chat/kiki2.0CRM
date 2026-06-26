@@ -187,6 +187,57 @@ def test_sync_inbound_number_noop_when_unbound(monkeypatch):
     assert calls["n"] == 0
 
 
+# ─── custom instructions ("Anweisungen für Kiki") ────────────────────────────
+def test_sanitize_custom_instructions_strips_tokens_and_headers():
+    raw = "# Achtung\nSei freundlich. Zeit ist {{system__time}}.\n== Ende =="
+    out = ac.sanitize_custom_instructions(raw)
+    assert "{{" not in out                 # placeholder injection stripped
+    assert "#" not in out and "==" not in out  # header markers demoted
+    assert "Sei freundlich." in out
+    assert "Achtung" in out and "Ende" in out  # text kept, markers gone
+
+
+def test_sanitize_custom_instructions_caps_length():
+    out = ac.sanitize_custom_instructions("x" * 5000)
+    assert len(out) <= ac._CUSTOM_INSTRUCTIONS_MAX + 1  # +1 for the trailing ellipsis
+    assert out.endswith("…")
+
+
+def test_sanitize_custom_instructions_empty():
+    assert ac.sanitize_custom_instructions(None) == ""
+    assert ac.sanitize_custom_instructions("   \n  ") == ""
+
+
+def test_render_custom_instructions_block_empty_renders_nothing():
+    # No custom instructions → no section at all (no orphan header in the prompt).
+    assert ac.render_custom_instructions_block({}) == ""
+    assert ac.render_custom_instructions_block({"custom_instructions": "  "}) == ""
+
+
+def test_render_custom_instructions_block_section():
+    out = ac.render_custom_instructions_block(
+        {"custom_instructions": "Wir sind ein Familienbetrieb — erwähne das."}
+    )
+    assert out.startswith("# Besondere Hinweise")
+    assert "Familienbetrieb" in out
+
+
+def test_render_prompt_fills_custom_instructions_token(monkeypatch):
+    # render_prompt_for_org must leave NO unfilled {{KZ_CUSTOM_INSTRUCTIONS}} —
+    # neither when empty (org_id=None → no config) nor when set.
+    name_only = ac.render_prompt_for_org("ACME GmbH")
+    assert "{{KZ_CUSTOM_INSTRUCTIONS}}" not in name_only
+    assert "# Besondere Hinweise" not in name_only  # empty → no section
+
+    monkeypatch.setattr(ac, "_fetch_kz_config", lambda _oid: {"custom_instructions": "Sei besonders herzlich."})
+    monkeypatch.setattr(ac, "_fetch_required_fields", lambda _oid: [])
+    monkeypatch.setattr(ac, "_fetch_appointment_categories", lambda _oid: [])
+    with_ci = ac.render_prompt_for_org("ACME GmbH", org_id=ORG_ID)
+    assert "{{KZ_CUSTOM_INSTRUCTIONS}}" not in with_ci
+    assert "# Besondere Hinweise" in with_ci
+    assert "Sei besonders herzlich." in with_ci
+
+
 def test_phone_meta_environment_none_when_unpinned(monkeypatch):
     monkeypatch.setattr(
         ac, "_list_phone_numbers",

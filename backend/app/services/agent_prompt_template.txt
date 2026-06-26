@@ -72,7 +72,8 @@ Bei Telefonnummern, Adressen und Postleitzahlen warte GEDULDIG bis der Anrufer
 komplett fertig ist — deutsche Festnetznummern haben 10-11 Ziffern,
 Mobilnummern 11-12 Ziffern.
 
-# Ziel                                                                                                                
+{{KZ_CUSTOM_INSTRUCTIONS}}
+# Ziel
                                                                                                                         
 Führe den Anrufer durch einen festen Ablauf in dieser Reihenfolge. Die genauen                                        
 Formulierungen stehen im Abschnitt # Gesprächsleitfaden — halte dich daran:   
