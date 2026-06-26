@@ -150,10 +150,20 @@ function HeroDeck() {
   })
   const [index, setIndex] = useState(0)
   const [busy, setBusy] = useState(false)
+  // Resolved cards vanish IMMEDIATELY (optimistic) instead of waiting for the 30s
+  // refetch — so a quick action has a visible effect.
+  const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
 
-  const total = decisions.length
+  const liveDecisions = decisions.filter((d) => !resolvedKeys.has(d.actionKey))
+  const total = liveDecisions.length
   const casesCount = cases?.length ?? 0
   const i = total ? Math.min(index, total - 1) : 0
+
+  // The deck is a glanceable queue. Clicking a card takes you into the INBOX,
+  // focused on that item, where the full call context + actions live.
+  function goToInbox(d: DecisionVM) {
+    navigate(`/posteingang?focus=${encodeURIComponent(d.actionKey)}`)
+  }
 
   async function act(d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') {
     if (busy) return
@@ -162,13 +172,17 @@ function HeroDeck() {
       navigate(d.route)
       return
     }
+    // Optimistically drop the card, then resolve. On failure, restore it.
+    setResolvedKeys((s) => new Set(s).add(d.actionKey))
+    setIndex((x) => Math.max(0, x - (i >= total - 1 ? 1 : 0)))
     setBusy(true)
     try {
       await resolve(d, choice)
+    } catch {
+      setResolvedKeys((s) => { const n = new Set(s); n.delete(d.actionKey); return n })
     } finally {
       setBusy(false)
     }
-    setIndex((x) => Math.max(0, Math.min(x, total - 2)))
   }
 
   return (
@@ -230,11 +244,15 @@ function HeroDeck() {
             <p className="text-xs text-muted">Kiki hat alles abgearbeitet — neue Anrufe erscheinen hier automatisch.</p>
           </div>
         )}
-        {decisions.map((d, j) => {
+        {liveDecisions.map((d, j) => {
           const p = j - i
           if (p < 0 || p > 2) return null
           const Icon = TYPE_ICON[d.type] ?? Sparkles
           const front = p === 0
+          // A Termin tied to an inquiry must be assigned before it can be confirmed
+          // (assign ≠ confirm). The dashboard card has no inline assign control, so
+          // the primary button routes into the inbox (where assignment lives).
+          const needsAssignee = d.kind === 'termin_anfrage' && !!d.inquiryId && !d.assigneeId
           return (
             <div
               key={d.actionKey}
@@ -248,55 +266,77 @@ function HeroDeck() {
                 pointerEvents: front ? 'auto' : 'none',
               }}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold"
-                  style={{ color: d.accent, backgroundColor: `color-mix(in srgb, ${d.accent} 12%, transparent)` }}
-                >
-                  <Icon size={12} /> {d.typeLabel}
-                </span>
-                {d.caseTicket && <span className="truncate font-mono text-[11px] text-muted">{d.caseTicket}</span>}
-              </div>
-              <p className="mt-1.5 truncate text-sm font-bold text-text">{d.title}</p>
-              <p className="mt-0.5 truncate text-[11px] text-muted">
-                {d.customer}
-                {d.caseName ? ` · ${d.caseName}` : ''}
-              </p>
-              {front && (
-                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                  <button
-                    disabled={busy}
-                    onClick={() => act(d, 'primary')}
-                    className="rounded-lg px-3 py-1.5 text-xs font-bold text-white transition disabled:opacity-50"
-                    style={{ backgroundColor: d.accent }}
+              {/* Subject region — clicking the card takes you into the inbox,
+                  focused on this item, where the full call context + actions live. */}
+              <div
+                onClick={front ? () => goToInbox(d) : undefined}
+                className={front ? 'cursor-pointer' : undefined}
+                title={front ? 'Im Posteingang öffnen' : undefined}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold"
+                    style={{ color: d.accent, backgroundColor: `color-mix(in srgb, ${d.accent} 12%, transparent)` }}
                   >
-                    {d.primary}
-                  </button>
-                  {d.secondary && (
-                    <button
-                      disabled={busy}
-                      onClick={() => act(d, 'secondary')}
-                      className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-text transition hover:border-green-tint-200 disabled:opacity-50"
-                    >
-                      {d.secondary}
-                    </button>
-                  )}
-                  {d.tertiary && (
-                    <button
-                      disabled={busy}
-                      onClick={() => act(d, 'tertiary')}
-                      className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-muted transition hover:text-text disabled:opacity-50"
-                    >
-                      {d.tertiary}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => navigate('/posteingang')}
-                    className="ml-auto self-center text-xs font-medium text-muted hover:text-text"
-                  >
-                    Alle ansehen →
-                  </button>
+                    <Icon size={12} /> {d.typeLabel}
+                  </span>
+                  {d.caseTicket && <span className="truncate font-mono text-[11px] text-muted">{d.caseTicket}</span>}
                 </div>
+                <p className="mt-1.5 truncate text-sm font-bold text-text">{d.title}</p>
+                <p className="mt-0.5 truncate text-[11px] text-muted">
+                  {d.customer}
+                  {d.caseName ? ` · ${d.caseName}` : ''}
+                </p>
+              </div>
+              {front && (
+                d.notify ? (
+                  // Notification card: a single neutral "check" link — NO decision.
+                  // A doc/caller link jumps straight there; otherwise into the inbox.
+                  <div className="mt-2.5 flex items-center gap-1.5">
+                    <button
+                      onClick={() => (d.route && !d.opensDrawer ? navigate(d.route) : goToInbox(d))}
+                      className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-text transition hover:border-green-tint-200"
+                    >
+                      {d.cardCta} →
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    <button
+                      disabled={busy}
+                      onClick={() => (needsAssignee ? goToInbox(d) : act(d, 'primary'))}
+                      title={needsAssignee ? 'Erst zuweisen — im Posteingang' : undefined}
+                      className="rounded-lg px-3 py-1.5 text-xs font-bold text-white transition disabled:opacity-50"
+                      style={{ backgroundColor: d.accent }}
+                    >
+                      {d.primary}
+                    </button>
+                    {d.secondary && (
+                      <button
+                        disabled={busy}
+                        onClick={() => act(d, 'secondary')}
+                        className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-text transition hover:border-green-tint-200 disabled:opacity-50"
+                      >
+                        {d.secondary}
+                      </button>
+                    )}
+                    {d.tertiary && (
+                      <button
+                        disabled={busy}
+                        onClick={() => act(d, 'tertiary')}
+                        className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-muted transition hover:text-text disabled:opacity-50"
+                      >
+                        {d.tertiary}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => goToInbox(d)}
+                      className="ml-auto self-center text-xs font-semibold text-green-deep hover:underline"
+                    >
+                      Details →
+                    </button>
+                  </div>
+                )
               )}
             </div>
           )

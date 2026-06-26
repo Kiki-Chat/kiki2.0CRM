@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import stripe
 from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_super_admin
+from app.api.deps import CurrentUser, require_super_admin, verify_master_secret
 from app.db.supabase_client import get_service_client
 from app.services.stripe_admin_actions import (
     approve_match,
@@ -33,6 +34,28 @@ from app.services.stripe_matcher import propose_matches
 router = APIRouter(prefix="/api/super-admin/billing", tags=["super-admin-billing"])
 
 _DELINQUENT = {"past_due", "unpaid"}
+
+
+# ─── Catalog bootstrap (master-secret; run once per Stripe mode) ──────────────
+@router.post("/ensure-catalog", dependencies=[Depends(verify_master_secret)])
+async def ensure_catalog_endpoint() -> dict:
+    """Create/refresh the canonical Solo/Team/Premium products + prices in whatever
+    Stripe mode the active key points at (idempotent, price-drift-aware).
+
+    MUST be run once after switching to a LIVE key — without a live catalog, checkout
+    fails with 'no catalog prices for …'. Guarded by the master secret (X-Heykiki-Secret
+    header) so it can be triggered out-of-band at go-live; safe to re-run after a price
+    change (it transfers lookup keys, never breaking existing subscriptions).
+    """
+    from app.services.stripe_catalog import ensure_catalog
+
+    if not is_configured():
+        raise HTTPException(status_code=400, detail="Stripe ist nicht konfiguriert (kein STRIPE_SECRET_KEY).")
+    try:
+        catalog = await run_in_threadpool(ensure_catalog)
+    except stripe.error.StripeError as exc:  # type: ignore[attr-defined]
+        raise HTTPException(status_code=502, detail=f"Katalog konnte nicht erstellt werden: {exc}") from exc
+    return {"ok": True, "plans": list(catalog.keys()), "catalog": catalog}
 
 
 # ─── Overview ────────────────────────────────────────────────────────────────

@@ -34,6 +34,10 @@ export interface RawAction {
   customer_name: string | null
   summary: string
   priority: 'high' | 'normal'
+  // When the action is time-bound (a proposed appointment / reschedule slot) the
+  // backend carries the slot here as `due_at` — the single most important fact to
+  // show before confirming. Null for document-lifecycle actions.
+  due_at?: string | null
 }
 
 export interface Employee {
@@ -69,6 +73,10 @@ interface RawCall {
   assigned_employee_id: string | null
   assigned_employee_initials: string | null
   read_at: string | null
+  // The agent's collected fields — already returned by /api/calls (data_collection
+  // is in the list select), so the inbox can show a real summary + next action with
+  // NO extra fetch. Keys vary (ultimate_summary / issue_summary / next_action / …).
+  data_collection: Record<string, string> | null
   customers: { full_name: string | null } | null
 }
 
@@ -88,10 +96,24 @@ export interface DecisionVM {
   reco: string
   suggestedEmployeeId: string | null
   inquiryId: string | null
+  // The originating call (when resolvable) — lets a decision drill into the call
+  // summary/transcript/recording that produced it. Null for actions with no call
+  // link (e.g. draft-Angebot reminders, missed-call callbacks).
+  callId: string | null
+  // Proposed appointment / reschedule slot (ISO) for time-bound decisions. Null otherwise.
+  dueAt: string | null
   // Case context (point 2/6): the named Fall this decision belongs to, resolved
   // from the call's project_title / inquiry_subject so the card says WHICH case.
   caseName: string | null
   caseTicket: string | null
+  // The case id — lets the inbox link the case chip to /cases?case=<id> so people
+  // open the Vorgang without going via the calls page. Null for inquiry-less actions.
+  caseId: string | null
+  // A real summary of what the case is about + what's going on, taken from the
+  // latest call's data_collection (LLM summary). Plus the agent's next action.
+  // Both already in the calls list — no extra fetch. Null when no call/summary.
+  contextSummary: string | null
+  nextAction: string | null
   // Current assignee of the case — surfaced so assignment is its own visible
   // step on the card (point 1: assign ≠ confirm).
   assigneeId: string | null
@@ -99,9 +121,18 @@ export interface DecisionVM {
   secondary: string | null
   tertiary: string | null
   assignable: boolean
-  // For the AI-suggested KVA/Rechnung actions: the pre-filled create-form to open
-  // on "primary" (the action references a call, not a document, so it navigates
-  // rather than POSTs). Null for all document-lifecycle actions.
+  // Notification vs decision intent (Amber 2026-06-26). notify=true → the card
+  // carries NO in-card business decision (KVA/Rechnung/Rückruf); it links onward.
+  // opensDrawer → the card has an inline call detail to expand in the inbox
+  // (appointment / suggestion) vs a notify card that just navigates via `route`.
+  // cardCta → the single neutral button label on a notify card.
+  notify: boolean
+  opensDrawer: boolean
+  cardCta: string
+  // Where a notify card navigates / what the drawer's onward action opens: the
+  // existing document (/cost-estimates/:id, /invoices/:id), the pre-filled
+  // create-form (suggestions), or the caller (/customers/:id). Null when there is
+  // nowhere to go (pure info). Appointment kinds keep route null (they POST).
   route: string | null
 }
 
@@ -146,21 +177,39 @@ const rel = (iso: string | null) => (iso ? relativeTimeDe(iso) : '—')
 const ts = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : 0)
 const firstName = (n: string | null | undefined) => (n ? n.trim().split(/\s+/)[0] : 'jemand')
 
+// Intent split (Amber 2026-06-26): ONLY appointment kinds are actionable on the
+// card (confirm/reschedule/cancel — a scheduling decision). KVA/Rechnung and
+// Rückruf are NOTIFICATION-only: they carry NO direct business decision (no
+// send/accept/mark-paid). A notification either deep-links to the existing
+// document, or — when no document exists yet (a call-derived suggestion) — opens
+// the call-transcript drawer where the "create" action lives.
+//   notify      = no in-card decision; it's a "go check" reminder
+//   opensDrawer = the card has an inline call detail to expand (appointment /
+//                 suggestion); a plain notify card just navigates via route
+//   cardCta     = the single neutral button label shown on a notify card
 const KIND_CFG: Record<
   ActionKind,
-  { type: DecisionType; accent: string; label: string; variant: TagVariant; title: (a: RawAction) => string; primary: string; secondary: string | null; tertiary: string | null; reco: (name: string, cust: string) => string; assignable: boolean }
+  { type: DecisionType; accent: string; label: string; variant: TagVariant; title: (a: RawAction) => string; primary: string; secondary: string | null; tertiary: string | null; reco: (name: string, cust: string) => string; assignable: boolean; notify: boolean; opensDrawer: boolean; cardCta: string }
 > = {
-  termin_anfrage: { type: 'termin', accent: 'var(--info)', label: 'Termin', variant: 'info', title: () => 'Termin bestätigen?', primary: 'Bestätigen', secondary: 'Verschieben', tertiary: 'Ablehnen', reco: (n) => `${n} zuweisen und Termin bestätigen`, assignable: true },
-  kva_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: (a) => `Angebot für ${a.customer_name || 'Kunde'}?`, primary: 'Angebot erstellen', secondary: null, tertiary: 'Später', reco: (_n, c) => `Im Anruf erwähnt — Angebot für ${c} vorausgefüllt erstellen`, assignable: false },
-  invoice_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: (a) => `Rechnung für ${a.customer_name || 'Kunde'}?`, primary: 'Rechnung erstellen', secondary: null, tertiary: 'Später', reco: (_n, c) => `Im Anruf erwähnt — Rechnung für ${c} vorausgefüllt erstellen`, assignable: false },
-  invoice_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: (a) => `Rechnung an ${a.customer_name || 'Kunde'} senden?`, primary: 'Rechnung senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `Rechnung jetzt an ${c} senden`, assignable: false },
-  invoice_pending_payment: { type: 'kva', accent: 'var(--warning)', label: 'Zahlung', variant: 'warning', title: () => 'Zahlung eingegangen?', primary: 'Als bezahlt', secondary: null, tertiary: null, reco: (_n, c) => `Zahlungseingang für ${c} prüfen`, assignable: false },
-  alt_time_proposal: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschieben', variant: 'warning', title: () => 'Neuen Termin annehmen?', primary: 'Annehmen', secondary: null, tertiary: 'Ablehnen', reco: () => 'Vorgeschlagenen Termin annehmen', assignable: false },
-  appointment_cancelled: { type: 'storno', accent: 'var(--error)', label: 'Storno', variant: 'error', title: () => 'Termin storniert', primary: 'Verstanden', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false },
-  callback_owed: { type: 'rueckruf', accent: 'var(--green-primary)', label: 'Rückruf', variant: 'green', title: (a) => `Rückruf an ${a.customer_name || 'Kunde'}?`, primary: 'Erledigt', secondary: 'Zuweisen', tertiary: null, reco: (n) => `${n} den Rückruf zuweisen`, assignable: true },
-  kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: (a) => `Angebot an ${a.customer_name || 'Kunde'} senden?`, primary: 'Angebot senden', secondary: null, tertiary: 'Später', reco: (_n, c) => `Angebot jetzt an ${c} senden`, assignable: false },
-  kva_pending_acceptance: { type: 'kva', accent: 'var(--ai)', label: 'Angebot-Antwort', variant: 'ai', title: () => 'Kundenantwort erfassen', primary: 'Angenommen', secondary: null, tertiary: 'Abgelehnt', reco: () => 'Antwort des Kunden eintragen', assignable: false },
-  reschedule_unmatched: { type: 'reschedule', accent: 'var(--warning)', label: 'Zuordnen', variant: 'warning', title: () => 'Terminänderung zuordnen', primary: 'Zuordnen', secondary: null, tertiary: 'Erledigt', reco: () => 'Terminänderung manuell einem Termin zuordnen', assignable: false },
+  // ── Appointment lifecycle — ACTIONABLE (decision drawer) ──────────────────
+  termin_anfrage: { type: 'termin', accent: 'var(--info)', label: 'Termin', variant: 'info', title: () => 'Termin bestätigen?', primary: 'Bestätigen', secondary: 'Verschieben', tertiary: 'Ablehnen', reco: (n) => `${n} zuweisen und Termin bestätigen`, assignable: true, notify: false, opensDrawer: true, cardCta: '' },
+  alt_time_proposal: { type: 'reschedule', accent: 'var(--warning)', label: 'Verschieben', variant: 'warning', title: () => 'Neuen Termin annehmen?', primary: 'Annehmen', secondary: null, tertiary: 'Ablehnen', reco: () => 'Vorgeschlagenen Termin annehmen', assignable: false, notify: false, opensDrawer: true, cardCta: '' },
+  appointment_cancelled: { type: 'storno', accent: 'var(--error)', label: 'Storno', variant: 'error', title: () => 'Termin storniert', primary: 'Verstanden', secondary: null, tertiary: 'Behalten', reco: () => 'Termin stornieren und Slot freigeben', assignable: false, notify: false, opensDrawer: true, cardCta: '' },
+  reschedule_unmatched: { type: 'reschedule', accent: 'var(--warning)', label: 'Zuordnen', variant: 'warning', title: () => 'Terminänderung zuordnen', primary: 'Zuordnen', secondary: null, tertiary: 'Erledigt', reco: () => 'Terminänderung manuell einem Termin zuordnen', assignable: false, notify: false, opensDrawer: true, cardCta: '' },
+
+  // ── KVA / Rechnung — NOTIFICATION only (no in-card decision) ──────────────
+  // Suggestions have no document yet → expand the call inline (the "create"
+  // action lives there). primary = the onward action.
+  kva_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: () => 'Angebot angefragt', primary: 'Angebot erstellen', secondary: null, tertiary: null, reco: (_n, c) => `Im Anruf erwähnt — Angebot für ${c} prüfen und ggf. erstellen`, assignable: false, notify: true, opensDrawer: true, cardCta: 'Angebot erstellen' },
+  invoice_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: () => 'Rechnung angefragt', primary: 'Rechnung erstellen', secondary: null, tertiary: null, reco: (_n, c) => `Im Anruf erwähnt — Rechnung für ${c} prüfen und ggf. erstellen`, assignable: false, notify: true, opensDrawer: true, cardCta: 'Rechnung erstellen' },
+  // Existing documents → deep-link to the document (decision happens there).
+  kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: () => 'Angebot bereit — prüfen', primary: 'Angebot prüfen', secondary: null, tertiary: null, reco: (_n, c) => `Angebot für ${c} im Bereich Angebote prüfen`, assignable: false, notify: true, opensDrawer: false, cardCta: 'Angebot prüfen' },
+  kva_pending_acceptance: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: () => 'Angebot — Antwort prüfen', primary: 'Angebot prüfen', secondary: null, tertiary: null, reco: (_n, c) => `Kundenantwort zum Angebot für ${c} prüfen`, assignable: false, notify: true, opensDrawer: false, cardCta: 'Angebot prüfen' },
+  invoice_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: () => 'Rechnung bereit — prüfen', primary: 'Rechnung prüfen', secondary: null, tertiary: null, reco: (_n, c) => `Rechnung für ${c} im Bereich Rechnungen prüfen`, assignable: false, notify: true, opensDrawer: false, cardCta: 'Rechnung prüfen' },
+  invoice_pending_payment: { type: 'kva', accent: 'var(--warning)', label: 'Zahlung', variant: 'warning', title: () => 'Zahlung prüfen', primary: 'Rechnung prüfen', secondary: null, tertiary: null, reco: (_n, c) => `Zahlungseingang für ${c} prüfen`, assignable: false, notify: true, opensDrawer: false, cardCta: 'Rechnung prüfen' },
+
+  // ── Rückruf — NOTIFICATION only (links to the caller) ─────────────────────
+  callback_owed: { type: 'rueckruf', accent: 'var(--green-primary)', label: 'Rückruf', variant: 'green', title: () => 'Rückruf offen', primary: 'Anrufer ansehen', secondary: null, tertiary: null, reco: () => 'Verpasster Anruf — Kunde ansehen und zurückrufen', assignable: false, notify: true, opensDrawer: false, cardCta: 'Anrufer ansehen' },
 }
 
 function pickSuggested(employees: Employee[]): Employee | null {
@@ -178,7 +227,28 @@ function pickSuggested(employees: Employee[]): Employee | null {
 interface InquiryMeta {
   caseName: string | null
   caseTicket: string | null
+  caseId: string | null
   assigneeId: string | null
+  contextSummary: string | null
+  nextAction: string | null
+}
+// The agent's summaries are lightly markdown-formatted (** , "- " bullets,
+// newlines) — flatten to clean prose for an inline 1-3 line card.
+function cleanText(s: string): string {
+  return s
+    .replace(/\*\*/g, '')
+    .replace(/^\s*[-*]\s+/gm, '')
+    .replace(/\s*\n+\s*/g, ' · ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+// The agent stores its summary under varying keys depending on flow. Prefer the
+// concise issue_summary for an inline card, then the fuller ultimate_summary,
+// then the call's short title.
+function callSummary(c: RawCall): string | null {
+  const dc = c.data_collection ?? {}
+  const raw = dc.issue_summary || dc.ultimate_summary || dc.call_summary || dc.summary || c.summary_title || null
+  return raw ? cleanText(raw) : null
 }
 function buildInquiryMeta(calls: RawCall[]): Map<string, InquiryMeta> {
   const meta = new Map<string, InquiryMeta>()
@@ -189,22 +259,46 @@ function buildInquiryMeta(calls: RawCall[]): Map<string, InquiryMeta> {
     if (meta.has(c.inquiry_id) && t <= (seenTs.get(c.inquiry_id) ?? 0)) continue
     seenTs.set(c.inquiry_id, t)
     const isCase = !!c.case_id
+    const dc = c.data_collection ?? {}
     meta.set(c.inquiry_id, {
       caseName: (isCase ? c.case_label : c.inquiry_subject) || c.summary_title || null,
       caseTicket: (isCase ? c.case_number : c.inquiry_number) || null,
+      caseId: c.case_id,
       assigneeId: c.assigned_employee_id,
+      contextSummary: callSummary(c),
+      nextAction: dc.next_action || dc.next_step || null,
     })
   }
   return meta
 }
 
-export function buildDecisions(actions: RawAction[], employees: Employee[], meta: Map<string, InquiryMeta>): DecisionVM[] {
+export function buildDecisions(actions: RawAction[], employees: Employee[], meta: Map<string, InquiryMeta>, callsById?: Map<string, RawCall>): DecisionVM[] {
   const suggested = pickSuggested(employees)
   return actions.map((a) => {
     const cfg = KIND_CFG[a.kind]
     const cust = a.customer_name || 'Unbekannter Kunde'
     const name = firstName(suggested?.display_name)
     const info = a.inquiry_id ? meta.get(a.inquiry_id) : undefined
+    // Summary/next-action straight from the action's OWN call (most reliable),
+    // then the inquiry's latest call, then the terse backend action summary.
+    const ownCall = a.call_id ? callsById?.get(a.call_id) : undefined
+    const contextSummary =
+      (ownCall ? callSummary(ownCall) : null) ?? info?.contextSummary ?? a.summary ?? null
+    const nextAction =
+      ownCall?.data_collection?.next_action || ownCall?.data_collection?.next_step || info?.nextAction || null
+    // Case/Vorgang context — from the inquiry meta, else the action's own call.
+    const caseName =
+      info?.caseName ??
+      (ownCall ? (ownCall.case_id ? ownCall.case_label : ownCall.inquiry_subject) : null) ??
+      null
+    const caseTicket =
+      info?.caseTicket ??
+      (ownCall ? (ownCall.case_id ? ownCall.case_number : ownCall.inquiry_number) : null) ??
+      null
+    const caseId = info?.caseId ?? ownCall?.case_id ?? null
+    // Navigation target per intent: suggestions → pre-filled create-form (opened
+    // from the transcript drawer); existing KVA/Rechnung → the document detail;
+    // Rückruf → the caller. Appointment kinds keep route null (they POST a decision).
     const route =
       a.kind === 'kva_suggested'
         ? `/cost-estimates/new?customer_id=${a.customer_id ?? ''}` +
@@ -212,7 +306,13 @@ export function buildDecisions(actions: RawAction[], employees: Employee[], meta
           (a.call_id ? `&call_id=${a.call_id}` : '')
         : a.kind === 'invoice_suggested'
           ? `/invoices/new?customer_id=${a.customer_id ?? ''}` + (a.call_id ? `&call_id=${a.call_id}` : '')
-          : null
+          : a.kind === 'kva_to_send' || a.kind === 'kva_pending_acceptance'
+            ? `/cost-estimates/${a.id}`
+            : a.kind === 'invoice_to_send' || a.kind === 'invoice_pending_payment'
+              ? `/invoices/${a.id}`
+              : a.kind === 'callback_owed'
+                ? (a.customer_id ? `/customers/${a.customer_id}` : null)
+                : null
     return {
       actionKey: a.action_key,
       kind: a.kind,
@@ -228,13 +328,21 @@ export function buildDecisions(actions: RawAction[], employees: Employee[], meta
       reco: cfg.reco(name, cust),
       suggestedEmployeeId: cfg.assignable ? suggested?.id ?? null : null,
       inquiryId: a.inquiry_id,
-      caseName: info?.caseName ?? null,
-      caseTicket: info?.caseTicket ?? null,
+      callId: a.call_id,
+      dueAt: a.due_at ?? null,
+      caseName,
+      caseTicket,
+      caseId,
+      contextSummary,
+      nextAction,
       assigneeId: info?.assigneeId ?? null,
       primary: cfg.primary,
       secondary: cfg.secondary,
       tertiary: cfg.tertiary,
       assignable: cfg.assignable,
+      notify: cfg.notify,
+      opensDrawer: cfg.opensDrawer,
+      cardCta: cfg.cardCta,
       route,
     }
   })
@@ -309,7 +417,8 @@ export function usePosteingang() {
   const employees = employeesQ.data ?? []
   const actions = (actionsQ.data ?? []).filter((a) => a.kind in KIND_CFG)
   const calls = callsQ.data?.calls ?? []
-  const decisions = buildDecisions(actions, employees, buildInquiryMeta(calls))
+  const callsById = new Map(calls.map((c) => [c.id, c]))
+  const decisions = buildDecisions(actions, employees, buildInquiryMeta(calls), callsById)
   const vorgaenge = buildVorgaenge(calls, actions)
 
   return {
@@ -429,6 +538,10 @@ export function usePosteingangActions() {
   async function runResolve(d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') {
     const id = d.actionKey.split(':').slice(1).join(':') || d.actionKey
     const done = () => apiFetch('/api/actions/state', { method: 'POST', body: JSON.stringify({ action_key: d.actionKey, status: 'done' }) })
+    // ONLY appointment kinds resolve via a POST decision here. KVA/Rechnung and
+    // Rückruf are notification-only — their card buttons navigate (d.route) and
+    // never reach runResolve, so there is no send/accept/mark-paid path on the
+    // dashboard (the decision is made in the document's own page).
     if (d.kind === 'termin_anfrage') {
       if (choice === 'primary') await apiFetch(`/api/appointments/${id}/confirm`, { method: 'POST' })
       else if (choice === 'tertiary') await apiFetch(`/api/appointments/${id}/reject`, { method: 'POST', body: JSON.stringify({}) })
@@ -437,27 +550,10 @@ export function usePosteingangActions() {
       await apiFetch(`/api/appointments/${id}/${choice === 'primary' ? 'approve-proposal' : 'decline-proposal'}`, { method: 'POST' })
     } else if (d.kind === 'appointment_cancelled') {
       // Informational card: the cancellation already happened (status='cancelled').
-      // 'Zur Kenntnis' just acknowledges it — DON'T POST /reject (requires
+      // 'Verstanden' just acknowledges it — DON'T POST /reject (requires
       // status='pending' → always 409; would also double-fire a customer cancel).
       await done()
     } else if (d.kind === 'reschedule_unmatched') {
-      await done()
-    } else if (d.kind === 'callback_owed') {
-      await done()
-    } else if (d.kind === 'kva_to_send') {
-      if (choice === 'primary') await apiFetch(`/api/cost-estimates/${id}/send`, { method: 'POST', body: JSON.stringify({ copy_to_me: false }) })
-      else await done()
-    } else if (d.kind === 'kva_pending_acceptance') {
-      await apiFetch(`/api/cost-estimates/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: choice === 'primary' ? 'accepted' : 'rejected' }) })
-    } else if (d.kind === 'invoice_to_send') {
-      if (choice === 'primary') await apiFetch(`/api/invoices/${id}/send`, { method: 'POST', body: JSON.stringify({}) })
-      else await done()
-    } else if (d.kind === 'invoice_pending_payment') {
-      if (choice === 'primary') await apiFetch(`/api/invoices/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'paid' }) })
-      else await done()
-    } else if (d.kind === 'kva_suggested' || d.kind === 'invoice_suggested') {
-      // 'primary' navigates to the pre-filled form (handled by the card via d.route);
-      // reaching here means 'Später' — just dismiss for now.
       await done()
     }
   }
