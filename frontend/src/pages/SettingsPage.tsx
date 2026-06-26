@@ -543,12 +543,17 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
     staleTime: STALE,
   })
   const s = summaryQ.data
-  const configured = !!s?.configured
+  // 'Subscribed' = an actual Stripe subscription exists (any live state) — NOT merely
+  // 'has a Stripe customer'. A failed checkout can create a customer without a
+  // subscription; keying the whole billing view off status (not 'configured') is what
+  // keeps usage/plan/invoices hidden until the customer has really subscribed.
+  const subscribed =
+    !!s && ['active', 'trialing', 'past_due', 'unpaid'].includes(s.status ?? '')
   const invoicesQ = useQuery({
     queryKey: ['billing', 'invoices'],
     queryFn: () => apiFetch<BillingInvoice[]>('/api/billing/invoices?limit=12'),
     retry: false,
-    enabled: configured,
+    enabled: subscribed,
     staleTime: STALE,
   })
   const portal = useMutation({
@@ -638,7 +643,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
           <span><strong>Testphase aktiv</strong>{s?.period_end ? ` – endet am ${new Date(s.period_end).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' })}` : ''}. Hinterlege eine Zahlungsmethode, damit deine KI nahtlos weiterläuft.</span>
         </div>
       )}
-      {configured && s && (
+      {subscribed && s && (
         <Card>
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-4">
@@ -704,12 +709,13 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
         </Card>
       )}
 
+      {subscribed && (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card>
           <div className="flex items-center gap-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-tint-100"><Clock size={18} className="text-green-deep" /></div>
             <div className="min-w-0">
-              <div className="text-xs font-bold uppercase tracking-wide text-muted">KI-Minuten {configured ? '(Abrechnungsperiode)' : '(Monat)'}</div>
+              <div className="text-xs font-bold uppercase tracking-wide text-muted">KI-Minuten (Abrechnungsperiode)</div>
               <div className="text-2xl font-bold leading-tight text-text">{used} / {quota || '∞'}</div>
             </div>
           </div>
@@ -720,22 +726,23 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
         <KpiCard label="Aktive Mitarbeiter" value={usage.active_employees} icon={Users} />
         <KpiCard label="Gespeicherte Dokumente" value={usage.document_count} sub={size} icon={FileText} />
       </div>
+      )}
 
       {/* Two pre-overage warnings (80 % → first, 95 % → final), mirroring the two
           warning e-mails the backend sends before any extra usage is charged. */}
-      {!over && quota > 0 && pct >= 80 && pct < 95 && (
+      {subscribed && !over && quota > 0 && pct >= 80 && pct < 95 && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-bg/40 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
           <span><strong>{Math.round(pct)} % deines Minutenkontingents verbraucht.</strong> Ab {quota} Min. wird jede weitere Minute nach Tarif berechnet.</span>
         </div>
       )}
-      {!over && quota > 0 && pct >= 95 && (
+      {subscribed && !over && quota > 0 && pct >= 95 && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/50 bg-warning-bg/60 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
           <span><strong>Letzte Warnung: {Math.round(pct)} % verbraucht.</strong> Dein Kontingent ist fast aufgebraucht. Ab {quota} Min. wird jede weitere Minute{s?.overage_cents_per_min != null ? ` mit ${fmtCents(s.overage_cents_per_min)}/Min.` : ''} berechnet.</span>
         </div>
       )}
-      {over && (
+      {subscribed && over && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-bg/40 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
           <span>Dein Minutenkontingent ist aufgebraucht. Deine KI bleibt erreichbar — der <strong>Mehrverbrauch wird nach Tarif berechnet</strong>.</span>
@@ -744,7 +751,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
 
       {/* Explicit extra-usage breakdown — included vs used, minutes over, the
           per-minute tariff, and the running projected extra charge for the period. */}
-      {over && configured && s && s.minutes_over > 0 && (
+      {subscribed && over && s && s.minutes_over > 0 && (
         <Card>
           <div className="mb-3 flex items-center gap-2 text-sm font-bold text-text"><Zap size={16} className="text-warning" /> Mehrverbrauch (Extra-Nutzung)</div>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -775,7 +782,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
         </Card>
       )}
 
-      {configured && invoices.length > 0 && (
+      {subscribed && invoices.length > 0 && (
         <Card>
           <div className="mb-3 flex items-center gap-2 text-sm font-bold text-text"><Receipt size={16} className="text-green-deep" /> Rechnungen</div>
           <div className="divide-y divide-border">
@@ -802,7 +809,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
         </Card>
       )}
 
-      {!configured && plans.length > 0 && (
+      {!subscribed && plans.length > 0 && (
         <Card>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -833,7 +840,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
         </Card>
       )}
 
-      {!configured && (
+      {!subscribed && (
         <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
           <Info size={16} className="mt-0.5 shrink-0 text-info" />
           <span>Für Fragen zu deinem Abonnement wende dich an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>.</span>

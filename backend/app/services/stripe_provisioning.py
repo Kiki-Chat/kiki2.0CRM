@@ -102,11 +102,15 @@ def create_checkout_session(
     if interval not in ("month", "year"):
         raise StripeBillingError(f"invalid interval {interval!r}")
     db = get_service_client()
-    customer_id = ensure_stripe_customer(org_id, actor_id)
-
+    # Resolve catalog prices BEFORE creating the Stripe customer. Otherwise a missing
+    # catalog (e.g. LIVE mode before ensure_catalog has run) mints an orphan customer on
+    # the org, flipping the Abrechnung UI into a fake 'subscribed' state on a failed
+    # checkout. Fail fast here = no customer, no orphan link.
     prices = find_plan_prices(plan_title, interval)
     if not prices["base_price"] or not prices["metered_price"]:
         raise StripeBillingError(f"no catalog prices for {plan_title!r}/{interval!r}")
+
+    customer_id = ensure_stripe_customer(org_id, actor_id)
 
     line_items = [
         {"price": prices["base_price"], "quantity": 1},
