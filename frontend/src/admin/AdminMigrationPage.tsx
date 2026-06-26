@@ -11,7 +11,7 @@
  * Route: /admin/orgs/:id/migration  →  GET /api/super-admin/orgs/{id}/migration
  */
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowLeft, FileText, Info, Phone, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckCircle2, FileText, Info, Loader2, Phone, Users } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { apiFetch } from '../lib/adminApi'
@@ -41,6 +41,16 @@ interface MigrationOverview {
     sample_added: string[]
     sample_removed: string[]
   }
+  import_state: {
+    status: 'running' | 'complete' | 'incomplete'
+    started_at?: string
+    finished_at?: string
+    imported?: number
+    seen?: number
+    errors?: number
+    more?: boolean
+    passes?: number
+  } | null
 }
 
 const fmtDate = (s: string | null) =>
@@ -63,6 +73,9 @@ export function AdminMigrationPage() {
     queryKey: ['admin', 'migration', id],
     queryFn: () => apiFetch<MigrationOverview>(`/api/super-admin/orgs/${id}/migration`),
     enabled: !!id,
+    // Poll live while an import is still running, so the count + status update.
+    refetchInterval: (q) =>
+      q.state.data?.import_state?.status === 'running' ? 4000 : false,
   })
 
   return (
@@ -97,8 +110,11 @@ export function AdminMigrationPage() {
         <>
           {/* ── Migrierte Daten ─────────────────────────────────────────── */}
           <section className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-              <Users size={15} className="text-amber-300" /> Migrierte Daten
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+                <Users size={15} className="text-amber-300" /> Migrierte Daten
+              </div>
+              {data.import_state && <ImportStatusBadge state={data.import_state} />}
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <Stat label="Anrufe importiert" value={data.history.calls} icon={<Phone size={13} />} />
@@ -109,6 +125,17 @@ export function AdminMigrationPage() {
             </div>
             <p className="text-xs text-slate-500">
               Letzter importierter Anruf: <span className="text-slate-400">{fmtDate(data.history.last_call_at)}</span>
+              {data.import_state && (
+                <>
+                  {' · '}
+                  {data.import_state.status === 'running'
+                    ? <>Import gestartet: <span className="text-slate-400">{fmtDate(data.import_state.started_at ?? null)}</span></>
+                    : <>Import zuletzt: <span className="text-slate-400">{fmtDate(data.import_state.finished_at ?? null)}</span></>}
+                  {(data.import_state.errors ?? 0) > 0 && (
+                    <span className="text-amber-400"> · {data.import_state.errors} Fehler</span>
+                  )}
+                </>
+              )}
             </p>
           </section>
 
@@ -176,6 +203,57 @@ export function AdminMigrationPage() {
         </>
       )}
     </div>
+  )
+}
+
+function ImportStatusBadge({
+  state,
+}: {
+  state: NonNullable<MigrationOverview['import_state']>
+}) {
+  const imported = state.imported ?? 0
+  const seen = state.seen ?? 0
+  const complete = state.status === 'complete'
+  // A "running" state whose start is >30 min old is most likely a worker that
+  // was restarted mid-pass — flag it so staff know to re-trigger (it resumes).
+  const stale =
+    state.status === 'running' &&
+    !!state.started_at &&
+    Date.now() - new Date(state.started_at).getTime() > 30 * 60 * 1000
+  const running = state.status === 'running' && !stale
+
+  const tone = complete ? 'emerald' : stale || state.status === 'incomplete' ? 'red' : 'amber'
+  const label = complete
+    ? 'Import abgeschlossen'
+    : state.status === 'incomplete'
+      ? 'Import unvollständig'
+      : stale
+        ? 'Import evtl. unterbrochen'
+        : 'Import läuft…'
+  const count = seen ? ` · ${imported}/${seen}` : imported ? ` · ${imported}` : ''
+
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1',
+        tone === 'emerald'
+          ? 'bg-emerald-950/60 text-emerald-300 ring-emerald-900/60'
+          : tone === 'red'
+            ? 'bg-red-950/60 text-red-300 ring-red-900/60'
+            : 'bg-amber-950/60 text-amber-300 ring-amber-900/60',
+      )}
+      title={state.passes ? `${state.passes} Durchlauf/Durchläufe` : undefined}
+    >
+      {running ? (
+        <Loader2 size={11} className="animate-spin" />
+      ) : complete ? (
+        <CheckCircle2 size={11} />
+      ) : (
+        <AlertTriangle size={11} />
+      )}
+      {label}
+      {count}
+    </span>
   )
 }
 

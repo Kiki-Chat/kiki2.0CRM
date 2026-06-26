@@ -205,3 +205,48 @@ def test_import_per_run_cap_sets_more(monkeypatch):
     assert result["imported"] == 2
     assert result["more"] is True
     assert len(fetched) == 2             # stopped at the cap — didn't fetch the rest
+
+
+# ─── import_agent_history_until_done (auto-continue + progress state) ─────────
+def test_import_until_done_auto_continues_past_cap(monkeypatch):
+    """Loops import_agent_history until a pass reports more=False — auto-continue
+    past the per-run cap without a manual re-trigger — and records progress."""
+    monkeypatch.setattr(hi.settings, "elevenlabs_api_key", "fake")
+    monkeypatch.setattr(hi, "_now_iso", lambda: "2026-06-26T10:00:00+00:00")
+    states: list[dict] = []
+    monkeypatch.setattr(hi, "_set_import_state", lambda oid, st: states.append(st))
+
+    calls = {"n": 0}
+    def _imp(org_id, agent_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"imported": 1000, "skipped": 0, "errors": 0, "seen": 1500, "more": True}
+        return {"imported": 200, "skipped": 1000, "errors": 1, "seen": 1500, "more": False}
+    monkeypatch.setattr(hi, "import_agent_history", _imp)
+
+    final = hi.import_agent_history_until_done("org_x", "agent_x")
+    assert calls["n"] == 2                 # continued past the first (capped) pass
+    assert final["status"] == "complete"
+    assert final["imported"] == 1200       # summed across passes (total new)
+    assert final["seen"] == 1500           # last pass's full list size (the "M")
+    assert final["errors"] == 1
+    assert final["more"] is False
+    assert states[0]["status"] == "running"
+    assert states[-1]["status"] == "complete"
+
+
+def test_import_until_done_stops_at_max_passes(monkeypatch):
+    """A never-ending more=True stops at the _MAX_PASSES guard → 'incomplete'
+    (re-trigger continues), never an infinite loop."""
+    monkeypatch.setattr(hi.settings, "elevenlabs_api_key", "fake")
+    monkeypatch.setattr(hi, "_now_iso", lambda: "2026-06-26T10:00:00+00:00")
+    monkeypatch.setattr(hi, "_set_import_state", lambda oid, st: None)
+    monkeypatch.setattr(
+        hi, "import_agent_history",
+        lambda o, a: {"imported": 1000, "skipped": 0, "errors": 0, "seen": 99999, "more": True},
+    )
+    final = hi.import_agent_history_until_done("org_x", "agent_x")
+    assert final["status"] == "incomplete"
+    assert final["more"] is True
+    assert final["passes"] == hi._MAX_PASSES
+    assert final["imported"] == 1000 * hi._MAX_PASSES

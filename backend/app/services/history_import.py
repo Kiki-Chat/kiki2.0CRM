@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Iterator
 from uuid import UUID
 
@@ -194,3 +195,64 @@ def import_agent_history(
     log.info("history_import done org=%s agent=%s seen=%d imported=%d skipped=%d errors=%d more=%s",
              org_id, agent_id, seen, imported, skipped, errors, more)
     return {"imported": imported, "skipped": skipped, "errors": errors, "seen": seen, "more": more}
+
+
+# ─── Auto-continuing wrapper + progress state ────────────────────────────────
+_MAX_PASSES = 20  # auto-continue bound: 20 × _MAX_NEW_PER_RUN ≈ 20k convs per run
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _set_import_state(org_id: str | UUID, state: dict) -> None:
+    """Best-effort: persist import progress on ``organizations.history_import_state``
+    so the super-admin Migration view can show running / complete / N-of-M. A write
+    failure is logged, never raised (it must not break the import)."""
+    try:
+        get_service_client().table("organizations").update(
+            {"history_import_state": state}
+        ).eq("id", str(org_id)).execute()
+    except Exception:  # noqa: BLE001
+        log.exception("history_import: failed to persist import state for org=%s", org_id)
+
+
+def import_agent_history_until_done(org_id: str | UUID, agent_id: str) -> dict:
+    """Import the FULL back-catalogue, auto-continuing past the per-run cap.
+
+    Calls ``import_agent_history`` in a loop until a pass reports ``more=False``
+    (or the ``_MAX_PASSES`` guard), so a large agent finishes in one BackgroundTask
+    without a manual re-trigger. Each pass skips already-imported conversations, so
+    successive passes only do new work; the run is idempotent + resumable on
+    re-trigger if interrupted. Records progress on the org throughout.
+
+    ``imported`` is summed across passes (total NEW this run); ``seen`` is the last
+    pass's full list size (≈ the agent's total conversations, the "M" of N-of-M).
+    """
+    started = _now_iso()
+    _set_import_state(org_id, {"status": "running", "started_at": started,
+                              "imported": 0, "seen": 0, "errors": 0, "more": True, "passes": 0})
+
+    imported_total = errors_total = seen_last = 0
+    more = True
+    passes = 0
+    for passes in range(1, _MAX_PASSES + 1):
+        result = import_agent_history(org_id, agent_id)
+        imported_total += int(result.get("imported", 0) or 0)
+        errors_total += int(result.get("errors", 0) or 0)
+        seen_last = int(result.get("seen", 0) or 0)
+        more = bool(result.get("more"))
+        _set_import_state(org_id, {"status": "running", "started_at": started,
+                                  "imported": imported_total, "seen": seen_last,
+                                  "errors": errors_total, "more": more, "passes": passes})
+        if not more:
+            break
+
+    status_ = "incomplete" if more else "complete"
+    final = {"status": status_, "started_at": started, "finished_at": _now_iso(),
+             "imported": imported_total, "seen": seen_last, "errors": errors_total,
+             "more": more, "passes": passes}
+    _set_import_state(org_id, final)
+    log.info("history_import_until_done org=%s status=%s imported=%d seen=%d passes=%d",
+             org_id, status_, imported_total, seen_last, passes)
+    return final

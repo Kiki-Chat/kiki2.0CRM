@@ -30,7 +30,9 @@ from app.services.agent_config import (
     sync_inbound_number,
     verify_agent_health,
 )
-from app.services.history_import import import_agent_history
+from app.services.history_import import (
+    import_agent_history_until_done,
+)
 from app.services.prompt_diff import classify_agent_prompt
 from app.services.provisioning import provision_org
 
@@ -338,7 +340,7 @@ async def create_org(
     """
     response = await run_in_threadpool(provision_org, payload)
     background_tasks.add_task(
-        import_agent_history,
+        import_agent_history_until_done,
         org_id=response.org_id,
         agent_id=payload.elevenlabs_agent_id,
     )
@@ -378,7 +380,7 @@ async def import_history(
             status_code=400,
             detail="Diese Organisation hat keine Sprach-ID hinterlegt.",
         )
-    background_tasks.add_task(import_agent_history, org_id, agent_id)
+    background_tasks.add_task(import_agent_history_until_done, org_id, agent_id)
     return {
         "success": True,
         "org_id": org_id,
@@ -856,6 +858,9 @@ class MigrationOverview(BaseModel):
     agent_id: str | None = None
     history: MigrationHistory
     prompt: MigrationPromptDiff
+    # Progress of the background EL call-import (organizations.history_import_state),
+    # written by import_agent_history_until_done. None = no import has run yet.
+    import_state: dict | None = None
 
 
 def _migration_history(org_id: str) -> dict:
@@ -923,12 +928,14 @@ async def org_migration_overview(
         )
     else:
         prompt = {"available": False, "error": "Keine Sprach-ID hinterlegt."}
+    import_state = org.get("history_import_state")
     return MigrationOverview(
         org_id=org_id,
         name=org.get("name"),
         agent_id=agent_id,
         history=MigrationHistory(**history),
         prompt=MigrationPromptDiff(**prompt),
+        import_state=import_state if isinstance(import_state, dict) else None,
     )
 
 

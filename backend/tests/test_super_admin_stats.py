@@ -160,7 +160,7 @@ def test_create_org_response_omits_org_secret(monkeypatch):
         org_secret = "should-NOT-appear-in-response"
 
     monkeypatch.setattr(sa, "provision_org", lambda payload: _StubProvisionResponse())
-    monkeypatch.setattr(sa, "import_agent_history", lambda **_kw: None)
+    monkeypatch.setattr(sa, "import_agent_history_until_done", lambda **_kw: None)
 
     payload = ProvisionRequest(
         heykikiOrgId="kiki-customer-test",
