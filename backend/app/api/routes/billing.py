@@ -17,6 +17,7 @@ from app.db.supabase_client import get_service_client
 from app.schemas.billing import (
     BillingInvoice,
     BillingSummary,
+    ChangePlanPreview,
     ChangePlanRequest,
     CheckoutRequest,
     CheckoutResponse,
@@ -365,6 +366,29 @@ async def billing_change_plan(
     body: ChangePlanRequest, user: CurrentUser = Depends(require_org)
 ) -> BillingSummary:
     return await run_in_threadpool(_change_plan, user.org_id, user.id, body)
+
+
+# ─── POST /api/billing/change-plan/preview (prorated cost before confirming) ──
+def _change_plan_preview(org_id: str, plan_title: str) -> ChangePlanPreview:
+    from app.services.stripe_provisioning import preview_change_plan
+
+    if not is_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Für diese Organisation ist noch keine Abrechnung eingerichtet.",
+        )
+    try:
+        data = preview_change_plan(org_id, plan_title)
+    except StripeBillingError as exc:
+        raise HTTPException(status_code=502, detail=f"Vorschau fehlgeschlagen: {exc}") from exc
+    return ChangePlanPreview(**data)
+
+
+@router.post("/change-plan/preview", response_model=ChangePlanPreview)
+async def billing_change_plan_preview(
+    body: ChangePlanRequest, user: CurrentUser = Depends(require_org)
+) -> ChangePlanPreview:
+    return await run_in_threadpool(_change_plan_preview, user.org_id, body.plan_title)
 
 
 # ─── POST /api/billing/sync (webhook fallback) ───────────────────────────────
