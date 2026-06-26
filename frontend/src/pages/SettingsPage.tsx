@@ -16,6 +16,7 @@ import {
   Info,
   Lock,
   Mail,
+  Minus,
   Palette,
   Plug,
   Receipt,
@@ -531,6 +532,93 @@ function DesignSection({ org }: { org: Org }) {
   )
 }
 
+// ─── Plan features (mirrors the catalog packaging — Amber 2026-06-26) ─────────
+const PLAN_FEATURE_BULLETS: Record<string, string[]> = {
+  'Kiki Basis': ['Kiki – Anrufe qualifizieren', 'Kontakte', 'Geschäftszeiten', 'Begrüßungen'],
+  'Kiki Pro': ['Alles aus Basis', 'Vorgänge & Aufträge', 'Planungstafel', 'Kalender & Terminverwaltung', 'Automatische Notizen (KI)'],
+  'Kiki Enterprise': ['Alles aus Pro', 'Projekte', 'Finanzen (Rechnungen, Angebote)', 'Artikel/Katalog', 'ERP-Integrationen', 'API & Custom'],
+  'Kiki Legacy': ['Alles aus Basis', 'Vorgänge & Aufträge', 'Basic Notizen (manuell)'],
+}
+
+const COMPARE_COLUMNS = ['Kiki Basis', 'Kiki Pro', 'Kiki Enterprise']
+const COMPARE_GROUPS: { group: string; rows: { label: string; in: string[] }[] }[] = [
+  { group: 'Kommunikation', rows: [
+    { label: 'Kiki – Anrufe qualifizieren', in: ['Kiki Basis', 'Kiki Pro', 'Kiki Enterprise'] },
+    { label: 'Kontakte', in: ['Kiki Basis', 'Kiki Pro', 'Kiki Enterprise'] },
+    { label: 'Geschäftszeiten', in: ['Kiki Basis', 'Kiki Pro', 'Kiki Enterprise'] },
+    { label: 'Begrüßungen', in: ['Kiki Basis', 'Kiki Pro', 'Kiki Enterprise'] },
+  ] },
+  { group: 'Workflow & Termine', rows: [
+    { label: 'Vorgänge & Aufträge', in: ['Kiki Pro', 'Kiki Enterprise'] },
+    { label: 'Planungstafel', in: ['Kiki Pro', 'Kiki Enterprise'] },
+    { label: 'Kalender & Terminverwaltung', in: ['Kiki Pro', 'Kiki Enterprise'] },
+    { label: 'Automatische Notizen (KI)', in: ['Kiki Pro', 'Kiki Enterprise'] },
+  ] },
+  { group: 'Enterprise', rows: [
+    { label: 'Projekte', in: ['Kiki Enterprise'] },
+    { label: 'Finanzen (Rechnungen, Angebote)', in: ['Kiki Enterprise'] },
+    { label: 'Artikel/Katalog', in: ['Kiki Enterprise'] },
+    { label: 'ERP-Integrationen', in: ['Kiki Enterprise'] },
+    { label: 'API & Custom', in: ['Kiki Enterprise'] },
+  ] },
+]
+
+const shortPlan = (title: string) => title.replace(/^Kiki\s+/, '')
+
+function PlanFeatureList({ plan }: { plan: string }) {
+  const bullets = PLAN_FEATURE_BULLETS[plan] ?? []
+  if (!bullets.length) return null
+  return (
+    <ul className="mt-3 space-y-1.5">
+      {bullets.map((b) => (
+        <li key={b} className="flex items-start gap-2 text-xs text-body">
+          <Check size={13} className="mt-0.5 shrink-0 text-green-deep" />
+          <span>{b}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function PlanComparison() {
+  return (
+    <div className="mt-5">
+      <div className="mb-2 text-sm font-bold text-text">Alle Funktionen im Vergleich</div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[440px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-border">
+              <th className="sticky left-0 z-10 bg-surface py-2 pr-3 text-left text-xs font-bold uppercase tracking-wide text-muted">Funktion</th>
+              {COMPARE_COLUMNS.map((c) => (
+                <th key={c} className="px-3 py-2 text-center text-sm font-bold text-text">{shortPlan(c)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {COMPARE_GROUPS.flatMap((g) => [
+              <tr key={`${g.group}-head`} className="bg-alt/60">
+                <td colSpan={COMPARE_COLUMNS.length + 1} className="sticky left-0 px-0 py-1.5 text-xs font-bold uppercase tracking-wide text-muted">{g.group}</td>
+              </tr>,
+              ...g.rows.map((row) => (
+                <tr key={row.label} className="border-t border-border">
+                  <td className="sticky left-0 z-10 bg-surface py-2 pr-3 text-left text-body">{row.label}</td>
+                  {COMPARE_COLUMNS.map((c) => (
+                    <td key={c} className="px-3 py-2 text-center">
+                      {row.in.includes(c)
+                        ? <Check size={16} className="mx-auto text-green-deep" />
+                        : <Minus size={16} className="mx-auto text-muted/40" />}
+                    </td>
+                  ))}
+                </tr>
+              )),
+            ])}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ─── Abrechnung ───────────────────────────────────────────────────────────────
 function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) => void }) {
   const qc = useQueryClient()
@@ -568,13 +656,21 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
   })
   const [planInterval, setPlanInterval] = useState<'month' | 'year'>('month')
   const [showUpgrade, setShowUpgrade] = useState(false)
+  // The plan the user has selected to switch to but not yet confirmed — drives the
+  // "confirm the change + prorated cost" step so a tier change is never silent.
+  const [pendingPlan, setPendingPlan] = useState<PlanOption | null>(null)
   const subscribe = useMutation({
     mutationFn: (vars: { plan_title: string; interval: string }) =>
-      apiFetch<{ url: string }>('/api/billing/checkout-session', { method: 'POST', body: JSON.stringify(vars) }),
+      apiFetch<{ url: string }>('/api/billing/checkout-session', {
+        method: 'POST',
+        // Send our own origin so Stripe returns the user to THIS app (logged in),
+        // not a baked PUBLIC_URL that may differ and bounce them to /login.
+        body: JSON.stringify({ ...vars, return_origin: window.location.origin }),
+      }),
     onSuccess: (r) => { window.location.href = r.url },
   })
-  // In-CRM upgrade: swap the live subscription to a higher plan (no Stripe redirect),
-  // then reflect the synced summary the endpoint returns. Downgrades are 400'd server-side.
+  // In-CRM plan switch: swap the live subscription up OR down (no Stripe redirect);
+  // Stripe prorates the difference onto the next invoice. Reflect the synced summary.
   const changePlan = useMutation({
     mutationFn: (vars: { plan_title: string }) =>
       apiFetch<BillingSummary>('/api/billing/change-plan', { method: 'POST', body: JSON.stringify(vars) }),
@@ -582,6 +678,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       qc.setQueryData(['billing', 'summary'], next)
       qc.invalidateQueries({ queryKey: ['billing'] })
       setShowUpgrade(false)
+      setPendingPlan(null)
       flash(`Tarif geändert: ${next.plan_title ?? 'aktualisiert'}.`)
     },
   })
@@ -620,10 +717,9 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
   const size = usage.document_size_bytes > 1e6 ? `${(usage.document_size_bytes / 1e6).toFixed(1)} MB` : `${Math.round(usage.document_size_bytes / 1024)} KB`
   const invoices = invoicesQ.data ?? []
   const plans = plansQ.data ?? []
-  // Upgrade targets = plans with more included minutes than the current quota
-  // (the 3-tier ladder is strictly ordered by included minutes). Server enforces
-  // upgrade-only too; this just hides downgrades/the current plan from the picker.
-  const upgradePlans = plans.filter((p) => p.included_minutes > quota)
+  // Switch targets = every other self-serve plan (up AND down) except the current one.
+  // Stripe prorates the difference (credit on downgrade, charge on upgrade).
+  const otherPlans = plans.filter((p) => p.plan_title !== s?.plan_title)
   const trialing = s?.status === 'trialing'
   const paymentDue = s?.status === 'past_due' || s?.status === 'unpaid'
 
@@ -664,12 +760,12 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                   <div className="text-sm font-semibold text-text">{fmtCents(s.next_invoice_amount_cents, s.currency)}</div>
                 </div>
               )}
-              {upgradePlans.length > 0 && (
+              {otherPlans.length > 0 && (
                 <button
-                  onClick={() => setShowUpgrade((v) => !v)}
+                  onClick={() => { setShowUpgrade((v) => !v); setPendingPlan(null) }}
                   className="flex items-center gap-2 rounded-md border border-green-primary px-4 py-2 text-sm font-semibold text-green-deep hover:bg-green-tint-100"
                 >
-                  <TrendingUp size={15} /> {showUpgrade ? 'Abbrechen' : 'Tarif upgraden'}
+                  <TrendingUp size={15} /> {showUpgrade ? 'Schließen' : 'Tarif wechseln'}
                 </button>
               )}
               <button
@@ -683,27 +779,60 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
           </div>
           {portal.isError && <div className="mt-3 text-sm text-error">{(portal.error as Error).message}</div>}
 
-          {showUpgrade && upgradePlans.length > 0 && (
+          {showUpgrade && otherPlans.length > 0 && (
             <div className="mt-4 border-t border-border pt-4">
-              <div className="mb-3 text-sm font-bold text-text">Upgrade auf einen höheren Tarif</div>
+              <div className="mb-3 text-sm font-bold text-text">Tarif wechseln</div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {upgradePlans.map((p) => (
-                  <div key={p.plan_title} className="flex flex-col rounded-xl border border-border p-4">
-                    <div className="text-sm font-bold text-text">{p.plan_title}</div>
-                    <div className="mt-1 text-2xl font-bold text-text">{fmtCents(p.monthly_cents)}<span className="text-xs font-normal text-muted">/Mon.</span></div>
-                    <div className="mt-1 text-xs text-muted">{p.included_minutes} Min. inkl. · dann {fmtCents(p.overage_cents_per_min)}/Min.</div>
+                {otherPlans.map((p) => {
+                  const isDown = p.included_minutes < quota
+                  const selected = pendingPlan?.plan_title === p.plan_title
+                  return (
+                    <div key={p.plan_title} className={cn('flex flex-col rounded-xl border p-4', selected ? 'border-green-primary ring-1 ring-green-primary' : 'border-border')}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm font-bold text-text">{shortPlan(p.plan_title)}</div>
+                        <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide', isDown ? 'bg-alt text-muted' : 'bg-green-tint-100 text-green-deep')}>{isDown ? 'Downgrade' : 'Upgrade'}</span>
+                      </div>
+                      <div className="mt-1 text-2xl font-bold text-text">{fmtCents(p.monthly_cents)}<span className="text-xs font-normal text-muted">/Mon.</span></div>
+                      <div className="mt-1 text-xs text-muted">{p.included_minutes} Min. inkl. · dann {fmtCents(p.overage_cents_per_min)}/Min.</div>
+                      <PlanFeatureList plan={p.plan_title} />
+                      <button
+                        onClick={() => setPendingPlan(selected ? null : p)}
+                        disabled={changePlan.isPending}
+                        className={cn('mt-4 rounded-md px-4 py-2 text-sm font-semibold disabled:opacity-50', selected ? 'border border-border text-muted hover:bg-alt' : 'bg-green-primary text-white hover:brightness-110')}
+                      >
+                        {selected ? 'Abbrechen' : `Zu ${shortPlan(p.plan_title)} wechseln`}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+              {pendingPlan && (
+                <div className="mt-4 rounded-xl border border-green-primary bg-green-tint-100/40 p-4">
+                  <div className="text-sm font-semibold text-text">Wechsel zu {shortPlan(pendingPlan.plan_title)} bestätigen — danach {fmtCents(pendingPlan.monthly_cents)}/Mon.</div>
+                  <div className="mt-1 text-xs text-muted">
+                    {pendingPlan.included_minutes < quota
+                      ? 'Downgrade: die nicht genutzte Zeit deines aktuellen Tarifs wird dir anteilig als Guthaben auf der nächsten Rechnung gutgeschrieben.'
+                      : 'Upgrade: die anteilige Differenz für den Rest der Abrechnungsperiode wird auf deiner nächsten Rechnung berechnet.'} Alle Preise zzgl. 19 % MwSt.
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
-                      onClick={() => changePlan.mutate({ plan_title: p.plan_title })}
+                      onClick={() => changePlan.mutate({ plan_title: pendingPlan.plan_title })}
                       disabled={changePlan.isPending}
-                      className="mt-4 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
+                      className="rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50"
                     >
-                      {changePlan.isPending ? 'Wird gewechselt…' : `Auf ${p.plan_title} wechseln`}
+                      {changePlan.isPending ? 'Wird gewechselt…' : 'Bestätigen & wechseln'}
+                    </button>
+                    <button
+                      onClick={() => setPendingPlan(null)}
+                      disabled={changePlan.isPending}
+                      className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-muted hover:bg-alt disabled:opacity-50"
+                    >
+                      Abbrechen
                     </button>
                   </div>
-                ))}
-              </div>
-              <div className="mt-2 text-xs text-muted">Der Wechsel gilt sofort; die Differenz wird anteilig auf deiner nächsten Rechnung verrechnet. Alle Preise zzgl. 19 % MwSt.</div>
-              {changePlan.isError && <div className="mt-2 text-sm text-error">{(changePlan.error as Error).message}</div>}
+                  {changePlan.isError && <div className="mt-2 text-sm text-error">{(changePlan.error as Error).message}</div>}
+                </div>
+              )}
             </div>
           )}
         </Card>
@@ -829,6 +958,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                   <div className="text-sm font-bold text-text">{p.plan_title}</div>
                   <div className="mt-1 text-2xl font-bold text-text">{fmtCents(price)}<span className="text-xs font-normal text-muted">/{planInterval === 'month' ? 'Mon.' : 'Jahr'}</span></div>
                   <div className="mt-1 text-xs text-muted">{p.included_minutes} Min. inkl. · dann {fmtCents(p.overage_cents_per_min)}/Min.</div>
+                  <PlanFeatureList plan={p.plan_title} />
                   <button onClick={() => subscribe.mutate({ plan_title: p.plan_title, interval: planInterval })} disabled={subscribe.isPending} className="mt-4 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
                     {subscribe.isPending ? 'Weiterleitung…' : 'Jetzt abonnieren'}
                   </button>
@@ -837,6 +967,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
             })}
           </div>
           {subscribe.isError && <div className="mt-3 text-sm text-error">{(subscribe.error as Error).message}</div>}
+          <PlanComparison />
         </Card>
       )}
 

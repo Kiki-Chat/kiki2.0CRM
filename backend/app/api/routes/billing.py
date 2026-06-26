@@ -308,7 +308,8 @@ def _checkout(org_id: str, actor_id: str, body: CheckoutRequest) -> CheckoutResp
 
     try:
         result = create_checkout_session(
-            org_id, body.plan_title, body.interval, actor_id=actor_id
+            org_id, body.plan_title, body.interval,
+            actor_id=actor_id, return_origin=body.return_origin,
         )
     except StripeBillingError as exc:
         raise HTTPException(status_code=502, detail=f"Checkout fehlgeschlagen: {exc}") from exc
@@ -324,13 +325,15 @@ async def billing_checkout(
 
 # ─── POST /api/billing/change-plan (in-CRM upgrade) ──────────────────────────
 def _change_plan(org_id: str, actor_id: str, body: ChangePlanRequest) -> BillingSummary:
-    """Upgrade the org's live subscription in place, then re-sync + return summary.
+    """Change the org's live subscription to ``plan_title`` in place, re-sync + return.
 
-    UPGRADE-ONLY: a same/lower-tier change is rejected (downgrade/cancellation goes
-    through support — Amber's policy). The swap keeps the current interval + cycle
-    anchor and prorates immediately; ``_sync`` re-derives plan/quota from the new
+    Allows UPGRADE *and* DOWNGRADE between self-serve tiers (Stripe prorates the
+    difference: a credit on downgrade, a charge on upgrade, both onto the next invoice
+    via create_prorations). Rejected: an unknown plan, the plan you're already on, and
+    grandfather tiers (self_serve=False, e.g. Kiki Legacy) — those are assigned during
+    migration, never self-selected. ``_sync`` re-derives plan/quota from the new
     base-item metadata so the UI reflects the change without waiting on a webhook."""
-    from app.services.stripe_catalog import PLANS, plan_rank
+    from app.services.stripe_catalog import PLANS
     from app.services.stripe_provisioning import change_subscription_plan
 
     client = get_service_client()
@@ -343,12 +346,13 @@ def _change_plan(org_id: str, actor_id: str, body: ChangePlanRequest) -> Billing
     target = body.plan_title
     if target not in PLANS:
         raise HTTPException(status_code=400, detail=f"Unbekannter Tarif: {target}")
-    if plan_rank(target) <= plan_rank(org.get("billing_plan_title")):
+    if not PLANS[target].get("self_serve", True):
         raise HTTPException(
             status_code=400,
-            detail="Ein Tarifwechsel ist nur als Upgrade möglich. Für ein Downgrade "
-            "oder eine Kündigung wende dich bitte an info@kikichat.de.",
+            detail=f"Der Tarif {target} kann nicht selbst gewählt werden.",
         )
+    if target == org.get("billing_plan_title"):
+        raise HTTPException(status_code=400, detail="Du bist bereits auf diesem Tarif.")
     try:
         change_subscription_plan(org_id, target, actor_id=actor_id)
     except StripeBillingError as exc:
