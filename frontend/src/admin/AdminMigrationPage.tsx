@@ -11,11 +11,12 @@
  * Route: /admin/orgs/:id/migration  →  GET /api/super-admin/orgs/{id}/migration
  */
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowLeft, CheckCircle2, FileText, Info, Loader2, Phone, Users } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckCircle2, FileText, Info, Loader2, LogOut, Phone, ShieldAlert, Users } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { apiFetch } from '../lib/adminApi'
 import { cn } from '../lib/utils'
+import { useAdminAuth } from './AdminAuthProvider'
 
 interface MigrationOverview {
   org_id: string
@@ -68,6 +69,13 @@ const fmtDate = (s: string | null) =>
 export function AdminMigrationPage() {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
+  const { session, signOut } = useAdminAuth()
+  const email = session?.user.email ?? ''
+
+  async function handleSignOut() {
+    await signOut()
+    navigate('/admin/login', { replace: true })
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['admin', 'migration', id],
@@ -79,21 +87,53 @@ export function AdminMigrationPage() {
   })
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <header>
-        <button
-          onClick={() => navigate('/admin/orgs')}
-          className="mb-2 flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-slate-200"
-        >
-          <ArrowLeft size={13} /> Zurück zur Liste
-        </button>
-        <h1 className="text-2xl font-bold text-slate-100">
-          Migration — <span className="text-amber-300">{data?.name ?? '…'}</span>
-        </h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Interner Status der Übernahme aus der Nicht-CRM-Version. Nur für uns sichtbar.
-        </p>
+    <div className="min-h-screen w-full bg-slate-950 text-slate-100">
+      <header className="border-b border-slate-800 bg-slate-900">
+        <div className="mx-auto flex w-full items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-400">
+              <ShieldAlert size={16} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-bold uppercase tracking-widest text-amber-400">
+                HeyKiki · Migration
+              </div>
+              <div className="truncate text-[11px] text-slate-400">
+                {data?.name ?? 'Organisation'} — interner Übernahme-Status
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-3">
+            <div className="hidden text-right sm:block">
+              <div className="text-xs text-slate-400">Angemeldet als</div>
+              <div className="text-sm font-medium text-slate-200">{email}</div>
+            </div>
+            <button
+              onClick={() => navigate('/admin/orgs')}
+              className="flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+            >
+              <ArrowLeft size={13} /> Zur Liste
+            </button>
+            <button
+              onClick={handleSignOut}
+              className="flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
+            >
+              <LogOut size={13} /> Abmelden
+            </button>
+          </div>
+        </div>
       </header>
+
+      <main className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
+        <div className="space-y-5">
+          <header>
+            <h1 className="text-2xl font-bold text-slate-100">
+              Migration — <span className="text-amber-300">{data?.name ?? '…'}</span>
+            </h1>
+            <p className="mt-1 text-sm text-slate-400">
+              Interner Status der Übernahme aus der Nicht-CRM-Version. Nur für uns sichtbar.
+            </p>
+          </header>
 
       {isLoading && (
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-12 text-center text-slate-400">
@@ -202,6 +242,8 @@ export function AdminMigrationPage() {
           </section>
         </>
       )}
+        </div>
+      </main>
     </div>
   )
 }
