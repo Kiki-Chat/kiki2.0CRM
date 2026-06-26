@@ -150,7 +150,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
     enabled: !!callId,
   })
 
-  // Same-customer sibling cases for "Anderem Vorgang zuordnen" — read from the
+  // Same-customer sibling cases for "Einem anderen Vorgang zuordnen" — read from the
   // already-loaded ['calls'] list (no extra endpoint), matching the old cockpit.
   const { data: callsList } = useQuery({
     queryKey: ['calls'],
@@ -471,7 +471,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                               ) : (
                                 <UserPlus size={15} />
                               )}
-                              <span className="max-w-[110px] truncate">{assigneeName ?? 'Zuständig'}</span>
+                              <span className="max-w-[110px] truncate">{assigneeName ?? 'Niemand'}</span>
                               <ChevronDown size={13} className="flex-shrink-0 text-faint" />
                             </button>
                           </AssignDropdown>
@@ -486,13 +486,13 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                     <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Erstellen</span>
                     <div className="flex gap-1.5">
                       <ActionBtn variant="secondary" className="flex-1" icon={<CalendarPlus size={15} />} onClick={() => setModal('appointment')}>
-                        Termin
+                        Termin erstellen
                       </ActionBtn>
                       <ActionBtn variant="secondary" className="flex-1" icon={<FileText size={15} />} disabled={!call.customer_id} onClick={goKva}>
-                        Angebot
+                        Angebot erstellen
                       </ActionBtn>
                       <ActionBtn variant="secondary" className="flex-1" icon={<Receipt size={15} />} disabled={!call.customer_id} onClick={goInvoice}>
-                        Rechnung
+                        Rechnung erstellen
                       </ActionBtn>
                     </div>
                   </div>
@@ -535,7 +535,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                   )}
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <ActionBtn variant="ghost" icon={<Inbox size={14} />} onClick={() => setPicking((p) => !p)}>
-                      Anderem Vorgang zuordnen
+                      Einem anderen Vorgang zuordnen
                     </ActionBtn>
                     <ActionBtn
                       variant="ghost"
@@ -546,7 +546,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                           spam.mutate()
                       }}
                     >
-                      Als Spam
+                      Als Spam markieren
                     </ActionBtn>
                   </div>
                 </div>
@@ -579,7 +579,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                           spam.mutate()
                       }}
                     >
-                      Als Spam
+                      Als Spam markieren
                     </ActionBtn>
                   </div>
                 </div>

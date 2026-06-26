@@ -416,7 +416,6 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-warning-bg text-warning"><Sparkles size={21} /></span>
             <div>
               <h2 className="font-poster text-[20px] font-extrabold text-text">Nächste Schritte</h2>
-              <div className="text-[13.5px] text-muted">Kiki hat das für dich vorbereitet</div>
             </div>
           </div>
           {decisions.length ? (
@@ -427,18 +426,17 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
             <div className="py-2 text-center">
               <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-green-tint-100 text-green-deep"><CheckCircle2 size={30} /></span>
               <div className="mt-3 text-[17px] font-extrabold text-text">Keine offenen Aufgaben</div>
-              <div className="mt-1 text-[13px] text-muted">Kiki meldet sich, sobald etwas reinkommt.</div>
             </div>
           )}
         </div>
 
         {/* QUICK ACTIONS */}
         <div className="grid grid-cols-2 gap-3">
-          <QuickTile label="Termin" icon={CalendarCheck} tone="green" onClick={() => setApptOpen(true)} />
-          <QuickTile label="Angebot" icon={Receipt} tone="ai" onClick={goKva} disabled={!customerId} />
-          <QuickTile label="Rechnung" icon={FileText} tone="ai" onClick={goInvoice} disabled={!customerId} />
+          <QuickTile label="Termin erstellen" icon={CalendarCheck} tone="green" onClick={() => setApptOpen(true)} />
+          <QuickTile label="Angebot erstellen" icon={Receipt} tone="ai" onClick={goKva} disabled={!customerId} />
+          <QuickTile label="Rechnung erstellen" icon={FileText} tone="ai" onClick={goInvoice} disabled={!customerId} />
           <div className="relative">
-            <QuickTile label="Mitarbeiter" icon={Users} tone="steel" onClick={() => setEmpOpen((o) => !o)} />
+            <QuickTile label="Mitarbeiter zuweisen" icon={Users} tone="steel" onClick={() => setEmpOpen((o) => !o)} />
             {empOpen && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setEmpOpen(false)} />
@@ -502,7 +500,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                 </Fragment>
               ))}
             </GroupedTable>
-          ) : <EmptyHint text={'Noch keine Termine — über „Termin" oben anlegen.'} />}
+          ) : <EmptyHint text="Keinen Termin erstellt" />}
         </BigCard>
 
         {/* KOSTENVORANSCHLÄGE */}
@@ -521,7 +519,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                 </Fragment>
               ))}
             </GroupedTable>
-          ) : <EmptyHint text="Noch keine Angebote." />}
+          ) : <EmptyHint text="Kein Angebot erstellt" />}
         </BigCard>
 
         {/* RECHNUNGEN */}
@@ -536,7 +534,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                 </tr>
               ))}
             </GroupedTable>
-          ) : <EmptyHint text="Noch keine Rechnungen." />}
+          ) : <EmptyHint text="Keine Rechnung erstellt" />}
         </BigCard>
 
         {/* TECHNIKER */}
@@ -599,11 +597,11 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                 </Fragment>
               ))}
             </GroupedTable>
-          ) : <EmptyHint text={'Noch kein Techniker beauftragt — über „Beauftragen" einen Termin-Link senden.'} />}
+          ) : <EmptyHint text="Noch keinen Techniker beauftragt - nur bei Terminerstellung möglich" />}
         </BigCard>
 
         {/* WER IST DABEI */}
-        <BigCard title="Wer ist dabei" icon={Users} count={data.employees.length}>
+        <BigCard title="Mitarbeiter" icon={Users} count={data.employees.length}>
           {data.employees.length === 0 ? (
             <EmptyHint text={'Niemand zugewiesen — über „Mitarbeiter" oben zuweisen.'} />
           ) : (

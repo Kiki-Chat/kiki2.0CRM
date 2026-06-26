@@ -156,7 +156,7 @@ export function InquiriesTab({ project }: { project: ProjectLite }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="rounded-md border border-border bg-alt px-3 py-2 text-sm text-text outline-none">
-          <option value="all">Status: alle</option>
+          <option value="all">Status: Alle</option>
           <option value="open">Offen</option>
           <option value="in_progress">In Bearbeitung</option>
           <option value="completed">Erledigt</option>

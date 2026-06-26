@@ -80,7 +80,7 @@ export function FinanzenTab() {
         }
       >
         {data.recent_invoices.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted">Noch keine Rechnungen.</div>
+          <div className="py-8 text-center text-sm text-muted">Keine Rechnung erstellt</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">

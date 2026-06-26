@@ -186,7 +186,7 @@ export function InvoicesPage() {
           <div>
             <div className="mb-1 text-xs font-medium text-muted">Status</div>
             <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
-              <option value="all">Status: alle</option>
+              <option value="all">Status: Alle</option>
               <option value="draft">Entwurf</option>
               <option value="sent">Gesendet</option>
               <option value="paid">Bezahlt</option>

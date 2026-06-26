@@ -53,7 +53,7 @@ export function CallDetail({
     queryFn: () => apiFetch<Employee[]>('/api/employees'),
   })
 
-  // Sibling cases for the "Anderem Vorgang zuordnen" triage control — other
+  // Sibling cases for the "Einem anderen Vorgang zuordnen" triage control — other
   // inquiries for the same customer, read from the already-cached call list.
   const { data: callsList } = useQuery({
     queryKey: ['calls'],

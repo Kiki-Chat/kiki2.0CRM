@@ -265,7 +265,7 @@ export function PosteingangPage() {
           <span style={{ width: 44, height: 44, borderRadius: '50%', display: 'grid', placeItems: 'center', background: 'var(--green-primary)', color: '#fff', flexShrink: 0 }}><Check size={24} strokeWidth={2.4} /></span>
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: 'var(--font-poster)', fontSize: 17, fontWeight: 800, color: 'var(--green-deep)' }}>Posteingang leer</div>
-            <div style={{ fontSize: 13.5, color: 'var(--muted)', marginTop: 2 }}>Alle Entscheidungen getroffen. Kiki meldet sich, sobald etwas Neues reinkommt.</div>
+            <div style={{ fontSize: 13.5, color: 'var(--muted)', marginTop: 2 }}>Alle Entscheidungen getroffen.</div>
           </div>
         </div>
       ) : (

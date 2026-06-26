@@ -285,7 +285,6 @@ export function EmptyAktionen() {
       </span>
       <div>
         <div className="text-sm font-extrabold text-text">Keine offenen Aufgaben</div>
-        <div className="mt-0.5 text-[12.5px] text-muted">Kiki meldet sich, sobald etwas reinkommt.</div>
       </div>
     </div>
   )
