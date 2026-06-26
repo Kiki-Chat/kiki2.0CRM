@@ -87,6 +87,17 @@ export interface PlanOption {
   annual_cents: number
   overage_cents_per_min: number
 }
+export interface ChangePlanPreview {
+  current_plan_title: string | null
+  target_plan_title: string
+  prorated_credit_cents: number
+  prorated_charge_cents: number
+  net_due_cents: number
+  next_recurring_cents: number
+  interval: string
+  currency: string
+  billed_on: string | null
+}
 export const fmtCents = (c: number | null | undefined, cur = 'EUR') =>
   c == null ? '—' : new Intl.NumberFormat('de-DE', { style: 'currency', currency: (cur || 'EUR').toUpperCase() }).format(c / 100)
 

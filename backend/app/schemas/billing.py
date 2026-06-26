@@ -75,7 +75,21 @@ class CheckoutResponse(BaseModel):
 
 
 class ChangePlanRequest(BaseModel):
-    plan_title: str                        # target plan; must be a strict upgrade
+    plan_title: str                        # target plan (up or down between self-serve tiers)
+
+
+class ChangePlanPreview(BaseModel):
+    """What switching to ``target_plan_title`` costs now — shown BEFORE applying, so a
+    tier change is never silent. Self-computed from the current period + list prices."""
+    current_plan_title: str | None = None
+    target_plan_title: str
+    prorated_credit_cents: int = 0         # credit for unused time on the current plan
+    prorated_charge_cents: int = 0         # charge for the new plan over the remaining period
+    net_due_cents: int = 0                 # charge − credit (negative ⇒ you get a credit)
+    next_recurring_cents: int = 0          # the new plan's full recurring price (per interval)
+    interval: str = "month"
+    currency: str = "eur"
+    billed_on: str | None = None           # when the proration lands (end of current period)
 
 
 class PlanOption(BaseModel):

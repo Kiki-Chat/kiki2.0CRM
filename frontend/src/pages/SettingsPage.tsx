@@ -39,6 +39,7 @@ import { apiFetch, apiUpload } from '../lib/api'
 import {
   type BillingInvoice,
   type BillingSummary,
+  type ChangePlanPreview,
   type PlanOption,
   billingStatusLabel,
   fmtCents,
@@ -682,6 +683,17 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       flash(`Tarif geändert: ${next.plan_title ?? 'aktualisiert'}.`)
     },
   })
+  // Prorated cost of the selected switch — fetched when a target is picked, shown in
+  // the confirm step so the customer sees the adjusted amount before applying.
+  const previewQ = useQuery({
+    queryKey: ['billing', 'change-preview', pendingPlan?.plan_title],
+    queryFn: () => apiFetch<ChangePlanPreview>('/api/billing/change-plan/preview', {
+      method: 'POST', body: JSON.stringify({ plan_title: pendingPlan!.plan_title }),
+    }),
+    enabled: !!pendingPlan,
+    retry: false,
+    staleTime: 0,
+  })
 
   // Webhook fallback: Stripe redirects back to ?checkout=success after a self-serve
   // Checkout, but its webhook can't reach localhost — so pull the new subscription
@@ -808,12 +820,33 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
               </div>
               {pendingPlan && (
                 <div className="mt-4 rounded-xl border border-green-primary bg-green-tint-100/40 p-4">
-                  <div className="text-sm font-semibold text-text">Wechsel zu {shortPlan(pendingPlan.plan_title)} bestätigen — danach {fmtCents(pendingPlan.monthly_cents)}/Mon.</div>
-                  <div className="mt-1 text-xs text-muted">
-                    {pendingPlan.included_minutes < quota
-                      ? 'Downgrade: die nicht genutzte Zeit deines aktuellen Tarifs wird dir anteilig als Guthaben auf der nächsten Rechnung gutgeschrieben.'
-                      : 'Upgrade: die anteilige Differenz für den Rest der Abrechnungsperiode wird auf deiner nächsten Rechnung berechnet.'} Alle Preise zzgl. 19 % MwSt.
-                  </div>
+                  <div className="text-sm font-semibold text-text">{shortPlan(s?.plan_title ?? 'Aktuell')} → {shortPlan(pendingPlan.plan_title)} — Wechsel bestätigen</div>
+                  {previewQ.isLoading && <div className="mt-2 text-xs text-muted">Anteilige Kosten werden berechnet…</div>}
+                  {previewQ.isError && <div className="mt-2 text-xs text-error">Vorschau konnte nicht geladen werden — der Wechsel ist trotzdem möglich.</div>}
+                  {previewQ.data && (
+                    <div className="mt-2 space-y-1.5 rounded-lg bg-surface/80 p-3 text-sm">
+                      <div className="flex items-center justify-between text-muted">
+                        <span>Gutschrift für ungenutzte Zeit ({shortPlan(previewQ.data.current_plan_title ?? 'aktuell')})</span>
+                        <span>−{fmtCents(previewQ.data.prorated_credit_cents)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted">
+                        <span>Anteilig {shortPlan(previewQ.data.target_plan_title)} (Rest der Periode)</span>
+                        <span>+{fmtCents(previewQ.data.prorated_charge_cents)}</span>
+                      </div>
+                      <div className="flex items-center justify-between border-t border-border pt-1.5 font-bold text-text">
+                        <span>{previewQ.data.net_due_cents >= 0 ? 'Differenz (auf nächster Rechnung)' : 'Dein Guthaben'}</span>
+                        <span>{fmtCents(Math.abs(previewQ.data.net_due_cents))}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted">
+                        <span>danach</span>
+                        <span>
+                          {fmtCents(previewQ.data.next_recurring_cents)}/{previewQ.data.interval === 'year' ? 'Jahr' : 'Mon.'}
+                          {previewQ.data.billed_on ? ` · ab ${new Date(previewQ.data.billed_on).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' })}` : ''}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-2 text-xs text-muted">Alle Beträge zzgl. 19 % MwSt.; aktive Rabatte werden bei der Abrechnung berücksichtigt.</div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       onClick={() => changePlan.mutate({ plan_title: pendingPlan.plan_title })}

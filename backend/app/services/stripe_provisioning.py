@@ -263,6 +263,77 @@ def change_subscription_plan(
     )
 
 
+def preview_change_plan(org_id: str, plan_title: str) -> dict:
+    """Read-only 'what will this switch cost me' for the confirm step. Computes the
+    prorated credit (unused time on the current plan) and charge (new plan over the
+    remaining period) from list prices + the current period — NO Stripe write. Returns
+    a dict matching ChangePlanPreview. Discounts/taxes are applied by Stripe at billing
+    time; this is the list-price proration the customer sees before confirming."""
+    from datetime import datetime, timezone
+
+    from app.services.stripe_catalog import ANNUAL_MONTHS, PLANS
+
+    if plan_title not in PLANS:
+        raise StripeBillingError(f"unknown plan {plan_title!r}")
+    db = get_service_client()
+    org = _org(db, org_id)
+    customer_id = org.get("stripe_customer_id")
+    if not customer_id:
+        raise StripeBillingError("org has no Stripe customer to preview against")
+
+    s = get_stripe()
+    sub = None
+    stored_id = org.get("billing_subscription_id")
+    if stored_id:
+        try:
+            sub = s.Subscription.retrieve(stored_id, expand=["items.data.price"])
+        except stripe.error.StripeError:  # type: ignore[attr-defined]
+            sub = None
+    if sub is None or sub.get("status") in (None, "canceled", "incomplete_expired"):
+        subs = (
+            s.Subscription.list(
+                customer=customer_id, status="active", expand=["data.items.data.price"]
+            ).get("data")
+            or []
+        )
+        sub = subs[0] if subs else None
+    if sub is None:
+        raise StripeBillingError("no active subscription to preview")
+
+    base_item = None
+    interval = "month"
+    for it in (sub.get("items") or {}).get("data") or []:
+        rec = (it.get("price") or {}).get("recurring") or {}
+        if rec.get("usage_type") != "metered":
+            base_item = it
+            interval = rec.get("interval") or "month"
+    current_base_cents = int(((base_item or {}).get("price") or {}).get("unit_amount") or 0)
+    mult = ANNUAL_MONTHS if interval == "year" else 1
+    target_base_cents = PLANS[plan_title]["monthly_cents"] * mult
+
+    p_start = int(sub.get("current_period_start") or 0)
+    p_end = int(sub.get("current_period_end") or 0)
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    span = max(1, p_end - p_start)
+    frac = min(1.0, max(0.0, (p_end - now_ts) / span)) if (p_start and p_end) else 0.0
+
+    credit = round(current_base_cents * frac)
+    charge = round(target_base_cents * frac)
+    return {
+        "current_plan_title": org.get("billing_plan_title"),
+        "target_plan_title": plan_title,
+        "prorated_credit_cents": credit,
+        "prorated_charge_cents": charge,
+        "net_due_cents": charge - credit,
+        "next_recurring_cents": target_base_cents,
+        "interval": interval,
+        "currency": sub.get("currency") or "eur",
+        "billed_on": (
+            datetime.fromtimestamp(p_end, timezone.utc).isoformat() if p_end else None
+        ),
+    }
+
+
 # ─── Billing-portal configuration ─────────────────────────────────────────────
 # Bump when the portal feature set changes (forces a fresh Configuration to be made).
 _PORTAL_CONFIG_MARKER = "v1"
