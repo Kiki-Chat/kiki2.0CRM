@@ -323,7 +323,7 @@ def _kva_suggested(client, org_id: str) -> list[dict[str, Any]]:
                 "call_id": c["id"],
                 "customer_name": name_by.get(c.get("customer_id")) or "Unbekannter Kunde",
                 "customer_id": c.get("customer_id"),
-                "summary": "Angebots-Entwurf",
+                "summary": "Kiki hat aus dem Anruf einen Angebots-Entwurf erstellt. Jetzt Angebot einsehen und verschicken.",
                 "created_at": c.get("created_at"),
                 "due_at": None,
                 "priority": "normal",
