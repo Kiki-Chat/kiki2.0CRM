@@ -366,10 +366,18 @@ class _RecordingPatch:
 def _build_current_cfg(
     *, tool_ids=None, prompt="OLD", client_events=None,
     webhook_url=None, webhook_enabled=False, override_flags=False,
+    post_call_webhook_id=None,
 ) -> dict:
     overrides = {
         "enable_conversation_initiation_client_data_from_webhook": webhook_enabled,
     }
+    workspace_overrides = {
+        "conversation_initiation_client_data_webhook": (
+            {"url": webhook_url} if webhook_url else {}
+        ),
+    }
+    if post_call_webhook_id:
+        workspace_overrides["webhooks"] = {"post_call_webhook_id": post_call_webhook_id}
     if override_flags:
         overrides["conversation_config_override"] = {
             "agent": {
@@ -392,11 +400,7 @@ def _build_current_cfg(
             },
         },
         "platform_settings": {
-            "workspace_overrides": {
-                "conversation_initiation_client_data_webhook": (
-                    {"url": webhook_url} if webhook_url else {}
-                ),
-            },
+            "workspace_overrides": workspace_overrides,
             "overrides": overrides,
         },
     }
@@ -439,7 +443,10 @@ def test_attach_hk_tools_merges_then_noops(monkeypatch):
     assert rec2.calls == []
 
 
-def test_set_conversation_init_webhook_writes_env_routed_url(monkeypatch):
+def test_set_conversation_init_webhook_writes_explicit_uat_host(monkeypatch):
+    # Default env = uat → the EXPLICIT UAT backend host, not the unresolvable
+    # {{system__env_api_host}} placeholder.
+    monkeypatch.setattr(ac.settings, "el_environment", "uat")
     rec = _RecordingPatch()
     monkeypatch.setattr(ac, "patch_agent_safely", rec)
     monkeypatch.setattr(ac, "get_agent_config", lambda _a: {})  # unset + disabled
@@ -447,20 +454,67 @@ def test_set_conversation_init_webhook_writes_env_routed_url(monkeypatch):
     assert len(rec.calls) == 1
     ps = rec.calls[0]["field_patches"]["platform_settings"]
     wh = ps["workspace_overrides"]["conversation_initiation_client_data_webhook"]
-    assert wh["url"] == ac._CONVERSATION_INIT_WEBHOOK_URL
-    assert wh["url"] == "https://{{system__env_api_host}}/api/elevenlabs/conversation-init"
+    assert wh["url"] == "https://backend-production-3f88a.up.railway.app/api/elevenlabs/conversation-init"
+    assert "{{" not in wh["url"]  # no unresolved placeholder
     assert ps["overrides"]["enable_conversation_initiation_client_data_from_webhook"] is True
     assert rec.calls[0]["endpoint_label"] == "provision_webhook"
 
 
-def test_set_conversation_init_webhook_noop_when_already_env_routed(monkeypatch):
+def test_set_conversation_init_webhook_prod_env_writes_prod_host(monkeypatch):
+    monkeypatch.setattr(ac.settings, "el_environment", "production")
+    rec = _RecordingPatch()
+    monkeypatch.setattr(ac, "patch_agent_safely", rec)
+    monkeypatch.setattr(ac, "get_agent_config", lambda _a: {})
+    ac.set_conversation_init_webhook("agent_x")
+    wh = rec.calls[0]["field_patches"]["platform_settings"]["workspace_overrides"][
+        "conversation_initiation_client_data_webhook"
+    ]
+    assert wh["url"] == "https://backend-production-7bca.up.railway.app/api/elevenlabs/conversation-init"
+
+
+def test_set_conversation_init_webhook_noop_when_already_explicit(monkeypatch):
+    monkeypatch.setattr(ac.settings, "el_environment", "uat")
     rec = _RecordingPatch()
     monkeypatch.setattr(ac, "patch_agent_safely", rec)
     cfg = _build_current_cfg(
-        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL, webhook_enabled=True
+        webhook_url=ac._conversation_init_webhook_url(), webhook_enabled=True
     )
     monkeypatch.setattr(ac, "get_agent_config", lambda _a: cfg)
     ac.set_conversation_init_webhook("agent_x")
+    assert rec.calls == []
+
+
+# ─── set_post_call_webhook (B.4b) ────────────────────────────────────────────
+def test_set_post_call_webhook_assigns_id(monkeypatch):
+    monkeypatch.setattr(ac.settings, "el_post_call_webhook_id", "wh_test_123")
+    rec = _RecordingPatch()
+    monkeypatch.setattr(ac, "patch_agent_safely", rec)
+    monkeypatch.setattr(ac, "get_agent_config", lambda _a: {})  # no webhooks set yet
+    ac.set_post_call_webhook("agent_x", actor_id="u", org_id="o")
+    assert len(rec.calls) == 1
+    wh = rec.calls[0]["field_patches"]["platform_settings"]["workspace_overrides"]["webhooks"]
+    assert wh["post_call_webhook_id"] == "wh_test_123"
+    assert wh["events"] == ["transcript"]
+    assert wh["transcript_format"] == "json"
+    assert wh["send_audio"] is False
+    assert rec.calls[0]["endpoint_label"] == "provision_post_call_webhook"
+
+
+def test_set_post_call_webhook_noop_when_already_assigned(monkeypatch):
+    monkeypatch.setattr(ac.settings, "el_post_call_webhook_id", "wh_test_123")
+    rec = _RecordingPatch()
+    monkeypatch.setattr(ac, "patch_agent_safely", rec)
+    cfg = {"platform_settings": {"workspace_overrides": {"webhooks": {"post_call_webhook_id": "wh_test_123"}}}}
+    monkeypatch.setattr(ac, "get_agent_config", lambda _a: cfg)
+    ac.set_post_call_webhook("agent_x")
+    assert rec.calls == []
+
+
+def test_set_post_call_webhook_skipped_when_id_blank(monkeypatch):
+    monkeypatch.setattr(ac.settings, "el_post_call_webhook_id", "")
+    rec = _RecordingPatch()
+    monkeypatch.setattr(ac, "patch_agent_safely", rec)
+    ac.set_post_call_webhook("agent_x")  # returns before any read/write
     assert rec.calls == []
 
 
@@ -490,6 +544,8 @@ def test_configure_agent_fresh_full_path(monkeypatch):
     assert "provision_tools" in endpoints
     assert "provision_prompt" in endpoints
     assert "provision_webhook" in endpoints
+    assert "provision_post_call_webhook" in endpoints  # B.4b: post-call webhook assigned
+    assert summary["post_call_webhook_id"]
     assert "provision_audio" not in endpoints  # already present
     # B.6: the Path A override whitelist is set on a fresh (untoggled) agent.
     assert "provision_overrides_whitelist" in endpoints
@@ -501,9 +557,10 @@ def test_configure_agent_rerun_skips_prompt(monkeypatch):
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         prompt="customer hand-edited content",
         client_events=["audio"],
-        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
+        webhook_url=ac._conversation_init_webhook_url(),
         webhook_enabled=True,
         override_flags=True,
+        post_call_webhook_id=ac.settings.el_post_call_webhook_id,
     )
     rec = _wire_configure_agent(monkeypatch, current_cfg=cfg, provisioned=True)
 
@@ -523,9 +580,10 @@ def test_configure_agent_adds_only_missing_audio(monkeypatch):
     cfg = _build_current_cfg(
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         client_events=["interruption"],  # missing audio
-        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
+        webhook_url=ac._conversation_init_webhook_url(),
         webhook_enabled=True,
         override_flags=True,
+        post_call_webhook_id=ac.settings.el_post_call_webhook_id,
     )
     rec = _wire_configure_agent(monkeypatch, current_cfg=cfg, provisioned=True)
 
@@ -549,9 +607,10 @@ def test_configure_agent_zero_phones_is_graceful(monkeypatch):
     cfg = _build_current_cfg(
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         client_events=["audio"],
-        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
+        webhook_url=ac._conversation_init_webhook_url(),
         webhook_enabled=True,
         override_flags=True,
+        post_call_webhook_id=ac.settings.el_post_call_webhook_id,
     )
     rec = _wire_configure_agent(
         monkeypatch, current_cfg=cfg, provisioned=True, phones=[]
@@ -616,7 +675,7 @@ def test_configure_agent_sets_override_whitelist_when_absent(monkeypatch):
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         prompt="customer hand-edited content",
         client_events=["audio"],
-        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
+        webhook_url=ac._conversation_init_webhook_url(),
         webhook_enabled=True,
         override_flags=False,
     )
@@ -645,9 +704,10 @@ def test_configure_agent_override_whitelist_idempotent(monkeypatch):
         tool_ids=[f"tool_{n}" for n in ac.HK_TOOL_NAMES],
         prompt="x",
         client_events=["audio"],
-        webhook_url=ac._CONVERSATION_INIT_WEBHOOK_URL,
+        webhook_url=ac._conversation_init_webhook_url(),
         webhook_enabled=True,
         override_flags=True,
+        post_call_webhook_id=ac.settings.el_post_call_webhook_id,
     )
     rec = _wire_configure_agent(monkeypatch, current_cfg=cfg, provisioned=True)
 

@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     # UAT, never accidentally to prod. The `production` env always exists in EL; a
     # `uat` environment must be created in the EL workspace.
     el_environment: str = "uat"
+    # ElevenLabs workspace post-call webhook resource id — assigned to every
+    # provisioned agent (platform_settings.workspace_overrides.webhooks.
+    # post_call_webhook_id). The webhook RESOURCE (its URL + secret) is managed in
+    # the EL workspace; UAT + prod share the workspace, so one id. Override per
+    # deployment via EL_POST_CALL_WEBHOOK_ID if the workspaces ever diverge; set
+    # "" to skip assigning it.
+    el_post_call_webhook_id: str = "4475ba8ecc94486aba76ba9df18c8d96"
     # Public base URL of the customer CRM frontend — used for EVERY link emailed
     # to a human (employee set-password/login link, technician job link, Stripe
     # billing return). Env-overridable via FRONTEND_PUBLIC_URL; set it in Railway

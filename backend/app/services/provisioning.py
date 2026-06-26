@@ -11,6 +11,7 @@ from app.services.agent_config import (
     attach_hk_tools,
     configure_agent,
     set_conversation_init_webhook,
+    set_post_call_webhook,
     verify_agent_health,
 )
 
@@ -280,14 +281,16 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
         if bind_only:
             # n8n BIND-ONLY: n8n built the agent (prompt + number) externally,
             # but the conversation-init webhook + the 11 hk_ tools are OURS to
-            # assign at onboarding (n8n only sets the post-call webhook). Attach
-            # them additively (prompt left untouched) — best-effort so a transient
-            # EL failure doesn't roll the org back; the verify gate below surfaces
-            # any gap. We still do NOT call configure_agent (that would re-apply
-            # and clobber n8n's prompt).
+            # assign at onboarding. Attach them additively (prompt left untouched)
+            # — best-effort so a transient EL failure doesn't roll the org back;
+            # the verify gate below surfaces any gap. We still do NOT call
+            # configure_agent (that would re-apply and clobber n8n's prompt).
             try:
                 attach_hk_tools(payload.elevenlabs_agent_id, org_id=org_id)
                 set_conversation_init_webhook(
+                    payload.elevenlabs_agent_id, org_id=org_id
+                )
+                set_post_call_webhook(
                     payload.elevenlabs_agent_id, org_id=org_id
                 )
             except Exception:  # noqa: BLE001 — verify gate surfaces gaps; don't roll back

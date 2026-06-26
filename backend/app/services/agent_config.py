@@ -1328,14 +1328,26 @@ def attach_hk_tools(
     return to_add
 
 
+def _conversation_init_webhook_url() -> str:
+    """The conversation-init webhook URL for THIS backend's environment.
+
+    Uses the EXPLICIT backend host (NOT the ``{{system__env_api_host}}``
+    placeholder, which ElevenLabs does not resolve in a webhook URL → the call
+    would hit a literal unresolved host and the init webhook would never fire):
+    ``EL_ENVIRONMENT=production`` → prod backend (…7bca), otherwise UAT (…3f88a).
+    """
+    host = _PROD_BACKEND_URL if settings.el_environment == "production" else _UAT_BACKEND_URL
+    return f"{host}{_CONVERSATION_INIT_PATH}"
+
+
 def set_conversation_init_webhook(
     agent_id: str,
     *,
     actor_id: str | UUID | None = None,
     org_id: str | UUID | None = None,
 ) -> None:
-    """Point the agent's conversation-init webhook at the env-routed URL and
-    enable it (step B.4).
+    """Point the agent's conversation-init webhook at THIS environment's explicit
+    backend host and enable it (step B.4).
 
     ElevenLabs validates the full webhook object on PATCH — a partial
     ``{url: ...}`` resets siblings and trips "Field required" on
@@ -1343,6 +1355,7 @@ def set_conversation_init_webhook(
     the X-HeyKiki-Secret). Idempotent: no write when the URL already matches and
     the toggle is on. Goes through ``patch_agent_safely``.
     """
+    target_url = _conversation_init_webhook_url()
     current = get_agent_config(agent_id)
     cur_webhook = (
         _get_path(
@@ -1355,14 +1368,14 @@ def set_conversation_init_webhook(
     cur_url = cur_webhook.get("url")
     cur_headers = cur_webhook.get("request_headers") or {}
     cur_enabled = bool(_get_path(current, WEBHOOK_ENABLED_PATH))
-    needs_url = cur_url != _CONVERSATION_INIT_WEBHOOK_URL
+    needs_url = cur_url != target_url
     needs_toggle = not cur_enabled
     if needs_url or needs_toggle:
         webhook_patch: dict = {}
         if needs_url:
             webhook_patch.setdefault("workspace_overrides", {})[
                 "conversation_initiation_client_data_webhook"
-            ] = {"url": _CONVERSATION_INIT_WEBHOOK_URL, "request_headers": cur_headers}
+            ] = {"url": target_url, "request_headers": cur_headers}
         if needs_toggle:
             webhook_patch.setdefault("overrides", {})[
                 "enable_conversation_initiation_client_data_from_webhook"
@@ -1374,6 +1387,50 @@ def set_conversation_init_webhook(
             org_id=org_id,
             endpoint_label="provision_webhook",
         )
+
+
+def set_post_call_webhook(
+    agent_id: str,
+    *,
+    actor_id: str | UUID | None = None,
+    org_id: str | UUID | None = None,
+) -> None:
+    """Assign the workspace post-call webhook to the agent (step B.4b).
+
+    Writes ``platform_settings.workspace_overrides.webhooks.post_call_webhook_id``
+    (+ the standard transcript event config). The webhook RESOURCE itself (URL +
+    secret) is managed in the ElevenLabs workspace; here we only attach its id so
+    EL delivers the post-call payload for this agent — provisioning never set it
+    before (it was assigned manually / by n8n), so new agents had no post-call
+    delivery. Idempotent: no write when the id already matches. ``el_post_call_
+    webhook_id=""`` skips it. Goes through ``patch_agent_safely``; EL deep-merges
+    workspace_overrides children, so this does not disturb the conversation-init
+    webhook set in B.4."""
+    webhook_id = (settings.el_post_call_webhook_id or "").strip()
+    if not webhook_id:
+        return
+    current = get_agent_config(agent_id)
+    cur = _get_path(current, "platform_settings.workspace_overrides.webhooks") or {}
+    if cur.get("post_call_webhook_id") == webhook_id:
+        return
+    patch_agent_safely(
+        agent_id=agent_id,
+        field_patches={
+            "platform_settings": {
+                "workspace_overrides": {
+                    "webhooks": {
+                        "post_call_webhook_id": webhook_id,
+                        "events": ["transcript"],
+                        "transcript_format": "json",
+                        "send_audio": False,
+                    }
+                }
+            }
+        },
+        actor_id=actor_id,
+        org_id=org_id,
+        endpoint_label="provision_post_call_webhook",
+    )
 
 
 # ─── Public entry point ──────────────────────────────────────────────────────
@@ -1503,6 +1560,10 @@ def configure_agent(
     # ─── B.4 Webhook (conversation initiation client data) ───────────────────
     set_conversation_init_webhook(agent_id, actor_id=actor_id, org_id=org_id)
     summary["webhook_enabled"] = True
+
+    # ─── B.4b Post-call webhook (workspace resource) ─────────────────────────
+    set_post_call_webhook(agent_id, actor_id=actor_id, org_id=org_id)
+    summary["post_call_webhook_id"] = settings.el_post_call_webhook_id or None
 
     # ─── B.5 Audio in client_events ──────────────────────────────────────────
     current = get_agent_config(agent_id)
