@@ -162,7 +162,7 @@ export function CallLogsPage() {
         <div className="mb-6">
           <h1 className="text-[26px] font-extrabold tracking-tight text-text">Anrufe</h1>
           <p className="mt-1 text-[14px] text-muted">
-            Jeder Anruf, den Kiki angenommen oder geführt hat — durchsuchbar und direkt bearbeitbar.
+            Übersicht aller Anrufe, die Kiki geführt hat.
           </p>
         </div>
 

@@ -329,7 +329,7 @@ function CaseStatChips({ c }: { c: CaseListRow }) {
   )
 }
 
-// Case status labels match the Cases redesign (Offen / In Arbeit / Fertig), NOT
+// Case status labels match the Cases redesign (Offen / In Arbeit / Abgeschlossen), NOT
 // the project STATUS_META wording, so a case reads the same here as in /cases.
 const CASE_STATUS_META: Record<string, { label: string; cls: string }> = {
   planning: { label: 'Offen', cls: 'bg-info-bg text-info' },

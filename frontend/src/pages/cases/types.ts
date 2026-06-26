@@ -97,7 +97,7 @@ export interface ProjectRow { id: string; number: string | null; title: string; 
 export const CASE_STATUS = [
   { value: 'planning', label: 'Offen', tone: 'info' as const },
   { value: 'active', label: 'In Arbeit', tone: 'warning' as const },
-  { value: 'completed', label: 'Fertig', tone: 'success' as const },
+  { value: 'completed', label: 'Abgeschlossen', tone: 'success' as const },
 ]
 
 // A case's single "next action" signal, resolved from /api/actions/pending.
