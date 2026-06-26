@@ -91,12 +91,27 @@ def ensure_stripe_customer(org_id: str, actor_id: str | None = None) -> str:
     return cid
 
 
+def _checkout_return_base(return_origin: str | None) -> str:
+    """Where Stripe sends the user after checkout. Prefer the caller's own app origin
+    (so they land back on the exact app they're using and keep their session); fall back
+    to the configured public URL. Only a well-formed http(s) origin is accepted, and we
+    always append our own fixed path — so this can't be used as an open redirect."""
+    origin = (return_origin or "").strip().rstrip("/")
+    if origin.startswith("https://") or origin.startswith("http://localhost"):
+        return f"{origin}/settings/abrechnung"
+    return (
+        settings.billing_portal_return_url
+        or settings.public_app_url.rstrip("/") + "/settings/abrechnung"
+    ).split("?")[0]
+
+
 def create_checkout_session(
     org_id: str,
     plan_title: str,
     interval: str,
     *,
     actor_id: str | None = None,
+    return_origin: str | None = None,
 ) -> dict:
     """Create a hosted Stripe Checkout session to subscribe the org. Returns {url, session_id}."""
     if interval not in ("month", "year"):
@@ -118,7 +133,7 @@ def create_checkout_session(
     ]
     sub_data: dict = {"metadata": {"heykiki_org_id": _org(db, org_id).get("heykiki_org_id"), "org_id": str(org_id)}}
 
-    base = (settings.billing_portal_return_url or settings.public_app_url + "/settings/abrechnung").split("?")[0]
+    base = _checkout_return_base(return_origin)
     success_url = f"{base}?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{base}?checkout=cancel"
 
@@ -135,6 +150,12 @@ def create_checkout_session(
             subscription_data=sub_data,
             success_url=success_url,
             cancel_url=cancel_url,
+            # Stable key for mapping this checkout back to the CRM org (handy when a
+            # future public onboarding page drives checkout via webhook).
+            client_reference_id=str(org_id),
+            # Collect the mobile number so subscriptions can be mapped to the customer
+            # going forward (stored on the Stripe customer).
+            phone_number_collection={"enabled": True},
             automatic_tax={"enabled": True},
             # Only collect a card when money is actually due now. A 100%-off promo (or a
             # future trial) drops the first invoice to €0 → Stripe skips card entry; a

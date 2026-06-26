@@ -63,6 +63,10 @@ class PortalSessionResponse(BaseModel):
 class CheckoutRequest(BaseModel):
     plan_title: str
     interval: str = "month"
+    # The app origin the user is on (window.location.origin). The post-checkout
+    # redirect returns here so the user lands back on the SAME app, logged in —
+    # instead of a baked PUBLIC_URL that may differ and bounce them to /login.
+    return_origin: str | None = None
 
 
 class CheckoutResponse(BaseModel):
