@@ -1026,7 +1026,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       {!subscribed && (
         <div className="flex items-start gap-3 rounded-xl border border-info/30 bg-info-bg/40 p-4 text-sm text-body">
           <Info size={16} className="mt-0.5 shrink-0 text-info" />
-          <span>Für Fragen zu deinem Abonnement wende dich an <a href="mailto:support@heykiki.de" className="font-medium text-green-deep hover:underline">support@heykiki.de</a>.</span>
+          <span>Für Fragen zu deinem Abonnement wende dich an <a href="mailto:info@kikichat.de" className="font-medium text-green-deep hover:underline">info@kikichat.de</a>.</span>
         </div>
       )}
     </div>

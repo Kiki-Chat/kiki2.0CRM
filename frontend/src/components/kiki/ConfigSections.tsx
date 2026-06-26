@@ -858,7 +858,7 @@ export function TelefonSection({ data, flash }: Props) {
           <span className="text-text">{data.phone_number || 'Nicht zugewiesen'}</span>
         </div>
       </Field>
-      <p className="mt-1 text-xs text-muted">Diese Nummer wird von HeyKiki bereitgestellt und kann nicht geändert werden. Für eine andere Rufnummer wende dich an support@heykiki.de.</p>
+      <p className="mt-1 text-xs text-muted">Diese Nummer wird von HeyKiki bereitgestellt und kann nicht geändert werden. Für eine andere Rufnummer wende dich an info@kikichat.de.</p>
       <div className="mt-4">
         <Field label="Deine bestehende Geschäftsnummer">
           <input
