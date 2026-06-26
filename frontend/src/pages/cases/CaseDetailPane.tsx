@@ -456,7 +456,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
         {/* ANFRAGEN */}
         <BigCard title="Anfragen" icon={Inbox} count={data.inquiries.length}>
           {data.inquiries.length ? (
-            <GroupedTable columns={['Status', 'Betreff', 'Nummer', '']}>
+            <GroupedTable columns={['Status', 'Betreff', 'Anrufprotokoll', '']}>
               {groupByDay(data.inquiries, (i) => i.created_at ?? null).map((g) => (
                 <Fragment key={g.key}>
                   <DayDivider label={g.label} span={4} />
@@ -466,8 +466,8 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                       <tr key={i.id} className={cn(rowCls, 'group relative')}>
                         <td className="px-3 py-2.5" onClick={() => openInquiry(i)}><Tag variant={st.variant}>{st.label}</Tag></td>
                         <td className="px-3 py-2.5 font-semibold text-text" onClick={() => openInquiry(i)}><span className="line-clamp-1">{i.subject || i.title || 'Anfrage'}</span></td>
-                        <td className="px-3 py-2.5 font-mono text-xs text-muted" onClick={() => openInquiry(i)}>
-                          <span className="inline-flex items-center gap-1.5">{i.call_id && <Phone size={12} className="text-green-deep" />}{i.number}</span>
+                        <td className="px-3 py-2.5 text-xs font-semibold text-muted" onClick={() => openInquiry(i)}>
+                          <span className="inline-flex items-center gap-1.5">{i.call_id && <Phone size={12} className="text-green-deep" />}{i.call_id ? 'Anruf öffnen' : 'Kein Anruf'}</span>
                         </td>
                         <td className="relative w-10 px-3 py-2.5"><MoveMenu inquiryId={i.id} currentCaseId={cs.id} cases={moveTargets} onMoved={() => { qc.invalidateQueries({ queryKey: ['caseDetail', caseId] }); qc.invalidateQueries({ queryKey: ['cases'] }) }} /></td>
                       </tr>
