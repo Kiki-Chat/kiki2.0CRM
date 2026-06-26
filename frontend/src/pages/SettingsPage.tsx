@@ -973,26 +973,45 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
 
       {!subscribed && plans.length > 0 && (
         <Card>
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-bold text-text">Tarif wählen</div>
-              <div className="text-xs text-muted">Starte dein Abonnement — inkl. Testphase. Alle Preise zzgl. 19 % MwSt.</div>
+              <div className="text-base font-bold text-text">Tarif wählen</div>
+              <div className="text-xs text-muted">Jederzeit wechselbar. Alle Preise zzgl. 19 % MwSt.</div>
             </div>
-            <div className="flex items-center gap-1 rounded-lg bg-alt p-1 text-xs font-semibold">
-              <button onClick={() => setPlanInterval('month')} className={cn('rounded-md px-3 py-1', planInterval === 'month' ? 'bg-surface text-text shadow' : 'text-muted')}>Monatlich</button>
-              <button onClick={() => setPlanInterval('year')} className={cn('rounded-md px-3 py-1', planInterval === 'year' ? 'bg-surface text-text shadow' : 'text-muted')}>Jährlich</button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 rounded-lg bg-alt p-1 text-xs font-semibold">
+                <button onClick={() => setPlanInterval('month')} className={cn('rounded-md px-3 py-1 transition', planInterval === 'month' ? 'bg-surface text-text shadow' : 'text-muted')}>Monatlich</button>
+                <button onClick={() => setPlanInterval('year')} className={cn('rounded-md px-3 py-1 transition', planInterval === 'year' ? 'bg-surface text-text shadow' : 'text-muted')}>Jährlich</button>
+              </div>
+              <span className="rounded-full bg-green-tint-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-green-deep">2 Monate gratis</span>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             {plans.map((p) => {
-              const price = planInterval === 'month' ? p.monthly_cents : p.annual_cents
+              const annual = planInterval === 'year'
+              const monthlyEquiv = Math.round(p.annual_cents / 12)
+              const savings = p.monthly_cents * 12 - p.annual_cents
+              const recommended = p.plan_title === 'Kiki Pro'
               return (
-                <div key={p.plan_title} className="flex flex-col rounded-xl border border-border p-4">
-                  <div className="text-sm font-bold text-text">{p.plan_title}</div>
-                  <div className="mt-1 text-2xl font-bold text-text">{fmtCents(price)}<span className="text-xs font-normal text-muted">/{planInterval === 'month' ? 'Mon.' : 'Jahr'}</span></div>
-                  <div className="mt-1 text-xs text-muted">{p.included_minutes} Min. inkl. · dann {fmtCents(p.overage_cents_per_min)}/Min.</div>
+                <div key={p.plan_title} className={cn('relative flex flex-col rounded-2xl border p-5', recommended ? 'border-green-primary ring-1 ring-green-primary shadow-sm' : 'border-border')}>
+                  {recommended && <span className="absolute -top-2.5 left-5 rounded-full bg-green-primary px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow">Beliebt</span>}
+                  <div className="text-sm font-bold text-text">{shortPlan(p.plan_title)}</div>
+                  <div className="mt-2 flex items-baseline gap-1">
+                    <span className="text-3xl font-bold leading-none text-text">{fmtCents(annual ? monthlyEquiv : p.monthly_cents)}</span>
+                    <span className="text-sm font-normal text-muted">/Mon.</span>
+                  </div>
+                  {annual ? (
+                    <div className="mt-1.5 text-xs font-semibold text-green-deep">{fmtCents(p.annual_cents)} / Jahr · spare {fmtCents(savings)}</div>
+                  ) : (
+                    <div className="mt-1.5 text-xs text-muted">inkl. MwSt. {fmtCents(Math.round(p.monthly_cents * 1.19))}/Mon.</div>
+                  )}
+                  <div className="mt-3 border-t border-border pt-3 text-xs font-semibold text-text">{p.included_minutes} Min. inkl. <span className="font-normal text-muted">· dann {fmtCents(p.overage_cents_per_min)}/Min.</span></div>
                   <PlanFeatureList plan={p.plan_title} />
-                  <button onClick={() => subscribe.mutate({ plan_title: p.plan_title, interval: planInterval })} disabled={subscribe.isPending} className="mt-4 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110 disabled:opacity-50">
+                  <button
+                    onClick={() => subscribe.mutate({ plan_title: p.plan_title, interval: planInterval })}
+                    disabled={subscribe.isPending}
+                    className={cn('mt-5 rounded-lg px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50', recommended ? 'bg-green-primary text-white hover:brightness-110' : 'border border-green-primary text-green-deep hover:bg-green-tint-100')}
+                  >
                     {subscribe.isPending ? 'Weiterleitung…' : 'Jetzt abonnieren'}
                   </button>
                 </div>
