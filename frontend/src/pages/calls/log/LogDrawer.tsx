@@ -415,7 +415,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                   >
                     <FileText size={16} className="flex-shrink-0 text-ai" />
                     <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-bold text-ai">Angebot erwähnt</div>
+                      <div className="text-[13px] font-bold text-ai">Angebot einsehen</div>
                       <div className="text-[11.5px] text-muted">Im Anruf nach einem Angebot gefragt — vorausgefüllt erstellen.</div>
                     </div>
                     <span className="flex-shrink-0 rounded-lg bg-ai px-2.5 py-1 text-[12px] font-bold text-white">Angebot erstellen</span>
@@ -484,14 +484,14 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
 
                   <div className="flex flex-col gap-1.5">
                     <span className="text-[10px] font-extrabold uppercase tracking-wider text-muted">Erstellen</span>
-                    <div className="flex gap-1.5">
-                      <ActionBtn variant="secondary" className="flex-1" icon={<CalendarPlus size={15} />} onClick={() => setModal('appointment')}>
+                    <div className="grid grid-cols-3 gap-2">
+                      <ActionBtn variant="secondary" className="w-full whitespace-nowrap px-2.5 py-2.5 text-[12px]" icon={<CalendarPlus size={15} className="shrink-0" />} onClick={() => setModal('appointment')}>
                         Termin erstellen
                       </ActionBtn>
-                      <ActionBtn variant="secondary" className="flex-1" icon={<FileText size={15} />} disabled={!call.customer_id} onClick={goKva}>
+                      <ActionBtn variant="secondary" className="w-full whitespace-nowrap px-2.5 py-2.5 text-[12px]" icon={<FileText size={15} className="shrink-0" />} disabled={!call.customer_id} onClick={goKva}>
                         Angebot erstellen
                       </ActionBtn>
-                      <ActionBtn variant="secondary" className="flex-1" icon={<Receipt size={15} />} disabled={!call.customer_id} onClick={goInvoice}>
+                      <ActionBtn variant="secondary" className="w-full whitespace-nowrap px-2.5 py-2.5 text-[12px]" icon={<Receipt size={15} className="shrink-0" />} disabled={!call.customer_id} onClick={goInvoice}>
                         Rechnung erstellen
                       </ActionBtn>
                     </div>

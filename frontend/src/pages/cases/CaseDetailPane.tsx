@@ -93,7 +93,7 @@ const JOB_STATUS: Record<string, { label: string; variant: 'info' | 'warning' | 
   abgeschlossen: { label: 'Abgeschlossen', variant: 'success' },
 }
 
-// ─── Header status switch (Offen / In Arbeit / Fertig) ──────────────────────
+// ─── Header status switch (Offen / In Arbeit / Abgeschlossen) ───────────────
 const STATUS_ICON: Record<string, LucideIcon> = { planning: Clock, active: Wrench, completed: CheckCircle2 }
 const STATUS_ON: Record<string, string> = {
   info: 'border-info bg-info-bg text-info',

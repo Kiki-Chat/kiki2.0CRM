@@ -1,7 +1,7 @@
 // Left pane of the Cases split-view: "Meine Fälle" + search + two big dropdown
 // filters (Status / Kontakt) + a scrollable list of case rows grouped under date
 // dividers (Heute / Gestern / "Montag, 16. Juni") by last activity. Each row shows
-// the customer, the case title, and the case STATUS chip (Offen / In Arbeit / Fertig).
+// the customer, the case title, and the case STATUS chip (Offen / In Arbeit / Abgeschlossen).
 import { Check, ChevronDown, Layers, Search, User, X } from 'lucide-react'
 import { Fragment, useMemo, useState } from 'react'
 
