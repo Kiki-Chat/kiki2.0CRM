@@ -140,11 +140,18 @@ def _invoices(org_id: str, limit: int) -> list[BillingInvoice]:
     customer_id = _org(client, org_id).get("stripe_customer_id")
     if not customer_id or not is_configured():
         return []
-    result = stripe_read(
-        op="invoice.list",
-        org_id=org_id,
-        fn=lambda: get_stripe().Invoice.list(customer=customer_id, limit=limit),
-    )
+    try:
+        result = stripe_read(
+            op="invoice.list",
+            org_id=org_id,
+            fn=lambda: get_stripe().Invoice.list(customer=customer_id, limit=limit),
+        )
+    except StripeBillingError as exc:
+        # A stored stripe_customer_id that doesn't exist for the active key (test↔live
+        # or wrong account) raises 'No such customer'. Degrade to an empty list like
+        # _summary/_upcoming already do, so the Abrechnung page renders instead of 500ing.
+        log.warning("invoice.list failed (org=%s, customer=%s): %s", org_id, customer_id, exc)
+        return []
     return [_map_invoice(i) for i in (result.get("data") or [])]
 
 
@@ -187,11 +194,17 @@ def _payment_methods(org_id: str) -> list[PaymentMethod]:
     customer_id = _org(client, org_id).get("stripe_customer_id")
     if not customer_id or not is_configured():
         return []
-    result = stripe_read(
-        op="payment_method.list",
-        org_id=org_id,
-        fn=lambda: get_stripe().PaymentMethod.list(customer=customer_id, type="card"),
-    )
+    try:
+        result = stripe_read(
+            op="payment_method.list",
+            org_id=org_id,
+            fn=lambda: get_stripe().PaymentMethod.list(customer=customer_id, type="card"),
+        )
+    except StripeBillingError as exc:
+        # Same 'No such customer' resilience as _invoices — never 500 the page over a
+        # stale/mismatched customer link.
+        log.warning("payment_method.list failed (org=%s, customer=%s): %s", org_id, customer_id, exc)
+        return []
     out: list[PaymentMethod] = []
     for pm in result.get("data") or []:
         card = pm.get("card") or {}
