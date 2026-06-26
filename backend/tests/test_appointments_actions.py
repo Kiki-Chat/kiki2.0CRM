@@ -168,20 +168,36 @@ def test_confirm_404_when_appointment_in_other_org(monkeypatch):
     assert exc.value.status_code == 404
 
 
-def test_confirm_409_when_not_pending(monkeypatch):
-    """State-machine guard: confirming a non-pending appointment is rejected
-    with 409 — otherwise the action would silently re-stamp confirmed_at on
-    an already-confirmed row (or worse, re-open a cancelled appointment)."""
+def test_confirm_idempotent_when_already_confirmed(monkeypatch):
+    """Idempotent confirm: re-confirming an already-'confirmed' appointment
+    (calendar-created, double-click, or a stale open-action card) returns the
+    row unchanged with 200 — NOT 409. No UPDATE is issued, so confirmed_at is
+    untouched and the customer call/email never re-fires."""
     already = {"id": "a", "org_id": "org-1", "status": "confirmed"}
+    client = _FakeClient([[already]])
+    monkeypatch.setattr(appt_routes, "get_service_client", lambda: client)
+    result = asyncio.run(
+        appt_routes.confirm_appointment("a", user=_org_admin_user("org-1"))
+    )
+    assert result["status"] == "confirmed"
+    # No write happened — the row was handed back as-is.
+    assert all(op != "update" for _, op in client.calls)
+
+
+def test_confirm_409_when_cancelled(monkeypatch):
+    """The state-machine guard still holds for genuinely un-confirmable states:
+    confirming a cancelled appointment is 409 (it must not resurrect a killed
+    booking + fire a confirmation call for it)."""
+    cancelled = {"id": "a", "org_id": "org-1", "status": "cancelled"}
     monkeypatch.setattr(
-        appt_routes, "get_service_client", lambda: _FakeClient([[already]])
+        appt_routes, "get_service_client", lambda: _FakeClient([[cancelled]])
     )
     with pytest.raises(HTTPException) as exc:
         asyncio.run(
             appt_routes.confirm_appointment("a", user=_org_admin_user("org-1"))
         )
     assert exc.value.status_code == 409
-    assert "confirmed" in exc.value.detail
+    assert "cancelled" in exc.value.detail
 
 
 # ─── reject ─────────────────────────────────────────────────────────────────
@@ -489,3 +505,48 @@ def test_cancel_clears_pending_proposal_fields(monkeypatch):
     assert upd["customer_proposed_at"] is None
     assert upd["reschedule_expires_at"] is None
     assert upd["reschedule_replace_intent"] is None
+
+
+# ─── create: backdating + Ort→Adresse sync ───────────────────────────────────
+def test_create_rejects_backdated_appointment(monkeypatch):
+    """A new appointment must be in the future. A scheduled_at already in the
+    past is rejected with 422 — the calendar can click a past slot and the agent
+    can propose a stale time; neither may mint a backdated appointment."""
+    from app.schemas.admin import AppointmentCreate
+
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    payload = AppointmentCreate(scheduled_at=past, title="Rückblick")
+    # No customer/employee FKs → no DB hit before the guard fires.
+    monkeypatch.setattr(appt_routes, "get_service_client", lambda: _FakeClient([]))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            appt_routes.create_appointment(payload, user=_org_admin_user("org-1"))
+        )
+    assert exc.value.status_code == 422
+    assert "Vergangenheit" in exc.value.detail
+
+
+def test_sync_location_writes_customer_address_when_changed():
+    """Ort → Kundenadresse: a location that differs from the customer's stored
+    address is written through (same {"raw": …} shape)."""
+    client = _FakeClient([[{"address": {"raw": "Alte Straße 1"}}]])
+    appt_routes._sync_location_to_customer(client, "org-1", "cust-1", "Neue Straße 5")
+    assert ("customers", "update") in client.calls
+    assert client._last_update_payload["address"] == {"raw": "Neue Straße 5"}
+
+
+def test_sync_location_noop_when_address_already_matches():
+    """No write when the location already equals the customer's address — the
+    common "Ort prefilled from the address" path must not churn the customer row."""
+    client = _FakeClient([[{"address": {"raw": "Gleiche Straße 1"}}]])
+    appt_routes._sync_location_to_customer(client, "org-1", "cust-1", "Gleiche Straße 1")
+    assert all(op != "update" for _, op in client.calls)
+
+
+def test_sync_location_noop_without_customer_or_location():
+    """No customer or no location → nothing happens (an empty Ort never clears
+    the customer's address)."""
+    client = _FakeClient([])
+    appt_routes._sync_location_to_customer(client, "org-1", None, "Irgendwo 1")
+    appt_routes._sync_location_to_customer(client, "org-1", "cust-1", "")
+    assert client.calls == []

@@ -37,6 +37,40 @@ def _is_past(iso_ts: str | None) -> bool:
         return False
 
 
+def _sync_location_to_customer(
+    client, org_id: str, customer_id: str | None, location: str | None
+) -> None:
+    """Keep the customer's address in lock-step with an appointment's Ort —
+    they are the same physical place. When a location is entered/changed on an
+    appointment that has a customer, write it into the customer's `address`
+    (same {"raw": …} jsonb shape) so the address shows up everywhere it's used.
+
+    No-op without a customer or without a location, and never clears an address
+    (an empty Ort leaves the customer's address untouched). Writes only when the
+    value actually differs, so the common "Ort prefilled from the address"
+    create/edit path stays a no-op."""
+    loc = (location or "").strip()
+    if not customer_id or not loc:
+        return
+    rows = (
+        client.table("customers")
+        .select("address")
+        .eq("org_id", org_id)
+        .eq("id", customer_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not rows:
+        return
+    current = (format_address(rows[0].get("address")) or "").strip()
+    if current == loc:
+        return
+    client.table("customers").update(
+        {"address": {"raw": loc}, "updated_at": "now()"}
+    ).eq("org_id", org_id).eq("id", customer_id).execute()
+
+
 def _get_appointment(org_id: str, appointment_id: str) -> dict | None:
     """Tenant-scoped fetch — every action route uses this before mutating so
     cross-org IDs return 404 instead of silently no-op'ing."""
@@ -132,6 +166,19 @@ def _create(user: CurrentUser, payload: AppointmentCreate) -> dict:
         client, user=user, current_assignee_id=None,
         new_assignee_id=payload.assigned_employee_id,
     )
+    # No backdating: a freshly-created appointment must lie in the future. The
+    # calendar lets you click a past day/slot, and the agent could propose a
+    # stale time — both would otherwise mint an appointment already in the past.
+    # (ICS import has its own path and is intentionally exempt — it carries real
+    # historical events.)
+    if _is_past(payload.scheduled_at):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Ein Termin kann nicht in der Vergangenheit liegen. "
+                "Bitte Datum und Uhrzeit in der Zukunft wählen."
+            ),
+        )
     row = {
         "org_id": org_id,
         "customer_id": payload.customer_id,
@@ -147,7 +194,10 @@ def _create(user: CurrentUser, payload: AppointmentCreate) -> dict:
         "status": "confirmed",
         "notes": payload.notes,
     }
-    return client.table("appointments").insert(row).execute().data[0]
+    created = client.table("appointments").insert(row).execute().data[0]
+    # Ort → Kundenadresse: a location entered here is the customer's address.
+    _sync_location_to_customer(client, org_id, payload.customer_id, payload.location)
+    return created
 
 
 @router.post("")
@@ -216,7 +266,15 @@ def _patch(user: CurrentUser, appointment_id: str, payload: AppointmentPatch) ->
         client.table("appointments").update(fields).eq("org_id", org_id)
         .eq("id", appointment_id).execute()
     )
-    return res.data[0] if res.data else None
+    row = res.data[0] if res.data else None
+    # Ort → Kundenadresse: an edited location syncs back to the customer's
+    # address (same place). The location was normalised to {"raw": …} above;
+    # flatten it and write it through when the appointment has a customer.
+    if row and "location" in fields:
+        _sync_location_to_customer(
+            client, org_id, row.get("customer_id"), format_address(fields["location"])
+        )
+    return row
 
 
 @router.patch("/{appointment_id}")
@@ -275,6 +333,14 @@ def _confirm(org_id: str, appointment_id: str) -> dict | None:
     appt = _get_appointment(org_id, appointment_id)
     if not appt:
         return None
+    # Idempotent confirm: a calendar-created appointment is already 'confirmed',
+    # and a double-click or a stale open-action card can re-issue confirm. Return
+    # the row unchanged (flagged so the route skips the re-notify + duplicate case
+    # creation) instead of 409'ing the user. Only a genuinely un-confirmable state
+    # — a cancelled/rejected/completed appointment — still hard-fails below.
+    if appt.get("status") == "confirmed":
+        appt["_already_confirmed"] = True
+        return appt
     if appt.get("status") != "pending":
         raise HTTPException(
             status_code=409,
@@ -410,6 +476,10 @@ async def confirm_appointment(
     appt = await run_in_threadpool(_confirm, user.org_id, appointment_id)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    # Already confirmed (idempotent path) — don't re-fire the customer call/email
+    # or re-create the case. Just hand back the current row so the UI settles.
+    if appt.get("_already_confirmed"):
+        return appt
     # Back-office automation: auto-create a case (+ planning-board presence),
     # gated by agent_configs.projects_enabled/level. Best-effort, non-blocking.
     case = await run_in_threadpool(

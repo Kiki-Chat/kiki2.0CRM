@@ -13,6 +13,8 @@ so `.eq("org_id", …)` actually excludes other-org rows.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -180,7 +182,10 @@ def test_appointment_create_rejects_cross_org_employee(monkeypatch):
 
 def test_appointment_create_accepts_same_org(monkeypatch):
     _override(monkeypatch, appt)
-    r = client.post("/api/appointments", json={"customer_id": "cust-A", "assigned_employee_id": "emp-A", "scheduled_at": "2026-06-02T10:00:00Z"})
+    # Future date: the create path rejects backdated appointments, so a same-org
+    # accept test must schedule ahead of now (this asserts FK acceptance only).
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    r = client.post("/api/appointments", json={"customer_id": "cust-A", "assigned_employee_id": "emp-A", "scheduled_at": future})
     assert r.status_code == 200, r.text
 
 
