@@ -1,4 +1,5 @@
 import logging
+import re
 
 from fastapi import HTTPException, status
 
@@ -14,6 +15,30 @@ from app.services.agent_config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Customer-id (heykiki_org_id) auto-generation. Server-generated so it can never
+# clash or be mistyped via manual entry — the super-admin form no longer asks for
+# it. Format: ``Kiki-Kunde-NNN`` (3-digit zero-padded; grows past 3 digits past 999).
+_HEYKIKI_ID_PREFIX = "Kiki-Kunde-"
+_HEYKIKI_ID_RE = re.compile(r"^kiki-kunde-(\d+)$", re.IGNORECASE)
+
+
+def next_heykiki_org_id(client) -> str:
+    """Next sequential ``Kiki-Kunde-NNN`` id: scan existing org ids
+    case-insensitively for the highest numeric suffix in the series and add one.
+
+    Case-insensitive so a stray ``kiki-kunde-005`` still advances the counter (no
+    accidental duplicate at a different casing). The ``heykiki_org_id`` unique
+    constraint is the final backstop against a concurrent-create race."""
+    rows = (
+        client.table("organizations").select("heykiki_org_id").execute().data or []
+    )
+    max_n = 0
+    for r in rows:
+        m = _HEYKIKI_ID_RE.match((r.get("heykiki_org_id") or "").strip())
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return f"{_HEYKIKI_ID_PREFIX}{max_n + 1:03d}"
 
 DEFAULT_AGENT_CONFIG = {
     "autonomy_level": 1,
@@ -138,18 +163,24 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
     """
     client = get_service_client()
 
+    # Resolve the customer id: server-generated (Kiki-Kunde-NNN) when the caller
+    # didn't supply one — the super-admin form no longer collects it, which kills
+    # the manual-entry clashes/typos. An explicit value (e.g. the n8n /provision
+    # path) is still honoured + dup-checked below.
+    org_slug = (payload.heykiki_org_id or "").strip() or next_heykiki_org_id(client)
+
     # Duplicate checks (handover known-bug #3).
     existing_org = (
         client.table("organizations")
         .select("id")
-        .eq("heykiki_org_id", payload.heykiki_org_id)
+        .eq("heykiki_org_id", org_slug)
         .limit(1)
         .execute()
     )
     if existing_org.data:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Organization '{payload.heykiki_org_id}' already exists",
+            detail=f"Organization '{org_slug}' already exists",
         )
 
     existing_user = (
@@ -193,9 +224,9 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
     agent_health: dict | None = None  # populated only on the bind-only path
     try:
         org_row: dict = {
-            "heykiki_org_id": payload.heykiki_org_id,
+            "heykiki_org_id": org_slug,
             "name": payload.org_name,
-            "slug": payload.heykiki_org_id,
+            "slug": org_slug,
             "elevenlabs_agent_id": payload.elevenlabs_agent_id,
             "email": payload.contact_email,
         }
@@ -293,7 +324,7 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
     return ProvisionResponse(
         org_id=org_id,
         user_id=user_id,
-        heykiki_org_id=payload.heykiki_org_id,
+        heykiki_org_id=org_slug,
         org_secret=None,  # B.6 — no longer generated
         agent_health=agent_health,  # bind-only verify report, else None
     )

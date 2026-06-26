@@ -40,7 +40,6 @@ export function AdminOrgFormPage() {
   const isNew = !id
 
   // CREATE fields
-  const [heykikiOrgId, setHeykikiOrgId] = useState('')
   const [orgName, setOrgName] = useState('')
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
@@ -105,7 +104,6 @@ export function AdminOrgFormPage() {
   }, [detailQuery.data])
 
   const resetCreateForm = () => {
-    setHeykikiOrgId('')
     setOrgName('')
     setLoginEmail('')
     setLoginPassword('')
@@ -121,7 +119,6 @@ export function AdminOrgFormPage() {
       apiFetch<CreateOrgResponse>('/api/super-admin/orgs', {
         method: 'POST',
         body: JSON.stringify({
-          heykikiOrgId,
           orgName,
           loginEmail,
           loginPassword,
@@ -237,15 +234,9 @@ export function AdminOrgFormPage() {
         {isNew ? (
           <>
             <Field label="Organisationsname *" value={orgName} onChange={setOrgName} required placeholder="Murdock Law GmbH" />
-            <Field
-              label="heykiki_org_id *"
-              value={heykikiOrgId}
-              onChange={setHeykikiOrgId}
-              required
-              placeholder="kiki-customer-001"
-              mono
-              help="Eindeutige slug-style ID — nicht änderbar nach dem Anlegen."
-            />
+            <p className="rounded-md border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-400">
+              Die Kunden-ID (<span className="font-mono text-slate-300">Kiki-Kunde-…</span>) wird beim Anlegen automatisch vergeben — fortlaufend und eindeutig.
+            </p>
             <Field
               label="Sprach-ID (technisch)"
               value={elevenlabsAgentId}

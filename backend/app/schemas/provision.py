@@ -2,7 +2,10 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class ProvisionRequest(BaseModel):
-    heykiki_org_id: str = Field(..., alias="heykikiOrgId")
+    # Optional: server-generated (Kiki-Kunde-NNN) when omitted, so the super-admin
+    # form no longer collects it (manual entry caused id clashes + typos). The n8n
+    # /provision path may still pass an explicit value, which is honoured + dup-checked.
+    heykiki_org_id: str | None = Field(default=None, alias="heykikiOrgId")
     org_name: str = Field(..., alias="orgName")
     login_email: EmailStr = Field(..., alias="loginEmail")
     login_password: str = Field(..., alias="loginPassword", min_length=8)
