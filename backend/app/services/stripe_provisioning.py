@@ -136,6 +136,11 @@ def create_checkout_session(
             success_url=success_url,
             cancel_url=cancel_url,
             automatic_tax={"enabled": True},
+            # Only collect a card when money is actually due now. A 100%-off promo (or a
+            # future trial) drops the first invoice to €0 → Stripe skips card entry; a
+            # real paying signup (base price > 0) still requires the card. Address is
+            # still collected (needed for the 19% VAT calc) regardless.
+            payment_method_collection="if_required",
             customer_update={"address": "auto", "name": "auto"},
             # REQUIRED (not auto): German invoicing needs the full billing
             # address on file — Stripe must collect line1/PLZ/city, not just
