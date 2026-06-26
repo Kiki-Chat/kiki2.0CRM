@@ -377,3 +377,39 @@ def test_patch_agent_safely_sets_override_flags(monkeypatch):
     assert "audio" in ea._get_path(out, ea.CLIENT_EVENTS_PATH)  # audio preserved
     # Pre-existing tools preserved (clobber guard).
     assert len(ea._get_path(out, ea.TOOLS_PATH)) == 2
+
+
+# ─── workspace_overrides shallow-replace widening (webhook sibling preservation) ─
+def test_widen_workspace_overrides_emits_whole_object_with_both_webhooks():
+    """EL shallow-replaces workspace_overrides, so a leaf patch of one webhook
+    would wipe the sibling. The widen must collapse the change to the whole
+    object, carrying BOTH webhooks from `merged`."""
+    current = {"platform_settings": {"workspace_overrides": {
+        "conversation_initiation_client_data_webhook": {
+            "url": "https://{{system__env_api_host}}/api/elevenlabs/conversation-init",
+            "request_headers": {"X-HeyKiki-Secret": "sec"},
+        },
+        "webhooks": {"post_call_webhook_id": "pc_id"},
+    }}}
+    merged = copy.deepcopy(current)
+    merged["platform_settings"]["workspace_overrides"][
+        "conversation_initiation_client_data_webhook"
+    ]["url"] = "https://backend-production-3f88a.up.railway.app/api/elevenlabs/conversation-init"
+
+    changes = ea._diff(current, merged)
+    # Only the webhook URL leaf changed.
+    assert list(changes.keys()) == [
+        "platform_settings.workspace_overrides."
+        "conversation_initiation_client_data_webhook.url"
+    ]
+
+    widened = ea._widen_workspace_overrides_changes(changes, current, merged)
+    assert list(widened.keys()) == ["platform_settings.workspace_overrides"]
+
+    body = ea._build_patch_body(merged, widened)
+    wo = body["platform_settings"]["workspace_overrides"]
+    # URL migrated, secret preserved, AND the post-call sibling carried along.
+    ci = wo["conversation_initiation_client_data_webhook"]
+    assert ci["url"].endswith("3f88a.up.railway.app/api/elevenlabs/conversation-init")
+    assert ci["request_headers"]["X-HeyKiki-Secret"] == "sec"
+    assert wo["webhooks"]["post_call_webhook_id"] == "pc_id"

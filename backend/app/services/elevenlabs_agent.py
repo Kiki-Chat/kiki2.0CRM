@@ -318,6 +318,9 @@ def patch_agent_safely(
     # leaf patch inside one (e.g. only params.transfers) 400s with "Field
     # required". Widen any change under built_in_tools.<tool> to the whole tool.
     changes = _widen_built_in_tool_changes(changes, current, merged)
+    # workspace_overrides is SHALLOW-replaced by EL — a leaf patch of one webhook
+    # wipes the sibling webhook. Widen any change under it to the whole object.
+    changes = _widen_workspace_overrides_changes(changes, current, merged)
 
     # 7) Snapshot the full current config BEFORE writing.
     snap = (
@@ -451,6 +454,34 @@ def _widen_built_in_tool_changes(changes: dict, current: dict, merged: dict) -> 
         tool = rest.split(".", 1)[0]
         wide = path[: i + len(_BUILT_IN_TOOLS_MARKER)] + tool
         out[wide] = {"old": _get_path(current, wide), "new": _get_path(merged, wide)}
+    return out
+
+
+_WORKSPACE_OVERRIDES_PATH = "platform_settings.workspace_overrides"
+
+
+def _widen_workspace_overrides_changes(changes: dict, current: dict, merged: dict) -> dict:
+    """Collapse any change under ``platform_settings.workspace_overrides`` to the
+    WHOLE object.
+
+    ElevenLabs SHALLOW-replaces ``workspace_overrides`` on PATCH (verified live: a
+    PATCH carrying only ``webhooks`` wipes ``conversation_initiation_client_data_
+    webhook`` and vice-versa). So a surgical leaf patch of one webhook would wipe
+    the sibling webhook (and drop the conversation-init ``request_headers`` →
+    "Field required" 400). Emitting the complete object (siblings carried from
+    ``merged``) keeps both webhooks intact."""
+    out: dict[str, dict] = {}
+    widened = False
+    for path, ch in changes.items():
+        if path == _WORKSPACE_OVERRIDES_PATH or path.startswith(_WORKSPACE_OVERRIDES_PATH + "."):
+            if not widened:
+                out[_WORKSPACE_OVERRIDES_PATH] = {
+                    "old": _get_path(current, _WORKSPACE_OVERRIDES_PATH),
+                    "new": _get_path(merged, _WORKSPACE_OVERRIDES_PATH),
+                }
+                widened = True
+            continue
+        out[path] = ch
     return out
 
 
