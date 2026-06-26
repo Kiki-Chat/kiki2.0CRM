@@ -30,11 +30,17 @@ from app.services.stripe_billing import get_stripe
 
 TAX_CODE = "txcd_10103001"  # SaaS – cloud-based (handover §3)
 
-# plan_title -> included minutes, monthly base (cents), per-minute overage (cents)
+# plan_title -> included minutes, monthly base (cents), per-minute overage (cents),
+# and self_serve (default True). Pricing CONFIRMED by Amber 2026-06-26:
+#   Basis €99/100min/€1.00 · Legacy €179/200min/€0.75 · Pro €249/200min/€0.75 ·
+#   Enterprise €599/750min/€0.50. 'Kiki Legacy' is a GRANDFATHER tier for existing
+#   customers only — created in Stripe (so it can be assigned/migrated) but hidden from
+#   the new-customer self-serve plan picker (self_serve=False).
 PLANS: dict[str, dict] = {
-    "Kiki Solo": {"minutes": 99, "monthly_cents": 9900, "overage_cents": 100},
-    "Kiki Team": {"minutes": 250, "monthly_cents": 17900, "overage_cents": 75},
-    "Kiki Premium": {"minutes": 750, "monthly_cents": 49900, "overage_cents": 50},
+    "Kiki Basis": {"minutes": 100, "monthly_cents": 9900, "overage_cents": 100},
+    "Kiki Legacy": {"minutes": 200, "monthly_cents": 17900, "overage_cents": 75, "self_serve": False},
+    "Kiki Pro": {"minutes": 200, "monthly_cents": 24900, "overage_cents": 75},
+    "Kiki Enterprise": {"minutes": 750, "monthly_cents": 59900, "overage_cents": 50},
 }
 ANNUAL_MONTHS = 10  # annual = 10× monthly (2 months free)
 INTERVALS = ("month", "year")
@@ -42,7 +48,7 @@ INTERVALS = ("month", "year")
 # Upgrade ladder (low → high). In-CRM plan changes are gated to UPGRADES only
 # (a downgrade/cancellation goes through support per Amber's policy), so callers
 # compare ranks before allowing a change.
-PLAN_ORDER: tuple[str, ...] = ("Kiki Solo", "Kiki Team", "Kiki Premium")
+PLAN_ORDER: tuple[str, ...] = ("Kiki Basis", "Kiki Legacy", "Kiki Pro", "Kiki Enterprise")
 
 
 def plan_rank(title: str | None) -> int:
