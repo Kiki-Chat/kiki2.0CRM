@@ -133,37 +133,20 @@ export function AdminOrgsPage() {
 
       {data && (
         <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900">
-          <table className="w-full min-w-[88rem] border-collapse text-sm">
-            <colgroup>
-              <col className="min-w-[11rem]" />
-              <col className="min-w-[10rem]" />
-              <col className="min-w-[12rem]" />
-              <col className="min-w-[7.5rem]" />
-              <col className="w-[4.5rem]" />
-              <col className="w-[5rem]" />
-              <col className="w-[5.5rem]" />
-              <col className="w-[5rem]" />
-              <col className="min-w-[6.5rem]" />
-              <col className="w-[6.5rem]" />
-              <col className="w-[7rem]" />
-              <col className="min-w-[18rem]" />
-            </colgroup>
+          <table className="w-full min-w-[56rem] border-collapse text-sm">
             <thead className="bg-slate-900/60 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               <tr>
                 <th className="px-4 py-3">Organisation</th>
                 <th className="px-4 py-3">Kontakt</th>
                 <th className="px-4 py-3">Sprach-ID</th>
                 <th className="px-4 py-3">Agent-Status</th>
-                <th className="px-4 py-3 text-right">Anrufe</th>
-                <th className="px-4 py-3 text-right">Angebote</th>
-                <th className="px-4 py-3 text-right">Mitarbeiter</th>
-                <th className="px-4 py-3 text-right">Termine</th>
                 <th className="px-4 py-3">Zugang</th>
                 <th className="whitespace-nowrap px-4 py-3">Angelegt am</th>
                 <th className="whitespace-nowrap px-4 py-3">Letzte Aktivität</th>
-                <th className="sticky right-0 z-10 bg-slate-900/95 px-4 py-3 text-right shadow-[-10px_0_16px_rgba(2,6,23,0.65)]">
-                  Aktionen
-                </th>
+                <th className="px-3 py-3 text-center">Bearbeiten</th>
+                <th className="px-3 py-3 text-center">Migration</th>
+                <th className="px-3 py-3 text-center">Deaktivieren</th>
+                <th className="px-3 py-3 text-center">Löschen</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -172,7 +155,7 @@ export function AdminOrgsPage() {
                 const s = statsQuery.data?.stats[o.id]
                 const ah = agentHealthMap[o.id]
                 return (
-                  <tr key={o.id} className="group hover:bg-slate-800/40">
+                  <tr key={o.id} className="hover:bg-slate-800/40">
                     <td className="px-4 py-3 align-top">
                       <div className="font-semibold text-slate-100">{o.name ?? '—'}</div>
                       <div className="font-mono text-[11px] text-slate-500">{o.heykiki_org_id ?? '—'}</div>
@@ -211,18 +194,6 @@ export function AdminOrgsPage() {
                         </button>
                       )}
                     </td>
-                    <td className="px-4 py-3 align-top text-right font-mono text-xs text-slate-300">
-                      {s ? s.calls : <span className="text-slate-600">—</span>}
-                    </td>
-                    <td className="px-4 py-3 align-top text-right font-mono text-xs text-slate-300">
-                      {s ? s.kvas_sent : <span className="text-slate-600">—</span>}
-                    </td>
-                    <td className="px-4 py-3 align-top text-right font-mono text-xs text-slate-300">
-                      {s ? s.employees : <span className="text-slate-600">—</span>}
-                    </td>
-                    <td className="px-4 py-3 align-top text-right font-mono text-xs text-slate-300">
-                      {s ? s.appointments : <span className="text-slate-600">—</span>}
-                    </td>
                     <td className="px-4 py-3 align-top">
                       <span
                         className={cn(
@@ -237,49 +208,53 @@ export function AdminOrgsPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-slate-400">{fmtDate(o.created_at)}</td>
                     <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-slate-400">{fmtDate(s?.last_activity ?? null)}</td>
-                    <td className="sticky right-0 z-10 bg-slate-900 px-4 py-3 align-top shadow-[-10px_0_16px_rgba(2,6,23,0.65)] group-hover:bg-slate-800/40">
-                      <div className="flex flex-wrap items-center justify-end gap-1 whitespace-nowrap">
-                        <button
-                          onClick={() => navigate(`/admin/orgs/${o.id}`)}
-                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"
-                          title="Bearbeiten"
-                        >
-                          <Pencil size={13} /> Bearbeiten
-                        </button>
-                        <button
-                          onClick={() => navigate(`/admin/orgs/${o.id}/migration`)}
-                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"
-                          title="Migration (intern): übernommene Daten + Prompt-Abweichung"
-                        >
-                          <ArrowLeftRight size={13} /> Migration
-                        </button>
-                        <button
-                          onClick={() => setDisabled.mutate({ id: o.id, disabled: !disabled })}
-                          disabled={setDisabled.isPending}
-                          className={cn(
-                            'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium hover:bg-slate-800 disabled:opacity-50',
-                            disabled ? 'text-emerald-400' : 'text-amber-400',
-                          )}
-                          title={disabled ? 'Reaktivieren' : 'Deaktivieren'}
-                        >
-                          {disabled ? <CheckCircle2 size={13} /> : <MinusCircle size={13} />}
-                          {disabled ? 'Reaktivieren' : 'Deaktivieren'}
-                        </button>
-                        <button
-                          onClick={() => { setDeleteTarget(o); setDeleteConfirm('') }}
-                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-400 hover:bg-red-950/40"
-                          title="Löschen"
-                        >
-                          <Trash2 size={13} /> Löschen
-                        </button>
-                      </div>
+                    <td className="px-3 py-3 align-top text-center">
+                      <button
+                        onClick={() => navigate(`/admin/orgs/${o.id}`)}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"
+                        title="Organisation bearbeiten"
+                      >
+                        <Pencil size={13} /> Bearbeiten
+                      </button>
+                    </td>
+                    <td className="px-3 py-3 align-top text-center">
+                      <button
+                        onClick={() => navigate(`/admin/orgs/${o.id}/migration`)}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"
+                        title="Migration (intern): übernommene Daten + Prompt-Abweichung"
+                      >
+                        <ArrowLeftRight size={13} /> Migration
+                      </button>
+                    </td>
+                    <td className="px-3 py-3 align-top text-center">
+                      <button
+                        onClick={() => setDisabled.mutate({ id: o.id, disabled: !disabled })}
+                        disabled={setDisabled.isPending}
+                        className={cn(
+                          'inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium hover:bg-slate-800 disabled:opacity-50',
+                          disabled ? 'text-emerald-400' : 'text-amber-400',
+                        )}
+                        title={disabled ? 'Organisation reaktivieren' : 'Organisation deaktivieren'}
+                      >
+                        {disabled ? <CheckCircle2 size={13} /> : <MinusCircle size={13} />}
+                        {disabled ? 'Reaktivieren' : 'Deaktivieren'}
+                      </button>
+                    </td>
+                    <td className="px-3 py-3 align-top text-center">
+                      <button
+                        onClick={() => { setDeleteTarget(o); setDeleteConfirm('') }}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-400 hover:bg-red-950/40"
+                        title="Organisation endgültig löschen"
+                      >
+                        <Trash2 size={13} /> Löschen
+                      </button>
                     </td>
                   </tr>
                 )
               })}
               {data.orgs.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={11} className="px-4 py-12 text-center text-slate-500">
                     Keine Organisationen — lege die erste an.
                   </td>
                 </tr>

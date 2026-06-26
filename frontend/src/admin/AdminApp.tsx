@@ -25,7 +25,7 @@ export function AdminApp() {
       <Routes>
         <Route path="login" element={<AdminLoginPage />} />
         <Route element={<AdminProtectedRoute />}>
-          <Route index element={<Navigate to="orgs" replace />} />
+          <Route index element={<Navigate to="/admin/orgs" replace />} />
           <Route path="orgs" element={<AdminOrgsPage />} />
           <Route path="orgs/new" element={<AdminOrgFormPage />} />
           <Route path="orgs/:id" element={<AdminOrgFormPage />} />
@@ -34,7 +34,7 @@ export function AdminApp() {
         </Route>
         {/* Anything else under /admin/* that doesn't match → bounce to login (or list, if signed in).
             AdminProtectedRoute does the role check; non-super-admins get 404'd there. */}
-        <Route path="*" element={<Navigate to="orgs" replace />} />
+        <Route path="*" element={<Navigate to="/admin/orgs" replace />} />
       </Routes>
     </AdminAuthProvider>
   )
