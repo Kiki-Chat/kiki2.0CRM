@@ -99,7 +99,7 @@ export function AdminOrgsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Organisationen</h1>
           <p className="mt-0.5 text-sm text-slate-400">
@@ -132,8 +132,8 @@ export function AdminOrgsPage() {
       )}
 
       {data && (
-        <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900">
+          <table className="w-full min-w-[72rem] text-sm">
             <thead className="bg-slate-900/60 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               <tr>
                 <th className="px-4 py-3">Org</th>
@@ -218,7 +218,7 @@ export function AdminOrgsPage() {
                     <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(o.created_at)}</td>
                     <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(s?.last_activity ?? null)}</td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex flex-wrap items-center justify-end gap-1 whitespace-nowrap">
                         <button
                           onClick={() => navigate(`/admin/orgs/${o.id}`)}
                           className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"

@@ -25,9 +25,9 @@ export function AdminLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 bg-slate-900">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-3">
+    <div className="flex min-h-screen min-w-0 flex-col bg-slate-950 text-slate-100">
+      <header className="shrink-0 border-b border-slate-800 bg-slate-900">
+        <div className="mx-auto flex w-full max-w-7xl min-w-0 items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-amber-500/15 text-amber-400">
               <ShieldAlert size={16} />
@@ -53,8 +53,8 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <nav className="border-b border-slate-800 bg-slate-900/60">
-        <div className="mx-auto flex max-w-7xl items-center gap-1 px-6">
+      <nav className="shrink-0 border-b border-slate-800 bg-slate-900/60">
+        <div className="mx-auto flex w-full max-w-7xl min-w-0 items-center gap-1 overflow-x-auto px-4 sm:px-6">
           {NAV.map((n) => (
             <NavLink
               key={n.to}
@@ -72,7 +72,9 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           ))}
         </div>
       </nav>
-      <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
+      <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 overflow-x-auto px-4 py-6 sm:px-6 sm:py-8">
+        {children}
+      </main>
     </div>
   )
 }

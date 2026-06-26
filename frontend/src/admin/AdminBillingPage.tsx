@@ -157,7 +157,8 @@ export function AdminBillingPage() {
               <RefreshCw size={13} className={runMatcher.isPending ? 'animate-spin' : ''} /> Probelauf starten
             </button>
           </div>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[48rem] text-sm">
             <thead className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               <tr>
                 <th className="px-4 py-2">Organisation</th>
@@ -203,12 +204,13 @@ export function AdminBillingPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* Per-org billing state */}
-        <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
+        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900">
           <div className="border-b border-slate-800 px-4 py-3 text-sm font-bold text-slate-200">Organisationen — Abrechnungsstatus</div>
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[48rem] text-sm">
             <thead className="text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               <tr>
                 <th className="px-4 py-2">Organisation</th>
