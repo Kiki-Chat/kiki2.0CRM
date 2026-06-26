@@ -418,7 +418,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                       <div className="text-[13px] font-bold text-ai">Angebots-Entwurf</div>
                       <div className="text-[11.5px] text-muted">Im Anruf nach einem Angebot gefragt — vorausgefüllt erstellen.</div>
                     </div>
-                    <span className="flex-shrink-0 rounded-lg bg-ai px-2.5 py-1 text-[12px] font-bold text-white">Angebot erstellen</span>
+                    <span className="flex-shrink-0 rounded-lg bg-ai px-2.5 py-1 text-[12px] font-bold text-white">Angebot einsehen</span>
                   </button>
                 )}
                 {call.enrichment?.intent?.wants_invoice && (
