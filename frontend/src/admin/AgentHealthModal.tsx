@@ -68,7 +68,7 @@ export function AgentHealthModal({ orgId, orgName, onClose }: Props) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-slate-100">
-              Kiki-Status —{' '}
+              Agent-Status —{' '}
               <span className="text-amber-300">{orgName ?? orgId}</span>
             </h2>
             {data && (

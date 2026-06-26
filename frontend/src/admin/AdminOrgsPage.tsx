@@ -133,18 +133,37 @@ export function AdminOrgsPage() {
 
       {data && (
         <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900">
-          <table className="w-full min-w-[72rem] text-sm">
+          <table className="w-full min-w-[88rem] border-collapse text-sm">
+            <colgroup>
+              <col className="min-w-[11rem]" />
+              <col className="min-w-[10rem]" />
+              <col className="min-w-[12rem]" />
+              <col className="min-w-[7.5rem]" />
+              <col className="w-[4.5rem]" />
+              <col className="w-[5rem]" />
+              <col className="w-[5.5rem]" />
+              <col className="w-[5rem]" />
+              <col className="min-w-[6.5rem]" />
+              <col className="w-[6.5rem]" />
+              <col className="w-[7rem]" />
+              <col className="min-w-[18rem]" />
+            </colgroup>
             <thead className="bg-slate-900/60 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               <tr>
-                <th className="px-4 py-3">Org</th>
+                <th className="px-4 py-3">Organisation</th>
                 <th className="px-4 py-3">Kontakt</th>
-                <th className="px-4 py-3">Kiki</th>
-                <th className="px-4 py-3">Kiki-Status</th>
-                <th className="px-4 py-3 text-right">Nutzung</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Erstellt</th>
-                <th className="px-4 py-3">Aktivität</th>
-                <th className="px-4 py-3 text-right">Aktionen</th>
+                <th className="px-4 py-3">Sprach-ID</th>
+                <th className="px-4 py-3">Agent-Status</th>
+                <th className="px-4 py-3 text-right">Anrufe</th>
+                <th className="px-4 py-3 text-right">Angebote</th>
+                <th className="px-4 py-3 text-right">Mitarbeiter</th>
+                <th className="px-4 py-3 text-right">Termine</th>
+                <th className="px-4 py-3">Zugang</th>
+                <th className="whitespace-nowrap px-4 py-3">Angelegt am</th>
+                <th className="whitespace-nowrap px-4 py-3">Letzte Aktivität</th>
+                <th className="sticky right-0 z-10 bg-slate-900/95 px-4 py-3 text-right shadow-[-10px_0_16px_rgba(2,6,23,0.65)]">
+                  Aktionen
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -153,38 +172,38 @@ export function AdminOrgsPage() {
                 const s = statsQuery.data?.stats[o.id]
                 const ah = agentHealthMap[o.id]
                 return (
-                  <tr key={o.id} className="hover:bg-slate-800/40">
-                    <td className="px-4 py-3">
+                  <tr key={o.id} className="group hover:bg-slate-800/40">
+                    <td className="px-4 py-3 align-top">
                       <div className="font-semibold text-slate-100">{o.name ?? '—'}</div>
                       <div className="font-mono text-[11px] text-slate-500">{o.heykiki_org_id ?? '—'}</div>
                     </td>
-                    <td className="px-4 py-3 text-xs">
+                    <td className="px-4 py-3 align-top text-xs">
                       <div className="text-slate-300">{o.email ?? '—'}</div>
                       <div className="text-slate-500">{o.phone_number ?? '—'}</div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-[11px] text-slate-400">{o.elevenlabs_agent_id ?? '—'}</td>
-                    {/* Agent-health indicator */}
-                    <td className="px-4 py-3">
+                    <td className="max-w-[12rem] truncate px-4 py-3 align-top font-mono text-[11px] text-slate-400" title={o.elevenlabs_agent_id ?? undefined}>
+                      {o.elevenlabs_agent_id ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 align-top">
                       {agentHealthQuery.isLoading ? (
                         <span className="text-xs text-slate-600">…</span>
                       ) : !ah ? (
-                        /* No agent provisioned or not in the health board response */
-                        <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-slate-700">
-                          kein Kiki
+                        <span className="whitespace-nowrap rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-slate-700">
+                          Nicht eingerichtet
                         </span>
                       ) : ah.ok ? (
                         <button
                           onClick={() => setHealthTarget(o)}
-                          className="flex items-center gap-1 rounded-full bg-emerald-950/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-900/60 hover:ring-emerald-500/60"
-                          title="Details anzeigen"
+                          className="flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-950/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-900/60 hover:ring-emerald-500/60"
+                          title="Agent-Status anzeigen"
                         >
                           <CheckCircle2 size={11} />
-                          OK
+                          In Ordnung
                         </button>
                       ) : (
                         <button
                           onClick={() => setHealthTarget(o)}
-                          className="flex items-center gap-1.5 rounded-full bg-red-950/60 px-2 py-0.5 text-[11px] font-semibold text-red-300 ring-1 ring-red-900/60 hover:ring-red-500/60"
+                          className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-red-950/60 px-2 py-0.5 text-[11px] font-semibold text-red-300 ring-1 ring-red-900/60 hover:ring-red-500/60"
                           title={ah.red_checks.join(', ')}
                         >
                           <AlertTriangle size={11} />
@@ -192,21 +211,22 @@ export function AdminOrgsPage() {
                         </button>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right text-xs">
-                      {s ? (
-                        <div className="space-y-0.5 text-slate-300">
-                          <div><span className="text-slate-500">Anrufe:</span> <span className="font-mono">{s.calls}</span></div>
-                          <div><span className="text-slate-500">Angebote:</span> <span className="font-mono">{s.kvas_sent}</span></div>
-                          <div><span className="text-slate-500">MA:</span> <span className="font-mono">{s.employees}</span> · <span className="text-slate-500">Termine:</span> <span className="font-mono">{s.appointments}</span></div>
-                        </div>
-                      ) : (
-                        <span className="text-slate-600">—</span>
-                      )}
+                    <td className="px-4 py-3 align-top text-right font-mono text-xs text-slate-300">
+                      {s ? s.calls : <span className="text-slate-600">—</span>}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 align-top text-right font-mono text-xs text-slate-300">
+                      {s ? s.kvas_sent : <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="px-4 py-3 align-top text-right font-mono text-xs text-slate-300">
+                      {s ? s.employees : <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="px-4 py-3 align-top text-right font-mono text-xs text-slate-300">
+                      {s ? s.appointments : <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="px-4 py-3 align-top">
                       <span
                         className={cn(
-                          'rounded-full px-2 py-0.5 text-xs font-semibold',
+                          'whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold',
                           disabled
                             ? 'bg-red-950/60 text-red-300 ring-1 ring-red-900/60'
                             : 'bg-emerald-950/60 text-emerald-300 ring-1 ring-emerald-900/60',
@@ -215,9 +235,9 @@ export function AdminOrgsPage() {
                         {disabled ? 'Deaktiviert' : 'Aktiv'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(o.created_at)}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(s?.last_activity ?? null)}</td>
-                    <td className="px-4 py-3">
+                    <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-slate-400">{fmtDate(o.created_at)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-slate-400">{fmtDate(s?.last_activity ?? null)}</td>
+                    <td className="sticky right-0 z-10 bg-slate-900 px-4 py-3 align-top shadow-[-10px_0_16px_rgba(2,6,23,0.65)] group-hover:bg-slate-800/40">
                       <div className="flex flex-wrap items-center justify-end gap-1 whitespace-nowrap">
                         <button
                           onClick={() => navigate(`/admin/orgs/${o.id}`)}
@@ -259,7 +279,7 @@ export function AdminOrgsPage() {
               })}
               {data.orgs.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={12} className="px-4 py-12 text-center text-slate-500">
                     Keine Organisationen — lege die erste an.
                   </td>
                 </tr>
