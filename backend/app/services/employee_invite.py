@@ -130,7 +130,7 @@ def send_employee_welcome(
         company_name=company_name, display_name=display_name,
         login_email=login_email, set_password_link=set_password_link,
     )
-    subject = f"Willkommen bei {company_name or 'HeyKiki'} – Ihr Zugang"
+    subject = f"Willkommen bei {company_name or 'HeyKiki'} – dein Zugang"
     email_send.send_email(
         org_id=org_id,
         to_email=login_email,

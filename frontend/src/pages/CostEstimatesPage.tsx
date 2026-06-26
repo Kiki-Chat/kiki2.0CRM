@@ -138,7 +138,7 @@ export function CostEstimatesPage() {
             onClick={() => navigate('/cost-estimates/new')}
             className="inline-flex items-center gap-2 rounded-md bg-green-primary px-4 py-2 text-sm font-semibold text-white hover:brightness-110"
           >
-            + Neuer Angebot
+            + Neues Angebot
           </button>
         )}
       </div>
@@ -164,7 +164,7 @@ export function CostEstimatesPage() {
           <div>
             <div className="mb-1 text-xs font-medium text-muted">Status</div>
             <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
-              <option value="all">Alle Status</option>
+              <option value="all">Status: alle</option>
               <option value="draft">Entwurf</option>
               <option value="sent">Gesendet</option>
               <option value="accepted">Akzeptiert</option>
@@ -286,9 +286,9 @@ export function CostEstimatesPage() {
 
 function SendModal({ estimate, onClose, onSent }: { estimate: Estimate; onClose: () => void; onSent: () => void }) {
   const [to, setTo] = useState(estimate.customer_email ?? '')
-  const [subject, setSubject] = useState(`Ihr Angebot ${estimate.number ?? ''}`)
+  const [subject, setSubject] = useState(`Dein Angebot ${estimate.number ?? ''}`)
   const [message, setMessage] = useState(
-    `Sehr geehrte Damen und Herren,\n\nanbei erhältst du unser Angebot ${estimate.number ?? ''}. ` +
+    `Hallo,\n\nanbei erhältst du unser Angebot ${estimate.number ?? ''}. ` +
       `Bei Fragen stehen wir dir gerne zur Verfügung.\n\nMit freundlichen Grüßen`,
   )
   const [copyToMe, setCopyToMe] = useState(false)

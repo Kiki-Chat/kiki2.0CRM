@@ -198,8 +198,8 @@ const KIND_CFG: Record<
   reschedule_unmatched: { type: 'reschedule', accent: 'var(--warning)', label: 'Zuordnen', variant: 'warning', title: () => 'Terminänderung zuordnen', primary: 'Zuordnen', secondary: null, tertiary: 'Erledigt', reco: () => 'Terminänderung manuell einem Termin zuordnen', assignable: false, notify: false, opensDrawer: true, cardCta: '' },
 
   // ── KVA / Rechnung — NOTIFICATION only (no in-card decision) ──────────────
-  // Suggestions have no document yet → open the call-transcript drawer (the
-  // "create" action lives there). primary = the drawer's onward action.
+  // Suggestions have no document yet → expand the call inline (the "create"
+  // action lives there). primary = the onward action.
   kva_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: () => 'Angebot angefragt', primary: 'Angebot erstellen', secondary: null, tertiary: null, reco: (_n, c) => `Im Anruf erwähnt — Angebot für ${c} prüfen und ggf. erstellen`, assignable: false, notify: true, opensDrawer: true, cardCta: 'Angebot erstellen' },
   invoice_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: () => 'Rechnung angefragt', primary: 'Rechnung erstellen', secondary: null, tertiary: null, reco: (_n, c) => `Im Anruf erwähnt — Rechnung für ${c} prüfen und ggf. erstellen`, assignable: false, notify: true, opensDrawer: true, cardCta: 'Rechnung erstellen' },
   // Existing documents → deep-link to the document (decision happens there).

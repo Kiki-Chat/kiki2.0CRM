@@ -344,7 +344,7 @@ function VehiclesTab({ vehicles, flash }: { vehicles: Vehicle[]; flash: (m: stri
   })
   return (
     <div>
-      <div className="mb-4"><select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-green-primary"><option value="all">Alle Status</option>{Object.entries(VEHICLE_STATUS).map(([v, m]) => <option key={v} value={v}>{m.l}</option>)}</select></div>
+      <div className="mb-4"><select value={status} onChange={(e) => setStatus(e.target.value)} className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text outline-none focus:border-green-primary"><option value="all">Status: alle</option>{Object.entries(VEHICLE_STATUS).map(([v, m]) => <option key={v} value={v}>{m.l}</option>)}</select></div>
       <div className="overflow-x-auto rounded-xl border border-border bg-surface">
         <table className="w-full text-sm">
           <thead><tr className="border-b border-border text-left text-xs font-semibold uppercase tracking-wide text-muted">

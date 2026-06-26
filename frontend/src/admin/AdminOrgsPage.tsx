@@ -122,7 +122,7 @@ export function AdminOrgsPage() {
 
       {isLoading && (
         <div className="rounded-xl border border-slate-800 bg-slate-900 p-12 text-center text-slate-400">
-          Lädt…
+          Wird geladen…
         </div>
       )}
       {error && (
@@ -138,8 +138,8 @@ export function AdminOrgsPage() {
               <tr>
                 <th className="px-4 py-3">Org</th>
                 <th className="px-4 py-3">Kontakt</th>
-                <th className="px-4 py-3">Agent</th>
-                <th className="px-4 py-3">Agent-Zustand</th>
+                <th className="px-4 py-3">Kiki</th>
+                <th className="px-4 py-3">Kiki-Status</th>
                 <th className="px-4 py-3 text-right">Nutzung</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Erstellt</th>
@@ -170,7 +170,7 @@ export function AdminOrgsPage() {
                       ) : !ah ? (
                         /* No agent provisioned or not in the health board response */
                         <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-slate-700">
-                          kein Agent
+                          kein Kiki
                         </span>
                       ) : ah.ok ? (
                         <button

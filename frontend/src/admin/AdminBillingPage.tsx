@@ -154,7 +154,7 @@ export function AdminBillingPage() {
               disabled={runMatcher.isPending}
               className="flex items-center gap-2 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-50"
             >
-              <RefreshCw size={13} className={runMatcher.isPending ? 'animate-spin' : ''} /> Matcher ausführen
+              <RefreshCw size={13} className={runMatcher.isPending ? 'animate-spin' : ''} /> Probelauf starten
             </button>
           </div>
           <table className="w-full text-sm">

@@ -186,7 +186,7 @@ export function InvoicesPage() {
           <div>
             <div className="mb-1 text-xs font-medium text-muted">Status</div>
             <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls}>
-              <option value="all">Alle Status</option>
+              <option value="all">Status: alle</option>
               <option value="draft">Entwurf</option>
               <option value="sent">Gesendet</option>
               <option value="paid">Bezahlt</option>
@@ -333,7 +333,7 @@ function SendModal({ invoice, onClose, onSent }: { invoice: Invoice; onClose: ()
   const [to, setTo] = useState(invoice.customer_email ?? '')
   const [subject, setSubject] = useState(`Deine Rechnung ${invoice.number ?? ''}`)
   const [message, setMessage] = useState(
-    `Sehr geehrte/r ${invoice.customer_name ?? 'Damen und Herren'},\n\n` +
+    `Hallo${invoice.customer_name ? ` ${invoice.customer_name}` : ''},\n\n` +
       `anbei erhältst du deine Rechnung ${invoice.number ?? ''} über ${money(invoice.total)}, ` +
       `fällig am ${fmtDate(invoice.due_date)}.\n\nMit freundlichen Grüßen`,
   )

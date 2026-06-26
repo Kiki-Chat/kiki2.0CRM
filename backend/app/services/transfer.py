@@ -122,13 +122,13 @@ def transfer_call(org_id: str, payload: TransferCallRequest) -> dict:
             "transferType": "EMERGENCY",
             "transferNumber": number,
             "transferred": transferred,
-            "message": "Ich verbinde Sie jetzt mit unserem Notdienst. Bitte bleiben "
-            "Sie in der Leitung.",
+            "message": "Ich verbinde dich jetzt mit unserem Notdienst. Bitte bleib "
+            "in der Leitung.",
         }
     return {
         "success": True,
         "transferType": "STAFF",
         "transferNumber": number,
         "transferred": transferred,
-        "message": "Ich verbinde Sie jetzt mit einem Mitarbeiter. Einen Moment bitte.",
+        "message": "Ich verbinde dich jetzt mit einem Mitarbeiter. Einen Moment bitte.",
     }

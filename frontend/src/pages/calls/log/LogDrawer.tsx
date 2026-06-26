@@ -97,7 +97,7 @@ function AudioPlayer({ callId }: { callId: string }) {
   return (
     <div className="flex flex-col gap-2">
       <ActionBtn variant="secondary" icon={<Play size={15} />} disabled={state === 'loading'} onClick={load}>
-        {state === 'loading' ? 'Lädt Aufnahme…' : 'Aufnahme abspielen'}
+        {state === 'loading' ? 'Aufnahme wird geladen…' : 'Aufnahme abspielen'}
       </ActionBtn>
       {state === 'error' && <span className="text-[12.5px] text-muted">Aufnahme derzeit nicht verfügbar.</span>}
     </div>
@@ -349,7 +349,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
       >
         <div className="px-6 pb-12 pt-5">
           {isLoading || !call ? (
-            <div className="p-10 text-center text-sm text-muted">Lädt…</div>
+            <div className="p-10 text-center text-sm text-muted">Wird geladen…</div>
           ) : (
             <>
               {/* header */}
@@ -388,7 +388,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
 
               {/* ─── Actions (appointment card + create + Zuständig) ─────────── */}
               <div className="mb-5">
-                <div className="mb-2 text-[10.5px] font-extrabold uppercase tracking-wider text-muted">Aktionen</div>
+                <div className="mb-2 text-[10.5px] font-extrabold uppercase tracking-wider text-muted">Aufgaben</div>
 
                 {showApptCard && shownAppt && (
                   <div className="mb-2.5">
@@ -510,7 +510,7 @@ export function LogDrawer({ callId, onClose, flash }: { callId: string | null; o
                     <Folder size={17} className="flex-shrink-0 text-green-deep" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[14px] font-bold text-green-deep">
-                        {link.title || (link.kind === 'fall' ? 'Fall' : 'Anfrage')}
+                        {link.title || (link.kind === 'fall' ? 'Vorgang' : 'Anfrage')}
                       </div>
                       {link.number && <div className="font-mono text-[11.5px] text-muted">{link.number}</div>}
                     </div>

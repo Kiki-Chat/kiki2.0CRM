@@ -121,7 +121,7 @@ def _create(user: CurrentUser, payload: AppointmentCreate) -> dict:
     client = get_service_client()
     # FK hardening: every foreign-key id in the body must belong to this org.
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
-    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Vorgang")
     validate_fk_in_org(client, table="inquiries", fk_id=payload.inquiry_id, org_id=org_id, label="Anfrage")
     validate_fk_in_org(
         client, table="employees", fk_id=payload.assigned_employee_id,

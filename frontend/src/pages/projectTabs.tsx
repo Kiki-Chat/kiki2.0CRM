@@ -156,7 +156,7 @@ export function InquiriesTab({ project }: { project: ProjectLite }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="rounded-md border border-border bg-alt px-3 py-2 text-sm text-text outline-none">
-          <option value="all">Alle Status</option>
+          <option value="all">Status: alle</option>
           <option value="open">Offen</option>
           <option value="in_progress">In Bearbeitung</option>
           <option value="completed">Erledigt</option>
@@ -356,7 +356,7 @@ export function CostEstimatesTab({ project }: { project: ProjectLite }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <button onClick={() => navigate(newUrl)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110"><Plus size={14} /> Neuer Angebot</button>
+        <button onClick={() => navigate(newUrl)} className="inline-flex items-center gap-1.5 rounded-md bg-green-primary px-3 py-2 text-sm font-semibold text-white hover:brightness-110"><Plus size={14} /> Neues Angebot</button>
       </div>
       {kvas.length ? (
         <div className="overflow-x-auto rounded-xl border border-border bg-surface">

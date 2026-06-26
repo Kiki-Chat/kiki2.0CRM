@@ -28,7 +28,7 @@ def render_appointment_email(
     uhr = de_time(sched) if sched else ""
     titel = (appointment.get("title") or "").strip()
     titel_clause = f" ({titel})" if titel else ""
-    greet = f"Sehr geehrte/r {name}," if name else "Guten Tag,"
+    greet = f"Hallo {name}," if name else "Hallo,"
     sign = f"Mit freundlichen Grüßen\n{company}"
 
     if occasion == "appointment_confirmation":

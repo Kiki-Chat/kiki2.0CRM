@@ -263,7 +263,7 @@ def create_inquiry(org_id: str, payload: CreateInquiryRequest) -> dict:
         "inquiryNumber": number,
         "customerId": customer["id"],
         "message": f"Anliegen aufgenommen. Referenznummer: {number}. "
-        "Jemand wird sich in Kürze bei Ihnen melden.",
+        "Jemand wird sich in Kürze bei dir melden.",
     }
 
 
@@ -290,7 +290,7 @@ def search_customer_inquiries(org_id: str, payload: SearchCustomerInquiriesReque
             "success": True,
             "inquiries": [],
             "total": 0,
-            "message": "Keine Anfragen gefunden. Bitte nennen Sie weitere Angaben.",
+            "message": "Keine Anfragen gefunden. Bitte nenne weitere Angaben.",
         }
 
     q = (

@@ -52,7 +52,7 @@ Regeln:
 - Bedingungen sind kurze deutsche Aussagen über den Anrufer/das Gespräch. Sie werden wörtlich hinter "Wenn" eingesetzt — formuliere sie also mit Verb am Ende, z. B. "der Anrufer ein Lieferant ist" (NICHT "der Anrufer ist ein Lieferant").
 - Mehrere Bedingungen in einem Zweig: condition_op "und" oder "oder".
 - Limits: max. {MAX_BLOCKS} Regeln, {MAX_BRANCHES} Zweige/Regel, {MAX_CONDITIONS} Bedingungen/Zweig, {MAX_ACTIONS} Aktionen/Zweig, {MAX_TEXT} Zeichen pro Text. Bleib DEUTLICH darunter — kurz und präzise.
-- Fragen formulierst du als wörtliche, höfliche deutsche Sätze (Sie-Form).
+- Fragen formulierst du als wörtliche, höfliche deutsche Sätze (Du-Form).
 - Erfinde NICHTS dazu: nur was die Beschreibung verlangt. Unklare Wünsche lässt du weg.
 - Wenn die Beschreibung bestehende Regeln ergänzen soll, bekommst du diese als JSON — gib dann den GESAMTEN neuen Stand zurück (bestehende Regeln unverändert lassen, sofern die Beschreibung nichts anderes sagt)."""
 

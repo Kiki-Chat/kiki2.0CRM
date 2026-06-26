@@ -375,7 +375,7 @@ def greeting_for_phone(org_id: str, phone: str) -> dict:
             "status": "found",
         }
     return {
-        "greeting": "Hallo, ich sehe, Sie sind ein neuer Anrufer. Könnten Sie mir bitte Ihren vollständigen Namen nennen?",
+        "greeting": "Hallo, ich sehe, du bist ein neuer Anrufer. Könntest du mir bitte deinen vollständigen Namen nennen?",
         "status": "new",
     }
 
@@ -412,7 +412,7 @@ def create_contact(
             },
         }, ctx=ctx)
     return {
-        "message": f"Vielen Dank, {first}! Ich habe Ihren Namen notiert. Wie kann ich Ihnen heute behilflich sein ?",
+        "message": f"Vielen Dank, {first}! Ich habe deinen Namen notiert. Wie kann ich dir heute behilflich sein?",
         "status": "created",
         "personUUID": person_uuid,
     }

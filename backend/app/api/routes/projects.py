@@ -868,9 +868,9 @@ async def add_project_employee(
     if res == "no_cases":
         raise HTTPException(
             status_code=400,
-            detail="Das Projekt hat noch keine Fälle — ein Teammitglied kann erst "
-            "zugewiesen werden, wenn dem Projekt mindestens ein Fall zugeordnet ist "
-            "(das Team wird auf Fall-Ebene geführt).",
+            detail="Das Projekt hat noch keine Vorgänge — ein Teammitglied kann erst "
+            "zugewiesen werden, wenn dem Projekt mindestens ein Vorgang zugeordnet ist "
+            "(das Team wird auf Vorgangs-Ebene geführt).",
         )
     return {"success": True}
 
@@ -933,12 +933,12 @@ async def link_case_to_project(
     if res == "no_project":
         raise HTTPException(status_code=404, detail="Project not found")
     if res == "no_case":
-        raise HTTPException(status_code=404, detail="Fall nicht gefunden")
+        raise HTTPException(status_code=404, detail="Vorgang nicht gefunden")
     if res == "wrong_customer":
         raise HTTPException(
             status_code=422,
-            detail="Dieser Fall gehört zu einem anderen Kunden — ein Projekt bündelt "
-            "nur Fälle desselben Kunden.",
+            detail="Dieser Vorgang gehört zu einem anderen Kunden — ein Projekt bündelt "
+            "nur Vorgänge desselben Kunden.",
         )
     return {"success": True, "project_id": project_id, "case_id": payload.case_id}
 
@@ -964,5 +964,5 @@ async def unlink_case_from_project(
     if res == "no_project":
         raise HTTPException(status_code=404, detail="Project not found")
     if res == "not_linked":
-        raise HTTPException(status_code=404, detail="Fall ist diesem Projekt nicht zugeordnet")
+        raise HTTPException(status_code=404, detail="Vorgang ist diesem Projekt nicht zugeordnet")
     return {"success": True, "project_id": project_id, "case_id": case_id}

@@ -32,13 +32,13 @@ export function LoginPage() {
     setError(null)
     setNotice(null)
     if (!email) {
-      setError('Enter your email first')
+      setError('Bitte gib zuerst deine E-Mail-Adresse ein.')
       return
     }
     setBusy(true)
     try {
       await signInWithMagicLink(email)
-      setNotice('Check your email for a magic link.')
+      setNotice('Prüfe dein Postfach — wir haben dir einen Anmelde-Link geschickt.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Link konnte nicht gesendet werden.')
     } finally {
@@ -50,13 +50,13 @@ export function LoginPage() {
     setError(null)
     setNotice(null)
     if (!email) {
-      setError('Enter your email first')
+      setError('Bitte gib zuerst deine E-Mail-Adresse ein.')
       return
     }
     setBusy(true)
     try {
       await resetPassword(email)
-      setNotice('Check your email for a link to set a new password.')
+      setNotice('Prüfe dein Postfach — wir haben dir einen Link zum Passwort-Setzen geschickt.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Zurücksetz-Link konnte nicht gesendet werden.')
     } finally {
@@ -77,8 +77,8 @@ export function LoginPage() {
 
         {!configured && (
           <div className="mb-4 rounded-md border border-warning bg-warning-bg p-3 text-sm text-warning">
-            Supabase is not configured yet. Set <code>VITE_SUPABASE_URL</code> and{' '}
-            <code>VITE_SUPABASE_ANON_KEY</code> to enable login.
+            Supabase ist noch nicht konfiguriert. Setze <code>VITE_SUPABASE_URL</code> und{' '}
+            <code>VITE_SUPABASE_ANON_KEY</code>, um die Anmeldung zu aktivieren.
           </div>
         )}
 
@@ -94,7 +94,7 @@ export function LoginPage() {
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-body">Password</label>
+            <label className="mb-1.5 block text-sm font-medium text-body">Passwort</label>
             <input
               type="password"
               value={password}
@@ -107,7 +107,7 @@ export function LoginPage() {
           {notice && <div className="text-sm text-success">{notice}</div>}
 
           <Button type="submit" variant="primary" disabled={busy || !configured} className="w-full">
-            {busy ? 'Signing in…' : 'Sign in'}
+            {busy ? 'Anmeldung läuft…' : 'Anmelden'}
           </Button>
           <Button
             type="button"
@@ -116,7 +116,7 @@ export function LoginPage() {
             className="w-full"
             onClick={handleMagicLink}
           >
-            Email me a magic link
+            Magic-Link per E-Mail senden
           </Button>
           <button
             type="button"
@@ -124,7 +124,7 @@ export function LoginPage() {
             onClick={handleReset}
             className="w-full text-center text-sm text-muted underline-offset-2 hover:text-green-deep hover:underline disabled:opacity-50"
           >
-            Forgot your password?
+            Passwort vergessen?
           </button>
         </form>
       </div>

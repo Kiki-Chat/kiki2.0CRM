@@ -115,7 +115,7 @@ def _existing(row: dict, *, client=None, org_id: str | None = None) -> dict:
         "email": row.get("email"),
         "phone": row.get("phone"),
         "message": f"Willkommen zurück{', ' + name if name else ''}. "
-        "Wie kann ich Ihnen helfen?",
+        "Wie kann ich dir helfen?",
     }
     if client is not None and org_id:
         open_items = _open_context(client, org_id, row["id"])
@@ -154,7 +154,7 @@ def _resolve(rows: list[dict], *, client=None, org_id: str | None = None) -> dic
             }
             for r in rows
         ],
-        "message": "Mehrere Treffer gefunden. Bitte nennen Sie Adresse und "
+        "message": "Mehrere Treffer gefunden. Bitte nenne Adresse und "
         "Nachnamen zur Bestätigung.",
     }
 
@@ -200,8 +200,8 @@ def identify_customer(org_id: str, payload: IdentifyCustomerRequest) -> dict:
         if org_phone and _norm_phone(org_phone) == _norm_phone(payload.caller_number):
             return {
                 "status": "FORWARDED_CALL",
-                "message": "Weitergeleiteter Anruf erkannt. Bitte nennen Sie Ihre "
-                "eigene Telefonnummer, damit ich Sie zuordnen kann.",
+                "message": "Weitergeleiteter Anruf erkannt. Bitte nenne deine "
+                "eigene Telefonnummer, damit ich dich zuordnen kann.",
             }
 
     caller = payload.phone_number or payload.caller_number

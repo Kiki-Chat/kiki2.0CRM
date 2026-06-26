@@ -5,7 +5,7 @@ ElevenLabs' flat ``transcript_summary`` paragraph doesn't give us:
 
   • ``summary_bullets`` — a short, structured German bullet list (the drawer
     renders these instead of the paragraph),
-  • ``intent`` — did the caller ask about a Kostenvoranschlag / Rechnung /
+  • ``intent`` — did the caller ask about an Angebot / Rechnung /
     Termin (drives the kva_suggested / invoice_suggested Open Actions so a card
     appears "when discussed", mirroring how appointments work),
   • ``prefill`` — service description / address / problem / preferred time, used
@@ -30,6 +30,14 @@ logger = logging.getLogger(__name__)
 ENRICHMENT_VERSION = 1
 _MAX_TRANSCRIPT_CHARS = 6000
 
+
+def _summary_from_bullets(result: dict) -> str | None:
+    bullets = result.get("summary_bullets") or []
+    cleaned = [str(b).strip() for b in bullets if str(b).strip()]
+    if not cleaned:
+        return None
+    return "\n".join(f"• {b}" for b in cleaned)
+
 _SYSTEM_PROMPT = (
     "Du bist eine Assistenz für ein Handwerksbetrieb-CRM. Du analysierst das "
     "Transkript EINES Telefonats und gibst AUSSCHLIESSLICH ein JSON-Objekt "
@@ -40,7 +48,7 @@ _SYSTEM_PROMPT = (
     '  "next_steps": [string],        // 0-3 KURZE, imperative Folge-Schritte fürs Team '
     '(z.B. "Termin am Dienstag bestätigen", "Anna Bauer zuweisen"); leer wenn nichts zu tun ist\n'
     '  "intent": {\n'
-    '    "wants_kva": boolean,         // Kunde fragt nach Preis/Angebot/Kostenvoranschlag\n'
+    '    "wants_kva": boolean,         // Kunde fragt nach Preis/Angebot\n'
     '    "wants_invoice": boolean,     // Kunde fragt nach Rechnung/Bezahlung/Abrechnung\n'
     '    "wants_appointment": boolean  // Kunde möchte einen Termin/Besuch\n'
     "  },\n"
@@ -183,9 +191,13 @@ def enrich_call(client, org_id: str, call_row: dict) -> dict | None:
     )
     if not result:
         return None
+    update: dict[str, Any] = {"enrichment": result}
+    summary_text = _summary_from_bullets(result)
+    if summary_text:
+        update["summary"] = summary_text
     (
         client.table("calls")
-        .update({"enrichment": result})
+        .update(update)
         .eq("org_id", org_id)
         .eq("id", call_id)
         .execute()

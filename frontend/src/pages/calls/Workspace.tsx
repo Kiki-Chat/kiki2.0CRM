@@ -647,7 +647,7 @@ export function Workspace({
       </div>
 
       <div className="flex gap-1 border-b border-border px-3.5">
-        {([['actions', 'Aktionen', ListChecks], ['details', 'Details', Info], ['course', 'Verlauf', History]] as const).map(
+        {([['actions', 'Aufgaben', ListChecks], ['details', 'Details', Info], ['course', 'Verlauf', History]] as const).map(
           ([v, label, Ic]) => {
             const active = tab === v
             return (

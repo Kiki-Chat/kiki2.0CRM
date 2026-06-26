@@ -424,7 +424,7 @@ export function CostEstimateFormPage() {
       <div className="flex items-center gap-3 px-8 pt-8">
         <button onClick={() => navigate('/cost-estimates')} className="rounded-md p-1.5 text-muted hover:bg-alt"><ArrowLeft size={20} /></button>
         <div>
-          <h1 className="text-2xl font-bold text-text">{isEdit ? `${loadedNumber ?? 'Angebot'} bearbeiten` : 'Neuer Angebot'}</h1>
+          <h1 className="text-2xl font-bold text-text">{isEdit ? `${loadedNumber ?? 'Angebot'} bearbeiten` : 'Neues Angebot'}</h1>
           <p className="mt-0.5 text-sm text-muted">{isEdit ? 'Angebot bearbeiten' : 'Erstelle ein neues Angebot'}</p>
         </div>
       </div>
@@ -461,7 +461,7 @@ export function CostEstimateFormPage() {
                   ))}
                 </select>
                 {inquiryId && (
-                  <p className="mt-1 text-xs text-muted">Der Angebot wird automatisch dem Vorgang dieser Anfrage zugeordnet.</p>
+                  <p className="mt-1 text-xs text-muted">Das Angebot wird automatisch dem Vorgang dieser Anfrage zugeordnet.</p>
                 )}
               </div>
             )}
@@ -485,7 +485,7 @@ export function CostEstimateFormPage() {
               <input type="checkbox" checked={isBinding} onChange={(e) => setIsBinding(e.target.checked)} className="h-4 w-4 accent-green-primary" />
               Verbindlich (garantiert)
             </label>
-            <p className="mt-1 text-xs text-muted">{isBinding ? 'Verbindliches Angebot.' : `Unverbindlicher Angebot — Toleranz ±${tolerance}% (§ 650c BGB).`}</p>
+            <p className="mt-1 text-xs text-muted">{isBinding ? 'Verbindliches Angebot.' : `Unverbindliches Angebot — Toleranz ±${tolerance}% (§ 650c BGB).`}</p>
           </Card>
 
           {/* Section 3 */}

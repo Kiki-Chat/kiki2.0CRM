@@ -142,7 +142,7 @@ def _validate_fks(client, org_id: str, payload: CostEstimateUpsert) -> None:
     payload.case_id is the grouping pointer → the `cases` table (FL-)."""
     validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
     validate_fk_in_org(client, table="inquiries", fk_id=payload.inquiry_id, org_id=org_id, label="Anfrage")
-    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Fall")
+    validate_fk_in_org(client, table="cases", fk_id=payload.case_id, org_id=org_id, label="Vorgang")
 
 
 def _create(org_id: str, user_id: str | None, payload: CostEstimateUpsert) -> dict:
@@ -344,7 +344,7 @@ def _build_kva_email(
             firmenname=org_name, kundename=cust_name, rechnungsnummer=number, kvanummer=number,
         )
     else:
-        greeting = f"Sehr geehrte/r {cust_name}," if cust_name else "Guten Tag,"
+        greeting = f"Hallo {cust_name}," if cust_name else "Hallo,"
         body_text = (
             f"{greeting}\n\n"
             f"anbei senden wir dir den {type_label} {number}.\n\n"
@@ -502,7 +502,7 @@ async def set_status(
         if valid_until and str(valid_until)[:10] < now_berlin().date().isoformat():
             raise HTTPException(
                 status_code=409,
-                detail="Der Angebot ist abgelaufen. Bitte zuerst die Gültigkeit verlängern.",
+                detail="Das Angebot ist abgelaufen. Bitte zuerst die Gültigkeit verlängern.",
             )
 
     def _set() -> dict | None:

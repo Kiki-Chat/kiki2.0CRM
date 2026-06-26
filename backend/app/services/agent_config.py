@@ -488,8 +488,8 @@ def render_price_info_block(cfg: dict) -> str:
         return (
             "  Wenn nach Preisen gefragt wird, agiere Stichpunkt für Stichpunkt — nicht\n"
             "  zu viele Informationen auf einmal. Einleitung wörtlich:\n"
-            "  „Gerne sage ich Ihnen, was die gewünschte Leistung ungefähr kostet. Ich\n"
-            "  nenne Ihnen jeweils einen Richtpreis — der kann je nach Situation vor Ort\n"
+            "  „Gerne sage ich dir, was die gewünschte Leistung ungefähr kostet. Ich\n"
+            "  nenne dir jeweils einen Richtpreis — der kann je nach Situation vor Ort\n"
             "  etwas abweichen.“\n"
             "  Nenne AUSSCHLIESSLICH Preise aus dem Wissensbasis-Dokument „Preisliste\n"
             "  (Richtpreise)“ — exakt den dort hinterlegten Betrag, inkl. Einheit. ERFINDE\n"
@@ -503,7 +503,7 @@ def render_price_info_block(cfg: dict) -> str:
         "  Wenn nach Preisen gefragt wird, erkläre freundlich, dass sich der genaue\n"
         "  Preis erst nach einer Einschätzung beziffern lässt, und biete an, dass das\n"
         "  Team ein unverbindliches Angebot erstellt:\n"
-        "  „Das hängt von den Details vor Ort ab — ich nehme Ihr Anliegen gern auf und\n"
+        "  „Das hängt von den Details vor Ort ab — ich nehme dein Anliegen gern auf und\n"
         "  das Team meldet sich mit einem unverbindlichen Angebot.“"
     )
 

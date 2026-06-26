@@ -44,7 +44,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     { slug: 'telefon', label: 'Telefon-Einstellungen', icon: Phone },
     { slug: 'ausgehende-anrufe', label: 'Ausgehende Anrufe', icon: PhoneOutgoing },
   ] },
-  { label: 'Umbenennen', items: [{ slug: 'verlauf', label: 'Verlauf & Rückgängig', icon: History }] },
+  { label: 'Versionsverlauf', items: [{ slug: 'verlauf', label: 'Verlauf & Rückgängig', icon: History }] },
 ]
 const ALL_SLUGS = new Set(NAV_GROUPS.flatMap((g) => g.items.map((i) => i.slug)))
 
@@ -124,7 +124,7 @@ export function KikiZentralePage() {
           onClick={() => setHealthOpen(true)}
           className={cn('flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold', healthy ? 'bg-success-bg text-success' : 'bg-error-bg text-error')}
         >
-          <Activity size={15} /> {healthy ? 'Agent OK' : 'Agent-Problem'}
+          <Activity size={15} /> {healthy ? 'Kiki OK' : 'Kiki-Problem'}
         </button>
       </div>
 
@@ -183,7 +183,7 @@ export function KikiZentralePage() {
         open={!!rollbackSnap}
         onOpenChange={(v) => !v && setRollbackSnap(null)}
         title="Änderung rückgängig machen?"
-        message="Der Agent wird auf den gespeicherten Snapshot vor dieser Änderung zurückgesetzt. Der aktuelle Stand wird zuvor gesichert."
+        message="Kiki wird auf den gespeicherten Snapshot vor dieser Änderung zurückgesetzt. Der aktuelle Stand wird zuvor gesichert."
         confirmLabel="Rückgängig machen"
         busy={rollback.isPending}
         onConfirm={() => rollbackSnap && rollback.mutate(rollbackSnap)}
@@ -251,14 +251,14 @@ function HealthDrawer({ open, onOpenChange, onFullLog }: { open: boolean; onOpen
     enabled: open,
   })
   const checks: [string, boolean | undefined][] = [
-    ['Agent erreichbar', health?.reachable],
+    ['Kiki erreichbar', health?.reachable],
     ['Audio-Event vorhanden', health?.audio_event_present],
     ['System-Prompt gesetzt', health?.prompt_non_empty],
     ['Begrüßung gesetzt', health?.first_message_non_empty],
     ['Stimme gesetzt', health?.voice_set],
   ]
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Agent-Gesundheit" widthClass="max-w-md">
+    <Modal open={open} onOpenChange={onOpenChange} title="Kiki-Status" widthClass="max-w-md">
       <div className="space-y-1.5">
         {checks.map(([label, ok]) => (
           <div key={label} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">

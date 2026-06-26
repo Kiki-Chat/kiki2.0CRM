@@ -726,7 +726,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       {!over && quota > 0 && pct >= 80 && pct < 95 && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-bg/40 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warning" />
-          <span><strong>{Math.round(pct)} % Ihres Minutenkontingents verbraucht.</strong> Ab {quota} Min. wird jede weitere Minute nach Tarif berechnet.</span>
+          <span><strong>{Math.round(pct)} % deines Minutenkontingents verbraucht.</strong> Ab {quota} Min. wird jede weitere Minute nach Tarif berechnet.</span>
         </div>
       )}
       {!over && quota > 0 && pct >= 95 && (
@@ -857,7 +857,7 @@ function KiVorschlaegeSection({ ai, flash }: { ai: AiSuggestions; flash: (m: str
   })
   const gen = useMutation({ mutationFn: () => apiFetch<{ message?: string }>('/api/settings/generate-suggestions', { method: 'POST' }), onSuccess: (r) => flash(r?.message || 'Vorschläge werden generiert.') })
   const cards = [
-    { icon: FileText, title: 'Angebot nachfassen', sub: 'Vorschlag, wenn ein gesendeter Angebot nicht beantwortet wurde', value: kva, set: setKva, unit: 'Tage ohne Antwort' },
+    { icon: FileText, title: 'Angebot nachfassen', sub: 'Vorschlag, wenn ein gesendetes Angebot nicht beantwortet wurde', value: kva, set: setKva, unit: 'Tage ohne Antwort' },
     { icon: Receipt, title: 'Zahlungserinnerung', sub: 'Vorschlag für eine Zahlungserinnerung bei überfälligen Rechnungen', value: pay, set: setPay, unit: 'Tage Zahlungsverzug' },
     { icon: Calendar, title: 'Terminerinnerung', sub: 'Tägliche Übersicht über anstehende Termine', value: appt, set: setAppt, unit: 'Tag(e) vorher' },
     { icon: Wrench, title: 'Wartungserinnerung', sub: 'Erscheint, wenn die Wartung laut Wartungsvertrag bald fällig ist.', value: maint, set: setMaint, unit: 'Tage vor Fälligkeit' },

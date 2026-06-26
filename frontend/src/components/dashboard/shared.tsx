@@ -82,14 +82,14 @@ function Sparkline({ data, color = 'var(--green-primary)' }: { data: number[]; c
 }
 
 export function TrendBadge({ delta, unit, goodWhenUp = true }: { delta: number; unit?: string; goodWhenUp?: boolean }) {
-  if (!delta) return <div className="mt-2 text-xs text-muted">±0{unit ? ` ${unit}` : ''} ggü. Vorperiode</div>
+  if (!delta) return <div className="mt-2 text-xs text-muted">±0{unit ? ` ${unit}` : ''} gegenüber Vormonat</div>
   const up = delta > 0
   const positive = goodWhenUp ? up : !up
   const Icon = up ? ArrowUpRight : ArrowDownRight
   return (
     <div className={cn('mt-2 flex items-center gap-1 text-xs font-medium', positive ? 'text-success' : 'text-error')}>
       <Icon size={12} />
-      {up ? '+' : ''}{delta}{unit ? ` ${unit}` : ''} ggü. Vorperiode
+      {up ? '+' : ''}{delta}{unit ? ` ${unit}` : ''} gegenüber Vormonat
     </div>
   )
 }
