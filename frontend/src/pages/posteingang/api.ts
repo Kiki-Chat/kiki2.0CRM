@@ -73,6 +73,10 @@ interface RawCall {
   assigned_employee_id: string | null
   assigned_employee_initials: string | null
   read_at: string | null
+  // The agent's collected fields — already returned by /api/calls (data_collection
+  // is in the list select), so the inbox can show a real summary + next action with
+  // NO extra fetch. Keys vary (ultimate_summary / issue_summary / next_action / …).
+  data_collection: Record<string, string> | null
   customers: { full_name: string | null } | null
 }
 
@@ -102,6 +106,14 @@ export interface DecisionVM {
   // from the call's project_title / inquiry_subject so the card says WHICH case.
   caseName: string | null
   caseTicket: string | null
+  // The case id — lets the inbox link the case chip to /cases?case=<id> so people
+  // open the Vorgang without going via the calls page. Null for inquiry-less actions.
+  caseId: string | null
+  // A real summary of what the case is about + what's going on, taken from the
+  // latest call's data_collection (LLM summary). Plus the agent's next action.
+  // Both already in the calls list — no extra fetch. Null when no call/summary.
+  contextSummary: string | null
+  nextAction: string | null
   // Current assignee of the case — surfaced so assignment is its own visible
   // step on the card (point 1: assign ≠ confirm).
   assigneeId: string | null
@@ -111,9 +123,9 @@ export interface DecisionVM {
   assignable: boolean
   // Notification vs decision intent (Amber 2026-06-26). notify=true → the card
   // carries NO in-card business decision (KVA/Rechnung/Rückruf); it links onward.
-  // opensDrawer → click opens the ActionDrawer (appointment decision, or a
-  // suggestion's transcript) vs navigates via `route`. cardCta → the single
-  // neutral button label on a notify card.
+  // opensDrawer → the card has an inline call detail to expand in the inbox
+  // (appointment / suggestion) vs a notify card that just navigates via `route`.
+  // cardCta → the single neutral button label on a notify card.
   notify: boolean
   opensDrawer: boolean
   cardCta: string
@@ -172,8 +184,8 @@ const firstName = (n: string | null | undefined) => (n ? n.trim().split(/\s+/)[0
 // document, or — when no document exists yet (a call-derived suggestion) — opens
 // the call-transcript drawer where the "create" action lives.
 //   notify      = no in-card decision; it's a "go check" reminder
-//   opensDrawer = click opens the ActionDrawer (appointment decision, or the
-//                 suggestion's transcript); when false, click navigates (route)
+//   opensDrawer = the card has an inline call detail to expand (appointment /
+//                 suggestion); a plain notify card just navigates via route
 //   cardCta     = the single neutral button label shown on a notify card
 const KIND_CFG: Record<
   ActionKind,
@@ -188,8 +200,8 @@ const KIND_CFG: Record<
   // ── KVA / Rechnung — NOTIFICATION only (no in-card decision) ──────────────
   // Suggestions have no document yet → open the call-transcript drawer (the
   // "create" action lives there). primary = the drawer's onward action.
-  kva_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: () => 'Angebot angefragt', primary: 'Angebot erstellen', secondary: null, tertiary: null, reco: (_n, c) => `Im Anruf erwähnt — Angebot für ${c} prüfen und ggf. erstellen`, assignable: false, notify: true, opensDrawer: true, cardCta: 'Angebot ansehen' },
-  invoice_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: () => 'Rechnung angefragt', primary: 'Rechnung erstellen', secondary: null, tertiary: null, reco: (_n, c) => `Im Anruf erwähnt — Rechnung für ${c} prüfen und ggf. erstellen`, assignable: false, notify: true, opensDrawer: true, cardCta: 'Rechnung ansehen' },
+  kva_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: () => 'Angebot angefragt', primary: 'Angebot erstellen', secondary: null, tertiary: null, reco: (_n, c) => `Im Anruf erwähnt — Angebot für ${c} prüfen und ggf. erstellen`, assignable: false, notify: true, opensDrawer: true, cardCta: 'Angebot erstellen' },
+  invoice_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Rechnung', variant: 'ai', title: () => 'Rechnung angefragt', primary: 'Rechnung erstellen', secondary: null, tertiary: null, reco: (_n, c) => `Im Anruf erwähnt — Rechnung für ${c} prüfen und ggf. erstellen`, assignable: false, notify: true, opensDrawer: true, cardCta: 'Rechnung erstellen' },
   // Existing documents → deep-link to the document (decision happens there).
   kva_to_send: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: () => 'Angebot bereit — prüfen', primary: 'Angebot prüfen', secondary: null, tertiary: null, reco: (_n, c) => `Angebot für ${c} im Bereich Angebote prüfen`, assignable: false, notify: true, opensDrawer: false, cardCta: 'Angebot prüfen' },
   kva_pending_acceptance: { type: 'kva', accent: 'var(--ai)', label: 'Angebot', variant: 'ai', title: () => 'Angebot — Antwort prüfen', primary: 'Angebot prüfen', secondary: null, tertiary: null, reco: (_n, c) => `Kundenantwort zum Angebot für ${c} prüfen`, assignable: false, notify: true, opensDrawer: false, cardCta: 'Angebot prüfen' },
@@ -215,7 +227,28 @@ function pickSuggested(employees: Employee[]): Employee | null {
 interface InquiryMeta {
   caseName: string | null
   caseTicket: string | null
+  caseId: string | null
   assigneeId: string | null
+  contextSummary: string | null
+  nextAction: string | null
+}
+// The agent's summaries are lightly markdown-formatted (** , "- " bullets,
+// newlines) — flatten to clean prose for an inline 1-3 line card.
+function cleanText(s: string): string {
+  return s
+    .replace(/\*\*/g, '')
+    .replace(/^\s*[-*]\s+/gm, '')
+    .replace(/\s*\n+\s*/g, ' · ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+// The agent stores its summary under varying keys depending on flow. Prefer the
+// concise issue_summary for an inline card, then the fuller ultimate_summary,
+// then the call's short title.
+function callSummary(c: RawCall): string | null {
+  const dc = c.data_collection ?? {}
+  const raw = dc.issue_summary || dc.ultimate_summary || dc.call_summary || dc.summary || c.summary_title || null
+  return raw ? cleanText(raw) : null
 }
 function buildInquiryMeta(calls: RawCall[]): Map<string, InquiryMeta> {
   const meta = new Map<string, InquiryMeta>()
@@ -226,22 +259,43 @@ function buildInquiryMeta(calls: RawCall[]): Map<string, InquiryMeta> {
     if (meta.has(c.inquiry_id) && t <= (seenTs.get(c.inquiry_id) ?? 0)) continue
     seenTs.set(c.inquiry_id, t)
     const isCase = !!c.case_id
+    const dc = c.data_collection ?? {}
     meta.set(c.inquiry_id, {
       caseName: (isCase ? c.case_label : c.inquiry_subject) || c.summary_title || null,
       caseTicket: (isCase ? c.case_number : c.inquiry_number) || null,
+      caseId: c.case_id,
       assigneeId: c.assigned_employee_id,
+      contextSummary: callSummary(c),
+      nextAction: dc.next_action || dc.next_step || null,
     })
   }
   return meta
 }
 
-export function buildDecisions(actions: RawAction[], employees: Employee[], meta: Map<string, InquiryMeta>): DecisionVM[] {
+export function buildDecisions(actions: RawAction[], employees: Employee[], meta: Map<string, InquiryMeta>, callsById?: Map<string, RawCall>): DecisionVM[] {
   const suggested = pickSuggested(employees)
   return actions.map((a) => {
     const cfg = KIND_CFG[a.kind]
     const cust = a.customer_name || 'Unbekannter Kunde'
     const name = firstName(suggested?.display_name)
     const info = a.inquiry_id ? meta.get(a.inquiry_id) : undefined
+    // Summary/next-action straight from the action's OWN call (most reliable),
+    // then the inquiry's latest call, then the terse backend action summary.
+    const ownCall = a.call_id ? callsById?.get(a.call_id) : undefined
+    const contextSummary =
+      (ownCall ? callSummary(ownCall) : null) ?? info?.contextSummary ?? a.summary ?? null
+    const nextAction =
+      ownCall?.data_collection?.next_action || ownCall?.data_collection?.next_step || info?.nextAction || null
+    // Case/Vorgang context — from the inquiry meta, else the action's own call.
+    const caseName =
+      info?.caseName ??
+      (ownCall ? (ownCall.case_id ? ownCall.case_label : ownCall.inquiry_subject) : null) ??
+      null
+    const caseTicket =
+      info?.caseTicket ??
+      (ownCall ? (ownCall.case_id ? ownCall.case_number : ownCall.inquiry_number) : null) ??
+      null
+    const caseId = info?.caseId ?? ownCall?.case_id ?? null
     // Navigation target per intent: suggestions → pre-filled create-form (opened
     // from the transcript drawer); existing KVA/Rechnung → the document detail;
     // Rückruf → the caller. Appointment kinds keep route null (they POST a decision).
@@ -276,8 +330,11 @@ export function buildDecisions(actions: RawAction[], employees: Employee[], meta
       inquiryId: a.inquiry_id,
       callId: a.call_id,
       dueAt: a.due_at ?? null,
-      caseName: info?.caseName ?? null,
-      caseTicket: info?.caseTicket ?? null,
+      caseName,
+      caseTicket,
+      caseId,
+      contextSummary,
+      nextAction,
       assigneeId: info?.assigneeId ?? null,
       primary: cfg.primary,
       secondary: cfg.secondary,
@@ -360,7 +417,8 @@ export function usePosteingang() {
   const employees = employeesQ.data ?? []
   const actions = (actionsQ.data ?? []).filter((a) => a.kind in KIND_CFG)
   const calls = callsQ.data?.calls ?? []
-  const decisions = buildDecisions(actions, employees, buildInquiryMeta(calls))
+  const callsById = new Map(calls.map((c) => [c.id, c]))
+  const decisions = buildDecisions(actions, employees, buildInquiryMeta(calls), callsById)
   const vorgaenge = buildVorgaenge(calls, actions)
 
   return {

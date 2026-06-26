@@ -13,7 +13,6 @@ import { apiFetch } from '../lib/api'
 import { isSupabaseConfigured } from '../lib/env'
 import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
-import { ActionDrawer } from './posteingang/ActionDrawer'
 import { usePosteingang, usePosteingangActions, type DecisionVM } from './posteingang/api'
 
 // The overview tab leads with the "Jetzt entscheiden" decision deck (the pending
@@ -137,12 +136,12 @@ const TYPE_ICON: Record<string, typeof Phone> = {
 function HeroDeck() {
   const navigate = useNavigate()
   const { isAdmin } = useMe()
-  const { decisions, callsCount, loading, employees } = usePosteingang()
+  const { decisions, callsCount, loading } = usePosteingang()
   // Employee portal: frame the deck as the person's own to-do list ("Aufgaben");
   // for the admin/company login it stays the org decision queue ("Entscheidungen").
   const taskNoun = isAdmin ? 'Entscheidung' : 'Aufgabe'
   const taskNounPl = isAdmin ? 'Entscheidungen' : 'Aufgaben'
-  const { resolve, assignInquiry } = usePosteingangActions()
+  const { resolve } = usePosteingangActions()
   const { data: cases } = useQuery({
     queryKey: ['cases'],
     queryFn: () => apiFetch<{ id: string }[]>('/api/cases'),
@@ -152,36 +151,18 @@ function HeroDeck() {
   const [index, setIndex] = useState(0)
   const [busy, setBusy] = useState(false)
   // Resolved cards vanish IMMEDIATELY (optimistic) instead of waiting for the 30s
-  // refetch — so every button has a visible effect. assignOverrides reflects a
-  // fresh assignment right away (assigneeId is derived from a windowed calls list
-  // the refetch may lag), so the assign-then-confirm gate updates instantly.
+  // refetch — so a quick action has a visible effect.
   const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
-  const [assignOverrides, setAssignOverrides] = useState<Map<string, string | null>>(new Map())
-  // The decision currently expanded in the "open action" drawer (by action_key).
-  const [openKey, setOpenKey] = useState<string | null>(null)
 
-  const liveDecisions = decisions
-    .filter((d) => !resolvedKeys.has(d.actionKey))
-    .map((d) =>
-      d.inquiryId && assignOverrides.has(d.inquiryId)
-        ? { ...d, assigneeId: assignOverrides.get(d.inquiryId) ?? null }
-        : d,
-    )
+  const liveDecisions = decisions.filter((d) => !resolvedKeys.has(d.actionKey))
   const total = liveDecisions.length
   const casesCount = cases?.length ?? 0
   const i = total ? Math.min(index, total - 1) : 0
-  const openDecision = openKey ? liveDecisions.find((d) => d.actionKey === openKey) ?? null : null
 
-  function onAssign(inquiryId: string, employeeId: string | null) {
-    setAssignOverrides((m) => new Map(m).set(inquiryId, employeeId))
-    assignInquiry.mutate({ inquiryId, employeeId })
-  }
-
-  // Opening a card: appointment + suggestion kinds open the ActionDrawer; a
-  // notification with a document/caller link navigates straight there.
-  function handleOpen(d: DecisionVM) {
-    if (d.opensDrawer) setOpenKey(d.actionKey)
-    else if (d.route) navigate(d.route)
+  // The deck is a glanceable queue. Clicking a card takes you into the INBOX,
+  // focused on that item, where the full call context + actions live.
+  function goToInbox(d: DecisionVM) {
+    navigate(`/posteingang?focus=${encodeURIComponent(d.actionKey)}`)
   }
 
   async function act(d: DecisionVM, choice: 'primary' | 'secondary' | 'tertiary') {
@@ -191,10 +172,8 @@ function HeroDeck() {
       navigate(d.route)
       return
     }
-    // Optimistically drop the card + close the drawer, then resolve. On failure,
-    // restore the card so nothing is silently lost.
+    // Optimistically drop the card, then resolve. On failure, restore it.
     setResolvedKeys((s) => new Set(s).add(d.actionKey))
-    setOpenKey(null)
     setIndex((x) => Math.max(0, x - (i >= total - 1 ? 1 : 0)))
     setBusy(true)
     try {
@@ -272,7 +251,7 @@ function HeroDeck() {
           const front = p === 0
           // A Termin tied to an inquiry must be assigned before it can be confirmed
           // (assign ≠ confirm). The dashboard card has no inline assign control, so
-          // the primary button routes into the drawer (where assignment lives).
+          // the primary button routes into the inbox (where assignment lives).
           const needsAssignee = d.kind === 'termin_anfrage' && !!d.inquiryId && !d.assigneeId
           return (
             <div
@@ -287,12 +266,12 @@ function HeroDeck() {
                 pointerEvents: front ? 'auto' : 'none',
               }}
             >
-              {/* Subject region — appointment/suggestion cards open the action
-                  drawer; notification cards link straight to the document/caller. */}
+              {/* Subject region — clicking the card takes you into the inbox,
+                  focused on this item, where the full call context + actions live. */}
               <div
-                onClick={front ? () => handleOpen(d) : undefined}
+                onClick={front ? () => goToInbox(d) : undefined}
                 className={front ? 'cursor-pointer' : undefined}
-                title={front ? (d.notify ? d.cardCta : 'Details & Anruf ansehen') : undefined}
+                title={front ? 'Im Posteingang öffnen' : undefined}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span
@@ -312,24 +291,21 @@ function HeroDeck() {
               {front && (
                 d.notify ? (
                   // Notification card: a single neutral "check" link — NO decision.
+                  // A doc/caller link jumps straight there; otherwise into the inbox.
                   <div className="mt-2.5 flex items-center gap-1.5">
-                    {(d.opensDrawer || d.route) ? (
-                      <button
-                        onClick={() => handleOpen(d)}
-                        className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-text transition hover:border-green-tint-200"
-                      >
-                        {d.cardCta} →
-                      </button>
-                    ) : (
-                      <span className="text-xs font-medium text-muted">Nur zur Information</span>
-                    )}
+                    <button
+                      onClick={() => (d.route && !d.opensDrawer ? navigate(d.route) : goToInbox(d))}
+                      className="rounded-lg border border-border bg-alt px-3 py-1.5 text-xs font-semibold text-text transition hover:border-green-tint-200"
+                    >
+                      {d.cardCta} →
+                    </button>
                   </div>
                 ) : (
                   <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                     <button
                       disabled={busy}
-                      onClick={() => (needsAssignee ? setOpenKey(d.actionKey) : act(d, 'primary'))}
-                      title={needsAssignee ? 'Erst zuweisen — im Detail öffnen' : undefined}
+                      onClick={() => (needsAssignee ? goToInbox(d) : act(d, 'primary'))}
+                      title={needsAssignee ? 'Erst zuweisen — im Posteingang' : undefined}
                       className="rounded-lg px-3 py-1.5 text-xs font-bold text-white transition disabled:opacity-50"
                       style={{ backgroundColor: d.accent }}
                     >
@@ -354,7 +330,7 @@ function HeroDeck() {
                       </button>
                     )}
                     <button
-                      onClick={() => setOpenKey(d.actionKey)}
+                      onClick={() => goToInbox(d)}
                       className="ml-auto self-center text-xs font-semibold text-green-deep hover:underline"
                     >
                       Details →
@@ -371,14 +347,6 @@ function HeroDeck() {
         src={kikiAvatar}
         alt="Kiki"
         className="kiki-live pointer-events-none absolute bottom-0 right-[-24px] hidden h-[280px] w-auto select-none lg:block xl:right-2"
-      />
-      <ActionDrawer
-        decision={openDecision}
-        employees={employees}
-        busy={busy}
-        onResolve={act}
-        onAssign={onAssign}
-        onClose={() => setOpenKey(null)}
       />
     </section>
   )
