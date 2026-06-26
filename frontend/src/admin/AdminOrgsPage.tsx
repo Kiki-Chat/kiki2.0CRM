@@ -99,7 +99,7 @@ export function AdminOrgsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Organisationen</h1>
           <p className="mt-0.5 text-sm text-slate-400">
@@ -132,19 +132,21 @@ export function AdminOrgsPage() {
       )}
 
       {data && (
-        <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900">
+          <table className="w-full min-w-[56rem] border-collapse text-sm">
             <thead className="bg-slate-900/60 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               <tr>
-                <th className="px-4 py-3">Org</th>
+                <th className="px-4 py-3">Organisation</th>
                 <th className="px-4 py-3">Kontakt</th>
-                <th className="px-4 py-3">Kiki</th>
-                <th className="px-4 py-3">Kiki-Status</th>
-                <th className="px-4 py-3 text-right">Nutzung</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Erstellt</th>
-                <th className="px-4 py-3">Aktivität</th>
-                <th className="px-4 py-3 text-right">Aktionen</th>
+                <th className="px-4 py-3">Sprach-ID</th>
+                <th className="px-4 py-3">Agent-Status</th>
+                <th className="px-4 py-3">Zugang</th>
+                <th className="whitespace-nowrap px-4 py-3">Angelegt am</th>
+                <th className="whitespace-nowrap px-4 py-3">Letzte Aktivität</th>
+                <th className="px-3 py-3 text-center">Bearbeiten</th>
+                <th className="px-3 py-3 text-center">Migration</th>
+                <th className="px-3 py-3 text-center">Deaktivieren</th>
+                <th className="px-3 py-3 text-center">Löschen</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -154,37 +156,37 @@ export function AdminOrgsPage() {
                 const ah = agentHealthMap[o.id]
                 return (
                   <tr key={o.id} className="hover:bg-slate-800/40">
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 align-top">
                       <div className="font-semibold text-slate-100">{o.name ?? '—'}</div>
                       <div className="font-mono text-[11px] text-slate-500">{o.heykiki_org_id ?? '—'}</div>
                     </td>
-                    <td className="px-4 py-3 text-xs">
+                    <td className="px-4 py-3 align-top text-xs">
                       <div className="text-slate-300">{o.email ?? '—'}</div>
                       <div className="text-slate-500">{o.phone_number ?? '—'}</div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-[11px] text-slate-400">{o.elevenlabs_agent_id ?? '—'}</td>
-                    {/* Agent-health indicator */}
-                    <td className="px-4 py-3">
+                    <td className="max-w-[12rem] truncate px-4 py-3 align-top font-mono text-[11px] text-slate-400" title={o.elevenlabs_agent_id ?? undefined}>
+                      {o.elevenlabs_agent_id ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 align-top">
                       {agentHealthQuery.isLoading ? (
                         <span className="text-xs text-slate-600">…</span>
                       ) : !ah ? (
-                        /* No agent provisioned or not in the health board response */
-                        <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-slate-700">
-                          kein Kiki
+                        <span className="whitespace-nowrap rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-slate-700">
+                          Nicht eingerichtet
                         </span>
                       ) : ah.ok ? (
                         <button
                           onClick={() => setHealthTarget(o)}
-                          className="flex items-center gap-1 rounded-full bg-emerald-950/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-900/60 hover:ring-emerald-500/60"
-                          title="Details anzeigen"
+                          className="flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-950/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-900/60 hover:ring-emerald-500/60"
+                          title="Agent-Status anzeigen"
                         >
                           <CheckCircle2 size={11} />
-                          OK
+                          In Ordnung
                         </button>
                       ) : (
                         <button
                           onClick={() => setHealthTarget(o)}
-                          className="flex items-center gap-1.5 rounded-full bg-red-950/60 px-2 py-0.5 text-[11px] font-semibold text-red-300 ring-1 ring-red-900/60 hover:ring-red-500/60"
+                          className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-red-950/60 px-2 py-0.5 text-[11px] font-semibold text-red-300 ring-1 ring-red-900/60 hover:ring-red-500/60"
                           title={ah.red_checks.join(', ')}
                         >
                           <AlertTriangle size={11} />
@@ -192,21 +194,10 @@ export function AdminOrgsPage() {
                         </button>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right text-xs">
-                      {s ? (
-                        <div className="space-y-0.5 text-slate-300">
-                          <div><span className="text-slate-500">Anrufe:</span> <span className="font-mono">{s.calls}</span></div>
-                          <div><span className="text-slate-500">Angebote:</span> <span className="font-mono">{s.kvas_sent}</span></div>
-                          <div><span className="text-slate-500">MA:</span> <span className="font-mono">{s.employees}</span> · <span className="text-slate-500">Termine:</span> <span className="font-mono">{s.appointments}</span></div>
-                        </div>
-                      ) : (
-                        <span className="text-slate-600">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 align-top">
                       <span
                         className={cn(
-                          'rounded-full px-2 py-0.5 text-xs font-semibold',
+                          'whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold',
                           disabled
                             ? 'bg-red-950/60 text-red-300 ring-1 ring-red-900/60'
                             : 'bg-emerald-950/60 text-emerald-300 ring-1 ring-emerald-900/60',
@@ -215,51 +206,55 @@ export function AdminOrgsPage() {
                         {disabled ? 'Deaktiviert' : 'Aktiv'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(o.created_at)}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(s?.last_activity ?? null)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => navigate(`/admin/orgs/${o.id}`)}
-                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"
-                          title="Bearbeiten"
-                        >
-                          <Pencil size={13} /> Bearbeiten
-                        </button>
-                        <button
-                          onClick={() => navigate(`/admin/orgs/${o.id}/migration`)}
-                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"
-                          title="Migration (intern): übernommene Daten + Prompt-Abweichung"
-                        >
-                          <ArrowLeftRight size={13} /> Migration
-                        </button>
-                        <button
-                          onClick={() => setDisabled.mutate({ id: o.id, disabled: !disabled })}
-                          disabled={setDisabled.isPending}
-                          className={cn(
-                            'flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium hover:bg-slate-800 disabled:opacity-50',
-                            disabled ? 'text-emerald-400' : 'text-amber-400',
-                          )}
-                          title={disabled ? 'Reaktivieren' : 'Deaktivieren'}
-                        >
-                          {disabled ? <CheckCircle2 size={13} /> : <MinusCircle size={13} />}
-                          {disabled ? 'Reaktivieren' : 'Deaktivieren'}
-                        </button>
-                        <button
-                          onClick={() => { setDeleteTarget(o); setDeleteConfirm('') }}
-                          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-400 hover:bg-red-950/40"
-                          title="Löschen"
-                        >
-                          <Trash2 size={13} /> Löschen
-                        </button>
-                      </div>
+                    <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-slate-400">{fmtDate(o.created_at)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-slate-400">{fmtDate(s?.last_activity ?? null)}</td>
+                    <td className="px-3 py-3 align-top text-center">
+                      <button
+                        onClick={() => navigate(`/admin/orgs/${o.id}`)}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"
+                        title="Organisation bearbeiten"
+                      >
+                        <Pencil size={13} /> Bearbeiten
+                      </button>
+                    </td>
+                    <td className="px-3 py-3 align-top text-center">
+                      <button
+                        onClick={() => navigate(`/admin/orgs/${o.id}/migration`)}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-300 hover:bg-slate-800"
+                        title="Migration (intern): übernommene Daten + Prompt-Abweichung"
+                      >
+                        <ArrowLeftRight size={13} /> Migration
+                      </button>
+                    </td>
+                    <td className="px-3 py-3 align-top text-center">
+                      <button
+                        onClick={() => setDisabled.mutate({ id: o.id, disabled: !disabled })}
+                        disabled={setDisabled.isPending}
+                        className={cn(
+                          'inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium hover:bg-slate-800 disabled:opacity-50',
+                          disabled ? 'text-emerald-400' : 'text-amber-400',
+                        )}
+                        title={disabled ? 'Organisation reaktivieren' : 'Organisation deaktivieren'}
+                      >
+                        {disabled ? <CheckCircle2 size={13} /> : <MinusCircle size={13} />}
+                        {disabled ? 'Reaktivieren' : 'Deaktivieren'}
+                      </button>
+                    </td>
+                    <td className="px-3 py-3 align-top text-center">
+                      <button
+                        onClick={() => { setDeleteTarget(o); setDeleteConfirm('') }}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-red-400 hover:bg-red-950/40"
+                        title="Organisation endgültig löschen"
+                      >
+                        <Trash2 size={13} /> Löschen
+                      </button>
                     </td>
                   </tr>
                 )
               })}
               {data.orgs.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={11} className="px-4 py-12 text-center text-slate-500">
                     Keine Organisationen — lege die erste an.
                   </td>
                 </tr>

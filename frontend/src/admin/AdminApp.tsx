@@ -6,7 +6,8 @@ import { AdminLoginPage } from './AdminLoginPage'
 import { AdminMigrationPage } from './AdminMigrationPage'
 import { AdminOrgsPage } from './AdminOrgsPage'
 import { AdminOrgFormPage } from './AdminOrgFormPage'
-import { AdminProtectedRoute } from './AdminProtectedRoute'
+import { AdminRoleGate } from './AdminRoleGate'
+import { AdminShellRoute } from './AdminShellRoute'
 
 /**
  * Super-admin surface. Completely separate from the customer-facing app —
@@ -14,27 +15,26 @@ import { AdminProtectedRoute } from './AdminProtectedRoute'
  * by the top-level Router. Visually distinct (slate/dark + amber) so it's
  * obvious at a glance that you're not in customer space.
  *
- * Wraps everything in `AdminAuthProvider` so the admin tree reads/writes its
- * own Supabase session (storageKey `heykiki-admin-auth`) independently of the
- * customer surface's `AuthProvider` (storageKey `heykiki-customer-auth`).
- * Result: both surfaces can hold a live session in the same Chrome profile.
+ * Migration is a standalone full-page route (no Organisationen/Abrechnung nav)
+ * so it never shares a split view with list/billing screens.
  */
 export function AdminApp() {
   return (
     <AdminAuthProvider>
       <Routes>
         <Route path="login" element={<AdminLoginPage />} />
-        <Route element={<AdminProtectedRoute />}>
-          <Route index element={<Navigate to="orgs" replace />} />
-          <Route path="orgs" element={<AdminOrgsPage />} />
-          <Route path="orgs/new" element={<AdminOrgFormPage />} />
-          <Route path="orgs/:id" element={<AdminOrgFormPage />} />
+        <Route element={<AdminRoleGate />}>
+          {/* Standalone — own shell inside AdminMigrationPage */}
           <Route path="orgs/:id/migration" element={<AdminMigrationPage />} />
-          <Route path="billing" element={<AdminBillingPage />} />
+          <Route element={<AdminShellRoute />}>
+            <Route index element={<Navigate to="/admin/orgs" replace />} />
+            <Route path="orgs" element={<AdminOrgsPage />} />
+            <Route path="orgs/new" element={<AdminOrgFormPage />} />
+            <Route path="orgs/:id" element={<AdminOrgFormPage />} />
+            <Route path="billing" element={<AdminBillingPage />} />
+          </Route>
         </Route>
-        {/* Anything else under /admin/* that doesn't match → bounce to login (or list, if signed in).
-            AdminProtectedRoute does the role check; non-super-admins get 404'd there. */}
-        <Route path="*" element={<Navigate to="orgs" replace />} />
+        <Route path="*" element={<Navigate to="/admin/orgs" replace />} />
       </Routes>
     </AdminAuthProvider>
   )
