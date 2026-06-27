@@ -2,7 +2,6 @@ import { ArrowUpRight, Clock, Phone } from 'lucide-react'
 
 import { Tag } from '../../components/ui/Tag'
 import { relativeTimeDe } from '../../lib/datetime'
-import { cn } from '../../lib/utils'
 import { CASE_STATUS } from '../cases/types'
 import { CASE_STATUS_RAIL } from './useCustomerVorgaenge'
 import type { CaseCardRow } from './types'
