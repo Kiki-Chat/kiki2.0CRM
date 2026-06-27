@@ -21,7 +21,8 @@ from app.core.config import settings
 from app.services.ai import client as ai_client
 from app.services.ai import usage
 from app.services.copilot.prompt import system_prompt
-from app.services.copilot.tools import get_tool, schemas_for_role
+from app.services.copilot.tools import FEATURE_BY_TOOL, get_tool, schemas_for_role
+from app.services.entitlements import FEATURE_MIN_PLAN, FEATURES, org_has_feature
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +107,19 @@ def run_turn(
 
             if tool is None or not tool.allowed_for(user.role):
                 result: Any = {"error": "Tool nicht verfügbar."}
+            elif (gated := FEATURE_BY_TOOL.get(name)) and not org_has_feature(
+                user.org_id, user.role, gated
+            ):
+                # Copilot must respect plan gating — refuse with an upgrade hint instead
+                # of executing, so it can't be used to bypass the menu/route locks.
+                result = {
+                    "error": f"{FEATURES.get(gated, gated)} ist im aktuellen Tarif nicht enthalten.",
+                    "locked": True,
+                    "feature": gated,
+                    "min_plan": FEATURE_MIN_PLAN.get(gated),
+                    "hint": "Sage der Person, dass diese Funktion ein Upgrade erfordert "
+                    f"(ab {FEATURE_MIN_PLAN.get(gated) or 'einem höheren Tarif'}).",
+                }
             elif tool.client_side:
                 # Executed by the frontend (e.g. navigation) — return as a directive.
                 client_actions.append({"tool": tool.name, "args": args})

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, require_org_admin
+from app.services.entitlements import require_entitlement
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import (
     CostEstimateSend,
@@ -22,7 +23,7 @@ from app.services import email_templates
 from app.services.common import now_berlin, run_parallel, validate_fk_in_org
 from app.services.email_send import Attachment, send_email
 
-router = APIRouter(prefix="/api/cost-estimates", tags=["cost-estimates"])
+router = APIRouter(prefix="/api/cost-estimates", tags=["cost-estimates"], dependencies=[Depends(require_entitlement("finance"))])
 
 # Status → timestamp column for the generic PATCH /status endpoint. Mirrors
 # invoices._STAMP. The dedicated POST /send route stamps sent_at directly, but

@@ -23,12 +23,13 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
+from app.services.entitlements import require_entitlement
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import ProjectEmployeeAdd, ProjectPatch, ProjectUpsert
 from app.services.common import fetch_all_rows, now_berlin, run_parallel, validate_fk_in_org
 from app.services.projects import gen_project_number
 
-router = APIRouter(prefix="/api/projects", tags=["projects"])
+router = APIRouter(prefix="/api/projects", tags=["projects"], dependencies=[Depends(require_entitlement("projects"))])
 
 BUCKET = "customer-files"
 MAX_BYTES = 10 * 1024 * 1024

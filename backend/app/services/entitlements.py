@@ -13,8 +13,6 @@ layer on via a per-org overrides column (not needed for v1).
 
 from __future__ import annotations
 
-from app.services.stripe_catalog import PLAN_ORDER, PLANS
-
 # Gateable feature key → German label (drives the upgrade CTA copy).
 FEATURES: dict[str, str] = {
     "cases": "Vorgänge",
@@ -34,19 +32,16 @@ PLAN_FEATURES: dict[str, frozenset[str]] = {
 }
 
 
-def _lowest_self_serve_with(feature: str) -> str | None:
-    """Cheapest SELF-SERVE plan that unlocks ``feature`` — the upgrade target a customer
-    is sent to (Kiki Legacy is grandfather-only, so it's never an upgrade target)."""
-    for title in PLAN_ORDER:  # low → high
-        if not PLANS.get(title, {}).get("self_serve", True):
-            continue
-        if feature in PLAN_FEATURES.get(title, frozenset()):
-            return title
-    return None
-
-
-# feature key → lowest self-serve plan that grants it (for the "ab Tarif X" CTA).
-FEATURE_MIN_PLAN: dict[str, str | None] = {f: _lowest_self_serve_with(f) for f in FEATURES}
+# feature key → lowest SELF-SERVE plan that grants it (the "ab Tarif X" upgrade target;
+# Kiki Legacy is grandfather-only, so it's never a target). Static — mirrors
+# PLAN_FEATURES above; keep in sync if the matrix changes.
+FEATURE_MIN_PLAN: dict[str, str] = {
+    "cases": "Kiki Pro",
+    "calendar": "Kiki Pro",
+    "planning": "Kiki Pro",
+    "projects": "Kiki Enterprise",
+    "finance": "Kiki Enterprise",
+}
 
 
 def features_for_plan(plan_title: str | None) -> set[str]:
@@ -62,3 +57,68 @@ def effective_features(plan_title: str | None, overrides: dict | None = None) ->
     feats |= {f for f in (ov.get("grant") or []) if f in FEATURES}
     feats -= set(ov.get("revoke") or [])
     return feats
+
+
+# ─── Enforcement (Phase 2) ────────────────────────────────────────────────────
+def _org_plan_and_features(org_id: str | None) -> tuple[str | None, set[str]]:
+    """(billing_plan_title, effective feature set) for an org — DB read, uncached."""
+    if not org_id:
+        return None, set()
+    from app.db.supabase_client import get_service_client
+
+    rows = (
+        get_service_client()
+        .table("organizations")
+        .select("billing_plan_title")
+        .eq("id", str(org_id))
+        .limit(1)
+        .execute()
+        .data
+    )
+    plan = (rows[0] if rows else {}).get("billing_plan_title")
+    return plan, effective_features(plan)
+
+
+def org_has_feature(org_id: str | None, role: str | None, feature: str) -> bool:
+    """Authoritative entitlement check used by BOTH the route dependency and the copilot
+    guardrail. Fails open (returns True) when enforcement is off, the caller is
+    super_admin, or the org has no plan yet — so it never locks out staff or
+    not-yet-subscribed/unmigrated orgs."""
+    from app.core.config import settings
+
+    if not settings.entitlements_enforced or role == "super_admin":
+        return True
+    plan, feats = _org_plan_and_features(org_id)
+    if plan is None:  # org not on a plan yet → don't block
+        return True
+    return feature in feats
+
+
+def require_entitlement(feature: str):
+    """FastAPI dependency factory: 402s a request to a gated route when the org's plan
+    doesn't grant ``feature``. Add at the router level: ``dependencies=[Depends(
+    require_entitlement('finance'))]``. Inert unless ENTITLEMENTS_ENFORCED=1."""
+    from fastapi import Depends, HTTPException
+    from starlette.concurrency import run_in_threadpool
+
+    from app.api.deps import CurrentUser, require_org
+
+    async def _dep(user: CurrentUser = Depends(require_org)) -> CurrentUser:
+        from app.core.config import settings
+
+        # Fast path: enforcement off or platform staff → no DB read, no threadpool hop.
+        if not settings.entitlements_enforced or user.role == "super_admin":
+            return user
+        allowed = await run_in_threadpool(org_has_feature, user.org_id, user.role, feature)
+        if not allowed:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "error": "feature_locked",
+                    "feature": feature,
+                    "min_plan": FEATURE_MIN_PLAN.get(feature),
+                },
+            )
+        return user
+
+    return _dep

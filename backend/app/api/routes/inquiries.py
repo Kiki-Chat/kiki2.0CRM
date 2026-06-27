@@ -4,11 +4,12 @@ from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, require_org
+from app.services.entitlements import require_entitlement
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import InquiryUpdate
 from app.services.common import enforce_self_assignment, gen_inquiry_number, validate_fk_in_org
 
-router = APIRouter(prefix="/api/inquiries", tags=["inquiries"])
+router = APIRouter(prefix="/api/inquiries", tags=["inquiries"], dependencies=[Depends(require_entitlement("cases"))])
 
 _ALLOWED_STATUS = {"open", "in_progress", "completed", "deleted"}
 

@@ -180,6 +180,11 @@ class Settings(BaseSettings):
     stripe_usage_reporting_enabled: bool = Field(
         default=False, validation_alias="STRIPE_USAGE_REPORTING_ENABLED"
     )
+    # Phase-2 entitlements HARD enforcement (402 on gated routes + copilot guardrail).
+    # OFF by default so the frontend gating ships safely; flip to 1 once every org has a
+    # plan assigned. Enforcement also fails OPEN for orgs with no plan (never locks them
+    # out) and bypasses super_admin.
+    entitlements_enforced: bool = Field(default=False, validation_alias="ENTITLEMENTS_ENFORCED")
     # Return URL for the Stripe billing-portal session. Falls back to
     # frontend_public_url + '/settings/abrechnung' when blank.
     billing_portal_return_url: str = Field(default="", validation_alias="BILLING_PORTAL_RETURN_URL")

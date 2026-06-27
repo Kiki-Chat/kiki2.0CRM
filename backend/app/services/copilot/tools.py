@@ -894,6 +894,22 @@ REGISTRY: list[Tool] = [
 
 _BY_NAME: dict[str, Tool] = {t.name: t for t in REGISTRY}
 
+# Copilot tools that touch a GATED feature area (Phase 2). The copilot queries the DB
+# directly, so it would otherwise BYPASS the menu/route locks — a tool listed here is
+# refused with an "upgrade to access" guardrail when the org's plan doesn't grant the
+# feature. Tools NOT listed are core (calls/contacts/settings/help) and never gated.
+FEATURE_BY_TOOL: dict[str, str] = {
+    "create_inquiry": "cases",
+    "set_inquiry_status": "cases",
+    "list_appointments": "calendar",
+    "create_appointment": "calendar",
+    "update_appointment": "calendar",
+    "create_project": "projects",
+    "create_cost_estimate": "finance",
+    "create_invoice": "finance",
+    "get_finance_summary": "finance",
+}
+
 
 def get_tool(name: str) -> Tool | None:
     return _BY_NAME.get(name)

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
+from app.services.entitlements import require_entitlement
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import AppointmentCreate, AppointmentPatch
 from app.services import calendar_sync
@@ -14,7 +15,7 @@ from app.services.appointments import import_ics
 from app.services.common import enforce_self_assignment, format_address, validate_fk_in_org
 from app.services.projects import maybe_create_case_for_appointment
 
-router = APIRouter(prefix="/api/appointments", tags=["appointments"])
+router = APIRouter(prefix="/api/appointments", tags=["appointments"], dependencies=[Depends(require_entitlement("calendar"))])
 
 log = logging.getLogger(__name__)
 

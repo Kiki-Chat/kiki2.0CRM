@@ -5,13 +5,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Qu
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, require_org_admin
+from app.services.entitlements import require_entitlement
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import CatalogItemUpsert
 from app.services.price_knowledge import sync_price_list_kb
 
-router = APIRouter(prefix="/api/catalog", tags=["catalog"])
+router = APIRouter(prefix="/api/catalog", tags=["catalog"], dependencies=[Depends(require_entitlement("finance"))])
 # Legacy alias still used by the Angebot quick-select until it is repointed.
-items_router = APIRouter(prefix="/api/catalog-items", tags=["catalog"])
+items_router = APIRouter(prefix="/api/catalog-items", tags=["catalog"], dependencies=[Depends(require_entitlement("finance"))])
 
 _COLS = (
     "id, article_number, name, description, category, unit, vat_rate, is_wage, "
