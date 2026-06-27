@@ -146,6 +146,10 @@ export function CreateAppointmentModal({
           assigned_employee_id: assigned || null,
           notes: description,
           inquiry_id: isPrivate ? null : inquiryId ?? null,
+          // A customer appointment created from a call lands 'pending' → it appears
+          // as "Bestätigung ausstehend" in the open actions and is confirmed there.
+          // A private time-block needs no confirmation, so it lands 'confirmed'.
+          status: isPrivate ? 'confirmed' : 'pending',
         }),
       })
     },

@@ -620,7 +620,10 @@ def _my_employee(client, org_id: str, user_id: str) -> dict | None:
 
 
 def _attach_employee_names(client, org_id: str, absences: list[dict]) -> list[dict]:
+    # Resolve BOTH the absent employee and the chosen substitute (Vertretung) in a
+    # single lookup so the overview/approval list can name who covers the absence.
     emp_ids = {a["employee_id"] for a in absences}
+    emp_ids |= {a["substitute_employee_id"] for a in absences if a.get("substitute_employee_id")}
     names: dict[str, dict] = {}
     if emp_ids:
         for e in (
@@ -637,6 +640,8 @@ def _attach_employee_names(client, org_id: str, absences: list[dict]) -> list[di
         emp = names.get(a["employee_id"]) or {}
         a["employee_name"] = emp.get("display_name")
         a["calendar_color"] = emp.get("calendar_color")
+        sub = names.get(a.get("substitute_employee_id")) if a.get("substitute_employee_id") else None
+        a["substitute_name"] = sub.get("display_name") if sub else None
     return absences
 
 
@@ -750,6 +755,15 @@ def _apply_absence(org_id: str, user_id: str, payload: AbsenceApply) -> dict | s
     me = _my_employee(client, org_id, user_id)
     if not me:
         return "no_employee"
+    sub_id = (payload.substitute_employee_id or "").strip() or None
+    if sub_id:
+        if sub_id == me["id"]:
+            return "substitute_is_self"
+        # A stand-in must be an active employee of the same org.
+        validate_fk_in_org(
+            client, table="employees", fk_id=sub_id, org_id=org_id,
+            label="Vertretung", require_active=True,
+        )
     row = {
         "org_id": org_id,
         "employee_id": me["id"],  # OWN record — never from the request
@@ -758,6 +772,7 @@ def _apply_absence(org_id: str, user_id: str, payload: AbsenceApply) -> dict | s
         "ends_at": payload.ends_at,
         "all_day": payload.all_day,
         "reason": payload.reason,
+        "substitute_employee_id": sub_id,
         "status": "pending",  # employee requests are pending until an admin reviews
     }
     return client.table("employee_absences").insert(row).execute().data[0]
@@ -773,6 +788,11 @@ async def apply_for_absence(
         raise HTTPException(
             status_code=404,
             detail="Kein Mitarbeiterprofil für dieses Konto gefunden.",
+        )
+    if res == "substitute_is_self":
+        raise HTTPException(
+            status_code=400,
+            detail="Die Vertretung darf nicht die antragstellende Person selbst sein.",
         )
     return res
 
@@ -809,6 +829,17 @@ def _create_absence(org_id: str, employee_id: str, payload: AbsenceCreate) -> di
         client, table="employees", fk_id=employee_id, org_id=org_id,
         label="Mitarbeiter", require_active=True,
     )
+    sub_id = (payload.substitute_employee_id or "").strip() or None
+    if sub_id:
+        if sub_id == employee_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Die Vertretung darf nicht die abwesende Person selbst sein.",
+            )
+        validate_fk_in_org(
+            client, table="employees", fk_id=sub_id, org_id=org_id,
+            label="Vertretung", require_active=True,
+        )
     row = {
         "org_id": org_id,
         "employee_id": employee_id,
@@ -818,6 +849,7 @@ def _create_absence(org_id: str, employee_id: str, payload: AbsenceCreate) -> di
         "all_day": payload.all_day,
         "reason": payload.reason,
         "internal_note": payload.internal_note,
+        "substitute_employee_id": sub_id,
         # status omitted → DB default 'approved' (an admin-created absence is
         # authoritative, no approval step needed).
     }

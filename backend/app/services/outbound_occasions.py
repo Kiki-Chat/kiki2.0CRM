@@ -718,32 +718,69 @@ def _render_appointment_reschedule(record: dict, customer: dict | None, org: dic
     # employee_absences). A counter-slot the customer picks can land on an absent
     # employee. Fix would teach get_available_slots to subtract approved absences.
     alt = record.get("alternative_start_time")
+    # The renderer serves TWO distinct reschedule cases that share this occasion:
+    #
+    #  (A) IN-CALL counter-proposal (_propose_alternative set `alternative_start_time`,
+    #      status stays 'pending'): `scheduled_at` is still the OLD slot and `alt` is
+    #      the NOT-yet-committed proposed slot → "we'd like to move you FROM old TO alt".
+    #
+    #  (B) DEFINITE move (manual calendar/copilot reschedule, or the agent's own
+    #      hk_changeAppointment): `scheduled_at` IS ALREADY the new committed time and
+    #      there is NO `alternative_start_time` → state the NEW time as the new slot
+    #      and ask the customer to CONFIRM it. Only if they decline do we look for an
+    #      alternative. This is the fix for the bug where the call announced the new
+    #      time as a slot to ABANDON and immediately offered fresh slots.
     if alt:
-        vorschlag = f"Wir möchten deinen Termin auf {de_long_date(alt)} um {de_time(alt)} Uhr verschieben."
-        vorschlag_kurz = f"unser Vorschlag: {de_long_date(alt)} um {de_time(alt)} Uhr"
-    else:
-        vorschlag = "Wir müssten deinen Termin leider verschieben und würden gerne einen neuen Termin finden."
-        vorschlag_kurz = "wir würden gerne einen neuen Termin finden"
+        # Case (A) — proposal, scheduled_at = OLD slot, alt = proposed new slot.
+        first = (
+            f"Guten Tag, hier ist der Telefonassistent von {company}. Es geht um deinen Termin{fuer} "
+            f"am {datum} um {uhr} Uhr{titel_clause}. Wir möchten ihn gerne auf {de_long_date(alt)} "
+            f"um {de_time(alt)} Uhr verschieben. Würde dir das passen?"
+        )
+        voicemail = (
+            f"Guten Tag, hier ist der Telefonassistent von {company}. Wir möchten deinen Termin{fuer} "
+            f"am {datum} um {uhr} Uhr gerne verschieben – unser Vorschlag: {de_long_date(alt)} um "
+            f"{de_time(alt)} Uhr. Melde dich gerne bei uns. Auf Wiederhören!"
+        )
+        task = (
+            "## PRIMÄRE AUFGABE – Terminverschiebung (Vorschlag)\n"
+            f"Deine erste Nachricht schlug vor, den Termin vom {datum} um {uhr} Uhr auf "
+            f"{de_long_date(alt)} um {de_time(alt)} Uhr zu verschieben.\n"
+            "- Passt dem Kunden der vorgeschlagene Termin: bestätige freundlich und halte ihn mit "
+            "hk_changeAppointment fest.\n"
+            "- Möchte der Kunde einen ANDEREN Termin: suche mit hk_getAvailableAppointments nur "
+            "tatsächlich freie Termine, biete sie an, und halte den gewählten mit "
+            "hk_changeAppointment fest. Buche NICHT direkt.\n"
+            "- Sage immer: „Ich halte den Termin fest; die endgültige Bestätigung kommt von unserem "
+            "Team.“\n"
+            "Nenne keine internen IDs oder technischen Details."
+        )
+        return Rendered(first, voicemail, task, name)
+    # Case (B) — definite move: scheduled_at IS the new committed time. STATE it and
+    # ask the customer to confirm; offer alternatives ONLY if they decline.
     first = (
-        f"Guten Tag, hier ist der Telefonassistent von {company}. Es geht um deinen Termin{fuer} "
-        f"am {datum} um {uhr} Uhr{titel_clause}. {vorschlag} Würde dir das passen?"
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Es geht um deinen Termin{fuer}"
+        f"{titel_clause}: Wir mussten ihn verschieben und haben ihn neu auf {datum} um {uhr} Uhr "
+        "gelegt. Passt dir der neue Termin?"
     )
     voicemail = (
-        f"Guten Tag, hier ist der Telefonassistent von {company}. Wir möchten deinen Termin{fuer} "
-        f"am {datum} um {uhr} Uhr gerne verschieben – {vorschlag_kurz}. Melde dich gerne bei "
-        "uns, dann finden wir einen passenden Termin. Auf Wiederhören!"
+        f"Guten Tag, hier ist der Telefonassistent von {company}. Wir mussten deinen Termin{fuer} "
+        f"verschieben und haben ihn neu auf {datum} um {uhr} Uhr gelegt. Falls der neue Termin "
+        "nicht passt, melde dich gerne bei uns. Auf Wiederhören!"
     )
     task = (
-        "## PRIMÄRE AUFGABE – Terminverschiebung\n"
-        f"Deine erste Nachricht schlug vor, den Termin vom {datum} um {uhr} Uhr zu verschieben "
-        f"({vorschlag_kurz}).\n"
-        "- Passt dem Kunden der vorgeschlagene Termin: bestätige freundlich und halte den "
-        "Wunschtermin mit hk_changeAppointment fest.\n"
-        "- Möchte der Kunde einen ANDEREN Termin: suche mit hk_getAvailableAppointments nur "
-        "tatsächlich freie Termine, biete sie an, und halte den vom Kunden gewählten Termin mit "
-        "hk_changeAppointment fest. Buche NICHT direkt.\n"
-        "- Sage immer: „Ich halte den Termin fest; die endgültige Bestätigung kommt von unserem "
-        "Team.“\n"
+        "## PRIMÄRE AUFGABE – Terminverschiebung bestätigen\n"
+        f"Der Termin wurde bereits auf {datum} um {uhr} Uhr{titel_clause} verschoben. Deine erste "
+        "Nachricht hat dem Kunden GENAU DIESEN neuen Termin genannt und gefragt, ob er passt.\n"
+        "- Bestätigt der Kunde den neuen Termin: bedanke dich kurz, bestätige, dass der Termin "
+        "auf den neuen Zeitpunkt festgehalten ist, und komme zum Abschluss. Suche KEINE weiteren "
+        "Termine.\n"
+        "- Passt dem Kunden der neue Termin NICHT: erst DANN mit hk_getAvailableAppointments nur "
+        "tatsächlich freie Termine suchen, anbieten, und den vom Kunden gewählten mit "
+        "hk_changeAppointment festhalten.\n"
+        "- Möchte der Kunde GAR keinen Termin mehr: mit hk_cancelAppointment absagen.\n"
+        "- Nenne dem Kunden NIEMALS andere Uhrzeiten, solange er den genannten neuen Termin nicht "
+        "abgelehnt hat. Sage am Ende: „Die endgültige Bestätigung kommt von unserem Team.“\n"
         "Nenne keine internen IDs oder technischen Details."
     )
     return Rendered(first, voicemail, task, name)

@@ -63,6 +63,8 @@ class AbsenceCreate(BaseModel):
     all_day: bool = True
     reason: str | None = None
     internal_note: str | None = None
+    # Optional stand-in covering the absence (Vertretung); validated same-org.
+    substitute_employee_id: str | None = None
 
 
 class AbsenceApply(BaseModel):
@@ -74,6 +76,9 @@ class AbsenceApply(BaseModel):
     ends_at: str
     all_day: bool = True
     reason: str | None = None
+    # Chosen stand-in (Vertretung). For vacation the UI requires it; illness can be
+    # unplanned, so it stays optional at the schema layer.
+    substitute_employee_id: str | None = None
 
 
 class AbsenceReview(BaseModel):
@@ -241,6 +246,10 @@ class AppointmentCreate(BaseModel):
     notes: str | None = None
     inquiry_id: str | None = None
     case_id: str | None = None  # grouping ticket (Fall) — FK → cases (was project_id)
+    # Optional initial status. Default (None) → 'confirmed' (calendar / planning-board
+    # creates). The call-log create-appointment modal passes 'pending' so the new
+    # appointment enters the "Bestätigung ausstehend" stage in the open-action panel.
+    status: str | None = None
 
 
 class CaseUpsert(BaseModel):

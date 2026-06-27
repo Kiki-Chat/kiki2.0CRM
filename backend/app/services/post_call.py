@@ -161,6 +161,39 @@ def _normalize(payload) -> list[tuple[dict | None, str]]:
     return [_extract(payload)]
 
 
+# German phone numbers spoken/typed in a conversation, e.g. "+49 170 1234567",
+# "0170 1234567", "0049/170-1234567". Used only as a LAST-resort link signal when
+# Caller-ID and the structured data_collection fields gave us nothing — so a
+# migrated/web conversation that mentions a number still links to a customer.
+_DE_PHONE_RE = re.compile(r"(?:\+49|0049|0)[\s/().-]?(?:\d[\s/().-]?){8,13}\d")
+
+
+def _normalize_de_phone(raw: str) -> str | None:
+    """Best-effort raw → +49E.164. None if the digit count isn't phone-plausible."""
+    d = re.sub(r"\D", "", raw or "")
+    if d.startswith("0049"):
+        d = d[4:]
+    elif d.startswith("49"):
+        d = d[2:]
+    elif d.startswith("0"):
+        d = d[1:]
+    return f"+49{d}" if 9 <= len(d) <= 13 else None
+
+
+def _phone_from_transcript(transcript) -> str | None:
+    """First phone-plausible number a CUSTOMER (non-agent) turn mentions, normalised.
+    Conservative: scans only customer turns, returns at most one number."""
+    for turn in transcript or []:
+        if (turn.get("role") or "") == "agent":
+            continue
+        msg = turn.get("message") or ""
+        for m in _DE_PHONE_RE.finditer(msg):
+            norm = _normalize_de_phone(m.group())
+            if norm:
+                return norm
+    return None
+
+
 def _trim_transcript(transcript) -> list[dict]:
     out = []
     for turn in transcript or []:
@@ -455,6 +488,12 @@ def _process_one(data: dict | None, fmt: str) -> dict:
         link_phone = dc_values["customer_phone"]
     dc_name = dc_values.get("customer_name") if _ok(dc_values.get("customer_name")) else None
     dc_addr = dc_values.get("customer_address") if _ok(dc_values.get("customer_address")) else None
+    # Last-resort linking for migrated/web conversations with no Caller-ID and no
+    # structured phone: pull a number out of the customer's own words. Only fires
+    # when we'd otherwise have NOTHING to link on (no phone AND no name), so it can
+    # only ADD links, never override the Caller-ID / data_collection signals above.
+    if not link_phone and not dc_name:
+        link_phone = _phone_from_transcript(data.get("transcript"))
 
     customer_id = None
     kunde_matched = False

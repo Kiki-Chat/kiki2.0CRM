@@ -138,6 +138,28 @@ def test_employee_applies_for_own_absence_pending(monkeypatch):
     assert body["org_id"] == "org-A"
 
 
+def test_employee_applies_with_substitute(monkeypatch):
+    tables = _tables()
+    tables["employees"].append(
+        {"id": "e-sub", "org_id": "org-A", "user_id": "u-sub", "deleted": False,
+         "display_name": "Sub", "is_active": True}
+    )
+    _use(monkeypatch, "employee", db=FakeDB(tables))
+    r = client.post("/api/employees/me/absences", json={
+        "type": "vacation", "starts_at": "2026-08-01T00:00:00Z", "ends_at": "2026-08-03T00:00:00Z",
+        "substitute_employee_id": "e-sub"})
+    assert r.status_code == 200, r.text
+    assert r.json()["substitute_employee_id"] == "e-sub"
+
+
+def test_employee_cannot_pick_self_as_substitute(monkeypatch):
+    _use(monkeypatch, "employee")
+    r = client.post("/api/employees/me/absences", json={
+        "type": "vacation", "starts_at": "2026-08-01T00:00:00Z", "ends_at": "2026-08-03T00:00:00Z",
+        "substitute_employee_id": "e-emp"})  # e-emp is the caller's own employee row
+    assert r.status_code == 400
+
+
 def test_apply_without_employee_record_404(monkeypatch):
     # caller's user_id has no matching employees row
     db = FakeDB({"employees": [], "employee_absences": []})
