@@ -109,7 +109,11 @@ def ensure_call_inquiry(client, org_id: str, call: dict) -> dict:
         return existing[0]
 
     dc = call.get("data_collection") or {}
-    title = call.get("summary_title") or dc.get("issue_summary") or "Anruf"
+    # Prefer the German `issue_summary` (the org's Betreffzeile-prompt output — specific
+    # to the actual concern) over ElevenLabs' generic, often-English `summary_title`.
+    # The Vorgang/Fall the inquiry auto-files into inherits this title, so this is the
+    # single chokepoint that fixes the call log AND the Vorgang headers.
+    title = (dc.get("issue_summary") or "").strip() or call.get("summary_title") or "Anruf"
     notes = dc.get("ultimate_summary") or call.get("summary") or ""
 
     # Emergency tagging (user-confirmed): flag ONLY when BOTH (a) the call arrived

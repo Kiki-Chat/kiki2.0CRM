@@ -163,7 +163,12 @@ _SYS = (
     "den sie nennen (per Datum/Thema im Anruftext zuordnen). "
     "(4) Lieber viele kleine, präzise Vorgänge als wenige große. Ein Vorgang mit >6 "
     "Anfragen ist fast immer falsch. "
-    "(5) Jede Anfragenummer in genau EINEM Vorgang. Antworte NUR mit JSON."
+    "(5) Jede Anfragenummer in genau EINEM Vorgang. "
+    "(6) Das `label` ist konkret und UNTERSCHEIDBAR: das spezifische Problem MIT Detail "
+    "(z. B. 'Heizung Fehler F28 – kein Warmwasser', 'Dach undicht über Garage'), nicht nur "
+    "das Gewerk ('Heizung'). Vergib NIEMALS zwei identische Labels für denselben Kunden — "
+    "unterscheide ähnliche Vorgänge durch ein konkretes Detail (Ort, Fehlercode, Gerät). "
+    "Antworte NUR mit JSON."
 )
 
 
@@ -226,7 +231,7 @@ def propose_cases_for_customer(client, org_id: str, customer_id: str, customer_n
         f"Kunde: {customer_name or customer_id}\n\nANFRAGEN:\n"
         + "\n".join(s["signal"] for s in sigs)
         + f"\n\nÄhnliche Paare (Hinweis — nur bei GLEICHEM Anliegen zusammenführen):\n{cand_txt}\n\n"
-        'JSON: {"cases":[{"label":"konkretes Thema","members":["<Anfragenummer>"],"confidence":0.0-1.0,"reason":"<=12 Wörter"}]}'
+        'JSON: {"cases":[{"label":"konkretes, unterscheidbares Thema mit Detail","members":["<Anfragenummer>"],"confidence":0.0-1.0,"reason":"<=12 Wörter"}]}'
     )
     try:
         resp = ai_client.chat(
