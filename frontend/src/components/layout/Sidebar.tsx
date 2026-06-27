@@ -4,6 +4,7 @@ import {
   Building2,
   ChevronDown,
   ChevronRight,
+  Lock,
   LogOut,
   Search,
   Settings,
@@ -21,10 +22,12 @@ function Leaf({
   leaf,
   collapsed,
   badges,
+  locked,
 }: {
   leaf: NavLeaf
   collapsed: boolean
   badges: Record<string, number>
+  locked?: boolean
 }) {
   const Icon = leaf.icon
   const badge = leaf.badgeKey ? badges[leaf.badgeKey] : undefined
@@ -32,8 +35,8 @@ function Leaf({
     <NavLink
       to={leaf.to}
       end={leaf.to === '/'}
-      className={({ isActive }) => cn('nav-item', isActive && 'active', collapsed && 'justify-center')}
-      title={leaf.label}
+      className={({ isActive }) => cn('nav-item', isActive && 'active', collapsed && 'justify-center', locked && 'opacity-60')}
+      title={locked ? `${leaf.label} — in höherem Tarif enthalten` : leaf.label}
     >
       {Icon && (
         <span className="nav-ico">
@@ -41,7 +44,11 @@ function Leaf({
         </span>
       )}
       {!collapsed && <span className="flex-1 truncate">{leaf.label}</span>}
-      {!collapsed && badge ? <span className="nav-count">{badge}</span> : null}
+      {!collapsed && locked ? (
+        <Lock size={13} className="shrink-0 text-faint" />
+      ) : !collapsed && badge ? (
+        <span className="nav-count">{badge}</span>
+      ) : null}
     </NavLink>
   )
 }
@@ -81,7 +88,11 @@ export function Sidebar({
   // White-label company name + role come from /api/me (ProtectedRoute primes the
   // ['me'] cache, so this is instant). isAdmin drives cosmetic hiding of
   // admin-only nav entries — the backend still enforces every action.
-  const { me, isAdmin } = useMe()
+  const { me, isAdmin, hasFeature } = useMe()
+  // Plan-gated leaves stay VISIBLE but locked (soft preview) when the org's plan
+  // doesn't grant the feature — clicking routes to the page, where FeatureRoute shows
+  // the upgrade panel. super_admin bypasses (handled in hasFeature).
+  const isLocked = (l: NavLeaf) => !!l.feature && !hasFeature(l.feature)
   const companyName = me?.org_name
   const companyEmail = me?.org_email
   const companyLogo = me?.org_logo_url
@@ -160,7 +171,7 @@ export function Sidebar({
       <nav className="-mx-1 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden px-1">
         {visibleNav.map((entry) => {
           if (!isGroup(entry)) {
-            return <Leaf key={entry.to} leaf={entry} collapsed={railCollapsed} badges={badges} />
+            return <Leaf key={entry.to} leaf={entry} collapsed={railCollapsed} badges={badges} locked={isLocked(entry)} />
           }
           const Icon = entry.icon
           const key = entry.label
@@ -186,17 +197,21 @@ export function Sidebar({
               </button>
               {open && !railCollapsed && (
                 <div className="nav-sub">
-                  {entry.children.map((child) => (
-                    <NavLink
-                      key={child.to}
-                      to={child.to}
-                      className={({ isActive }) => cn('nav-subitem', isActive && 'active')}
-                      title={child.label}
-                    >
-                      <span className="dot" />
-                      <span className="flex-1 truncate">{child.label}</span>
-                    </NavLink>
-                  ))}
+                  {entry.children.map((child) => {
+                    const childLocked = isLocked(child)
+                    return (
+                      <NavLink
+                        key={child.to}
+                        to={child.to}
+                        className={({ isActive }) => cn('nav-subitem', isActive && 'active', childLocked && 'opacity-60')}
+                        title={childLocked ? `${child.label} — in höherem Tarif enthalten` : child.label}
+                      >
+                        <span className="dot" />
+                        <span className="flex-1 truncate">{child.label}</span>
+                        {childLocked && <Lock size={12} className="shrink-0 text-faint" />}
+                      </NavLink>
+                    )
+                  })}
                 </div>
               )}
             </div>
