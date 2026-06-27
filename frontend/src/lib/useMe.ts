@@ -20,6 +20,8 @@ export interface Me {
    * feature keys it unlocks. Drives menu/route gating + the locked soft preview. */
   plan_title?: string | null
   features?: string[]
+  /** UAT/QA only — when true, the Abrechnung page shows a dev plan-switcher (off in prod). */
+  dev_plan_switcher?: boolean
 }
 
 export function isAdminRole(role: string | null | undefined): boolean {

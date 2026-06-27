@@ -78,6 +78,11 @@ class ChangePlanRequest(BaseModel):
     plan_title: str                        # target plan (up or down between self-serve tiers)
 
 
+class DevSetPlanRequest(BaseModel):
+    """UAT/QA only: set the org's plan directly (no Stripe). None/'' clears it."""
+    plan_title: str | None = None
+
+
 class ChangePlanPreview(BaseModel):
     """What switching to ``target_plan_title`` costs now — shown BEFORE applying, so a
     tier change is never silent. Self-computed from the current period + list prices."""

@@ -185,6 +185,9 @@ class Settings(BaseSettings):
     # plan assigned. Enforcement also fails OPEN for orgs with no plan (never locks them
     # out) and bypasses super_admin.
     entitlements_enforced: bool = Field(default=False, validation_alias="ENTITLEMENTS_ENFORCED")
+    # UAT/QA ONLY: exposes a dev button to switch an org's plan directly (no Stripe), so
+    # entitlement gating can be tested first-hand. MUST stay 0 in production.
+    dev_plan_switcher: bool = Field(default=False, validation_alias="DEV_PLAN_SWITCHER")
     # Return URL for the Stripe billing-portal session. Falls back to
     # frontend_public_url + '/settings/abrechnung' when blank.
     billing_portal_return_url: str = Field(default="", validation_alias="BILLING_PORTAL_RETURN_URL")

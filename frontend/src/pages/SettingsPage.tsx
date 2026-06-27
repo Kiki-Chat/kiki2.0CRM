@@ -45,6 +45,7 @@ import {
   fmtCents,
   stripeInvoiceStatusLabel,
 } from '../lib/dashApi'
+import { useMe } from '../lib/useMe'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../lib/theme'
 import { useToast } from '../lib/useToast'
@@ -631,6 +632,18 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
     retry: false,
     staleTime: STALE,
   })
+  const { me } = useMe()
+  // UAT/QA: switch the org's plan directly (no Stripe) to test entitlement gating; the
+  // panel only renders when the backend DEV_PLAN_SWITCHER flag is on (never in prod).
+  const devSetPlan = useMutation({
+    mutationFn: (plan_title: string | null) =>
+      apiFetch<BillingSummary>('/api/billing/dev/set-plan', { method: 'POST', body: JSON.stringify({ plan_title }) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['billing'] })
+      qc.invalidateQueries({ queryKey: ['me'] }) // re-resolve entitlements → menus re-gate
+      flash('Test-Tarif gesetzt — Menüs aktualisiert.')
+    },
+  })
   const s = summaryQ.data
   // 'Subscribed' = an actual Stripe subscription exists (any live state) — NOT merely
   // 'has a Stripe customer'. A failed checkout can create a customer without a
@@ -739,6 +752,40 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
 
   return (
     <div className="space-y-4">
+      {me?.dev_plan_switcher && (
+        <div className="rounded-xl border border-dashed border-ai/50 bg-ai/5 p-4">
+          <div className="mb-2 flex items-center gap-2 text-sm font-bold text-text">
+            🧪 Test-Tarifumschalter
+            <span className="rounded bg-ai/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ai">UAT</span>
+          </div>
+          <div className="mb-3 text-xs text-muted">
+            Setzt den Tarif direkt (ohne Stripe), um die Funktions-Sperren zu testen. Aktuell:{' '}
+            <strong className="text-text">{me?.plan_title ? shortPlan(me.plan_title) : 'Kein Abo'}</strong>.
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {['Kiki Basis', 'Kiki Legacy', 'Kiki Pro', 'Kiki Enterprise'].map((p) => (
+              <button
+                key={p}
+                onClick={() => devSetPlan.mutate(p)}
+                disabled={devSetPlan.isPending}
+                className={cn(
+                  'rounded-md border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50',
+                  me?.plan_title === p ? 'border-ai bg-ai/15 text-ai' : 'border-border text-body hover:bg-alt',
+                )}
+              >
+                {shortPlan(p)}
+              </button>
+            ))}
+            <button
+              onClick={() => devSetPlan.mutate(null)}
+              disabled={devSetPlan.isPending}
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-muted transition hover:bg-alt disabled:opacity-50"
+            >
+              Kein Abo
+            </button>
+          </div>
+        </div>
+      )}
       {paymentDue && (
         <div className="flex items-start gap-3 rounded-xl border border-error/40 bg-error-bg/40 p-4 text-sm text-body">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-error" />

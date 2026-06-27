@@ -11,7 +11,7 @@ import stripe
 from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_org
+from app.api.deps import CurrentUser, require_org, require_org_admin
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
 from app.schemas.billing import (
@@ -20,6 +20,7 @@ from app.schemas.billing import (
     ChangePlanPreview,
     ChangePlanRequest,
     CheckoutRequest,
+    DevSetPlanRequest,
     CheckoutResponse,
     PaymentMethod,
     PlanOption,
@@ -389,6 +390,47 @@ async def billing_change_plan_preview(
     body: ChangePlanRequest, user: CurrentUser = Depends(require_org)
 ) -> ChangePlanPreview:
     return await run_in_threadpool(_change_plan_preview, user.org_id, body.plan_title)
+
+
+# ─── POST /api/billing/dev/set-plan (UAT/QA only — switch plan without Stripe) ─
+def _dev_set_plan(org_id: str, plan_title: str | None) -> BillingSummary:
+    """Set the org's plan directly so entitlement gating can be tested first-hand.
+    Bypasses Stripe entirely — gated by DEV_PLAN_SWITCHER (404 in prod)."""
+    from app.services.stripe_catalog import PLANS
+
+    if not settings.dev_plan_switcher:
+        raise HTTPException(status_code=404, detail="Not found")
+    client = get_service_client()
+    if plan_title:
+        if plan_title not in PLANS:
+            raise HTTPException(status_code=400, detail=f"Unbekannter Tarif: {plan_title}")
+        spec = PLANS[plan_title]
+        client.table("organizations").update(
+            {
+                "billing_plan_title": plan_title,
+                "billing_status": "active",
+                "billing_quota_minutes": spec["minutes"],
+                "billing_period_start": month_start_utc_iso(),
+            }
+        ).eq("id", org_id).execute()
+    else:  # clear → simulate 'no subscription'
+        client.table("organizations").update(
+            {
+                "billing_plan_title": None,
+                "billing_status": None,
+                "billing_quota_minutes": None,
+                "billing_period_start": None,
+                "billing_period_end": None,
+            }
+        ).eq("id", org_id).execute()
+    return _summary(org_id)
+
+
+@router.post("/dev/set-plan", response_model=BillingSummary)
+async def billing_dev_set_plan(
+    body: DevSetPlanRequest, user: CurrentUser = Depends(require_org_admin)
+) -> BillingSummary:
+    return await run_in_threadpool(_dev_set_plan, user.org_id, body.plan_title)
 
 
 # ─── POST /api/billing/sync (webhook fallback) ───────────────────────────────

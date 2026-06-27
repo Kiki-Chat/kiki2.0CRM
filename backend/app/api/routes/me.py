@@ -3,6 +3,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, get_current_user
 from app.core import cache
+from app.core.config import settings
 from app.db.supabase_client import get_service_client
 
 router = APIRouter(prefix="/api", tags=["me"])
@@ -75,4 +76,6 @@ async def me(user: CurrentUser = Depends(get_current_user)) -> dict:
         # Phase-2 entitlements: which plan + which gateable features this org has.
         "plan_title": ent.get("plan_title"),
         "features": ent.get("features", []),
+        # UAT/QA only — drives the dev plan-switcher button (off in prod).
+        "dev_plan_switcher": settings.dev_plan_switcher,
     }
