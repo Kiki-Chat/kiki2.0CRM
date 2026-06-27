@@ -365,3 +365,163 @@ def test_aggregate_with_empty_db_returns_empty_list(monkeypatch):
     monkeypatch.setattr(ax, "_unmatched_reschedule", lambda *_: [])
 
     assert ax._aggregate(ORG) == []
+
+
+# ─── kva_suggested / invoice_suggested quality gate (sacred-action guard) ────
+# These two pre-fill an Angebot / Rechnung off an AI intent flag, so they must clear
+# the same "the basics actually exist" bar the Termin path enforces on date/time.
+# The fake supabase chain ignores DB-side filters (returns canned rows as-is), so
+# these tests exercise exactly the Python gates added to actions.py.
+
+_QG_CUSTOMERS = [{"id": "cust-1", "full_name": "Max Mustermann"}]
+_QG_OPEN_INQ = [{"id": "inq-1", "case_id": "case-1", "status": "open"}]
+
+
+def _qg_enr(*, service="Heizung entlüften", problem="Heizung wird nicht warm",
+            wants_kva=True, wants_invoice=False):
+    return {
+        "intent": {"wants_kva": wants_kva, "wants_invoice": wants_invoice,
+                   "wants_appointment": False},
+        "prefill": {"service_description": service, "address": None,
+                    "problem": problem, "preferred_time": None},
+    }
+
+
+def _qg_transcript():
+    return [
+        {"role": "agent", "message": "Hallo, hier ist Kiki."},
+        {"role": "user", "message": "Meine Heizung ist defekt."},
+        {"role": "agent", "message": "Das tut mir leid. Können Sie das beschreiben?"},
+        {"role": "user", "message": "Sie wird nicht mehr warm, schon seit gestern."},
+    ]
+
+
+def _qg_call(**over):
+    base = {
+        "id": "call-1",
+        "inquiry_id": "inq-1",
+        "customer_id": "cust-1",
+        "created_at": _iso(_now()),
+        "duration_seconds": 140,
+        "is_spam": False,
+        "transcript": _qg_transcript(),
+        "enrichment": _qg_enr(),
+    }
+    base.update(over)
+    return base
+
+
+# --- _call_has_substance ---
+def test_call_has_substance_accepts_solid_call():
+    assert ax._call_has_substance(_qg_call()) is True
+
+
+def test_call_has_substance_rejects_spam():
+    assert ax._call_has_substance(_qg_call(is_spam=True)) is False
+
+
+def test_call_has_substance_rejects_too_short():
+    assert ax._call_has_substance(_qg_call(duration_seconds=12)) is False
+
+
+def test_call_has_substance_rejects_one_sided_call():
+    barely = [
+        {"role": "agent", "message": "Hallo, hier ist Kiki."},
+        {"role": "user", "message": "Ähm…"},
+    ]
+    assert ax._call_has_substance(_qg_call(transcript=barely)) is False
+
+
+def test_call_has_substance_allows_missing_duration_with_good_transcript():
+    assert ax._call_has_substance(_qg_call(duration_seconds=None)) is True
+
+
+# --- _kva_suggested ---
+def test_kva_suggested_emits_when_service_and_problem_present():
+    client = _FakeClient({
+        "calls": [_qg_call()],
+        "cost_estimates": [],          # no existing KVA for the Vorgang
+        "inquiries": _QG_OPEN_INQ,
+        "customers": _QG_CUSTOMERS,
+    })
+    out = ax._kva_suggested(client, ORG)
+    assert len(out) == 1
+    assert out[0]["kind"] == "kva_suggested"
+    assert out[0]["call_id"] == "call-1"
+    assert out[0]["customer_id"] == "cust-1"
+    # copy must no longer falsely claim a draft was already created
+    assert "Entwurf erstellt" not in out[0]["summary"]
+
+
+def test_kva_suggested_suppressed_without_problem():
+    client = _FakeClient({
+        "calls": [_qg_call(enrichment=_qg_enr(problem=None))],
+        "cost_estimates": [],
+        "inquiries": _QG_OPEN_INQ,
+        "customers": _QG_CUSTOMERS,
+    })
+    assert ax._kva_suggested(client, ORG) == []
+
+
+def test_kva_suggested_suppressed_without_service():
+    client = _FakeClient({
+        "calls": [_qg_call(enrichment=_qg_enr(service=None))],
+        "cost_estimates": [],
+        "inquiries": _QG_OPEN_INQ,
+        "customers": _QG_CUSTOMERS,
+    })
+    assert ax._kva_suggested(client, ORG) == []
+
+
+def test_kva_suggested_suppressed_for_short_call():
+    client = _FakeClient({
+        "calls": [_qg_call(duration_seconds=11)],
+        "cost_estimates": [],
+        "inquiries": _QG_OPEN_INQ,
+        "customers": _QG_CUSTOMERS,
+    })
+    assert ax._kva_suggested(client, ORG) == []
+
+
+# --- _invoice_suggested ---
+def test_invoice_suggested_emits_with_completed_appointment():
+    client = _FakeClient({
+        "calls": [_qg_call(enrichment=_qg_enr(wants_kva=False, wants_invoice=True))],
+        "inquiries": _QG_OPEN_INQ,
+        "invoices": [],                              # none yet
+        "appointments": [{"inquiry_id": "inq-1"}],   # a completed appointment exists
+        "cost_estimates": [],
+        "customers": _QG_CUSTOMERS,
+    })
+    out = ax._invoice_suggested(client, ORG)
+    assert len(out) == 1
+    assert out[0]["kind"] == "invoice_suggested"
+    assert out[0]["inquiry_id"] == "inq-1"
+
+
+def test_invoice_suggested_emits_with_accepted_estimate():
+    client = _FakeClient({
+        "calls": [_qg_call(enrichment=_qg_enr(wants_kva=False, wants_invoice=True))],
+        "inquiries": _QG_OPEN_INQ,
+        "invoices": [],
+        "appointments": [],
+        "cost_estimates": [{"inquiry_id": "inq-1"}],  # an accepted Angebot exists
+        "customers": _QG_CUSTOMERS,
+    })
+    out = ax._invoice_suggested(client, ORG)
+    assert len(out) == 1
+    assert out[0]["kind"] == "invoice_suggested"
+
+
+def test_invoice_suggested_suppressed_without_billable_basis():
+    # The booking-call false-positive: a Rechnung was mentioned but there is no
+    # completed appointment and no accepted Angebot — nothing is actually billable.
+    client = _FakeClient({
+        "calls": [_qg_call(enrichment=_qg_enr(wants_kva=False, wants_invoice=True))],
+        "inquiries": _QG_OPEN_INQ,
+        "invoices": [],
+        "appointments": [],     # no completed work
+        "cost_estimates": [],   # no accepted quote
+        "customers": _QG_CUSTOMERS,
+    })
+    assert ax._invoice_suggested(client, ORG) == []

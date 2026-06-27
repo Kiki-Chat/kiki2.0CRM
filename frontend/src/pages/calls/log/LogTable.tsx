@@ -10,7 +10,7 @@ import { Fragment } from 'react'
 import { cn } from '../../../lib/utils'
 import { Avatar, DirBadge, StatusPill } from '../atoms'
 import { fmtClockUhr, fmtDurationLong, type CallListItem } from '../shared'
-import { callerTitle, caseLink, fmtDayDate, projectLink, subjectEmoji } from './util'
+import { callerTitle, callSubject, caseLink, fmtDayDate, projectLink, subjectEmoji } from './util'
 
 export interface DayGroup {
   key: string
@@ -60,7 +60,7 @@ function LogTableRow({
     <tr
       role="button"
       tabIndex={0}
-      aria-label={`${out ? 'Ausgehender' : 'Eingehender'} Anruf — ${call.summary_title || callerTitle(call)} — Details öffnen`}
+      aria-label={`${out ? 'Ausgehender' : 'Eingehender'} Anruf — ${callSubject(call)} · ${callerTitle(call)} — Details öffnen`}
       onClick={onSelect}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -109,12 +109,34 @@ function LogTableRow({
         </span>
       </td>
 
-      {/* 4 — Anrufer (name + number) — flexes to share the slack on wide screens */}
+      {/* 4 — Anrufer (name + number). The name links to the customer profile when the
+          call is tied to a customer record; stopPropagation keeps the row drawer from
+          also opening. Unknown / unlinked callers stay plain text. */}
       <td className={td}>
         <div className="min-w-0">
-          <div className={cn('truncate text-[13.5px]', unread ? 'font-extrabold text-text' : 'font-bold text-body')}>
-            {callerTitle(call)}
-          </div>
+          {call.customer_id ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenCase(`/customers/${call.customer_id}`)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation()
+              }}
+              title="Kundenprofil öffnen"
+              className={cn(
+                'block max-w-full truncate text-left text-[13.5px] text-green-deep hover:underline',
+                unread ? 'font-extrabold' : 'font-bold',
+              )}
+            >
+              {callerTitle(call)}
+            </button>
+          ) : (
+            <div className={cn('truncate text-[13.5px]', unread ? 'font-extrabold text-text' : 'font-bold text-body')}>
+              {callerTitle(call)}
+            </div>
+          )}
           <div className="truncate font-mono text-[11.5px] text-faint">{call.caller_number || '—'}</div>
         </div>
       </td>
@@ -129,7 +151,7 @@ function LogTableRow({
                 {subjectEmoji(call)}
               </span>
               <span className="truncate text-[13.5px] font-extrabold text-error">
-                {call.summary_title || 'Ohne Betreff'}
+                {callSubject(call)}
               </span>
             </span>
           ) : (
@@ -143,7 +165,7 @@ function LogTableRow({
                   unread ? 'font-extrabold text-text' : 'font-semibold text-body',
                 )}
               >
-                {call.summary_title || 'Ohne Betreff'}
+                {callSubject(call)}
               </span>
             </>
           )}
