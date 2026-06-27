@@ -258,6 +258,71 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
         inq["open_count"] = open_count.get(iid, 0)
         inq["last_activity_at"] = last_act.get(iid) or inq.get("updated_at") or inq.get("created_at")
 
+    # Orphan-card enrichment — newest call per ungrouped inquiry (case_id null).
+    calls_by_inq: dict[str, list[dict]] = {}
+    for c in customer["calls"]:
+        iid = c.get("inquiry_id")
+        if iid:
+            calls_by_inq.setdefault(iid, []).append(c)
+
+    def _primary_call(iid: str) -> dict | None:
+        rows = calls_by_inq.get(iid) or []
+        if not rows:
+            return None
+        best = max(rows, key=lambda row: row.get("started_at") or "")
+        return {
+            "id": best["id"],
+            "summary_title": best.get("summary_title"),
+            "direction": best.get("direction"),
+            "duration_seconds": best.get("duration_seconds"),
+            "started_at": best.get("started_at"),
+        }
+
+    inq_case: dict[str, str | None] = {i["id"]: i.get("case_id") for i in customer["inquiries"]}
+    for inq in customer["inquiries"]:
+        if not inq.get("case_id"):
+            inq["primary_call"] = _primary_call(inq["id"])
+
+    # Case-card rollups — aggregate member-inquiry activity for the Vorgänge grid.
+    case_call_count: Counter = Counter()
+    case_entry_count: Counter = Counter()
+    case_last_act: dict[str, str] = {}
+    for c in customer["calls"]:
+        iid = c.get("inquiry_id")
+        cid = inq_case.get(iid) if iid else None
+        if not cid:
+            continue
+        case_call_count[cid] += 1
+        case_entry_count[cid] += 1
+        ts = c.get("started_at")
+        if ts and ts > case_last_act.get(cid, ""):
+            case_last_act[cid] = ts
+    for a in customer["appointments"]:
+        iid = a.get("inquiry_id")
+        cid = inq_case.get(iid) if iid else None
+        if not cid:
+            continue
+        case_entry_count[cid] += 1
+        ts = a.get("scheduled_at")
+        if ts and ts > case_last_act.get(cid, ""):
+            case_last_act[cid] = ts
+    for k in customer["cost_estimates"]:
+        iid = k.get("inquiry_id")
+        cid = inq_case.get(iid) if iid else None
+        if not cid:
+            continue
+        case_entry_count[cid] += 1
+        ts = k.get("created_at")
+        if ts and ts > case_last_act.get(cid, ""):
+            case_last_act[cid] = ts
+    for inq in customer["inquiries"]:
+        cid = inq.get("case_id")
+        if not cid:
+            continue
+        for ts in (inq.get("last_activity_at"), inq.get("updated_at"), inq.get("created_at")):
+            if ts and ts > case_last_act.get(cid, ""):
+                case_last_act[cid] = ts
+
     # The grouping umbrella is the CASE (Fall) now. After the split (migration 0073)
     # `cases` is the renamed former projects table → FL- number, display name in
     # `title`, status planning|active|completed|archived. Serve them in the historical
@@ -265,14 +330,23 @@ def _detail(org_id: str, customer_id: str) -> dict | None:
     # and /fall/:id links expect — `label` = case.title. Each inquiry already carries
     # its real `case_id` (the former inquiries.project_id was renamed), so no aliasing.
     cases = (
-        client.table("cases").select("id, number, title, status, created_at, project_id")
+        client.table("cases").select("id, number, title, status, created_at, project_id, ai_summary")
         .eq("org_id", org_id).eq("customer_id", customer_id)
         .neq("status", "archived").order("created_at", desc=True).execute().data or []
     )
     customer["cases"] = [
-        {"id": c["id"], "number": c.get("number"), "label": c.get("title"),
-         "status": c.get("status"), "created_at": c.get("created_at"),
-         "project_id": c.get("project_id")}
+        {
+            "id": c["id"],
+            "number": c.get("number"),
+            "label": c.get("title"),
+            "status": c.get("status"),
+            "created_at": c.get("created_at"),
+            "project_id": c.get("project_id"),
+            "ai_summary": c.get("ai_summary"),
+            "call_count": case_call_count.get(c["id"], 0),
+            "entry_count": case_entry_count.get(c["id"], 0),
+            "last_activity_at": case_last_act.get(c["id"]) or c.get("created_at"),
+        }
         for c in cases
     ]
 
