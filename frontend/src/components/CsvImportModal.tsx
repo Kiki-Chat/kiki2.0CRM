@@ -16,7 +16,8 @@ interface Target {
 
 const TARGETS: Record<Entity, Target[]> = {
   customers: [
-    { key: 'full_name', label: 'Name', required: true },
+    { key: 'first_name', label: 'Vorname' },
+    { key: 'last_name', label: 'Nachname' },
     { key: 'email', label: 'E-Mail' },
     { key: 'phone', label: 'Telefon' },
     { key: 'phone2', label: 'Mobil (2. Nummer)' },
@@ -40,7 +41,8 @@ const TARGETS: Record<Entity, Target[]> = {
 
 // Keyword hints to pre-fill the mapping from CSV headers (case-insensitive contains).
 const HINTS: Record<string, string[]> = {
-  full_name: ['titel+vorname+name', 'name', 'vorname'],
+  first_name: ['vorname', 'titel+vorname+name', 'firstname', 'name', 'kunde'],
+  last_name: ['nachname', 'name', 'familienname', 'lastname'],
   display_name: ['name'],
   email: ['mail', 'email', 'e-mail'],
   phone: ['telefon', 'phone', 'tel'],
@@ -111,7 +113,8 @@ const TYPE_LABEL: Record<string, string> = {
 }
 // Which detected content types are "right" for each target field (green vs amber badge).
 const EXPECTED_TYPES: Record<string, string[]> = {
-  full_name: ['person_name', 'free_text'],
+  first_name: ['person_name', 'free_text'],
+  last_name: ['person_name', 'free_text'],
   email: ['email'],
   phone: ['landline', 'mobile'],
   phone2: ['mobile', 'landline'],
@@ -222,8 +225,16 @@ export function CsvImportModal({
     }
   }
 
-  const requiredKey = targets.find((t) => t.required)?.key
-  const canImport = !!file && !!requiredKey && !!mapping[requiredKey]
+  const canImport =
+    !!file &&
+    (entity === 'employees'
+      ? !!mapping[targets.find((t) => t.required)?.key ?? '']
+      : !!(
+          mapping.first_name ||
+          mapping.last_name ||
+          mapping.email ||
+          mapping.phone
+        ))
 
   async function doImport() {
     if (!file) return
@@ -308,12 +319,20 @@ export function CsvImportModal({
                   )}
                 </div>
                 <div className="space-y-2">
-                  {targets.map((t) => {
+                  {targets.map((t, idx) => {
                     const sel = mapping[t.key]
                     const info = sel ? columns[sel] : undefined
                     const ok = info ? (EXPECTED_TYPES[t.key] ?? []).includes(info.type) : true
+                    const showNameHint =
+                      entity === 'customers' && t.key === 'first_name' && idx === 0
                     return (
-                      <div key={t.key} className="flex items-center gap-3">
+                      <div key={t.key}>
+                        {showNameHint && (
+                          <p className="mb-1 text-xs text-muted">
+                            Mindestens Vorname, Nachname, E-Mail oder Telefon zuordnen
+                          </p>
+                        )}
+                        <div className="flex items-center gap-3">
                         <div className="w-40 shrink-0 text-sm text-body">
                           {t.label}
                           {t.required && <span className="text-error"> *</span>}
@@ -352,6 +371,7 @@ export function CsvImportModal({
                             </span>
                           )}
                         </div>
+                      </div>
                       </div>
                     )
                   })}

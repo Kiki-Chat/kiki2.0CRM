@@ -75,6 +75,31 @@ def _get(row: dict, mapping: dict, key: str) -> str | None:
     return val
 
 
+def split_export_name(full_name: str) -> tuple[str, str]:
+    """Split stored ``full_name`` into (Vorname, Nachname) for CSV export."""
+    parts = (full_name or "").strip().split()
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])
+
+
+def resolve_import_full_name(row: dict, mapping: dict) -> str | None:
+    """Build ``full_name`` from split first/last mapping or a legacy combined column."""
+    first = _get(row, mapping, "first_name")
+    last = _get(row, mapping, "last_name")
+    legacy = _get(row, mapping, "full_name") or _get(row, mapping, "name")
+
+    if first and last:
+        return re.sub(r"\s+", " ", f"{first} {last}").strip()
+    if first:
+        return first
+    if last:
+        return last
+    return legacy
+
+
 def clean_phone(raw: str | None) -> str | None:
     """Normalize to E.164. Trailing free-text notes (e.g. 'nicht anrufe') are
     dropped by taking only the leading phone-ish run before delegating to the
@@ -206,7 +231,8 @@ def detect_column_type(samples: list[str]) -> dict:
 # Header-name hints (mirror the frontend) — used only to break ties / fill the soft
 # text fields where content alone is ambiguous (name vs city vs notes).
 _HEADER_HINTS = {
-    "full_name": ["titel+vorname+name", "name", "vorname", "kurzname"],
+    "first_name": ["vorname", "titel+vorname+name", "firstname", "name", "kunde"],
+    "last_name": ["nachname", "familienname", "lastname"],
     "email": ["mail", "email", "e-mail"],
     "phone": ["telefon", "phone", "tel", "festnetz"],
     "phone2": ["mobil", "mobile", "handy"],
@@ -220,7 +246,7 @@ _HEADER_HINTS = {
 
 def _hint_score(field: str, header: str) -> int:
     """Header-name match score. Preserves hint PRIORITY order (an exact match on the
-    first hint beats a match on a later one) so e.g. full_name binds to
+    first hint beats a match on a later one) so e.g. first_name binds to
     'Titel+Vorname+Name' before the lower-priority 'Vorname'. Exact > substring."""
     h = header.lower().strip()
     hints = _HEADER_HINTS.get(field, [])
@@ -231,6 +257,73 @@ def _hint_score(field: str, header: str) -> int:
         if len(kw) >= 4 and kw in h:
             return 50 - i
     return 0
+
+
+def _is_name_eligible(info: dict) -> bool:
+    return info.get("type") in ("person_name", "free_text", "city")
+
+
+def _suggest_name_mapping(columns: dict, used: set[str], m: dict) -> None:
+    """Pick ``first_name`` / ``last_name`` from detected columns.
+
+    Priority: split Vorname+Name pair → combined column → lone name column →
+    best remaining person_name by header hint.
+    """
+    candidates = [h for h, info in columns.items() if h not in used and _is_name_eligible(info)]
+
+    vorname_h: str | None = None
+    nachname_h: str | None = None
+    combined_h: str | None = None
+    lone_name_h: str | None = None
+
+    for h in candidates:
+        hl = h.lower().strip()
+        if hl == "vorname":
+            vorname_h = h
+        elif hl in ("nachname", "familienname", "lastname"):
+            nachname_h = h
+        elif hl == "titel+vorname+name" or (hl.startswith("titel") and "vorname" in hl and "name" in hl):
+            combined_h = h
+        elif hl == "name":
+            lone_name_h = h
+        elif _hint_score("first_name", h) >= 90:
+            combined_h = h
+        elif _hint_score("first_name", h) >= 1 and not lone_name_h:
+            lone_name_h = h
+
+    if vorname_h:
+        m["first_name"] = vorname_h
+        used.add(vorname_h)
+        for h in candidates:
+            if h in used:
+                continue
+            if h.lower().strip() == "name":
+                m["last_name"] = h
+                used.add(h)
+                return
+        if nachname_h:
+            m["last_name"] = nachname_h
+            used.add(nachname_h)
+        return
+
+    if combined_h:
+        m["first_name"] = combined_h
+        used.add(combined_h)
+        return
+
+    if lone_name_h:
+        m["first_name"] = lone_name_h
+        used.add(lone_name_h)
+        return
+
+    best, best_key = None, (-1, -1.0)
+    for h in candidates:
+        key = (_hint_score("first_name", h), columns[h].get("confidence", 0.0))
+        if key > best_key:
+            best, best_key = h, key
+    if best:
+        m["first_name"] = best
+        used.add(best)
 
 
 def suggest_mapping(columns: dict) -> dict:
@@ -260,14 +353,16 @@ def suggest_mapping(columns: dict) -> dict:
     take("customer_number", {"customer_number"})
     take("street", {"street"})
     take("city", {"city"})
-    take("full_name", {"person_name"})
-    # Fallbacks: a lone mobile can be the primary phone; a name field may read as city.
+    _suggest_name_mapping(columns, used, m)
+    # Fallbacks: a lone mobile can be the primary phone.
     if "phone" not in m:
         take("phone", {"mobile"})
-    if "full_name" not in m:
-        take("full_name", {"city", "free_text"})
+    if "first_name" not in m and "last_name" not in m:
+        take("first_name", {"person_name"})
+    if "first_name" not in m and "last_name" not in m:
+        take("first_name", {"city", "free_text"})
     # Soft fields still unmapped → header hint only (never steal a typed column).
-    for field in ("notes", "customer_number", "city", "street", "full_name", "phone2"):
+    for field in ("notes", "customer_number", "city", "street", "first_name", "last_name", "phone2"):
         if field in m:
             continue
         for h in columns:
@@ -376,7 +471,7 @@ def import_customers(org_id: str, content: bytes, mapping: dict) -> dict:
     to_insert: list[dict] = []
 
     for i, row in enumerate(rows, start=1):
-        full_name = _get(row, mapping, "full_name") or _get(row, mapping, "name")
+        full_name = resolve_import_full_name(row, mapping)
         raw_email = _get(row, mapping, "email")
         email = _valid_email(raw_email)
         phone = clean_phone(_get(row, mapping, "phone"))

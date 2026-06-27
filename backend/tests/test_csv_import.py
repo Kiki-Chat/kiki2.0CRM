@@ -71,7 +71,7 @@ class _DB:
 
 
 _CUST_MAP = {
-    "full_name": "Name",
+    "first_name": "Name",
     "email": "Mail",
     "phone": "Telefon",
     "phone2": "Mobil",
@@ -235,7 +235,7 @@ def test_import_customers_generates_number_when_missing(monkeypatch):
     no_num = "Name,Mail\nNeu Kunde,neu@x.de\n".encode("utf-8")
     db = _DB({"customers": [{"email": None, "phone": None, "customer_number": "101005"}]})
     monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
-    out = csv_import.import_customers("org-1", no_num, {"full_name": "Name", "email": "Mail"})
+    out = csv_import.import_customers("org-1", no_num, {"first_name": "Name", "email": "Mail"})
     assert out["imported"] == 1
     assert db.inserted("customers")[0]["customer_number"] == "KI-000001"
 
@@ -372,17 +372,18 @@ def test_suggest_mapping_content_overrides_header():
     m = csv_import.suggest_mapping(columns)
     assert m.get("email") == "Kontakt"      # content-detected email column
     assert m.get("email") != "Mail"         # the phone-filled 'Mail' is NOT email
-    assert m.get("full_name") == "Name"
+    assert m.get("first_name") == "Name"
 
 
 def test_suggest_mapping_avoids_datev_decoys():
-    # Wide DATEV-style headers: full_name must bind to the full column, not Vorname/
-    # Suchwort/Kurzname; city to Ort not Titel; phone to Telefon not Titel.
+    # Wide DATEV-style headers: split Vorname+Name when both exist; city to Ort not
+    # Titel; phone to Telefon not Titel.
     cols = {
         "Suchwort": csv_import.detect_column_type(["ADAMHH", "MEIERHH"]),
         "Kurzname": csv_import.detect_column_type(["Adam, Wischenwinkel 17", "Meier, Hauptstr 2"]),
         "Titel": csv_import.detect_column_type(["Dr.", "Dr.", "Prof."]),
         "Vorname": csv_import.detect_column_type(["Heiko", "Erika"]),
+        "Name": csv_import.detect_column_type(["Adam", "Meier"]),
         "Titel+Vorname+Name": csv_import.detect_column_type(["Heiko Adam", "Erika Meier"]),
         "Telefon": csv_import.detect_column_type(["040 734170", "04161 713810"]),
         "Mail": csv_import.detect_column_type(["a@b.de", "c@d.de"]),
@@ -390,7 +391,8 @@ def test_suggest_mapping_avoids_datev_decoys():
         "Ort": csv_import.detect_column_type(["Hamburg", "Buxtehude"]),
     }
     m = csv_import.suggest_mapping(cols)
-    assert m["full_name"] == "Titel+Vorname+Name"
+    assert m["first_name"] == "Vorname"
+    assert m["last_name"] == "Name"
     assert m["phone"] == "Telefon"
     assert m["postal_code"] == "PLZ"
     assert m["city"] == "Ort"
@@ -419,7 +421,8 @@ _DATEV_HEADER = (
     "Titel+Vorname+Name,Strasse,Land,PLZ,Ort,Telefon,Fax,Mail,Mobil,Internet,Bemerkung\n"
 )
 _DATEV_MAP = {
-    "full_name": "Titel+Vorname+Name",
+    "first_name": "Vorname",
+    "last_name": "Name",
     "email": "Mail",
     "phone": "Telefon",
     "phone2": "Mobil",
@@ -508,6 +511,67 @@ def test_import_employees_happy_path(monkeypatch):
     assert recs["Ole Hillermann"]["email"] is None  # "-" treated as empty
     assert recs["Ole Hillermann"]["activity_area"] == "Wenn Ole genannt wird"
     assert recs["Valerie Klingschat"]["auto_assign"] is False  # column absent → default
+
+
+# ─── split name import / export ──────────────────────────────────────────────
+def test_resolve_import_full_name_split():
+    row = {"Vorname": "Heiko", "Nachname": "Adam"}
+    mapping = {"first_name": "Vorname", "last_name": "Nachname"}
+    assert csv_import.resolve_import_full_name(row, mapping) == "Heiko Adam"
+
+
+def test_resolve_import_full_name_combined_column():
+    row = {"Full": "Heiko Adam"}
+    mapping = {"first_name": "Full"}
+    assert csv_import.resolve_import_full_name(row, mapping) == "Heiko Adam"
+
+
+def test_resolve_import_full_name_single_token():
+    row = {"Name": "Thomas"}
+    mapping = {"first_name": "Name"}
+    assert csv_import.resolve_import_full_name(row, mapping) == "Thomas"
+
+
+def test_resolve_import_full_name_legacy():
+    row = {"Name": "Max Mustermann"}
+    mapping = {"full_name": "Name"}
+    assert csv_import.resolve_import_full_name(row, mapping) == "Max Mustermann"
+
+
+@pytest.mark.parametrize(
+    "full, vorname, nachname",
+    [
+        ("Max Mustermann", "Max", "Mustermann"),
+        ("Acme GmbH", "Acme", "GmbH"),
+        ("Thomas", "Thomas", ""),
+        ("", "", ""),
+    ],
+)
+def test_split_export_name(full, vorname, nachname):
+    assert csv_import.split_export_name(full) == (vorname, nachname)
+
+
+def test_import_customers_split_name_columns(monkeypatch):
+    csv_bytes = (
+        "Vorname,Nachname,Mail\n"
+        "Heiko,Adam,adam@x.de\n"
+    ).encode("utf-8")
+    mapping = {"first_name": "Vorname", "last_name": "Nachname", "email": "Mail"}
+    db = _DB({"customers": []})
+    monkeypatch.setattr(csv_import, "get_service_client", lambda: db)
+    out = csv_import.import_customers("org-1", csv_bytes, mapping)
+    assert out["imported"] == 1
+    assert db.inserted("customers")[0]["full_name"] == "Heiko Adam"
+
+
+def test_suggest_mapping_combined_only():
+    cols = {
+        "Titel+Vorname+Name": csv_import.detect_column_type(["Heiko Adam", "Erika Meier"]),
+        "Mail": csv_import.detect_column_type(["a@b.de", "c@d.de"]),
+    }
+    m = csv_import.suggest_mapping(cols)
+    assert m["first_name"] == "Titel+Vorname+Name"
+    assert "last_name" not in m
 
 
 def test_import_employees_skips_existing_email(monkeypatch):

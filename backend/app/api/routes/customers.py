@@ -366,15 +366,17 @@ def _export_csv(
     buf.write("﻿")  # UTF-8 BOM so Excel renders umlauts correctly
     w = csv.writer(buf, delimiter=";")
     w.writerow([
-        "Kundennummer", "Name", "E-Mail", "Telefon", "Telefon 2", "Adresse",
+        "Kundennummer", "Vorname", "Nachname", "E-Mail", "Telefon", "Telefon 2", "Adresse",
         "Typ", "Quelle", "Notizen", "Erstellt am",
     ])
     for r in rows:
         a = r.get("address")
         address = a.get("raw") if isinstance(a, dict) else (a or "")
+        vorname, nachname = csv_import.split_export_name(r.get("full_name") or "")
         w.writerow([
             r.get("customer_number") or "",
-            r.get("full_name") or "",
+            vorname,
+            nachname,
             r.get("email") or "",
             r.get("phone") or "",
             r.get("phone2") or "",
