@@ -525,3 +525,55 @@ def test_invoice_suggested_suppressed_without_billable_basis():
         "customers": _QG_CUSTOMERS,
     })
     assert ax._invoice_suggested(client, ORG) == []
+
+
+# ─── vorgang_merge_suggested (auto-grouper merge suggestions) ────────────────
+def _MERGE_SUGG(**over):
+    base = {
+        "id": "s1", "customer_id": "cust-1",
+        "source_case_id": "c-src", "target_case_id": "c-tgt",
+        "confidence": 0.6, "reason": "evtl. dasselbe", "created_at": _iso(_now()),
+    }
+    base.update(over)
+    return base
+
+
+def test_vorgang_merge_suggested_surfaces_open_pairs():
+    client = _FakeClient({
+        "case_merge_suggestions": [_MERGE_SUGG()],
+        "cases": [
+            {"id": "c-src", "title": "Heizung Bad", "status": "active", "customer_id": "cust-1"},
+            {"id": "c-tgt", "title": "Heizung defekt", "status": "active", "customer_id": "cust-1"},
+        ],
+        "customers": [{"id": "cust-1", "full_name": "Max Mustermann"}],
+    })
+    out = ax._vorgang_merge_suggested(client, ORG)
+    assert len(out) == 1
+    a = out[0]
+    assert a["kind"] == "vorgang_merge_suggested"
+    assert a["id"] == "c-src"
+    assert a["target_case_id"] == "c-tgt"
+    assert a["source_title"] == "Heizung Bad"
+    assert a["target_title"] == "Heizung defekt"
+    assert a["customer_name"] == "Max Mustermann"
+
+
+def test_vorgang_merge_suggested_skips_completed_target():
+    client = _FakeClient({
+        "case_merge_suggestions": [_MERGE_SUGG()],
+        "cases": [
+            {"id": "c-src", "title": "A", "status": "active", "customer_id": "cust-1"},
+            {"id": "c-tgt", "title": "B", "status": "completed", "customer_id": "cust-1"},
+        ],
+        "customers": [{"id": "cust-1", "full_name": "Max"}],
+    })
+    assert ax._vorgang_merge_suggested(client, ORG) == []
+
+
+def test_vorgang_merge_suggested_skips_when_a_case_vanished():
+    client = _FakeClient({
+        "case_merge_suggestions": [_MERGE_SUGG()],
+        "cases": [{"id": "c-src", "title": "A", "status": "active", "customer_id": "cust-1"}],  # target gone
+        "customers": [{"id": "cust-1", "full_name": "Max"}],
+    })
+    assert ax._vorgang_merge_suggested(client, ORG) == []

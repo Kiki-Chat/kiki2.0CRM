@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.services.cases.grouper import propose_cases_for_customer
+from app.services.cases.summarize import safe_retitle
 from app.services.cases.titles import existing_case_titles, make_unique_case_title
 from app.services.common import gen_case_number, validate_fk_in_org
 from app.services import invoices
@@ -232,6 +233,7 @@ async def apply_cases(payload: ApplyIn, user: CurrentUser = Depends(require_org)
                 "case_reason": ((g.reason or "")[:200] or None),
                 "case_source": "ai_confirmed",
             }).eq("org_id", org_id).in_("id", ids).execute()
+            safe_retitle(client, org_id, case["id"])  # set the aggregate ai_summary
             created.append({
                 "id": case["id"], "label": case["title"],
                 "number": case.get("number"),
@@ -257,11 +259,12 @@ async def move_inquiry_case(
         client = get_service_client()
         org_id = user.org_id
         inq = (
-            client.table("inquiries").select("id, customer_id")
+            client.table("inquiries").select("id, customer_id, case_id")
             .eq("org_id", org_id).eq("id", inquiry_id).limit(1).execute().data
         )
         if not inq:
             return None
+        old_case = inq[0].get("case_id")
         target = payload.case_id
         if payload.new_case_label:
             taken = existing_case_titles(client, org_id, inq[0].get("customer_id"))
@@ -293,6 +296,11 @@ async def move_inquiry_case(
             "case_confidence": None if target is None else 1.0,
             "case_reason": None if target is None else "manuell zugeordnet",
         }).eq("org_id", org_id).eq("id", inquiry_id).execute()
+        # Reshuffle → refresh both the ticket it left and the one it joined.
+        if target:
+            safe_retitle(client, org_id, target)
+        if old_case and old_case != target:
+            safe_retitle(client, org_id, old_case)
         return {"success": True, "case_id": target}
 
     res = await run_in_threadpool(_run)
@@ -422,6 +430,7 @@ async def update_case(case_id: str, payload: CaseUpdateIn, user: CurrentUser = D
             fields["status"] = payload.status
         if payload.title is not None:
             fields["title"] = payload.title[:200]
+            fields["title_locked"] = True  # a human-chosen title — the AI won't overwrite it
         if payload.project_id is not None:
             pid = payload.project_id or None
             if pid:
@@ -483,5 +492,84 @@ async def remove_case_employee(case_id: str, employee_id: str, user: CurrentUser
         validate_fk_in_org(client, table="cases", fk_id=case_id, org_id=org_id, label="Vorgang")
         client.table("case_employees").delete().eq("case_id", case_id).eq("employee_id", employee_id).execute()
         return {"success": True}
+
+    return await run_in_threadpool(_run)
+
+
+# ─── Merge two Vorgänge (accept / reject a merge suggestion) ─────────────────
+class MergeCasesIn(BaseModel):
+    source_case_id: str
+    target_case_id: str
+
+
+@router.post("/cases/merge")
+async def merge_cases(payload: MergeCasesIn, user: CurrentUser = Depends(require_org)) -> dict:
+    """Merge the source Vorgang INTO the target: move all its records over, delete the
+    now-empty source, refresh the target's title/summary, and mark the suggestion
+    accepted. Resumable — the source is deleted only after every child has moved."""
+    def _run():
+        client = get_service_client()
+        org_id = user.org_id
+        src, tgt = payload.source_case_id, payload.target_case_id
+        if src == tgt:
+            raise HTTPException(status_code=422, detail="Quelle und Ziel sind identisch.")
+        rows = (
+            client.table("cases").select("id, customer_id")
+            .eq("org_id", org_id).in_("id", [src, tgt]).execute().data or []
+        )
+        by = {r["id"]: r for r in rows}
+        if src not in by or tgt not in by:
+            raise HTTPException(status_code=404, detail="Vorgang nicht gefunden.")
+        sc, tc = by[src].get("customer_id"), by[tgt].get("customer_id")
+        if sc and tc and sc != tc:
+            raise HTTPException(status_code=422, detail="Vorgänge gehören zu unterschiedlichen Kunden.")
+        # Re-point everything that hangs off the source case onto the target.
+        for tbl in ("inquiries", "appointments", "cost_estimates", "invoices"):
+            client.table(tbl).update({"case_id": tgt}).eq("org_id", org_id).eq("case_id", src).execute()
+        try:  # documents are optional / rarely case-linked — never block a merge on them
+            client.table("documents").update({"case_id": tgt}).eq("org_id", org_id).eq("case_id", src).execute()
+        except Exception:  # noqa: BLE001
+            pass
+        client.table("case_merge_suggestions").update({"status": "accepted", "updated_at": _now()}) \
+            .eq("org_id", org_id).eq("source_case_id", src).eq("status", "pending").execute()
+        # Source is empty now (its case_employees cascade-delete with it).
+        client.table("cases").delete().eq("org_id", org_id).eq("id", src).execute()
+        safe_retitle(client, org_id, tgt)
+        return {"success": True, "case_id": tgt}
+
+    return await run_in_threadpool(_run)
+
+
+class MergeRejectIn(BaseModel):
+    source_case_id: str
+
+
+@router.post("/cases/merge-reject")
+async def reject_merge(payload: MergeRejectIn, user: CurrentUser = Depends(require_org)) -> dict:
+    """Dismiss a merge suggestion — the two Vorgänge stay separate."""
+    def _run():
+        client = get_service_client()
+        client.table("case_merge_suggestions").update({"status": "rejected", "updated_at": _now()}) \
+            .eq("org_id", user.org_id).eq("source_case_id", payload.source_case_id).eq("status", "pending").execute()
+        return {"success": True}
+
+    return await run_in_threadpool(_run)
+
+
+@router.post("/cases/{case_id}/retitle")
+async def retitle_case_route(case_id: str, user: CurrentUser = Depends(require_org)) -> dict:
+    """Hand the title back to the AI: clear any manual lock, then re-title + re-summarise
+    this Vorgang from its calls."""
+    def _run():
+        client = get_service_client()
+        org_id = user.org_id
+        cur = client.table("cases").select("id").eq("org_id", org_id).eq("id", case_id).limit(1).execute().data
+        if not cur:
+            raise HTTPException(status_code=404, detail="Vorgang nicht gefunden.")
+        client.table("cases").update({"title_locked": False, "updated_at": _now()}) \
+            .eq("org_id", org_id).eq("id", case_id).execute()
+        applied = safe_retitle(client, org_id, case_id, force=True)
+        row = client.table("cases").select("*").eq("org_id", org_id).eq("id", case_id).limit(1).execute().data[0]
+        return {"success": True, "applied": bool(applied), "case": row}
 
     return await run_in_threadpool(_run)

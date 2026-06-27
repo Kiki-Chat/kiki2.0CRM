@@ -1,4 +1,5 @@
--- 0082_backfill_call_titles.sql — ONE-TIME data backfill (no schema change).
+-- 0084_backfill_call_titles.sql — ONE-TIME data backfill (no schema change).
+-- (Renumbered from 0082 to avoid colliding with the parallel calendars branch.)
 --
 -- Aligns existing Anfrage/Vorgang titles with the German `issue_summary` (the org's
 -- Betreffzeile-prompt output) instead of ElevenLabs' generic, often-English
