@@ -119,6 +119,52 @@ def _resolve_call_ids(client, org_id: str, rows: list[dict]) -> dict[str, str]:
     return out
 
 
+# ─── Suggestion quality gate ────────────────────────────────────────────────
+# A kva_suggested / invoice_suggested card pre-fills a "sacred" document off a single
+# AI intent flag, so we hold it to the same bar the Termin path holds a booking to:
+# the call must actually carry the basics. Tuned against 180 days of production calls —
+# these floors drop the 22s "Kiki Services" KVA and the booking-call invoice
+# false-positives while keeping every genuine request.
+_SUGGEST_MIN_DURATION_SECONDS = 30
+_SUGGEST_MIN_CUSTOMER_TURNS = 2
+
+
+def _call_has_substance(call: dict) -> bool:
+    """True when a call is solid enough to base a KVA/Rechnung suggestion on.
+
+    Rejects spam, very short calls (hang-ups / mis-dials / greetings) and calls with
+    no real customer back-and-forth. Tone alone never raises a suggestion, mirroring
+    how a Termin only surfaces once a parseable date was captured."""
+    if call.get("is_spam"):
+        return False
+    dur = call.get("duration_seconds")
+    if dur is not None and dur < _SUGGEST_MIN_DURATION_SECONDS:
+        return False
+    transcript = call.get("transcript")
+    if isinstance(transcript, list):
+        customer_turns = sum(
+            1
+            for turn in transcript
+            if isinstance(turn, dict)
+            and turn.get("role") != "agent"
+            and str(turn.get("message") or "").strip()
+        )
+        if customer_turns < _SUGGEST_MIN_CUSTOMER_TURNS:
+            return False
+    return True
+
+
+def _enrichment_prefill(call: dict) -> dict:
+    """The enrichment prefill bag (service_description / problem / …), or {}."""
+    enr = call.get("enrichment")
+    pf = enr.get("prefill") if isinstance(enr, dict) else None
+    return pf if isinstance(pf, dict) else {}
+
+
+def _has_text(value: Any) -> bool:
+    return bool(str(value).strip()) if value is not None else False
+
+
 # ─── Per-kind aggregators (org-scoped) ──────────────────────────────────────
 def _termin_anfrage(client, org_id: str) -> list[dict[str, Any]]:
     """Appointments Kiki proposed but no human has confirmed yet.
@@ -259,13 +305,18 @@ def _kva_pending_acceptance(client, org_id: str) -> list[dict[str, Any]]:
 
 
 def _intent_calls(client, org_id: str, intent_key: str) -> list[dict[str, Any]]:
-    """Recent, non-deleted calls whose AI enrichment flagged the given intent
-    (wants_kva / wants_invoice) and that are tied to a Vorgang. The action surfaces
-    'when discussed', mirroring how a booked appointment surfaces termin_anfrage."""
+    """Recent, non-deleted, *substantial* calls whose AI enrichment flagged the given
+    intent (wants_kva / wants_invoice) and that are tied to a Vorgang. The action
+    surfaces 'when genuinely discussed', mirroring how a booked appointment surfaces
+    termin_anfrage — a tone-only hint on a short / spam / one-line call no longer
+    counts (see _call_has_substance)."""
     cutoff = _iso_minus_days(30)
     rows = (
         client.table("calls")
-        .select("id, inquiry_id, customer_id, created_at")
+        .select(
+            "id, inquiry_id, customer_id, created_at, "
+            "duration_seconds, is_spam, transcript, enrichment"
+        )
         .eq("org_id", org_id)
         .is_("deleted_at", "null")
         .gte("created_at", cutoff)
@@ -276,7 +327,7 @@ def _intent_calls(client, org_id: str, intent_key: str) -> list[dict[str, Any]]:
         .data
         or []
     )
-    return [r for r in rows if r.get("inquiry_id")]
+    return [r for r in rows if r.get("inquiry_id") and _call_has_substance(r)]
 
 
 def _open_inquiry_status(client, org_id: str, inq_ids: list[str]) -> dict[str, str]:
@@ -314,6 +365,12 @@ def _kva_suggested(client, org_id: str) -> list[dict[str, Any]]:
         inq = c["inquiry_id"]
         if inq in have or inq in seen or status_by.get(inq) in ("completed", "deleted"):
             continue
+        # An Angebot needs the basics the appointment path demands of date/time: a
+        # concrete service AND a described problem. Without both, the caller merely
+        # gestured at a price — not enough to pre-fill a quote.
+        pf = _enrichment_prefill(c)
+        if not (_has_text(pf.get("service_description")) and _has_text(pf.get("problem"))):
+            continue
         seen.add(inq)
         out.append(
             {
@@ -323,7 +380,7 @@ def _kva_suggested(client, org_id: str) -> list[dict[str, Any]]:
                 "call_id": c["id"],
                 "customer_name": name_by.get(c.get("customer_id")) or "Unbekannter Kunde",
                 "customer_id": c.get("customer_id"),
-                "summary": "Kiki hat aus dem Anruf einen Angebots-Entwurf erstellt. Jetzt Angebot einsehen und verschicken.",
+                "summary": "Kunde hat im Anruf nach einem Angebot gefragt — Angebot erstellen.",
                 "created_at": c.get("created_at"),
                 "due_at": None,
                 "priority": "normal",
@@ -358,6 +415,26 @@ def _invoice_suggested(client, org_id: str) -> list[dict[str, Any]]:
             )
             if r.get("case_id")
         }
+    # Billable basis: only suggest a Rechnung when the Vorgang has something to bill —
+    # a completed appointment OR an accepted Angebot. A bare "please invoice me" on a
+    # booking / price call (no work done, no accepted quote) is NOT enough; that was
+    # producing invoice cards on pure appointment-scheduling calls.
+    billable_inqs: set[str] = set()
+    if inq_ids:
+        for r in (
+            client.table("appointments").select("inquiry_id")
+            .eq("org_id", org_id).in_("inquiry_id", inq_ids).eq("status", "completed")
+            .execute().data or []
+        ):
+            if r.get("inquiry_id"):
+                billable_inqs.add(r["inquiry_id"])
+        for r in (
+            client.table("cost_estimates").select("inquiry_id")
+            .eq("org_id", org_id).in_("inquiry_id", inq_ids)
+            .not_.is_("accepted_at", "null").execute().data or []
+        ):
+            if r.get("inquiry_id"):
+                billable_inqs.add(r["inquiry_id"])
     name_by = _customer_name_map(client, org_id, [c.get("customer_id") for c in calls])
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -368,6 +445,8 @@ def _invoice_suggested(client, org_id: str) -> list[dict[str, Any]]:
             continue
         if case and case in have_inv_cases:
             continue
+        if inq not in billable_inqs:
+            continue  # nothing actually billable on this Vorgang yet
         seen.add(inq)
         out.append(
             {
@@ -377,7 +456,7 @@ def _invoice_suggested(client, org_id: str) -> list[dict[str, Any]]:
                 "call_id": c["id"],
                 "customer_name": name_by.get(c.get("customer_id")) or "Unbekannter Kunde",
                 "customer_id": c.get("customer_id"),
-                "summary": "Kunde hat nach einer Rechnung gefragt",
+                "summary": "Kunde hat nach einer Rechnung gefragt — Auftrag ist abgeschlossen.",
                 "created_at": c.get("created_at"),
                 "due_at": None,
                 "priority": "normal",

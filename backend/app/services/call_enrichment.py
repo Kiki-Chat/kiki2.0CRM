@@ -48,8 +48,8 @@ _SYSTEM_PROMPT = (
     '  "next_steps": [string],        // 0-3 KURZE, imperative Folge-Schritte fürs Team '
     '(z.B. "Termin am Dienstag bestätigen", "Anna Bauer zuweisen"); leer wenn nichts zu tun ist\n'
     '  "intent": {\n'
-    '    "wants_kva": boolean,         // Kunde fragt nach Preis/Angebot\n'
-    '    "wants_invoice": boolean,     // Kunde fragt nach Rechnung/Bezahlung/Abrechnung\n'
+    '    "wants_kva": boolean,         // NUR true, wenn der Kunde im Gespräch AUSDRÜCKLICH ein Angebot / einen Kostenvoranschlag anfordert. Eine beiläufige Preisfrage ("was kostet das ungefähr?") ist NICHT genug.\n'
+    '    "wants_invoice": boolean,     // NUR true, wenn der Kunde AUSDRÜCKLICH eine Rechnung für eine bereits erbrachte oder vereinbarte Leistung verlangt. Eine reine Termin- oder Preisanfrage ist NICHT genug.\n'
     '    "wants_appointment": boolean  // Kunde möchte einen Termin/Besuch\n'
     "  },\n"
     '  "prefill": {\n'

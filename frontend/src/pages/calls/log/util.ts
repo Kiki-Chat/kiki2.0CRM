@@ -136,7 +136,7 @@ export function callMatches(c: CallListItem, f: LogFilters, q: string, nowMs: nu
   if (!matchesDate(c, f, nowMs)) return false
 
   if (q) {
-    const hay = `${displayName(c)} ${c.summary_title ?? ''} ${c.caller_number ?? ''}`.toLowerCase()
+    const hay = `${displayName(c)} ${resolvedSubject(c)} ${c.caller_number ?? ''}`.toLowerCase()
     if (!hay.includes(q)) return false
   }
   return true
@@ -178,6 +178,23 @@ export function dayDividerLabel(iso: string | null, nowMs: number): string {
   return new Date(t).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: BERLIN_TZ })
 }
 
+// ─── Subject (Betreff) ──────────────────────────────────────────────────────
+// The call's subject text. Prefer `issue_summary` — the field the ElevenLabs agent
+// fills from the org's "Betreffzeile" prompt (German, specific to the real concern)
+// — over EL's generic built-in `call_summary_title`, which is frequently English and
+// vague ("Heater Repair Request", "Kiki Services"). Falls back to the generic title,
+// then empty. issue_summary rides along on the flat data_collection bag (0004).
+function resolvedSubject(c: CallListItem): string {
+  const issue = c.data_collection?.issue_summary
+  if (issue && issue.trim()) return issue.trim()
+  return (c.summary_title ?? '').trim()
+}
+
+// Display form for the Betreff column — a placeholder when we have nothing at all.
+export function callSubject(c: CallListItem): string {
+  return resolvedSubject(c) || 'Ohne Betreff'
+}
+
 // ─── Subject emoji (keyword → emoji; emergency always wins) ─────────────────
 const EMOJI_RULES: [RegExp, string][] = [
   [/wartung|service|inspekt|maintenance/i, '🛠️'],
@@ -196,7 +213,9 @@ const EMOJI_RULES: [RegExp, string][] = [
 
 export function subjectEmoji(c: CallListItem): string {
   if (c.emergency_flag) return '🚨'
-  const s = `${c.summary_title ?? ''} ${c.inquiry_subject ?? ''}`.toLowerCase()
+  // Match the resolved subject (issue_summary first) so the emoji reflects the same
+  // German concern text the row shows — not EL's generic (often English) title.
+  const s = `${resolvedSubject(c)} ${c.inquiry_subject ?? ''}`.toLowerCase()
   for (const [re, e] of EMOJI_RULES) if (re.test(s)) return e
   return '📞'
 }
