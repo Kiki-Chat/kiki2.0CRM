@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.services.cases.grouper import propose_cases_for_customer
+from app.services.cases.titles import existing_case_titles, make_unique_case_title
 from app.services.common import gen_case_number, validate_fk_in_org
 from app.services import invoices
 from app.services.scope import resolve_scope
@@ -194,6 +195,8 @@ async def apply_cases(payload: ApplyIn, user: CurrentUser = Depends(require_org)
         org_id = user.org_id
         validate_fk_in_org(client, table="customers", fk_id=payload.customer_id, org_id=org_id, label="Kunde")
         created = []
+        # Keep Vorgang titles unique within the customer, even across this one batch.
+        taken = existing_case_titles(client, org_id, payload.customer_id)
         for g in payload.groups:
             members = [m for m in (g.members or []) if m]
             if not members:
@@ -214,9 +217,11 @@ async def apply_cases(payload: ApplyIn, user: CurrentUser = Depends(require_org)
             # grouped) → don't mint an empty case.
             if not ids:
                 continue
+            title = make_unique_case_title(g.label, taken)
+            taken.add(title)
             case = client.table("cases").insert({
                 "org_id": org_id, "customer_id": payload.customer_id,
-                "title": (g.label or "Vorgang")[:120], "created_by": _uid(user),
+                "title": title, "created_by": _uid(user),
                 "number": gen_case_number(client, org_id),
                 "status": "active",
                 "description": "Aus KI-Gruppierung erstellt.",
@@ -259,9 +264,11 @@ async def move_inquiry_case(
             return None
         target = payload.case_id
         if payload.new_case_label:
+            taken = existing_case_titles(client, org_id, inq[0].get("customer_id"))
+            title = make_unique_case_title(payload.new_case_label, taken)
             case = client.table("cases").insert({
                 "org_id": org_id, "customer_id": inq[0].get("customer_id"),
-                "title": payload.new_case_label[:120], "created_by": _uid(user),
+                "title": title, "created_by": _uid(user),
                 "number": gen_case_number(client, org_id),
                 "status": "active",
             }).execute().data[0]
@@ -381,9 +388,11 @@ async def create_case(
     def _run():
         client = get_service_client()
         validate_fk_in_org(client, table="customers", fk_id=customer_id, org_id=user.org_id, label="Kunde")
+        taken = existing_case_titles(client, user.org_id, customer_id)
+        title = make_unique_case_title(payload.label or "Neuer Vorgang", taken)
         return client.table("cases").insert({
             "org_id": user.org_id, "customer_id": customer_id,
-            "title": (payload.label or "Neuer Vorgang")[:120], "created_by": _uid(user),
+            "title": title, "created_by": _uid(user),
             "number": gen_case_number(client, user.org_id),
             "status": "active",
         }).execute().data[0]

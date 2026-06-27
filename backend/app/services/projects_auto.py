@@ -27,6 +27,7 @@ import logging
 
 from app.services.ai import client as ai_client
 from app.services.ai import usage as ai_usage
+from app.services.cases.titles import existing_case_titles, make_unique_case_title
 from app.services.common import gen_case_number
 
 log = logging.getLogger(__name__)
@@ -96,11 +97,18 @@ def _case_signal(client, org_id: str, case: dict) -> str:
 
 
 def _create_case_for_inquiry(client, org_id: str, inquiry: dict) -> dict:
+    # Keep Vorgang titles unique per customer so two matters never share a header
+    # (the inquiry title — now the German issue_summary — is the base).
+    customer_id = inquiry.get("customer_id")
+    base = inquiry.get("subject") or inquiry.get("title") or "Neue Anfrage"
+    title = make_unique_case_title(
+        base, existing_case_titles(client, org_id, customer_id), inquiry.get("created_at")
+    )
     case = client.table("cases").insert({
         "org_id": org_id,
-        "customer_id": inquiry.get("customer_id"),
+        "customer_id": customer_id,
         "number": gen_case_number(client, org_id),
-        "title": (inquiry.get("subject") or inquiry.get("title") or "Neue Anfrage")[:120],
+        "title": title,
         "description": "Automatisch aus neuer Anfrage erstellt.",
         "status": "active",
     }).execute().data[0]
