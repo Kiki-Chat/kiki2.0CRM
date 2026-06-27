@@ -86,6 +86,7 @@ export interface PlanOption {
   monthly_cents: number
   annual_cents: number
   overage_cents_per_min: number
+  seats: number
 }
 export interface ChangePlanPreview {
   current_plan_title: string | null

@@ -456,7 +456,7 @@ def _create_employee(user: CurrentUser, args: dict) -> dict:
             activity_area=args.get("activity_area"),
             is_technician=bool(args.get("is_technician") or False),
         )
-        emp = emp_routes._create(user.org_id, payload)
+        emp = emp_routes._create(user.org_id, payload, user.role)
         return {"employee": {k: emp.get(k) for k in ("id", "display_name", "email", "is_technician")},
                 "note": "Ohne Login angelegt — eine Login-Einladung kann auf der Mitarbeiter-Seite gesendet werden."}
     except Exception as exc:  # noqa: BLE001

@@ -1,8 +1,12 @@
-import { Check, Lock } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Check, Lock, Sparkles } from 'lucide-react'
 import { Outlet, useNavigate } from 'react-router-dom'
 
+import { apiFetch } from '../lib/api'
 import { FEATURE_META, shortPlanName } from '../lib/entitlements'
 import { useMe } from '../lib/useMe'
+
+interface FeatureTeaser { count: number; noun: string }
 
 /**
  * Route-level entitlement gate (Phase 2). Use as a layout route in App.tsx:
@@ -22,6 +26,16 @@ export function FeatureRoute({ feature }: { feature: string }) {
 export function LockedFeature({ feature }: { feature: string }) {
   const meta = FEATURE_META[feature]
   const navigate = useNavigate()
+  // Real count from the org's own data (always-process) → personalises the lock into a
+  // "you already have value waiting" hook. Best-effort; hidden when 0.
+  const teaserQ = useQuery({
+    queryKey: ['entitlements', 'teaser'],
+    queryFn: () => apiFetch<Record<string, FeatureTeaser>>('/api/entitlements/teaser'),
+    retry: false,
+    staleTime: 60_000,
+  })
+  const teaser = teaserQ.data?.[feature]
+  const hasTeaser = (teaser?.count ?? 0) > 0
   if (!meta) return null
   return (
     <div className="flex min-h-[60vh] items-center justify-center p-6">
@@ -33,6 +47,27 @@ export function LockedFeature({ feature }: { feature: string }) {
         <p className="mt-1 text-sm text-muted">
           Ab <span className="font-semibold text-text">{shortPlanName(meta.minPlan)}</span> verfügbar.
         </p>
+
+        {hasTeaser && (
+          <div className="relative mt-5 overflow-hidden rounded-xl border border-green-primary/40">
+            <div className="space-y-2 p-3 blur-[3px] select-none" aria-hidden>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <div className="h-3 w-32 rounded bg-alt" />
+                  <div className="h-3 w-12 rounded bg-green-tint-200" />
+                </div>
+              ))}
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center bg-surface/55 px-4">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-text">
+                <Sparkles size={15} className="shrink-0 text-green-deep" />
+                Kiki hat aus deinen Anrufen{' '}
+                <span className="text-green-deep">{teaser!.count} {teaser!.noun}</span> vorbereitet
+              </p>
+            </div>
+          </div>
+        )}
+
         <ul className="mx-auto mt-5 max-w-xs space-y-2 text-left">
           {meta.pitch.map((b) => (
             <li key={b} className="flex items-start gap-2 text-sm text-body">
@@ -45,7 +80,7 @@ export function LockedFeature({ feature }: { feature: string }) {
           onClick={() => navigate('/settings/abrechnung')}
           className="mt-6 w-full rounded-lg bg-green-primary px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
         >
-          Auf {shortPlanName(meta.minPlan)} upgraden
+          {hasTeaser ? `Freischalten — auf ${shortPlanName(meta.minPlan)} upgraden` : `Auf ${shortPlanName(meta.minPlan)} upgraden`}
         </button>
         <button
           onClick={() => navigate('/')}

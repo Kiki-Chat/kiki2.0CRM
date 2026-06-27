@@ -854,7 +854,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                         <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide', isDown ? 'bg-alt text-muted' : 'bg-green-tint-100 text-green-deep')}>{isDown ? 'Downgrade' : 'Upgrade'}</span>
                       </div>
                       <div className="mt-1 text-2xl font-bold text-text">{fmtCents(p.monthly_cents)}<span className="text-xs font-normal text-muted">/Mon.</span></div>
-                      <div className="mt-1 text-xs text-muted">{p.included_minutes} Min. inkl. · dann {fmtCents(p.overage_cents_per_min)}/Min.</div>
+                      <div className="mt-1 text-xs text-muted">{p.included_minutes} Min. inkl. · dann {fmtCents(p.overage_cents_per_min)}/Min. · bis zu {p.seats} Mitarbeiter</div>
                       <PlanFeatureList plan={p.plan_title} />
                       <button
                         onClick={() => setPendingPlan(selected ? null : p)}
@@ -1055,6 +1055,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                     <div className="mt-1.5 text-xs text-muted">inkl. MwSt. {fmtCents(Math.round(p.monthly_cents * 1.19))}/Mon.</div>
                   )}
                   <div className="mt-3 border-t border-border pt-3 text-xs font-semibold text-text">{p.included_minutes} Min. inkl. <span className="font-normal text-muted">· dann {fmtCents(p.overage_cents_per_min)}/Min.</span></div>
+                  <div className="mt-1 text-xs text-muted">Bis zu {p.seats} Mitarbeiter</div>
                   <PlanFeatureList plan={p.plan_title} />
                   <button
                     onClick={() => subscribe.mutate({ plan_title: p.plan_title, interval: planInterval })}

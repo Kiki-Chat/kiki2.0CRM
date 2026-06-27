@@ -44,6 +44,21 @@ FEATURE_MIN_PLAN: dict[str, str] = {
 }
 
 
+# Max employees (Mitarbeiter / seats) per plan — Amber 2026-06-27. Unknown/no plan →
+# DEFAULT_SEATS. Surfaced in the plan cards + comparison; enforced on employee creation.
+PLAN_SEATS: dict[str, int] = {
+    "Kiki Basis": 1,
+    "Kiki Legacy": 5,
+    "Kiki Pro": 5,
+    "Kiki Enterprise": 10,
+}
+DEFAULT_SEATS = 1
+
+
+def seat_limit(plan_title: str | None) -> int:
+    return PLAN_SEATS.get(plan_title or "", DEFAULT_SEATS)
+
+
 def features_for_plan(plan_title: str | None) -> set[str]:
     """The feature keys a plan grants by default (no overrides)."""
     return set(PLAN_FEATURES.get(plan_title or "", frozenset()))
@@ -92,6 +107,25 @@ def org_has_feature(org_id: str | None, role: str | None, feature: str) -> bool:
     if plan is None:  # org not on a plan yet → don't block
         return True
     return feature in feats
+
+
+def org_can_add_seat(org_id: str | None, role: str | None, current_count: int) -> bool:
+    """True if the org may add another Mitarbeiter (current_count < plan seat limit).
+    Same flag / super_admin-bypass / fail-open-on-no-plan rules as feature gating."""
+    from app.core.config import settings
+
+    if not settings.entitlements_enforced or role == "super_admin":
+        return True
+    plan, _ = _org_plan_and_features(org_id)
+    if plan is None:  # org not on a plan yet → don't block
+        return True
+    return current_count < seat_limit(plan)
+
+
+def org_seat_limit(org_id: str | None) -> int:
+    """The seat limit for the org's current plan (for the 'X von Y' upgrade message)."""
+    plan, _ = _org_plan_and_features(org_id)
+    return seat_limit(plan)
 
 
 def require_entitlement(feature: str):

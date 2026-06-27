@@ -206,8 +206,26 @@ async def list_employees(user: CurrentUser = Depends(require_org)) -> list[dict]
     return await run_in_threadpool(_list, user.org_id, user.role)
 
 
-def _create(org_id: str, payload: EmployeeCreate) -> dict:
+def _create(org_id: str, payload: EmployeeCreate, role: str | None = None) -> dict:
     client = get_service_client()
+    # Seat limit (Phase 2) — block adding a Mitarbeiter beyond the plan's seat count.
+    # Single chokepoint: the REST route, CSV import, and the copilot tool all reach here.
+    from app.services.entitlements import org_can_add_seat, org_seat_limit  # noqa: PLC0415
+
+    current = (
+        client.table("employees").select("id", count="exact")
+        .eq("org_id", org_id).eq("deleted", False).execute().count or 0
+    )
+    if not org_can_add_seat(org_id, role, current):
+        limit = org_seat_limit(org_id)
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "seat_limit",
+                "limit": limit,
+                "message": f"Mitarbeiter-Limit erreicht ({current}/{limit}) — bitte upgrade, um weitere hinzuzufügen.",
+            },
+        )
     user_id = None
     warning = None
     # Email must be unique per org among active (non-deleted) employees. The
@@ -367,7 +385,7 @@ def _create(org_id: str, payload: EmployeeCreate) -> dict:
 async def create_employee(
     payload: EmployeeCreate, user: CurrentUser = Depends(require_org_admin)
 ) -> dict:
-    return await run_in_threadpool(_create, user.org_id, payload)
+    return await run_in_threadpool(_create, user.org_id, payload, user.role)
 
 
 @router.post("/import")
@@ -384,6 +402,20 @@ async def import_employees_csv(
         m = json.loads(mapping) if mapping else {}
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Ungültiges Mapping (kein JSON)")
+    # Seat limit (Phase 2) — block a bulk import when the org is already at its seat cap.
+    from app.services.entitlements import org_can_add_seat, org_seat_limit  # noqa: PLC0415
+
+    current = (
+        get_service_client().table("employees").select("id", count="exact")
+        .eq("org_id", user.org_id).eq("deleted", False).execute().count or 0
+    )
+    if not org_can_add_seat(user.org_id, user.role, current):
+        limit = org_seat_limit(user.org_id)
+        raise HTTPException(
+            status_code=402,
+            detail={"error": "seat_limit", "limit": limit,
+                    "message": f"Mitarbeiter-Limit erreicht ({current}/{limit}) — bitte upgrade."},
+        )
     return await run_in_threadpool(csv_import.import_employees, user.org_id, content, m)
 
 

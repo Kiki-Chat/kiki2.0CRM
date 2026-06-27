@@ -284,6 +284,7 @@ def _plans() -> list[PlanOption]:
     """Self-serve catalog for the subscribe UI. Excludes grandfather tiers
     (self_serve=False, e.g. 'Kiki Legacy') — those are assigned to existing
     customers during migration, never offered to new signups."""
+    from app.services.entitlements import seat_limit
     from app.services.stripe_catalog import ANNUAL_MONTHS, PLANS
 
     return [
@@ -293,6 +294,7 @@ def _plans() -> list[PlanOption]:
             monthly_cents=spec["monthly_cents"],
             annual_cents=spec["monthly_cents"] * ANNUAL_MONTHS,
             overage_cents_per_min=spec["overage_cents"],
+            seats=seat_limit(title),
         )
         for title, spec in PLANS.items()
         if spec.get("self_serve", True)

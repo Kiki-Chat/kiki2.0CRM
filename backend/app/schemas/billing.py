@@ -103,6 +103,7 @@ class PlanOption(BaseModel):
     monthly_cents: int
     annual_cents: int
     overage_cents_per_min: int
+    seats: int = 1                          # max Mitarbeiter on this plan
 
 
 # ─── Super-admin ─────────────────────────────────────────────────────────────
