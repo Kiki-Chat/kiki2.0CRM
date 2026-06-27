@@ -220,3 +220,56 @@ def test_safe_auto_log_never_raises(monkeypatch):
 
     monkeypatch.setattr(pds, "log_call", _boom)
     pds.safe_auto_log_call(client, "org1", {"id": "c1"})  # must not raise
+
+
+# ─── Route auth: greeting + create-contact are ElevenLabs tool webhooks ───────
+# Regression guard for the bug where these used require_org (a logged-in user's
+# JWT) — which the voice agent can never present. They MUST authenticate exactly
+# like every other tool webhook (resolve_tool_org: X-HeyKiki-Secret / _agentId).
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.api import deps  # noqa: E402
+from app.main import app  # noqa: E402
+
+_client = TestClient(app)
+
+
+def test_greeting_route_uses_tool_org_auth_not_user_jwt(monkeypatch):
+    """POST /api/pds/greeting resolves the org via resolve_tool_org and passes it
+    to the service — no Authorization header required (the agent has none)."""
+    app.dependency_overrides[deps.resolve_tool_org] = lambda: deps.ToolOrg(org_id="org-agent")
+    seen = {}
+    monkeypatch.setattr(
+        pds, "greeting_for_phone",
+        lambda org_id, phone: seen.update(org_id=org_id, phone=phone)
+        or {"greeting": "Hallo", "status": "found"},
+    )
+    try:
+        # No Authorization header — the agent sends _agentId in the body instead.
+        resp = _client.post("/api/pds/greeting", json={"phoneNumber": "+4915511357330", "_agentId": "agent_x"})
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"greeting": "Hallo", "status": "found"}
+    assert seen == {"org_id": "org-agent", "phone": "+4915511357330"}
+
+
+def test_create_contact_route_uses_tool_org_auth(monkeypatch):
+    app.dependency_overrides[deps.resolve_tool_org] = lambda: deps.ToolOrg(org_id="org-agent")
+    seen = {}
+    monkeypatch.setattr(
+        pds, "create_contact",
+        lambda org_id, **kw: seen.update(org_id=org_id, **kw)
+        or {"message": "ok", "status": "created", "personUUID": "u1"},
+    )
+    try:
+        resp = _client.post(
+            "/api/pds/create-contact",
+            json={"fullName": "Govind Yadav", "phoneNumber": "+4915511357330", "_agentId": "agent_x"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "created"
+    assert seen["org_id"] == "org-agent"
+    assert seen["full_name"] == "Govind Yadav"

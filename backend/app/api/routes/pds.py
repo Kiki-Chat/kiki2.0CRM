@@ -11,7 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, require_org, require_org_admin
+from app.api.deps import (
+    CurrentUser,
+    ToolOrg,
+    require_org,
+    require_org_admin,
+    resolve_tool_org,
+)
 from app.services import pds
 
 router = APIRouter(prefix="/api/pds", tags=["pds"])
@@ -29,10 +35,15 @@ class GreetingIn(BaseModel):
 
 
 @router.post("/greeting")
-async def pds_greeting(payload: GreetingIn, user: CurrentUser = Depends(require_org)) -> dict:
-    """Workflow 2a: caller lookup → personalised greeting (n8n contract)."""
+async def pds_greeting(payload: GreetingIn, org: ToolOrg = Depends(resolve_tool_org)) -> dict:
+    """Workflow 2a: caller lookup → personalised greeting (n8n contract).
+
+    The ElevenLabs agent calls this mid-call, so it authenticates like every other
+    tool webhook (``resolve_tool_org``: X-HeyKiki-Secret header or ``_agentId`` in the
+    body) — NOT via a logged-in user's JWT.
+    """
     try:
-        return await run_in_threadpool(pds.greeting_for_phone, user.org_id, payload.phoneNumber)
+        return await run_in_threadpool(pds.greeting_for_phone, org.org_id, payload.phoneNumber)
     except pds.PdsError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
@@ -46,11 +57,14 @@ class CreateContactIn(BaseModel):
 
 
 @router.post("/create-contact")
-async def pds_create_contact(payload: CreateContactIn, user: CurrentUser = Depends(require_org)) -> dict:
-    """Workflow 2b: create the PDS person + phone (+ address) (n8n contract)."""
+async def pds_create_contact(payload: CreateContactIn, org: ToolOrg = Depends(resolve_tool_org)) -> dict:
+    """Workflow 2b: create the PDS person + phone (+ address) (n8n contract).
+
+    Agent-facing — same tool-webhook auth as ``/greeting`` (``resolve_tool_org``).
+    """
     def _run():
         return pds.create_contact(
-            user.org_id,
+            org.org_id,
             full_name=payload.fullName,
             phone=payload.phoneNumber,
             city=payload.city,
