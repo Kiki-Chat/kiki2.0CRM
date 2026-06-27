@@ -1,0 +1,6 @@
+# Broken wiki skill symlinks and local-only paths — not needed for deploy.
+.cursor/
+exports/
+test_scripts/
+backend/.venv/
+frontend/node_modules/
