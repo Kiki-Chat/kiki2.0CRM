@@ -61,21 +61,48 @@ def test_no_open_cases_creates_one(monkeypatch):
     assert update_arg["case_source"] == "ai"
 
 
-def test_similar_open_case_attaches(monkeypatch):
-    open_c = {"id": "c-match", "title": "Heizungsreparatur", "description": None, "status": "active"}
+def test_confident_judge_attaches(monkeypatch):
+    # Embedding shortlists the candidate; the LLM judge confidently matches → attach.
+    open_c = {"id": "c-match", "title": "Heizungsreparatur", "description": None,
+              "status": "active", "customer_id": "cust-1", "number": "FL-1"}
     cases_tbl = _chain([open_c])
     inquiries_tbl = _chain([])
     client = _Client({"cases": cases_tbl, "inquiries": inquiries_tbl})
     monkeypatch.setattr(pa.ai_usage, "within_cap", lambda org: True)
-    # Identical vectors → cosine 1.0 ≥ threshold → attach.
     monkeypatch.setattr(pa.ai_client, "embed", lambda texts, model: ([[1.0, 0.0]] * len(texts), 1))
+    monkeypatch.setattr(pa, "_judge_attach", lambda *a: (open_c, 0.95, "gleiche Heizung"))
+    monkeypatch.setattr(pa, "safe_retitle", lambda *a, **k: None)
 
     out = pa.auto_assign_inquiry_to_case(client, "org1", _inquiry())
     assert out["id"] == "c-match"
     update_arg = inquiries_tbl.update.call_args[0][0]
     assert update_arg["case_id"] == "c-match"
-    assert update_arg["case_confidence"] == 1.0
+    assert update_arg["case_confidence"] == 0.95
     cases_tbl.insert.assert_not_called()
+
+
+def test_moderate_judge_creates_and_suggests_merge(monkeypatch):
+    # Plausible but not confident → keep the call as its OWN Vorgang, but persist a
+    # merge suggestion for a human to confirm (never a silent merge).
+    open_c = {"id": "c-maybe", "title": "Heizung", "description": None, "status": "active",
+              "customer_id": "cust-1", "number": "FL-2"}
+    cases_tbl = _chain([open_c])
+    cases_tbl.insert.return_value = _chain([{"id": "c-new"}])
+    inquiries_tbl = _chain([])
+    sugg_tbl = _chain([])
+    client = _Client({"cases": cases_tbl, "inquiries": inquiries_tbl, "case_merge_suggestions": sugg_tbl})
+    monkeypatch.setattr(pa.ai_usage, "within_cap", lambda org: True)
+    monkeypatch.setattr(pa, "gen_case_number", lambda c, o: "FL-KC007-9")
+    monkeypatch.setattr(pa.ai_client, "embed", lambda texts, model: ([[1.0, 0.0]] * len(texts), 1))
+    monkeypatch.setattr(pa, "_judge_attach", lambda *a: (open_c, 0.6, "evtl. dasselbe"))
+
+    out = pa.auto_assign_inquiry_to_case(client, "org1", _inquiry())
+    assert out["id"] == "c-new"                 # kept separate
+    sugg_tbl.insert.assert_called_once()
+    sugg_arg = sugg_tbl.insert.call_args[0][0]
+    assert sugg_arg["source_case_id"] == "c-new"
+    assert sugg_arg["target_case_id"] == "c-maybe"
+    assert sugg_arg["status"] == "pending"
 
 
 def test_low_similarity_creates_new(monkeypatch):

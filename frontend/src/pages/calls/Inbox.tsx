@@ -168,6 +168,7 @@ const KIND_ICON: Record<ActionItem['kind'], LucideIcon> = {
   callback_owed: Phone,
   alt_time_proposal: CalendarClock,
   appointment_cancelled: CalendarX,
+  vorgang_merge_suggested: Layers,
 }
 // Lifecycle colour scheme: confirmation (open) → green, reschedule → orange,
 // cancelled → dark.
@@ -182,6 +183,7 @@ const KIND_TONE: Record<ActionItem['kind'], { tile: string; tag: 'info' | 'ai' |
   callback_owed: { tile: 'bg-warning-bg text-warning', tag: 'warning' },
   alt_time_proposal: { tile: 'bg-orange-100 text-orange-700', tag: 'warning' },
   appointment_cancelled: { tile: 'bg-slate-700 text-white', tag: 'neutral' },
+  vorgang_merge_suggested: { tile: 'bg-ai-bg text-ai', tag: 'ai' },
 }
 
 function TaskBtn({

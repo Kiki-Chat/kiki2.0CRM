@@ -19,6 +19,7 @@ export type ActionKind =
   | 'alt_time_proposal'
   | 'appointment_cancelled'
   | 'reschedule_unmatched'
+  | 'vorgang_merge_suggested'
 
 export type DecisionType = 'termin' | 'rueckruf' | 'storno' | 'kva' | 'reschedule'
 export type VStatus = 'open' | 'in_progress' | 'completed'
@@ -38,6 +39,8 @@ export interface RawAction {
   // backend carries the slot here as `due_at` — the single most important fact to
   // show before confirming. Null for document-lifecycle actions.
   due_at?: string | null
+  // vorgang_merge_suggested only: the open Vorgang this fresh one might belong to.
+  target_case_id?: string | null
 }
 
 export interface Employee {
@@ -134,6 +137,8 @@ export interface DecisionVM {
   // create-form (suggestions), or the caller (/customers/:id). Null when there is
   // nowhere to go (pure info). Appointment kinds keep route null (they POST).
   route: string | null
+  // vorgang_merge_suggested only: the target Vorgang to merge INTO.
+  targetCaseId: string | null
 }
 
 export interface CallEntry {
@@ -210,6 +215,9 @@ const KIND_CFG: Record<
 
   // ── Rückruf — NOTIFICATION only (links to the caller) ─────────────────────
   callback_owed: { type: 'rueckruf', accent: 'var(--green-primary)', label: 'Rückruf', variant: 'green', title: () => 'Rückruf offen', primary: 'Anrufer ansehen', secondary: null, tertiary: null, reco: () => 'Verpasster Anruf — Kunde ansehen und zurückrufen', assignable: false, notify: true, opensDrawer: false, cardCta: 'Anrufer ansehen' },
+
+  // ── Vorgang merge suggestion — ACTIONABLE (Zusammenführen / Ablehnen) ──────
+  vorgang_merge_suggested: { type: 'kva', accent: 'var(--ai)', label: 'Zusammenführen', variant: 'ai', title: () => 'Vorgänge zusammenführen?', primary: 'Zusammenführen', secondary: null, tertiary: 'Ablehnen', reco: () => 'Kiki vermutet, dass dieser Anruf zu einem offenen Vorgang desselben Kunden gehört — zusammenführen oder getrennt lassen.', assignable: false, notify: false, opensDrawer: false, cardCta: '' },
 }
 
 function pickSuggested(employees: Employee[]): Employee | null {
@@ -344,6 +352,7 @@ export function buildDecisions(actions: RawAction[], employees: Employee[], meta
       opensDrawer: cfg.opensDrawer,
       cardCta: cfg.cardCta,
       route,
+      targetCaseId: a.target_case_id ?? null,
     }
   })
 }
@@ -555,6 +564,10 @@ export function usePosteingangActions() {
       await done()
     } else if (d.kind === 'reschedule_unmatched') {
       await done()
+    } else if (d.kind === 'vorgang_merge_suggested') {
+      if (choice === 'primary')
+        await apiFetch('/api/cases/merge', { method: 'POST', body: JSON.stringify({ source_case_id: id, target_case_id: d.targetCaseId }) })
+      else await apiFetch('/api/cases/merge-reject', { method: 'POST', body: JSON.stringify({ source_case_id: id }) })
     }
   }
 

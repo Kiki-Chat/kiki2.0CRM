@@ -57,6 +57,7 @@ ActionKind = Literal[
     "alt_time_proposal",
     "appointment_cancelled",
     "reschedule_unmatched",
+    "vorgang_merge_suggested",
 ]
 
 
@@ -757,6 +758,63 @@ def _appointment_cancelled(client, org_id: str) -> list[dict[str, Any]]:
     return out
 
 
+def _vorgang_merge_suggested(client, org_id: str) -> list[dict[str, Any]]:
+    """Pending 'this fresh Vorgang probably belongs to that open one (same caller)'
+    suggestions from the auto-grouper. A human confirms (merge) or rejects. Both sides
+    must still exist and still be OPEN — completed/archived are never offered."""
+    sugg = (
+        client.table("case_merge_suggestions")
+        .select("id, customer_id, source_case_id, target_case_id, confidence, reason, created_at")
+        .eq("org_id", org_id).eq("status", "pending")
+        .order("created_at", desc=True).limit(100)
+        .execute().data
+        or []
+    )
+    if not sugg:
+        return []
+    case_ids = list({c for s in sugg for c in (s.get("source_case_id"), s.get("target_case_id")) if c})
+    cases = {
+        r["id"]: r
+        for r in (
+            client.table("cases").select("id, title, status, customer_id")
+            .eq("org_id", org_id).in_("id", case_ids).execute().data or []
+        )
+    }
+    name_by = _customer_name_map(client, org_id, [s.get("customer_id") for s in sugg])
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for s in sugg:
+        src, tgt = s.get("source_case_id"), s.get("target_case_id")
+        sc, tc = cases.get(src), cases.get(tgt)
+        if not sc or not tc or src in seen:
+            continue
+        if sc.get("status") in ("completed", "archived") or tc.get("status") in ("completed", "archived"):
+            continue
+        seen.add(src)
+        sc_title = sc.get("title") or "Vorgang"
+        tc_title = tc.get("title") or "Vorgang"
+        out.append(
+            {
+                "kind": "vorgang_merge_suggested",
+                "id": src,
+                "inquiry_id": None,
+                "call_id": None,
+                "customer_name": name_by.get(s.get("customer_id")) or "Unbekannter Kunde",
+                "customer_id": s.get("customer_id"),
+                "summary": f"„{sc_title}“ gehört vermutlich zum offenen Vorgang „{tc_title}“ — zusammenführen?",
+                "created_at": s.get("created_at"),
+                "due_at": None,
+                "priority": "normal",
+                # extra fields the merge/reject card needs
+                "target_case_id": tgt,
+                "target_title": tc_title,
+                "source_title": sc_title,
+                "confidence": s.get("confidence"),
+            }
+        )
+    return out
+
+
 # ─── Sort: priority desc, due_at asc nulls last, created_at desc ────────────
 _PRIORITY_RANK = {"high": 0, "normal": 1}
 
@@ -868,6 +926,7 @@ def _aggregate(org_id: str, scope=None) -> list[dict[str, Any]]:
     items.extend(_alt_time_proposal(client, org_id))
     items.extend(_unmatched_reschedule(client, org_id))
     items.extend(_appointment_cancelled(client, org_id))
+    items.extend(_vorgang_merge_suggested(client, org_id))
 
     # Employee portal: restrict to the caller's own work before any further work.
     items = _scope_items(items, scope)

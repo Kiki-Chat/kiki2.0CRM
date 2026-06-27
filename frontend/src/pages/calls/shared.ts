@@ -103,6 +103,7 @@ export interface ActionItem {
     | 'callback_owed'
     | 'alt_time_proposal'
     | 'appointment_cancelled'
+    | 'vorgang_merge_suggested'
   id: string
   inquiry_id: string | null
   call_id: string | null
@@ -178,6 +179,7 @@ export const ACTION_KIND_LABEL: Record<ActionItem['kind'], string> = {
   callback_owed: 'Rückruf',
   alt_time_proposal: 'Alternativtermin',
   appointment_cancelled: 'Termin storniert',
+  vorgang_merge_suggested: 'Zusammenführen',
 }
 
 // Filter types (left inbox) — direction + status + the NEW date filter, all client-side.
