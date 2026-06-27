@@ -36,12 +36,32 @@ def _org_identity(org_id: str) -> dict:
     return cache.get_or_set(org_id, "org_identity", _load)
 
 
+def _org_entitlements(org_id: str) -> dict:
+    """The org's current plan + resolved feature keys (Phase-2 menu/route gating).
+    Uncached + off the same row read so it always reflects the latest plan after an
+    upgrade. plan_title=None / unknown plan ⇒ core features only."""
+    from app.services.entitlements import effective_features
+
+    rows = (
+        get_service_client()
+        .table("organizations")
+        .select("billing_plan_title")
+        .eq("id", org_id)
+        .limit(1)
+        .execute()
+        .data
+    )
+    plan = (rows[0] if rows else {}).get("billing_plan_title")
+    return {"plan_title": plan, "features": sorted(effective_features(plan))}
+
+
 @router.get("/me")
 async def me(user: CurrentUser = Depends(get_current_user)) -> dict:
     # org_* fields let the white-label UI show WHOSE CRM this is — company name +
     # contact email + logo + address surface in the sidebar badge, the footer, and
     # personal settings. Available to every authenticated user (incl. employees).
     ident = await run_in_threadpool(_org_identity, user.org_id) if user.org_id else {}
+    ent = await run_in_threadpool(_org_entitlements, user.org_id) if user.org_id else {}
     return {
         "id": user.id,
         "email": user.email,
@@ -52,4 +72,7 @@ async def me(user: CurrentUser = Depends(get_current_user)) -> dict:
         "org_email": ident.get("email"),
         "org_logo_url": ident.get("logo_url"),
         "org_address": ident.get("address"),
+        # Phase-2 entitlements: which plan + which gateable features this org has.
+        "plan_title": ent.get("plan_title"),
+        "features": ent.get("features", []),
     }

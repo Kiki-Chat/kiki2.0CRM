@@ -678,6 +678,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
     onSuccess: (next) => {
       qc.setQueryData(['billing', 'summary'], next)
       qc.invalidateQueries({ queryKey: ['billing'] })
+      qc.invalidateQueries({ queryKey: ['me'] }) // plan changed → re-resolve entitlements
       setShowUpgrade(false)
       setPendingPlan(null)
       flash(`Tarif geändert: ${next.plan_title ?? 'aktualisiert'}.`)
@@ -713,6 +714,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       .then((s) => {
         qc.setQueryData(['billing', 'summary'], s) // instant, before the refetch lands
         qc.invalidateQueries({ queryKey: ['billing'] })
+        qc.invalidateQueries({ queryKey: ['me'] }) // new subscription → unlock entitlements
         flash(s.status === 'trialing' ? 'Testphase gestartet.' : 'Abonnement aktiviert.')
       })
       .catch(() => {

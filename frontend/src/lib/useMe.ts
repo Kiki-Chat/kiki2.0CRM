@@ -16,6 +16,10 @@ export interface Me {
   org_email: string | null
   org_logo_url: string | null
   org_address: Record<string, string> | null
+  /** Phase-2 entitlements (from /api/me): the org's current plan + the gateable
+   * feature keys it unlocks. Drives menu/route gating + the locked soft preview. */
+  plan_title?: string | null
+  features?: string[]
 }
 
 export function isAdminRole(role: string | null | undefined): boolean {
@@ -39,10 +43,15 @@ export function useMe() {
     queryFn: () => apiFetch<Me>('/api/me'),
     staleTime: 5 * 60 * 1000,
   })
+  const features = q.data?.features ?? []
   return {
     me: q.data,
     role: q.data?.role ?? null,
     isAdmin: isAdminRole(q.data?.role),
+    features,
+    /** Entitlement check for menu/route gating. super_admin bypasses (platform staff
+     * are never plan-gated); otherwise the feature must be in the org's granted set. */
+    hasFeature: (f: string) => q.data?.role === 'super_admin' || features.includes(f),
     isLoading: q.isLoading,
   }
 }

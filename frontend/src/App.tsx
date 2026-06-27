@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { ChunkErrorBoundary } from './components/ChunkErrorBoundary'
+import { FeatureRoute } from './components/FeatureGate'
 import { AppLayout } from './components/layout/AppLayout'
 import { LoginPage } from './pages/LoginPage'
 import { Placeholder } from './pages/Placeholder'
@@ -76,30 +77,43 @@ export default function App() {
               <Route index element={<DashboardPage />} />
               <Route path="calls" element={<CallLogsPage />} />
               <Route path="posteingang" element={<PosteingangPage />} />
-              <Route path="cases" element={<CasesPage />} />
               <Route path="customers" element={<CustomersPage />} />
               <Route path="customers/:id" element={<CustomerDetailPage />} />
-              <Route path="vorgang/:id" element={<VorgangThreadPage />} />
               {/* Cases are now the split view at /cases; deep-links to a single Vorgang
                   pre-select it in that view. */}
               <Route path="fall/:id" element={<FallRedirect />} />
-              <Route path="calendar" element={<CalendarPage />} />
-              {/* Business hours moved into Kiki-Zentrale (UAT); keep the old path as a redirect. */}
+              {/* Business hours moved into Kiki-Zentrale (UAT); keep the old path as a
+                  redirect (ungated — it only points to Kiki-Zentrale). */}
               <Route path="calendar/business-hours" element={<Navigate to="/kiki-zentrale/geschaeftszeiten" replace />} />
               <Route path="meine-abwesenheit" element={<MyAbsencePage />} />
-              <Route path="projects" element={<ProjectsPage />} />
-              {/* Top-layer Projekt (restored above the Case): full workspace + create/edit form. */}
-              <Route path="projects/new" element={<ProjectFormPage />} />
-              <Route path="projects/:id" element={<ProjectWorkspacePage />} />
-              <Route path="projects/:id/edit" element={<ProjectFormPage />} />
-              <Route path="planning-board" element={<PlanningBoardPage />} />
-              <Route path="cost-estimates" element={<CostEstimatesPage />} />
-              <Route path="cost-estimates/new" element={<CostEstimateFormPage />} />
-              <Route path="cost-estimates/:id" element={<CostEstimateFormPage />} />
-              <Route path="invoices" element={<InvoicesPage />} />
-              <Route path="invoices/new" element={<InvoiceFormPage />} />
-              <Route path="invoices/:id" element={<InvoiceFormPage />} />
-              <Route path="catalog" element={<CatalogPage />} />
+
+              {/* ── Plan-gated menus (Phase 2). Locked → soft-preview upgrade panel. ── */}
+              <Route element={<FeatureRoute feature="cases" />}>
+                <Route path="cases" element={<CasesPage />} />
+                <Route path="vorgang/:id" element={<VorgangThreadPage />} />
+              </Route>
+              <Route element={<FeatureRoute feature="calendar" />}>
+                <Route path="calendar" element={<CalendarPage />} />
+              </Route>
+              <Route element={<FeatureRoute feature="projects" />}>
+                {/* Top-layer Projekt (restored above the Case): workspace + create/edit form. */}
+                <Route path="projects" element={<ProjectsPage />} />
+                <Route path="projects/new" element={<ProjectFormPage />} />
+                <Route path="projects/:id" element={<ProjectWorkspacePage />} />
+                <Route path="projects/:id/edit" element={<ProjectFormPage />} />
+              </Route>
+              <Route element={<FeatureRoute feature="planning" />}>
+                <Route path="planning-board" element={<PlanningBoardPage />} />
+              </Route>
+              <Route element={<FeatureRoute feature="finance" />}>
+                <Route path="cost-estimates" element={<CostEstimatesPage />} />
+                <Route path="cost-estimates/new" element={<CostEstimateFormPage />} />
+                <Route path="cost-estimates/:id" element={<CostEstimateFormPage />} />
+                <Route path="invoices" element={<InvoicesPage />} />
+                <Route path="invoices/new" element={<InvoiceFormPage />} />
+                <Route path="invoices/:id" element={<InvoiceFormPage />} />
+                <Route path="catalog" element={<CatalogPage />} />
+              </Route>
               <Route path="employees" element={<EmployeesPage />} />
               <Route path="kiki" element={<Navigate to="/kiki-zentrale/verhalten" replace />} />
               <Route path="kiki-zentrale" element={<Navigate to="/kiki-zentrale/verhalten" replace />} />
