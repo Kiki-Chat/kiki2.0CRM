@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org, require_org_admin
+from app.services.entitlements import require_entitlement
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import InvoiceSend, InvoiceStatus, InvoiceUpsert
 from app.services.common import validate_fk_in_org
@@ -15,7 +16,7 @@ from app.services.invoices import add_days, gen_invoice_number, today_iso
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/invoices", tags=["invoices"])
+router = APIRouter(prefix="/api/invoices", tags=["invoices"], dependencies=[Depends(require_entitlement("finance"))])
 
 # Statuses that may be persisted. "overdue" is derived from due_date, never stored.
 STORABLE_STATUSES = {"draft", "sent", "paid", "cancelled"}

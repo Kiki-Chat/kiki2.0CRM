@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
+from app.services.entitlements import require_entitlement
 from app.db.supabase_client import get_service_client
 
-router = APIRouter(prefix="/api/planning-board", tags=["planning-board"])
+router = APIRouter(prefix="/api/planning-board", tags=["planning-board"], dependencies=[Depends(require_entitlement("planning"))])
 
 
 def _board(org_id: str, date_str: str) -> dict:

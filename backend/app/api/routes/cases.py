@@ -16,13 +16,14 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import CurrentUser, require_org
+from app.services.entitlements import require_entitlement
 from app.db.supabase_client import get_service_client
 from app.services.cases.grouper import propose_cases_for_customer
 from app.services.common import gen_case_number, validate_fk_in_org
 from app.services import invoices
 from app.services.scope import resolve_scope
 
-router = APIRouter(prefix="/api", tags=["cases"])
+router = APIRouter(prefix="/api", tags=["cases"], dependencies=[Depends(require_entitlement("cases"))])
 
 
 def _now() -> str:

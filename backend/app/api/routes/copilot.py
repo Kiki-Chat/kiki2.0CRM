@@ -262,6 +262,17 @@ async def confirm(payload: ConfirmRequest, user: CurrentUser = Depends(require_o
     tool = get_tool(payload.tool)
     if tool is None or not tool.allowed_for(user.role):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Aktion nicht erlaubt.")
+    # Plan gating — refuse a gated tool (402) when the org's plan lacks the feature, so a
+    # confirmed write can't bypass the entitlement locks either.
+    from app.services.copilot.tools import FEATURE_BY_TOOL  # noqa: PLC0415
+    from app.services.entitlements import FEATURE_MIN_PLAN, org_has_feature  # noqa: PLC0415
+
+    gated = FEATURE_BY_TOOL.get(payload.tool)
+    if gated and not org_has_feature(user.org_id, user.role, gated):
+        raise HTTPException(
+            status_code=402,
+            detail={"error": "feature_locked", "feature": gated, "min_plan": FEATURE_MIN_PLAN.get(gated)},
+        )
     if not tool.needs_confirm:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
