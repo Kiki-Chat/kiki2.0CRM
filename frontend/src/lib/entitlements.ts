@@ -1,5 +1,5 @@
 // Frontend mirror of the backend entitlement matrix (app/services/entitlements.py).
-// Drives the locked-menu soft preview + upgrade CTA. The org's GRANTED feature keys
+// Drives the locked-menu liquid-glass paywall + upgrade CTA. The org's GRANTED feature keys
 // come live from /api/me (`features`); this file only holds the display copy + which
 // plan unlocks each feature. Keep in sync with the backend matrix.
 
@@ -64,3 +64,15 @@ export const FEATURE_META: Record<string, FeatureMeta> = {
 }
 
 export const shortPlanName = (t: string | null | undefined) => (t ?? '').replace(/^Kiki\s+/, '')
+
+/** Mirror of backend PLAN_FEATURES — used to refresh sidebar locks instantly after a plan switch. */
+const PLAN_FEATURES: Record<string, readonly string[]> = {
+  'Kiki Basis': [],
+  'Kiki Legacy': ['cases'],
+  'Kiki Pro': ['cases', 'calendar', 'planning'],
+  'Kiki Enterprise': ['cases', 'calendar', 'planning', 'projects', 'finance'],
+}
+
+export function featuresForPlan(planTitle: string | null | undefined): string[] {
+  return [...(PLAN_FEATURES[planTitle ?? ''] ?? [])]
+}

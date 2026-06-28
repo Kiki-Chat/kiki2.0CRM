@@ -46,6 +46,7 @@ import {
   stripeInvoiceStatusLabel,
 } from '../lib/dashApi'
 import { useMe } from '../lib/useMe'
+import { syncMeEntitlements } from '../lib/syncMeEntitlements'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../lib/theme'
 import { useToast } from '../lib/useToast'
@@ -638,9 +639,9 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
   const devSetPlan = useMutation({
     mutationFn: (plan_title: string | null) =>
       apiFetch<BillingSummary>('/api/billing/dev/set-plan', { method: 'POST', body: JSON.stringify({ plan_title }) }),
-    onSuccess: () => {
+    onSuccess: (_data, plan_title) => {
+      syncMeEntitlements(qc, plan_title)
       qc.invalidateQueries({ queryKey: ['billing'] })
-      qc.invalidateQueries({ queryKey: ['me'] }) // re-resolve entitlements → menus re-gate
       flash('Test-Tarif gesetzt — Menüs aktualisiert.')
     },
   })
@@ -690,8 +691,8 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       apiFetch<BillingSummary>('/api/billing/change-plan', { method: 'POST', body: JSON.stringify(vars) }),
     onSuccess: (next) => {
       qc.setQueryData(['billing', 'summary'], next)
+      syncMeEntitlements(qc, next.plan_title)
       qc.invalidateQueries({ queryKey: ['billing'] })
-      qc.invalidateQueries({ queryKey: ['me'] }) // plan changed → re-resolve entitlements
       setShowUpgrade(false)
       setPendingPlan(null)
       flash(`Tarif geändert: ${next.plan_title ?? 'aktualisiert'}.`)
@@ -725,9 +726,9 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
     }
     apiFetch<BillingSummary>('/api/billing/sync', { method: 'POST' })
       .then((s) => {
-        qc.setQueryData(['billing', 'summary'], s) // instant, before the refetch lands
+        qc.setQueryData(['billing', 'summary'], s)
+        syncMeEntitlements(qc, s.plan_title)
         qc.invalidateQueries({ queryKey: ['billing'] })
-        qc.invalidateQueries({ queryKey: ['me'] }) // new subscription → unlock entitlements
         flash(s.status === 'trialing' ? 'Testphase gestartet.' : 'Abonnement aktiviert.')
       })
       .catch(() => {

@@ -17,7 +17,7 @@ export interface Me {
   org_logo_url: string | null
   org_address: Record<string, string> | null
   /** Phase-2 entitlements (from /api/me): the org's current plan + the gateable
-   * feature keys it unlocks. Drives menu/route gating + the locked soft preview. */
+   * feature keys it unlocks. Drives menu/route gating + the liquid-glass paywall. */
   plan_title?: string | null
   features?: string[]
   /** UAT/QA only — when true, the Abrechnung page shows a dev plan-switcher (off in prod). */

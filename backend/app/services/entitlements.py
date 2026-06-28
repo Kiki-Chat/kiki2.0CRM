@@ -13,6 +13,8 @@ layer on via a per-org overrides column (not needed for v1).
 
 from __future__ import annotations
 
+from starlette.requests import Request
+
 # Gateable feature key → German label (drives the upgrade CTA copy).
 FEATURES: dict[str, str] = {
     "cases": "Vorgänge",
@@ -131,17 +133,25 @@ def org_seat_limit(org_id: str | None) -> int:
 def require_entitlement(feature: str):
     """FastAPI dependency factory: 402s a request to a gated route when the org's plan
     doesn't grant ``feature``. Add at the router level: ``dependencies=[Depends(
-    require_entitlement('finance'))]``. Inert unless ENTITLEMENTS_ENFORCED=1."""
+    require_entitlement('finance'))]``. Inert unless ENTITLEMENTS_ENFORCED=1.
+
+    GET/HEAD/OPTIONS are always allowed so the paywall can render the real page
+    (read-only preview) behind the glass overlay; mutations stay blocked."""
     from fastapi import Depends, HTTPException
     from starlette.concurrency import run_in_threadpool
 
     from app.api.deps import CurrentUser, require_org
 
-    async def _dep(user: CurrentUser = Depends(require_org)) -> CurrentUser:
+    async def _dep(
+        request: Request, user: CurrentUser = Depends(require_org)
+    ) -> CurrentUser:
         from app.core.config import settings
 
         # Fast path: enforcement off or platform staff → no DB read, no threadpool hop.
         if not settings.entitlements_enforced or user.role == "super_admin":
+            return user
+        # Read-only preview for the liquid-glass paywall (always-process: data accrues).
+        if request.method in ("GET", "HEAD", "OPTIONS"):
             return user
         allowed = await run_in_threadpool(org_has_feature, user.org_id, user.role, feature)
         if not allowed:

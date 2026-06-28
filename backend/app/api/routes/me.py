@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from starlette.concurrency import run_in_threadpool
 
-from app.api.deps import CurrentUser, get_current_user, require_org
+from app.api.deps import CurrentUser, get_current_user
 from app.core import cache
 from app.core.config import settings
 from app.db.supabase_client import get_service_client
@@ -79,34 +79,3 @@ async def me(user: CurrentUser = Depends(get_current_user)) -> dict:
         # UAT/QA only — drives the dev plan-switcher button (off in prod).
         "dev_plan_switcher": settings.dev_plan_switcher,
     }
-
-
-# ─── GET /api/entitlements/teaser ─────────────────────────────────────────────
-# Real counts from the org's OWN data (which keeps accruing for every tier —
-# always-process), used to make the locked-menu soft preview personal:
-# "Kiki hat aus deinen Anrufen X Angebote vorbereitet." NOT entitlement-gated — it's
-# what we show WHILE the feature is locked. Each count is best-effort (0 on error).
-def _feature_teaser(org_id: str) -> dict:
-    client = get_service_client()
-
-    def _count(table: str) -> int:
-        try:
-            return (
-                client.table(table).select("id", count="exact").eq("org_id", org_id).execute().count
-                or 0
-            )
-        except Exception:  # noqa: BLE001 — a missing/odd table never breaks the teaser
-            return 0
-
-    return {
-        "cases": {"count": _count("cases"), "noun": "Vorgänge"},
-        "calendar": {"count": _count("appointments"), "noun": "Termine"},
-        "planning": {"count": _count("appointments"), "noun": "Einsätze"},
-        "projects": {"count": _count("projects"), "noun": "Projekte"},
-        "finance": {"count": _count("cost_estimates"), "noun": "Angebote"},
-    }
-
-
-@router.get("/entitlements/teaser")
-async def entitlements_teaser(user: CurrentUser = Depends(require_org)) -> dict:
-    return await run_in_threadpool(_feature_teaser, user.org_id)

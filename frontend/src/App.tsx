@@ -87,7 +87,7 @@ export default function App() {
               <Route path="calendar/business-hours" element={<Navigate to="/kiki-zentrale/geschaeftszeiten" replace />} />
               <Route path="meine-abwesenheit" element={<MyAbsencePage />} />
 
-              {/* ── Plan-gated menus (Phase 2). Locked → soft-preview upgrade panel. ── */}
+              {/* ── Plan-gated menus (Phase 2). Locked → liquid-glass paywall overlay. ── */}
               <Route element={<FeatureRoute feature="cases" />}>
                 <Route path="cases" element={<CasesPage />} />
                 <Route path="vorgang/:id" element={<VorgangThreadPage />} />
