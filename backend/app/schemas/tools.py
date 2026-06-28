@@ -63,6 +63,12 @@ class GetAvailableAppointmentsRequest(ToolRequestBase):
     duration_minutes: int | None = Field(default=None, alias="durationMinutes")
     preferred_date: str | None = Field(default=None, alias="preferredDate")
     preferred_time: str | None = Field(default=None, alias="preferredTime")
+    # Routing signal (optional, additive). `category` = the appointment TYPE
+    # (drives duration); `topic` = the call's domain/problem (drives WHO is
+    # competent). When either is present, slots are offered per-competent-employee
+    # and filtered to that person's real availability; absent → org-wide behaviour.
+    category: str | None = None
+    topic: str | None = None
 
 
 # 5. bookAppointment

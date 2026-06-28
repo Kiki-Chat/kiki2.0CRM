@@ -44,6 +44,7 @@ export const NAV: NavEntry[] = [
   { to: '/customers', icon: Users, label: 'Kontakte' },
   { to: '/calendar', icon: Calendar, label: 'Kalender' },
   { to: '/meine-abwesenheit', icon: CalendarClock, label: 'Meine Abwesenheit', employeeOnly: true },
+  { to: '/mein-kalender', icon: Calendar, label: 'Mein Kalender', employeeOnly: true },
   {
     icon: Briefcase,
     label: 'Aufträge',

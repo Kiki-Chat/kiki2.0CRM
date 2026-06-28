@@ -84,10 +84,16 @@ def get_provider(provider: str) -> dict[str, Any]:
 
 
 def can_serve(provider: str, purpose: str) -> bool:
-    """Whether ``provider`` can serve ``purpose`` ('email' | 'calendar')."""
+    """Whether ``provider`` can serve ``purpose``.
+
+    'email' → email-capable providers; 'calendar' (the org/company calendar) and
+    'employee_calendar' (an individual employee's own calendar) → calendar-capable
+    providers. Both calendar purposes share the same provider capability — they
+    differ only in WHERE the grant is stored (oauth_connections vs
+    employee_calendar_connections)."""
     if purpose == "email":
         return provider in EMAIL_PROVIDERS
-    if purpose == "calendar":
+    if purpose in ("calendar", "employee_calendar"):
         return provider in CALENDAR_PROVIDERS
     return False
 

@@ -179,20 +179,23 @@ def _refresh_access_token(provider: str, refresh_token: str) -> dict:
     return r.json()
 
 
-def get_valid_access_token(
-    org_id: str, provider: str, *, now: datetime | None = None, leeway_sec: int = 120
+def access_token_from_conn(
+    conn: dict,
+    provider: str,
+    persist,
+    *,
+    now: datetime | None = None,
+    leeway_sec: int = 120,
 ) -> str:
-    """Return a non-expired access token for (org, provider), refreshing via the
-    stored refresh token when the current one is missing/expired/within
-    ``leeway_sec`` of expiry. Persists the refreshed token.
+    """Return a non-expired access token from a connection-row dict, refreshing
+    via the stored refresh token when the current one is missing/expired/within
+    ``leeway_sec`` of expiry. ``persist(access_token, refresh_token_or_none,
+    expires_at_iso)`` stores the refreshed token — org- vs employee-scoped storage
+    differs only by this callback. Shared by ``get_valid_access_token`` (org) and
+    ``services.employee_calendar`` (per-employee).
 
-    Raises ``OAuthTokenError`` when there is no connection, no refresh token, or
-    the refresh request fails.
+    Raises ``OAuthTokenError`` when there is no refresh token or the refresh fails.
     """
-    conn = get_connection(org_id, provider)
-    if not conn:
-        raise OAuthTokenError(f"no {provider} connection for org {org_id}")
-
     now_dt = _now(now)
     access = decrypt(conn.get("access_token_encrypted"))
     expires_at = _parse_expiry(conn.get("token_expires_at"))
@@ -201,9 +204,7 @@ def get_valid_access_token(
 
     refresh = decrypt(conn.get("refresh_token_encrypted"))
     if not refresh:
-        raise OAuthTokenError(
-            f"{provider} connection for org {org_id} has no refresh token — reconnect"
-        )
+        raise OAuthTokenError(f"{provider} connection has no refresh token — reconnect")
 
     token_data = _refresh_access_token(provider, refresh)
     new_access = token_data.get("access_token")
@@ -211,18 +212,35 @@ def get_valid_access_token(
         raise OAuthTokenError(f"{provider} refresh returned no access_token")
 
     expires_in = int(token_data.get("expires_in") or 0)
-    new_expiry = (
-        (now_dt + timedelta(seconds=expires_in)).isoformat() if expires_in else None
-    )
-    upsert_connection(
-        org_id=org_id,
-        provider=provider,
-        access_token=new_access,
-        refresh_token=token_data.get("refresh_token"),  # None → keep stored one
-        expires_at=new_expiry,
-        account_email=conn.get("account_email"),
-    )
+    new_expiry = (now_dt + timedelta(seconds=expires_in)).isoformat() if expires_in else None
+    persist(new_access, token_data.get("refresh_token"), new_expiry)  # None → keep stored one
     return new_access
+
+
+def get_valid_access_token(
+    org_id: str, provider: str, *, now: datetime | None = None, leeway_sec: int = 120
+) -> str:
+    """Return a non-expired access token for (org, provider), refreshing via the
+    stored refresh token when needed, and persisting the refreshed token.
+
+    Raises ``OAuthTokenError`` when there is no connection, no refresh token, or
+    the refresh request fails.
+    """
+    conn = get_connection(org_id, provider)
+    if not conn:
+        raise OAuthTokenError(f"no {provider} connection for org {org_id}")
+
+    def _persist(access: str, refresh: str | None, expires_at: str | None) -> None:
+        upsert_connection(
+            org_id=org_id,
+            provider=provider,
+            access_token=access,
+            refresh_token=refresh,
+            expires_at=expires_at,
+            account_email=conn.get("account_email"),
+        )
+
+    return access_token_from_conn(conn, provider, _persist, now=now, leeway_sec=leeway_sec)
 
 
 # ─── per-purpose linkage (which provider serves email vs calendar) ───────────

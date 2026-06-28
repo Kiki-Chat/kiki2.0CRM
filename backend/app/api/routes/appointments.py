@@ -8,7 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from app.api.deps import CurrentUser, require_org
 from app.db.supabase_client import get_service_client
 from app.schemas.admin import AppointmentCreate, AppointmentPatch
-from app.services import calendar_sync
+from app.services import calendar_sync, employee_calendar_sync
 from app.services.appointment_notify import notify_appointment_outcome
 from app.services.appointments import import_ics
 from app.services.common import enforce_self_assignment, format_address, validate_fk_in_org
@@ -51,6 +51,36 @@ def _get_appointment(org_id: str, appointment_id: str) -> dict | None:
         .data
     )
     return rows[0] if rows else None
+
+
+def _push_appt_to_employee(org_id: str, appointment_id: str) -> None:
+    """Best-effort: write a confirmed appointment into the assigned employee's own
+    Google calendar (so the job shows on their phone). No-op when the employee
+    hasn't connected a calendar; never raises."""
+    employee_calendar_sync.push_appointment_to_employee(org_id, appointment_id)
+
+
+def _sync_employee_calendar_after_patch(
+    org_id: str, appointment_id: str, prev: dict | None, appt: dict
+) -> None:
+    """Keep the assigned employee's Google event in step after an edit: remove it
+    from a previous assignee on reassignment, and re-push on reassignment / time
+    change for a confirmed appointment. Best-effort."""
+    try:
+        prev_emp = (prev or {}).get("assigned_employee_id")
+        new_emp = (appt or {}).get("assigned_employee_id")
+        time_changed = (prev or {}).get("scheduled_at") != (appt or {}).get("scheduled_at")
+        if prev_emp and prev_emp != new_emp:
+            employee_calendar_sync.remove_appointment_from_employee(
+                org_id, appointment_id, employee_id=prev_emp
+            )
+        if appt.get("status") == "confirmed" and new_emp and (prev_emp != new_emp or time_changed):
+            employee_calendar_sync.remove_appointment_from_employee(
+                org_id, appointment_id, employee_id=new_emp
+            )
+            employee_calendar_sync.push_appointment_to_employee(org_id, appointment_id)
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        log.warning("employee calendar sync after patch failed appt=%s: %s", appointment_id, exc)
 
 
 def _list(org_id: str, frm: str | None, to: str | None) -> list[dict]:
@@ -223,6 +253,9 @@ def _patch(user: CurrentUser, appointment_id: str, payload: AppointmentPatch) ->
 async def update_appointment(
     appointment_id: str, payload: AppointmentPatch, user: CurrentUser = Depends(require_org)
 ) -> dict:
+    # Capture pre-edit state so we can keep the employee's Google calendar in step
+    # when the assignee or the time changes (per-employee push).
+    prev = await run_in_threadpool(_get_appointment, user.org_id, appointment_id)
     appt = await run_in_threadpool(_patch, user, appointment_id, payload)
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
@@ -243,6 +276,10 @@ async def update_appointment(
             _maybe_resend_technician_link,
             user.org_id, appointment_id, appt.get("assigned_employee_id"),
         )
+    # Keep the assigned employee's own Google calendar in step (reassign / time change).
+    await run_in_threadpool(
+        _sync_employee_calendar_after_patch, user.org_id, appointment_id, prev, appt
+    )
     return appt
 
 
@@ -423,6 +460,9 @@ async def confirm_appointment(
     appt["_outbound"] = await run_in_threadpool(
         notify_appointment_outcome, user.org_id, appointment_id, "confirm"
     )
+    # Push the confirmed job into the assigned employee's own Google calendar
+    # (shows on their phone). Best-effort.
+    await run_in_threadpool(_push_appt_to_employee, user.org_id, appointment_id)
     return appt
 
 
@@ -751,6 +791,16 @@ async def approve_customer_proposal(
     appt["_outbound"] = await run_in_threadpool(
         notify_appointment_outcome, user.org_id, appointment_id, "confirm"
     )
+    # Push the now-confirmed job (new time) into the assigned employee's own Google
+    # calendar. Best-effort. _approve_proposal changed the time, so clear any prior
+    # pushed event first, then push the fresh one.
+    emp_id = appt.get("assigned_employee_id")
+    if emp_id:
+        await run_in_threadpool(
+            employee_calendar_sync.remove_appointment_from_employee,
+            user.org_id, appointment_id, employee_id=emp_id,
+        )
+    await run_in_threadpool(_push_appt_to_employee, user.org_id, appointment_id)
     return appt
 
 
@@ -838,8 +888,23 @@ def _send_technician_job(client, org_id: str, appointment_id: str, emp: dict) ->
     return {"url": url, "email_status": email_status}
 
 
+def _appt_window(appt: dict):
+    """(start, end) datetimes for an appointment row, or (None, None) when it has
+    no parseable time. Used for the technician availability guard."""
+    from datetime import datetime, timedelta
+
+    raw = appt.get("scheduled_at")
+    if not raw:
+        return None, None
+    try:
+        start = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None, None
+    return start, start + timedelta(minutes=int(appt.get("duration_minutes") or 60))
+
+
 def _dispatch_technician(user: CurrentUser, appointment_id: str, employee_id: str) -> dict:
-    from app.services import technician_jobs
+    from app.services import availability, technician_jobs
 
     client = get_service_client()
     emp_rows = (
@@ -853,6 +918,24 @@ def _dispatch_technician(user: CurrentUser, appointment_id: str, employee_id: st
         raise HTTPException(
             status_code=422,
             detail="Dieser Mitarbeiter ist nicht als Techniker hinterlegt.",
+        )
+    # Availability guard (phase 1.5): never dispatch a technician who is already on
+    # another job at this slot. Exclude THIS appointment (it is about to become
+    # theirs) so a re-dispatch to the same technician isn't a self-conflict.
+    appt_row = _get_appointment(user.org_id, appointment_id)
+    if not appt_row:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    start, end = _appt_window(appt_row)
+    if start and not availability.is_free(
+        client, user.org_id, employee_id, start, end,
+        exclude_appointment_ids={appointment_id},
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{emp.get('display_name') or 'Dieser Techniker'} ist zu diesem "
+                "Zeitpunkt bereits verplant. Bitte einen verfügbaren Techniker wählen."
+            ),
         )
     # Assign via the normal patch path: FK hardening + self-assignment rules.
     appt = _patch(user, appointment_id, AppointmentPatch(assigned_employee_id=employee_id))
@@ -915,6 +998,66 @@ async def dispatch_technician(
     return await run_in_threadpool(_dispatch_technician, user, appointment_id, payload.employee_id)
 
 
+def _available_technicians(org_id: str, appointment_id: str) -> list[dict] | None:
+    """Technicians ranked for THIS appointment's slot: available first, then
+    fewest open tickets, then name. Each carries ``available`` + ``open_tickets``
+    so the dispatch picker can show 'verfügbar' vs 'verplant' instead of letting
+    the admin pick a clashing technician (phase 1.5). ``None`` if the appointment
+    is gone."""
+    from app.services import assignment, availability
+
+    client = get_service_client()
+    appt = _get_appointment(org_id, appointment_id)
+    if not appt:
+        return None
+    start, end = _appt_window(appt)
+    techs = (
+        client.table("employees")
+        .select("id, display_name, activity_area, calendar_color")
+        .eq("org_id", org_id)
+        .eq("is_technician", True)
+        .eq("is_active", True)
+        .eq("deleted", False)
+        .order("display_name")
+        .execute()
+        .data
+        or []
+    )
+    ids = [t["id"] for t in techs]
+    busy = (
+        availability.load_busy_map(
+            client, org_id, ids, start, end, exclude_appointment_ids={appointment_id}
+        )
+        if start
+        else {}
+    )
+    workload = assignment.open_ticket_counts(client, org_id, ids)
+    current = appt.get("assigned_employee_id")
+    out = [
+        {
+            **t,
+            "available": (True if not start else availability.slot_free(busy.get(t["id"], []), start, end)),
+            "open_tickets": workload.get(t["id"], 0),
+            "is_current": t["id"] == current,
+        }
+        for t in techs
+    ]
+    out.sort(key=lambda x: (not x["available"], x["open_tickets"], (x.get("display_name") or "").lower()))
+    return out
+
+
+@router.get("/{appointment_id}/available-technicians")
+async def available_technicians(
+    appointment_id: str, user: CurrentUser = Depends(require_org)
+) -> list[dict]:
+    """Technicians for this appointment's slot, available-first with a busy flag —
+    powers the dispatch picker so an occupied technician is obvious (phase 1.5)."""
+    res = await run_in_threadpool(_available_technicians, user.org_id, appointment_id)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return res
+
+
 # ─── CRM cancel / delete (propagate to Google) ───────────────────────────────
 # CRM is authoritative for this direction: attempt the Google events.delete
 # (best-effort) ONLY when the appointment was pushed (google_event_id set), then
@@ -926,12 +1069,18 @@ def _cancel(org_id: str, appointment_id: str) -> dict | None:
         return None
     if appt.get("google_event_id"):
         calendar_sync.delete_google_event(org_id, appt["google_event_id"])
+    # Also remove it from the assigned employee's own Google calendar (push side).
+    if appt.get("employee_google_event_id") and appt.get("assigned_employee_id"):
+        employee_calendar_sync.remove_appointment_from_employee(
+            org_id, appointment_id, employee_id=appt["assigned_employee_id"]
+        )
     updated = (
         get_service_client()
         .table("appointments")
         .update({
             "status": "cancelled",
             "google_event_id": None,
+            "employee_google_event_id": None,
             "cancelled_at": _now_iso(),
             # Clear any pending reschedule proposal (bug #3): a cancelled row must
             # NOT keep customer_proposed_* / the safety timer, or the approve
@@ -974,6 +1123,10 @@ def _delete(org_id: str, appointment_id: str) -> bool:
         return False
     if appt.get("google_event_id"):
         calendar_sync.delete_google_event(org_id, appt["google_event_id"])
+    if appt.get("employee_google_event_id") and appt.get("assigned_employee_id"):
+        employee_calendar_sync.remove_appointment_from_employee(
+            org_id, appointment_id, employee_id=appt["assigned_employee_id"]
+        )
     get_service_client().table("appointments").delete().eq("org_id", org_id).eq(
         "id", appointment_id
     ).execute()

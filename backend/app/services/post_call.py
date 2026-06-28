@@ -121,6 +121,11 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
                         continue  # already confirmed by a concurrent delivery
                     notify_appointment_outcome(org_id, appt_id, "confirm")
                     maybe_create_case_for_appointment(org_id, appt, None, client)
+                    # Push the auto-confirmed job into the assigned employee's own
+                    # Google calendar (shows on their phone). Best-effort.
+                    from app.services import employee_calendar_sync
+
+                    employee_calendar_sync.push_appointment_to_employee(org_id, appt_id)
                 except Exception:  # noqa: BLE001 — one bad appt must not stop the rest
                     logger.exception(
                         "L3 auto-confirm failed for appointment %s (conv %s)",

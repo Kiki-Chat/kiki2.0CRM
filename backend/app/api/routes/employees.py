@@ -16,6 +16,7 @@ from app.schemas.admin import (
     EmployeeUpdate,
 )
 from app.services import csv_import, employee_invite, technician_jobs
+from app.services.assignment import open_ticket_counts
 from app.services.common import run_parallel, validate_fk_in_org
 
 log = logging.getLogger(__name__)
@@ -66,10 +67,6 @@ class SetPasswordRequest(BaseModel):
 router = APIRouter(prefix="/api/employees", tags=["employees"])
 
 _OWNER_ROLES = {"org_admin", "super_admin"}
-
-# Case statuses that count as CLOSED — everything else is an "open ticket" for the
-# per-employee workload badge shown while an admin assigns a Fall.
-_CLOSED_CASE = {"completed", "done", "closed", "archived", "cancelled"}
 
 
 def _now() -> datetime:
@@ -122,29 +119,11 @@ def _list(org_id: str, role: str | None = None) -> list[dict]:
         )
 
     def _fetch_open_tickets() -> dict[str, int]:
-        # Per-employee count of OPEN Fälle they're assigned to (case_employees ⨝
-        # cases), shown while an admin assigns a ticket so an overloaded colleague
-        # is obvious. One membership read + one status read, counted in Python.
-        if not emp_ids:
-            return {}
-        ce = (
-            client.table("case_employees").select("case_id, employee_id")
-            .in_("employee_id", emp_ids).execute().data or []
-        )
-        c_ids = list({r["case_id"] for r in ce if r.get("case_id")})
-        open_ids: set[str] = set()
-        if c_ids:
-            for c in (
-                client.table("cases").select("id, status")
-                .eq("org_id", org_id).in_("id", c_ids).execute().data or []
-            ):
-                if (c.get("status") or "") not in _CLOSED_CASE:
-                    open_ids.add(c["id"])
-        counts: dict[str, int] = {}
-        for r in ce:
-            if r.get("case_id") in open_ids:
-                counts[r["employee_id"]] = counts.get(r["employee_id"], 0) + 1
-        return counts
+        # Per-employee count of OPEN Fälle they're assigned to — shown while an
+        # admin assigns a ticket so an overloaded colleague is obvious. Canonical
+        # implementation lives in services.assignment (shared with the auto-suggest
+        # ranker so the badge and the ranking can never disagree).
+        return open_ticket_counts(client, org_id, emp_ids)
 
     user_rows, absence_rows, ticket_counts = run_parallel(
         _fetch_users, _fetch_absences, _fetch_open_tickets
@@ -758,7 +737,10 @@ def _apply_absence(org_id: str, user_id: str, payload: AbsenceApply) -> dict | s
         "ends_at": payload.ends_at,
         "all_day": payload.all_day,
         "reason": payload.reason,
-        "status": "pending",  # employee requests are pending until an admin reviews
+        # A manual self-BLOCK ('block') needs no approval — it's the employee's own
+        # availability and only affects their own bookability. Vacation/illness/…
+        # still land 'pending' for an admin to review.
+        "status": "approved" if payload.type == "block" else "pending",
     }
     return client.table("employee_absences").insert(row).execute().data[0]
 

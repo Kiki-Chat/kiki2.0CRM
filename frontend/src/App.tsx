@@ -23,6 +23,7 @@ const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage').then(
 const VorgangThreadPage = lazy(() => import('./pages/VorgangThreadPage').then((m) => ({ default: m.VorgangThreadPage })))
 const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const MyAbsencePage = lazy(() => import('./pages/MyAbsencePage').then((m) => ({ default: m.MyAbsencePage })))
+const MyCalendarPage = lazy(() => import('./pages/MyCalendarPage').then((m) => ({ default: m.MyCalendarPage })))
 const CasesPage = lazy(() => import('./pages/CasesPage').then((m) => ({ default: m.CasesPage })))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((m) => ({ default: m.ProjectsPage })))
 const ProjectWorkspacePage = lazy(() => import('./pages/ProjectWorkspacePage').then((m) => ({ default: m.ProjectWorkspacePage })))
@@ -87,6 +88,7 @@ export default function App() {
               {/* Business hours moved into Kiki-Zentrale (UAT); keep the old path as a redirect. */}
               <Route path="calendar/business-hours" element={<Navigate to="/kiki-zentrale/geschaeftszeiten" replace />} />
               <Route path="meine-abwesenheit" element={<MyAbsencePage />} />
+              <Route path="mein-kalender" element={<MyCalendarPage />} />
               <Route path="projects" element={<ProjectsPage />} />
               {/* Top-layer Projekt (restored above the Case): full workspace + create/edit form. */}
               <Route path="projects/new" element={<ProjectFormPage />} />

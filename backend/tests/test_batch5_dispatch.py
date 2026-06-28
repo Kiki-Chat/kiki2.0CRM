@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from app.api import deps
 from app.api.routes import appointments as appt_routes
-from app.services.dispatch import resolve_auto_assignee
+from app.services.dispatch import rank_candidates, resolve_auto_assignee
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
@@ -182,6 +182,68 @@ def test_never_raises_on_db_error():
         client, "org-1", category_name="Heizung", summary="Heizung defekt"
     )
     assert match is None
+
+
+# ─── rank_candidates — the competence POOL (heat → Steve AND James) ───────────
+def test_rank_candidates_returns_full_pool():
+    """Two employees who both cover the domain are BOTH returned — where
+    resolve_auto_assignee would lose them to a tie (None)."""
+    client = _employee_client(
+        [_emp("steve", "Heizung Sanitär"), _emp("james", "Heizung Solar")]
+    )
+    pool = rank_candidates(
+        client, "org-1", category_name="Heizung", summary="Die Heizung ist kaputt"
+    )
+    assert {e["id"] for e in pool} == {"steve", "james"}
+    assert all(e["skill_score"] >= 1 for e in pool)
+
+
+def test_rank_candidates_orders_by_score_desc():
+    client = _employee_client(
+        [_emp("weak", "Heizung"), _emp("strong", "Heizung Wartung Notdienst")]
+    )
+    pool = rank_candidates(
+        client, "org-1", category_name="Heizung", summary="Heizung Wartung Notdienst nötig"
+    )
+    assert [e["id"] for e in pool] == ["strong", "weak"]
+    assert pool[0]["skill_score"] > pool[1]["skill_score"]
+
+
+def test_rank_candidates_empty_signal_returns_empty():
+    client = _employee_client([_emp("a", "Heizung")])
+    assert rank_candidates(client, "org-1", category_name="", summary="") == []
+
+
+def test_rank_candidates_skips_blank_activity_area():
+    client = _employee_client([_emp("blank", ""), _emp("real", "Heizung")])
+    pool = rank_candidates(client, "org-1", category_name="Heizung", summary="Heizung")
+    assert [e["id"] for e in pool] == ["real"]
+
+
+def test_rank_candidates_auto_assign_filter_applied_by_default():
+    client = _employee_client([])
+    rank_candidates(client, "org-1", category_name="Heizung", summary="Heizung")
+    chain = client.table.return_value
+    eq_calls = [c.args for c in chain.eq.call_args_list]
+    assert ("auto_assign", True) in eq_calls
+
+
+def test_rank_candidates_full_roster_when_auto_assign_not_required():
+    client = _employee_client([_emp("a", "Heizung", auto_assign=False)])
+    pool = rank_candidates(
+        client, "org-1", category_name="Heizung", summary="Heizung defekt",
+        require_auto_assign=False,
+    )
+    chain = client.table.return_value
+    eq_calls = [c.args for c in chain.eq.call_args_list]
+    assert ("auto_assign", True) not in eq_calls
+    assert [e["id"] for e in pool] == ["a"]
+
+
+def test_rank_candidates_never_raises_on_db_error():
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("db down")
+    assert rank_candidates(client, "org-1", category_name="Heizung", summary="x") == []
 
 
 # ─── 5.4 _dispatch_technician is_technician guard ─────────────────────────────

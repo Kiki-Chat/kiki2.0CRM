@@ -501,7 +501,7 @@ def _fetch_kz_config(org_id: str | UUID) -> dict:
             # prompt on real emergencies).
             "emergency_surcharge_text, forwarding_number, incoming_forwarding_number, "
             "price_info_enabled, conversation_logic, conversation_logic_enabled, "
-            "custom_instructions"
+            "custom_instructions, suggest_employee_enabled"
         )
         .eq("org_id", str(org_id))
         .limit(1)
@@ -1230,7 +1230,16 @@ def render_prompt_for_org(
     # number that doesn't exist; the {{KZ_EMERGENCY}} block still renders its short
     # "kein Notdienst aktiv → Anliegen aufnehmen" fallback.
     text = _apply_feature_regions(
-        text, {"notdienst": bool(kz_cfg.get("emergency_enabled"))}
+        text,
+        {
+            "notdienst": bool(kz_cfg.get("emergency_enabled")),
+            # Default OFF: only when the org enables it may Kiki SPEAK the assigned
+            # employee's name on the call (the routing itself is always on). Kept in
+            # lock-step with the slot tool's name gating (both read
+            # suggest_employee_enabled), so the prompt never invites a name the tool
+            # withholds.
+            "suggest_employee": bool(kz_cfg.get("suggest_employee_enabled")),
+        },
     )
     for key, value in tokens.items():
         text = text.replace("{{" + key + "}}", value)
