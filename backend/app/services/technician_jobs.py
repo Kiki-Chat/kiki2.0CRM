@@ -75,6 +75,30 @@ def _content_type_for(filename: str | None, mime: str | None) -> str:
         return mime
     return _EXT_CONTENT_TYPE.get(_file_ext(filename), "image/jpeg")
 
+# A technician uploads from their phone, where the browser often sends an empty
+# or "application/octet-stream" content-type (especially for HEIC photos). Fall
+# back to the file extension so valid camera uploads aren't wrongly rejected.
+_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "bmp", "tiff"}
+_EXT_CONTENT_TYPE = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
+    "heic": "image/heic", "heif": "image/heif", "webp": "image/webp", "bmp": "image/bmp",
+    "tiff": "image/tiff",
+}
+
+
+def _file_ext(filename: str | None) -> str:
+    return (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+
+
+def _looks_like_image(filename: str | None, mime: str | None) -> bool:
+    return (mime or "").startswith("image/") or _file_ext(filename) in _IMAGE_EXTS
+
+
+def _content_type_for(filename: str | None, mime: str | None) -> str:
+    if (mime or "").startswith("image/"):
+        return mime
+    return _EXT_CONTENT_TYPE.get(_file_ext(filename), "image/jpeg")
+
 
 class JobLinkError(ValueError):
     """User-facing German message (404/410-style failures resolved by caller)."""
