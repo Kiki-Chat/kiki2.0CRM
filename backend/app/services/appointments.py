@@ -254,6 +254,60 @@ def _employee_by_id(client, org_id: str, employee_id: str | None) -> dict | None
     return None
 
 
+def _resolve_slot_assignee(
+    client,
+    org_id: str,
+    *,
+    category: dict | None,
+    summary: str | None,
+    start,
+    duration_minutes: int,
+) -> dict | None:
+    """Pick the responsible employee for a CONCRETE slot: the best AVAILABLE,
+    least-loaded, competent candidate (``services.assignment``). This closes the
+    long-standing ABSENCE TODO — the agent never pins a slot on someone who is
+    already booked, on holiday, or blocked.
+
+    Falls back to a best-effort competent pick (highest skill, then fewest open
+    tickets) when the WHOLE competence pool is busy at that time, and to the
+    legacy category-default / first-employee chain on any error — so booking
+    always resolves *someone* for the team to review. Returns an employee dict
+    (``id``, ``display_name``) or ``None`` when the org has no active employee.
+    """
+    from app.services import assignment, availability
+
+    end = start + timedelta(minutes=duration_minutes)
+    cat_default = category.get("default_employee_id") if category else None
+    cat_name = category["name"] if category else None
+    try:
+        buffer = _scheduling_rules(client, org_id).get("buffer_minutes", 0)
+        pool = assignment.build_pool(
+            client,
+            org_id,
+            category_name=cat_name,
+            summary=summary,
+            category_default_employee_id=cat_default,
+        )
+        if not pool:
+            return None
+        ids = [e["id"] for e in pool if e.get("id")]
+        busy = availability.load_busy_map(client, org_id, ids, start, end)
+        workload = assignment.open_ticket_counts(client, org_id, ids)
+        pick = assignment.pick_for_slot(pool, busy, workload, start, end, buffer_minutes=buffer)
+        chosen = pick or sorted(
+            pool,
+            key=lambda e: (
+                -int(e.get("skill_score") or 0),
+                int(workload.get(e.get("id"), 0)),
+                (e.get("display_name") or "").lower(),
+            ),
+        )[0]
+        return {"id": chosen["id"], "display_name": chosen.get("display_name")}
+    except Exception as exc:  # noqa: BLE001 — availability is best-effort, never blocks booking
+        logger.warning("slot assignee resolution failed (org %s): %s", org_id, str(exc)[:200])
+        return _employee_by_id(client, org_id, cat_default) or _first_employee(client, org_id)
+
+
 def _find_customer_by_phone(client, org_id: str, phone: str | None) -> dict | None:
     if not phone:
         return None
@@ -269,64 +323,44 @@ def _find_customer_by_phone(client, org_id: str, phone: str | None) -> dict | No
     return rows[0] if rows else None
 
 
-# ─── getAvailableAppointments ────────────────────────────────────────────────
-def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -> dict:
-    client = get_service_client()
-    rules = _scheduling_rules(client, org_id)
-    parallel = rules["parallel"]
-    buffer_min = rules["buffer_minutes"]
-    max_per_day = rules["max_per_day"]
-    days = min(int(payload.days or 7), 14)
-    dur = int(payload.duration_minutes or 60)
-    step = max(1, round(dur / 60))
+def _suggest_employee_enabled(client, org_id: str) -> bool:
+    """Per-org "Kiki names the assigned employee out loud on the call" toggle
+    (``agent_configs.suggest_employee_enabled``). Default OFF: the availability +
+    workload ROUTING is always on (the right person is still booked), but the
+    spoken NAME is opt-in. Guarded so a missing column (pre-migration) reads as
+    OFF instead of breaking the slot finder."""
+    try:
+        rows = (
+            client.table("agent_configs")
+            .select("suggest_employee_enabled")
+            .eq("org_id", org_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+    except Exception:  # noqa: BLE001 — column not migrated yet → OFF
+        return False
+    return bool(rows[0].get("suggest_employee_enabled")) if rows else False
 
-    now = now_berlin()
-    # Lead time in HOURS (Kiki-Zentrale Terminregeln): the first bookable moment
-    # is now + lead_hours (optionally counting only weekday hours). On that
-    # earliest day, slots additionally start no earlier than the configured
-    # "Frühester Termin (Uhrzeit)" — later days follow normal business hours.
-    earliest_dt = _add_lead_hours(now, rules["lead_hours"], rules["lead_only_weekdays"])
-    earliest_date = earliest_dt.date()
-    earliest_clock = _earliest_clock_hour(rules["earliest_clock"])
-    # Honor the caller's requested date: anchor the search window there (never
-    # before the lead time) so a "next Tuesday" request returns Tuesday's slots
-    # instead of always the generic earliest ones.
-    pref_date = _parse_iso_date(payload.preferred_date)
-    if pref_date:
-        start_date = max(pref_date, earliest_date)
-        days = min(days, 5)
-        window_end = datetime.combine(start_date, datetime.min.time(), tzinfo=BERLIN) + timedelta(days=days + 1)
-    else:
-        start_date = earliest_date
-        window_end = datetime.combine(start_date, datetime.min.time(), tzinfo=BERLIN) + timedelta(days=days + 1)
-    # A preferred time-of-day biases which slots surface first (and widens
-    # collection so the requested hour isn't truncated away by the early break).
-    pref_hour = None
-    if payload.preferred_time:
-        pt = _parse_time(payload.preferred_time)
-        if pt:
-            pref_hour = pt[0]
-    collect_cap = MAX_SLOTS if pref_hour is None else 48
 
-    existing = (
-        client.table("appointments")
-        .select("scheduled_at, duration_minutes, status")
-        .eq("org_id", org_id)
-        .gte("scheduled_at", now.isoformat())
-        .lte("scheduled_at", window_end.isoformat())
-        .in_("status", ["pending", "confirmed"])
-        .execute()
-        .data
-        or []
-    )
-    intervals = _appt_intervals(existing)
-    # Max. Termine pro Tag: count existing per Berlin calendar date.
-    per_day: Counter = Counter()
-    for (s, _e) in intervals:
-        per_day[s.astimezone(BERLIN).date()] += 1
-
-    business_hours = normalize_business_hours(rules["business_hours"])
-    emp = _first_employee(client, org_id)
+def _collect_slots(
+    *,
+    start_date,
+    days: int,
+    business_hours: dict,
+    now,
+    earliest_dt,
+    earliest_clock: int | None,
+    max_per_day: int,
+    per_day,
+    step: int,
+    collect_cap: int,
+    accept,
+) -> list[dict]:
+    """Walk business-hours slots over the window, emitting the ones ``accept(dt)``
+    approves. ``accept`` returns the chosen employee ``{"id", "name"}`` for the
+    slot, or ``None`` to skip it — the ONLY thing that differs between the org-wide
+    legacy mode and the per-employee routing mode."""
     slots: list[dict] = []
     # The "Frühester Termin (Uhrzeit)" floor applies on the first day we actually
     # offer slots — NOT on earliest_dt.date(), which can be a skipped weekend/holiday
@@ -353,21 +387,152 @@ def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -
                 continue
             if day == first_open_day and earliest_clock is not None and hour < earliest_clock:
                 continue  # "Frühester Termin (Uhrzeit)" on the first bookable day
-            if _slot_conflicts(intervals, dt, dur, buffer_min) >= parallel:
-                continue  # at capacity incl. Pufferzeit
+            who = accept(dt)
+            if who is None:
+                continue  # at capacity / nobody competent free
             slots.append(
                 {
                     "datetime": dt.isoformat(),
                     "displayDate": fmt_date(dt),
                     "displayTime": fmt_time(dt),
-                    "employeeId": emp["id"] if emp else None,
-                    "employeeName": emp["display_name"] if emp else "Team",
+                    "employeeId": who.get("id"),
+                    "employeeName": who.get("name") or "Team",
                 }
             )
             if len(slots) >= collect_cap:
-                break
-        if len(slots) >= collect_cap:
-            break
+                return slots
+    return slots
+
+
+# ─── getAvailableAppointments ────────────────────────────────────────────────
+def get_available_slots(org_id: str, payload: GetAvailableAppointmentsRequest) -> dict:
+    client = get_service_client()
+    rules = _scheduling_rules(client, org_id)
+    parallel = rules["parallel"]
+    buffer_min = rules["buffer_minutes"]
+    max_per_day = rules["max_per_day"]
+    days = min(int(payload.days or 7), 14)
+
+    # Category supplies the DURATION (and a routing signal); an explicit
+    # durationMinutes from the agent still wins. _resolve_category is a no-op
+    # (no DB) when the agent passes no category, so the legacy path is unchanged.
+    category = _resolve_category(client, org_id, getattr(payload, "category", None))
+    dur = int(payload.duration_minutes or 0)
+    if dur <= 0 and category and category.get("duration_minutes"):
+        try:
+            dur = int(category["duration_minutes"])
+        except (TypeError, ValueError):
+            dur = 0
+    dur = max(15, dur) if dur > 0 else 60
+    step = max(1, round(dur / 60))
+
+    now = now_berlin()
+    # Lead time in HOURS (Kiki-Zentrale Terminregeln): the first bookable moment
+    # is now + lead_hours (optionally counting only weekday hours). On that
+    # earliest day, slots additionally start no earlier than the configured
+    # "Frühester Termin (Uhrzeit)" — later days follow normal business hours.
+    earliest_dt = _add_lead_hours(now, rules["lead_hours"], rules["lead_only_weekdays"])
+    earliest_date = earliest_dt.date()
+    earliest_clock = _earliest_clock_hour(rules["earliest_clock"])
+    # Honor the caller's requested date: anchor the search window there (never
+    # before the lead time) so a "next Tuesday" request returns Tuesday's slots
+    # instead of always the generic earliest ones.
+    pref_date = _parse_iso_date(payload.preferred_date)
+    if pref_date:
+        start_date = max(pref_date, earliest_date)
+        days = min(days, 5)
+    else:
+        start_date = earliest_date
+    window_end = datetime.combine(start_date, datetime.min.time(), tzinfo=BERLIN) + timedelta(days=days + 1)
+    # A preferred time-of-day biases which slots surface first (and widens
+    # collection so the requested hour isn't truncated away by the early break).
+    pref_hour = None
+    if payload.preferred_time:
+        pt = _parse_time(payload.preferred_time)
+        if pt:
+            pref_hour = pt[0]
+    collect_cap = MAX_SLOTS if pref_hour is None else 48
+
+    existing = (
+        client.table("appointments")
+        .select("scheduled_at, duration_minutes, status")
+        .eq("org_id", org_id)
+        .gte("scheduled_at", now.isoformat())
+        .lte("scheduled_at", window_end.isoformat())
+        .in_("status", ["pending", "confirmed"])
+        # An employee's PERSONAL Google busy ('employee_busy') blocks only that
+        # person, not org-wide capacity — exclude it from the org slot finder. The
+        # availability engine still counts it per-employee via assigned_employee_id.
+        .neq("source", "employee_busy")
+        .execute()
+        .data
+        or []
+    )
+    intervals = _appt_intervals(existing)
+    # Max. Termine pro Tag: count existing per Berlin calendar date.
+    per_day: Counter = Counter()
+    for (s, _e) in intervals:
+        per_day[s.astimezone(BERLIN).date()] += 1
+    business_hours = normalize_business_hours(rules["business_hours"])
+
+    # Whether Kiki may SPEAK the employee's name (default OFF). The routing below
+    # runs regardless — only the surfaced name is gated.
+    name_enabled = _suggest_employee_enabled(client, org_id)
+
+    # ── Routing mode ─────────────────────────────────────────────────────────
+    # With a routing signal (category/topic) we offer only slots a COMPETENT
+    # person is genuinely free for, tagged with that person; otherwise we keep the
+    # historical org-wide behaviour so the current agent (which sends neither)
+    # never regresses.
+    topic = getattr(payload, "topic", None)
+    pool: list[dict] = []
+    if category or topic:
+        from app.services import assignment, availability
+
+        pool = assignment.build_pool(
+            client,
+            org_id,
+            category_name=(category["name"] if category else None),
+            summary=topic,
+            category_default_employee_id=(category.get("default_employee_id") if category else None),
+        )
+
+    if pool:
+        ids = [e["id"] for e in pool if e.get("id")]
+        busy_map = availability.load_busy_map(client, org_id, ids, now, window_end)
+        workload = assignment.open_ticket_counts(client, org_id, ids)
+
+        def _accept(dt):
+            pick = assignment.pick_for_slot(
+                pool, busy_map, workload, dt, dt + timedelta(minutes=dur), buffer_minutes=buffer_min
+            )
+            if not pick:
+                return None  # nobody competent is free at this slot
+            return {"id": pick["id"], "name": pick.get("display_name") if name_enabled else "Team"}
+    else:
+        emp = _first_employee(client, org_id)
+
+        def _accept(dt):
+            if _slot_conflicts(intervals, dt, dur, buffer_min) >= parallel:
+                return None  # at capacity incl. Pufferzeit
+            return {
+                "id": emp["id"] if emp else None,
+                "name": (emp["display_name"] if (emp and name_enabled) else "Team"),
+            }
+
+    slots = _collect_slots(
+        start_date=start_date,
+        days=days,
+        business_hours=business_hours,
+        now=now,
+        earliest_dt=earliest_dt,
+        earliest_clock=earliest_clock,
+        max_per_day=max_per_day,
+        per_day=per_day,
+        step=step,
+        collect_cap=collect_cap,
+        accept=_accept,
+    )
 
     # Surface slots nearest the requested time-of-day first, then truncate.
     if pref_hour is not None:
@@ -442,26 +607,18 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
             duration_minutes = max(15, int(category["duration_minutes"]))
         except (TypeError, ValueError):
             duration_minutes = 60
-    emp = None
-    if category:
-        emp = _employee_by_id(client, org_id, category.get("default_employee_id"))
-    # EMP-030 (ADDITIVE): when no explicit category default applies, try to match
-    # an auto-assign employee by Tätigkeitsbereich before the generic first-employee
-    # fallback. Never raises and only fires when the category-default path came up
-    # empty, so the existing default_employee_id behaviour is unchanged.
-    if not emp:
-        from app.services.dispatch import resolve_auto_assignee
-
-        auto = resolve_auto_assignee(
-            client,
-            org_id,
-            category_name=category["name"] if category else payload.category,
-            summary=payload.description,
-        )
-        if auto:
-            emp = auto
-    if not emp:
-        emp = _first_employee(client, org_id)
+    # Availability- + workload-aware assignment for THIS slot (closes the
+    # long-standing ABSENCE TODO): the best AVAILABLE, least-loaded, competent
+    # person — not blindly the category default / first employee. Category still
+    # supplies the DURATION above; the Tätigkeitsbereich supplies WHO.
+    emp = _resolve_slot_assignee(
+        client,
+        org_id,
+        category=category,
+        summary=payload.description or payload.category,
+        start=dt,
+        duration_minutes=duration_minutes,
+    )
 
     day_start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)

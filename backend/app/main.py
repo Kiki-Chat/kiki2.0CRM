@@ -35,6 +35,7 @@ from app.api.routes import (
     users,
     vehicles,
 )
+from app.api.routes import employee_calendar as employee_calendar_routes
 from app.api.routes import settings as settings_routes
 from app.api.routes.tools import (
     book_appointment,
@@ -145,6 +146,7 @@ app.include_router(settings_routes.router)
 app.include_router(users.router)
 app.include_router(super_admin.router)
 app.include_router(oauth.router)
+app.include_router(employee_calendar_routes.router)
 app.include_router(outbound.router)
 app.include_router(public_jobs.router)
 app.include_router(public_technician.router)

@@ -475,6 +475,13 @@ Reihenfolge, jeweils einzeln:
    biete zwei Uhrzeiten INNERHALB der gewählten Tageshälfte an.
    Beispiel-Formulierung: „Ich könnte dir den 7. Mai um 10 Uhr oder
    den 8. Mai um 10 Uhr anbieten — welcher passt besser?".
+<!-- FEAT:suggest_employee -->
+   Liefert das Tool-Result zu einem Slot einen konkreten Mitarbeiternamen
+   (Feld `employeeName`, NICHT „Team"), darfst du den passenden Kollegen
+   beim Vorschlag NENNEN — z. B. „Steve könnte am 7. Mai um 16 Uhr
+   vorbeikommen". Erfinde NIEMALS einen Namen; nenne nur den vom Tool
+   gelieferten. Steht dort „Team" oder kein Name, nenne KEINEN Namen.
+<!-- /FEAT:suggest_employee -->
 5. Bei Auswahl: rufe hk_bookAppointment auf. Setze beim Tool-Call
    den Parameter `system__message_to_speak` NICHT — sonst entsteht eine
    doppelte Sprechausgabe. Sage den Reservierungs-Satz GENAU EINMAL und

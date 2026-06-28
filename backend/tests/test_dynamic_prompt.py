@@ -256,8 +256,10 @@ def test_notdienst_region_gated_in_real_template():
     removes it but keeps the {{KZ_EMERGENCY}} fallback + the core outside-hours
     flow. ON must be byte-identical to the template with the 4 marker lines gone."""
     tpl = ac._load_prompt_template()
-    on = ac._apply_feature_regions(tpl, {"notdienst": True})
-    off = ac._apply_feature_regions(tpl, {"notdienst": False})
+    # suggest_employee stays ON in both branches so this test remains focused on
+    # the notdienst region (the template now also carries FEAT:suggest_employee).
+    on = ac._apply_feature_regions(tpl, {"notdienst": True, "suggest_employee": True})
+    off = ac._apply_feature_regions(tpl, {"notdienst": False, "suggest_employee": True})
 
     # ON keeps everything, no marker leakage, and equals the marker-stripped template.
     assert "## Vorgehen bei bestätigtem Notfall" in on
@@ -265,6 +267,8 @@ def test_notdienst_region_gated_in_real_template():
     assert "<!-- FEAT" not in on
     assert on == tpl.replace("<!-- FEAT:notdienst -->\n", "").replace(
         "<!-- /FEAT:notdienst -->\n", ""
+    ).replace("<!-- FEAT:suggest_employee -->\n", "").replace(
+        "<!-- /FEAT:suggest_employee -->\n", ""
     )
 
     # OFF removes both Notdienst regions but keeps the fallback + core flow.

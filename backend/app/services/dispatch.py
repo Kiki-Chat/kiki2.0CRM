@@ -77,3 +77,60 @@ def resolve_auto_assignee(
     except Exception as exc:  # noqa: BLE001 — auto-assign is best-effort
         logger.warning("resolve_auto_assignee failed (org %s): %s", org_id, str(exc)[:200])
         return None
+
+
+def rank_candidates(
+    client,
+    org_id: str,
+    *,
+    category_name: str | None,
+    summary: str | None,
+    require_auto_assign: bool = True,
+    exclude_inactive: bool = True,
+) -> list[dict]:
+    """The whole competence POOL for a signal, ranked by Tätigkeitsbereich match.
+
+    Where :func:`resolve_auto_assignee` collapses to a single distinctive winner
+    (used as booking's silent fallback), this returns EVERY employee whose
+    activity_area overlaps the signal (category_name + summary) with score > 0,
+    sorted by score desc then name — i.e. "heat → Steve AND James". The
+    availability + workload ranker (``services.assignment``) then chooses among
+    them. Each returned dict carries a ``skill_score`` (token-overlap count).
+
+    Empty signal, no overlap, or no eligible employees → ``[]``. Never raises —
+    routing is a best-effort convenience layered over manual assignment.
+
+    ``require_auto_assign`` gates on the employees' "Automatische Zuweisung"
+    opt-in (the UI surface where activity_area is configured). Pass ``False`` to
+    rank the full active roster (e.g. to power an admin's manual picker).
+    """
+    try:
+        signal_tokens = _tokens(f"{category_name or ''} {summary or ''}")
+        if not signal_tokens:
+            return []
+
+        q = (
+            client.table("employees")
+            .select("id, display_name, activity_area, auto_assign, is_active")
+            .eq("org_id", org_id)
+        )
+        if require_auto_assign:
+            q = q.eq("auto_assign", True)
+        if exclude_inactive:
+            q = q.eq("is_active", True)
+        rows = q.execute().data or []
+
+        scored: list[dict] = []
+        for emp in rows:
+            area = emp.get("activity_area")
+            if not area or not str(area).strip():
+                continue  # "non-empty activity_area" requirement
+            score = len(signal_tokens & _tokens(area))
+            if score > 0:
+                scored.append({**emp, "skill_score": score})
+
+        scored.sort(key=lambda e: (-e["skill_score"], (e.get("display_name") or "").lower()))
+        return scored
+    except Exception as exc:  # noqa: BLE001 — best-effort routing
+        logger.warning("rank_candidates failed (org %s): %s", org_id, str(exc)[:200])
+        return []

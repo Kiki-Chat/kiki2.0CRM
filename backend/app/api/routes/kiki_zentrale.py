@@ -30,7 +30,7 @@ MAX_PDF_BYTES = 20 * 1024 * 1024
 
 # agent_configs columns owned by Kiki-Zentrale (returned in the GET aggregator).
 _CONFIG_COLS = (
-    "kiki_level, appointments_enabled, appointments_level, kva_enabled, kva_level, "
+    "kiki_level, appointments_enabled, appointments_level, suggest_employee_enabled, kva_enabled, kva_level, "
     "projects_enabled, projects_level, invoices_enabled, invoices_level, "
     "welcome_message, custom_instructions, trade, knowledge_text, problem_description, "
     "prompt_manual_override, forwarding_number, "
@@ -134,6 +134,9 @@ class VerhaltenUpdate(BaseModel):
     # Per-capability autonomy (topics 19/21/22)
     appointments_enabled: bool | None = None
     appointments_level: int | None = None
+    # Real-time on-call naming: when ON, Kiki may say the assigned employee's name
+    # on the call (default OFF). The routing itself is always on; this gates speech.
+    suggest_employee_enabled: bool | None = None
     # Bug #3: hours a pending reschedule waits before the safety-timer resolves it.
     reschedule_request_timeout_hours: int | None = None
     kva_enabled: bool | None = None
@@ -605,7 +608,7 @@ async def update_verhalten(
         k: data[k]
         for k in (
             "kiki_level", "welcome_message", "welcome_messages", "custom_instructions",
-            "appointments_enabled", "appointments_level",
+            "appointments_enabled", "appointments_level", "suggest_employee_enabled",
             "reschedule_request_timeout_hours",
             "kva_enabled", "kva_level",
             "projects_enabled", "projects_level",

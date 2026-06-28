@@ -38,6 +38,7 @@ export function AutonomieSection({ data, flash }: { data: KzOverview; flash: (m:
   const initialCaps = {
     appointments_enabled: cfg.appointments_enabled,
     appointments_level: cfg.appointments_level,
+    suggest_employee_enabled: cfg.suggest_employee_enabled ?? false,
     reschedule_request_timeout_hours: cfg.reschedule_request_timeout_hours ?? 24,
     kva_enabled: cfg.kva_enabled,
     kva_level: cfg.kva_level,
@@ -128,29 +129,48 @@ export function AutonomieSection({ data, flash }: { data: KzOverview; flash: (m:
                     </div>
                     <p className="mt-2 text-xs text-body">{cap.levels[lvl - 1]}</p>
                     {cap.key === 'appointments' && (
-                      <div className="mt-3 border-t border-border pt-3">
-                        <label className="flex items-center justify-between gap-3">
-                          <span className="min-w-0">
-                            <span className="block text-xs font-semibold text-text">Umbuchungs-Timer</span>
-                            <span className="block text-xs text-muted">
-                              Stunden, die eine offene Umbuchung auf deine Entscheidung wartet.
-                              {lvl >= 3
-                                ? ' Danach wird sie automatisch aufgelöst.'
-                                : ' Danach wird sie als überfällig markiert (keine automatische Stornierung).'}
+                      <>
+                        <div className="mt-3 border-t border-border pt-3">
+                          <label className="flex items-center justify-between gap-3">
+                            <span className="min-w-0">
+                              <span className="block text-xs font-semibold text-text">Umbuchungs-Timer</span>
+                              <span className="block text-xs text-muted">
+                                Stunden, die eine offene Umbuchung auf deine Entscheidung wartet.
+                                {lvl >= 3
+                                  ? ' Danach wird sie automatisch aufgelöst.'
+                                  : ' Danach wird sie als überfällig markiert (keine automatische Stornierung).'}
+                              </span>
                             </span>
-                          </span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={168}
-                            value={caps.reschedule_request_timeout_hours}
-                            onChange={(e) =>
-                              setCap('reschedule_request_timeout_hours', Math.max(1, Number(e.target.value) || 1))
-                            }
-                            className="w-20 shrink-0 rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-text outline-none focus:border-green-primary"
-                          />
-                        </label>
-                      </div>
+                            <input
+                              type="number"
+                              min={1}
+                              max={168}
+                              value={caps.reschedule_request_timeout_hours}
+                              onChange={(e) =>
+                                setCap('reschedule_request_timeout_hours', Math.max(1, Number(e.target.value) || 1))
+                              }
+                              className="w-20 shrink-0 rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-text outline-none focus:border-green-primary"
+                            />
+                          </label>
+                        </div>
+                        <div className="mt-3 border-t border-border pt-3">
+                          <label className="flex items-center justify-between gap-3">
+                            <span className="min-w-0">
+                              <span className="block text-xs font-semibold text-text">Mitarbeiter am Telefon nennen</span>
+                              <span className="block text-xs text-muted">
+                                Kiki nennt im Gespräch den Namen des passenden, freien Mitarbeiters
+                                (z. B. „Steve kann um 16 Uhr kommen“). Die intelligente Zuweisung läuft
+                                immer — dieser Schalter steuert nur, ob der Name ausgesprochen wird. Nach
+                                dem Speichern wird die Telefon-KI neu abgeglichen.
+                              </span>
+                            </span>
+                            <Toggle
+                              on={!!caps.suggest_employee_enabled}
+                              onChange={(v) => setCap('suggest_employee_enabled', v)}
+                            />
+                          </label>
+                        </div>
+                      </>
                     )}
                   </div>
                 )}

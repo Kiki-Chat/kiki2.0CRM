@@ -52,7 +52,7 @@ router = APIRouter(prefix="/api/settings/oauth", tags=["oauth"])
 
 log = logging.getLogger(__name__)
 
-_VALID_PURPOSES = ("email", "calendar")
+_VALID_PURPOSES = ("email", "calendar", "employee_calendar")
 
 
 def _auto_sync_calendar(org_id: str, provider: str, purpose: str) -> None:
@@ -210,6 +210,32 @@ async def callback(
         else None
     )
 
+    # Per-employee calendar: store the grant against the consenting EMPLOYEE
+    # (employee_calendar_connections), never the org-level stores. Reuses this same
+    # registered redirect URI + popup flow — only the persistence target differs.
+    if purpose == "employee_calendar":
+        try:
+            await run_in_threadpool(
+                _persist_employee_grant,
+                org_id=org_id,
+                user_id=_user_id,
+                provider=provider,
+                refresh_token=token_data["refresh_token"],
+                access_token=token_data["access_token"],
+                expires_at=expires_at,
+                account_email=account_email,
+                scope=token_data.get("scope"),
+            )
+        except Exception as exc:  # noqa: BLE001 — surface the reason in the popup
+            return _popup_close_response(
+                success=False, message=f"Kalender konnte nicht verbunden werden: {exc}"
+            )
+        # Best-effort initial pull of this employee's busy time (per-employee sync).
+        await run_in_threadpool(_auto_sync_employee_calendar, org_id, _user_id, provider)
+        return _popup_close_response(
+            success=True, message=f"Dein Kalender wurde mit {account_email or provider} verbunden."
+        )
+
     await run_in_threadpool(
         _persist_grant_and_link,
         org_id=org_id,
@@ -320,6 +346,53 @@ async def disconnect(
 
 
 # ─── Persistence helpers ─────────────────────────────────────────────────────
+def _persist_employee_grant(
+    *,
+    org_id: str,
+    user_id: str,
+    provider: str,
+    refresh_token: str,
+    access_token: str,
+    expires_at: str | None,
+    account_email: str | None,
+    scope: str | None = None,
+) -> None:
+    """Store an EMPLOYEE's own calendar grant, keyed by the employee resolved from
+    the consenting login user. Never touches oauth_connections / email_configs."""
+    from app.services import employee_calendar
+
+    employee_id = employee_calendar.resolve_employee_id(org_id, user_id)
+    if not employee_id:
+        raise RuntimeError("Kein Mitarbeiterprofil für dieses Konto gefunden.")
+    employee_calendar.upsert_connection(
+        org_id=org_id,
+        employee_id=employee_id,
+        provider=provider,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_at=expires_at,
+        account_email=account_email,
+        scope=scope,
+    )
+
+
+def _auto_sync_employee_calendar(org_id: str, user_id: str, provider: str) -> None:
+    """On a fresh employee calendar connect, pull that employee's busy time so the
+    availability engine sees it immediately. Best-effort — the grant is already
+    persisted; a sync hiccup must never fail the connect. Only Google has a
+    working read-sync today; the actual pull lands with the per-employee sync."""
+    if provider != "google":
+        return
+    try:
+        from app.services import employee_calendar, employee_calendar_sync
+
+        employee_id = employee_calendar.resolve_employee_id(org_id, user_id)
+        if employee_id:
+            employee_calendar_sync.pull_employee_busy(org_id, employee_id)
+    except Exception:  # noqa: BLE001 — connect already succeeded; sync is best-effort
+        log.warning("auto-sync after employee calendar connect failed org=%s", org_id, exc_info=True)
+
+
 def _persist_grant_and_link(
     *,
     org_id: str,

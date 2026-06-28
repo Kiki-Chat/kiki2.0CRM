@@ -24,6 +24,7 @@ const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage').then(
 const VorgangThreadPage = lazy(() => import('./pages/VorgangThreadPage').then((m) => ({ default: m.VorgangThreadPage })))
 const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const MyAbsencePage = lazy(() => import('./pages/MyAbsencePage').then((m) => ({ default: m.MyAbsencePage })))
+const MyCalendarPage = lazy(() => import('./pages/MyCalendarPage').then((m) => ({ default: m.MyCalendarPage })))
 const CasesPage = lazy(() => import('./pages/CasesPage').then((m) => ({ default: m.CasesPage })))
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then((m) => ({ default: m.ProjectsPage })))
 const ProjectWorkspacePage = lazy(() => import('./pages/ProjectWorkspacePage').then((m) => ({ default: m.ProjectWorkspacePage })))
@@ -86,6 +87,7 @@ export default function App() {
                   redirect (ungated — it only points to Kiki-Zentrale). */}
               <Route path="calendar/business-hours" element={<Navigate to="/kiki-zentrale/geschaeftszeiten" replace />} />
               <Route path="meine-abwesenheit" element={<MyAbsencePage />} />
+              <Route path="mein-kalender" element={<MyCalendarPage />} />
 
               {/* ── Plan-gated menus (Phase 2). Locked → liquid-glass paywall overlay. ── */}
               <Route element={<FeatureRoute feature="cases" />}>

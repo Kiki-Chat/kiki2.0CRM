@@ -23,6 +23,9 @@ import {
 } from '../lib/liveFill'
 import { useMe } from '../lib/useMe'
 import { cn } from '../lib/utils'
+import { AvailabilityRail } from './calendar/AvailabilityRail'
+import { SpurenView } from './calendar/SpurenView'
+import { type Absence, buildColorMap, initials } from './calendar/shared'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Appointment {
@@ -53,6 +56,17 @@ interface Employee {
   display_name: string
   is_active?: boolean
   is_technician?: boolean
+  calendar_color?: string | null
+  activity_area?: string | null
+  open_tickets?: number
+  present?: boolean
+}
+interface AvailTech {
+  id: string
+  display_name: string
+  available: boolean
+  open_tickets: number
+  is_current?: boolean
 }
 interface CustomerOption {
   id: string
@@ -62,7 +76,6 @@ interface CustomerOption {
   address?: { raw?: string } | string | null
 }
 // ─── Constants ───────────────────────────────────────────────────────────────
-const EMP_COLORS = ['#2D6B3D', '#2563EB', '#7C3AED', '#DB2777', '#D97706', '#0891B2', '#65A30D']
 const UNASSIGNED_COLOR = '#78756F'
 // Google-imported events render as read-only "blocked time" — distinct slate.
 const GOOGLE_BLOCK_COLOR = '#64748B'
@@ -92,11 +105,8 @@ const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.ge
 const hm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`
 
 function useEmployeeColors(employees: Employee[]): (empId: string | null) => string {
-  return useMemo(() => {
-    const map = new Map<string, string>()
-    employees.forEach((e, i) => map.set(e.id, EMP_COLORS[i % EMP_COLORS.length]))
-    return (empId: string | null) => (empId && map.get(empId)) || UNASSIGNED_COLOR
-  }, [employees])
+  // Prefer each employee's own calendar_color, fall back to a stable palette.
+  return useMemo(() => buildColorMap(employees), [employees])
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -116,6 +126,8 @@ export function CalendarPage() {
   const [editAppt, setEditAppt] = useState<Appointment | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [mode, setMode] = useState<'appointments' | 'projects'>('appointments')
+  const [calView, setCalView] = useState<'kalender' | 'spuren'>('kalender')
+  const [spurenDate, setSpurenDate] = useState<Date>(() => new Date())
   // Drag/resize lands here until the user confirms — moving a confirmed
   // appointment fires the real reschedule call+email server-side, so it must
   // never happen from an accidental drag.
@@ -130,7 +142,7 @@ export function CalendarPage() {
     queryKey: ['employees'],
     queryFn: () => apiFetch<Employee[]>('/api/employees'),
   })
-  const { me } = useMe()
+  const { me, isAdmin } = useMe()
   const colorFor = useEmployeeColors(employees)
 
   // Hey-Kiki live fill: a confirmed copilot create_appointment lands here via
@@ -167,6 +179,15 @@ export function CalendarPage() {
     // The calendar is a shared, multi-user surface — poll so edits made by another
     // user/account appear here without a manual reload.
     refetchInterval: 30_000,
+  })
+
+  // Absences (admin only) for the master calendar: shown as blocked time on the
+  // lanes + week/month and fed into the availability rail.
+  const { data: absences = [] } = useQuery({
+    queryKey: ['calendar-absences', range?.from, range?.to],
+    queryFn: () => apiFetch<Absence[]>(`/api/employees/absences?from=${range!.from}&to=${range!.to}`),
+    enabled: !!range && isAdmin,
+    staleTime: 60_000,
   })
 
   // FIX 1 — calendar connection state, to gate the push button (provider-aware).
@@ -221,12 +242,16 @@ export function CalendarPage() {
         .map((a) => {
           const start = new Date(a.scheduled_at!)
           const end = new Date(start.getTime() + (a.duration_minutes ?? 60) * 60000)
-          const isGoogle = a.source === 'google_import'
+          // Org Google imports AND an employee's personal busy are external
+          // "blocked time" — grey, read-only, no customer detail surfaced.
+          const isExternal = a.source === 'google_import' || a.source === 'employee_busy'
           const isTentative = a.status === 'pending'
-          const color = isGoogle ? GOOGLE_BLOCK_COLOR : colorFor(a.assigned_employee_id)
+          const color = isExternal ? GOOGLE_BLOCK_COLOR : colorFor(a.assigned_employee_id)
           const base = a.title ?? 'Termin'
-          const title = isGoogle
-            ? `🔒 ${a.title ?? 'Google-Termin'}`
+          const title = isExternal
+            ? a.source === 'employee_busy'
+              ? '🔒 Gebucht'
+              : `🔒 ${a.title ?? 'Google-Termin'}`
             : a.customer_name
               ? `${(isTentative ? '✎ ' : '') + base} · ${a.customer_name}`
               : (isTentative ? '✎ ' : '') + base
@@ -237,16 +262,55 @@ export function CalendarPage() {
             end: end.toISOString(),
             backgroundColor: color,
             borderColor: color,
-            // Google blocks AND tentative suggestions are read-only on the grid:
+            // External blocks AND tentative suggestions are read-only on the grid:
             // a drag must never silently mutate an unconfirmed slot (confirm/adjust
             // happens via the detail modal). Confirmed CRM events stay draggable.
-            editable: !isGoogle && !isTentative,
+            editable: !isExternal && !isTentative,
             classNames: isTentative ? ['cal-tentative'] : [],
-            extendedProps: { appt: a },
+            extendedProps: { appt: a, external: isExternal },
           }
         }),
     [appointments, filter, myEmployeeId, colorFor],
   )
+
+  // Approved absences as soft all-day background bars on the week/month calendar.
+  const absenceEvents = useMemo(
+    () =>
+      absences
+        .filter((ab) => !ab.status || ab.status === 'approved')
+        .map((ab) => ({
+          id: `ab-${ab.id}`,
+          title: `${ab.employee_name ?? 'Abwesend'}${ab.type === 'block' ? ' · Blockiert' : ''}`,
+          start: ab.starts_at,
+          end: ab.ends_at,
+          display: 'background' as const,
+          backgroundColor: 'rgba(120,117,111,0.18)',
+          extendedProps: { absence: true },
+        })),
+    [absences],
+  )
+  const calEvents = useMemo(() => [...events, ...absenceEvents], [events, absenceEvents])
+
+  // Which employees get a lane in the Spuren view — follows the dropdown filter.
+  const spurenEmployees = useMemo(() => {
+    const active = employees.filter((e) => e.is_active !== false)
+    if (filter !== 'all' && filter !== 'mine' && filter !== 'unassigned') {
+      return active.filter((e) => e.id === filter)
+    }
+    if (filter === 'mine' && myEmployeeId) return active.filter((e) => e.id === myEmployeeId)
+    return active
+  }, [employees, filter, myEmployeeId])
+
+  // Spuren has no FullCalendar to fire datesSet, so drive the fetch range from the
+  // chosen day (appointments + absences load for exactly that day).
+  useEffect(() => {
+    if (calView !== 'spuren') return
+    const from = new Date(spurenDate)
+    from.setHours(0, 0, 0, 0)
+    const to = new Date(spurenDate)
+    to.setHours(23, 59, 59, 999)
+    setRange({ from: from.toISOString(), to: to.toISOString() })
+  }, [calView, spurenDate])
 
   // Project timeline: each project rendered as a bar spanning start_date → end_date.
   const { data: projects = [] } = useQuery({
@@ -372,6 +436,12 @@ export function CalendarPage() {
             <button onClick={() => setMode('appointments')} className={cn('rounded px-3 py-1 text-sm', mode === 'appointments' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Termine</button>
             <button onClick={() => setMode('projects')} className={cn('rounded px-3 py-1 text-sm', mode === 'projects' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Vorgangs-Verlauf</button>
           </div>
+          {mode === 'appointments' && (
+            <div className="flex gap-1 rounded-md border border-border bg-alt p-1">
+              <button onClick={() => setCalView('kalender')} className={cn('rounded px-3 py-1 text-sm', calView === 'kalender' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Kalender</button>
+              <button onClick={() => setCalView('spuren')} className={cn('rounded px-3 py-1 text-sm', calView === 'spuren' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Spuren</button>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {mode === 'appointments' && (
@@ -476,59 +546,103 @@ export function CalendarPage() {
         </div>
       )}
 
-      {/* Calendar */}
-      <div className="min-h-0 flex-1 rounded-xl border border-border bg-surface p-4">
-        <FullCalendar
-          ref={calRef}
-          plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
-          initialView="timeGridWeek"
-          locale={deLocale}
-          firstDay={1}
-          height="100%"
-          headerToolbar={{
-            left: 'prev,next today',
-            center: 'title',
-            right: 'timeGridWeek,dayGridMonth,timeGridDay,listWeek',
-          }}
-          buttonText={{ listWeek: 'Terminübersicht' }}
-          slotMinTime="06:00:00"
-          slotMaxTime="21:00:00"
-          scrollTime="07:30:00"
-          nowIndicator
-          dayMaxEvents={3}
-          eventDisplay="block"
-          eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
-          // Google-style column headers in week/day view: small weekday + big date.
-          dayHeaderContent={(arg) => {
-            if (!arg.view.type.startsWith('timeGrid')) return arg.text
-            return (
-              <>
-                <span className="cal-dow">{arg.date.toLocaleDateString('de-DE', { weekday: 'short' })}</span>
-                <span className="cal-day">{arg.date.getDate()}</span>
-              </>
-            )
-          }}
-          events={mode === 'projects' ? projectEvents : events}
-          eventDrop={onEventChange}
-          eventResize={onEventChange}
-          datesSet={(info) =>
-            setRange({ from: info.start.toISOString(), to: info.end.toISOString() })
-          }
-          dateClick={(info) => {
-            if (mode === 'projects') return
-            const d = info.date
-            if (info.allDay) d.setHours(9, 0, 0, 0)
-            setCreateAt(d)
-          }}
-          eventClick={(info) => {
-            if (mode === 'projects') {
-              navigate(`/projects/${info.event.extendedProps.projectId}`)
-              return
-            }
-            const appt = info.event.extendedProps.appt as Appointment
-            if (appt) setDetail(appt)
-          }}
-        />
+      {/* Calendar + availability rail */}
+      <div className="flex min-h-0 flex-1 gap-4">
+        {mode === 'appointments' && calView === 'spuren' ? (
+          <div className="min-h-0 flex-1">
+            <SpurenView
+              date={spurenDate}
+              employees={spurenEmployees}
+              appointments={appointments}
+              absences={absences}
+              colorFor={colorFor}
+              onSelectAppt={(a) => setDetail(a)}
+              onDateChange={setSpurenDate}
+            />
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 rounded-xl border border-border bg-surface p-4">
+            <FullCalendar
+              ref={calRef}
+              plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
+              initialView="timeGridWeek"
+              locale={deLocale}
+              firstDay={1}
+              height="100%"
+              headerToolbar={{
+                left: 'prev,next today',
+                center: 'title',
+                right: 'timeGridWeek,dayGridMonth,timeGridDay,listWeek',
+              }}
+              buttonText={{ listWeek: 'Terminübersicht' }}
+              slotMinTime="06:00:00"
+              slotMaxTime="21:00:00"
+              scrollTime="07:30:00"
+              nowIndicator
+              dayMaxEvents={3}
+              eventDisplay="block"
+              eventTimeFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
+              dayHeaderContent={(arg) => {
+                if (!arg.view.type.startsWith('timeGrid')) return arg.text
+                return (
+                  <>
+                    <span className="cal-dow">{arg.date.toLocaleDateString('de-DE', { weekday: 'short' })}</span>
+                    <span className="cal-day">{arg.date.getDate()}</span>
+                  </>
+                )
+              }}
+              eventContent={(arg) => {
+                if (arg.event.display === 'background') return undefined
+                const appt = arg.event.extendedProps.appt as Appointment | undefined
+                const external = !!arg.event.extendedProps.external
+                const empId = appt?.assigned_employee_id ?? null
+                return (
+                  <div className="flex items-center gap-1 overflow-hidden px-0.5 py-px">
+                    {!external && empId && (
+                      <span
+                        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-bold text-white ring-1 ring-white/50"
+                        style={{ background: colorFor(empId) }}
+                      >
+                        {initials(appt?.employee_name)}
+                      </span>
+                    )}
+                    {arg.timeText && <span className="shrink-0 font-semibold">{arg.timeText}</span>}
+                    <span className="truncate">{arg.event.title}</span>
+                  </div>
+                )
+              }}
+              events={mode === 'projects' ? projectEvents : calEvents}
+              eventDrop={onEventChange}
+              eventResize={onEventChange}
+              datesSet={(info) =>
+                setRange({ from: info.start.toISOString(), to: info.end.toISOString() })
+              }
+              dateClick={(info) => {
+                if (mode === 'projects') return
+                const d = info.date
+                if (info.allDay) d.setHours(9, 0, 0, 0)
+                setCreateAt(d)
+              }}
+              eventClick={(info) => {
+                if (mode === 'projects') {
+                  navigate(`/projects/${info.event.extendedProps.projectId}`)
+                  return
+                }
+                const appt = info.event.extendedProps.appt as Appointment
+                if (appt) setDetail(appt)
+              }}
+            />
+          </div>
+        )}
+        {mode === 'appointments' && isAdmin && (
+          <AvailabilityRail
+            employees={employees}
+            appointments={appointments}
+            absences={absences}
+            colorFor={colorFor}
+            at={new Date()}
+          />
+        )}
       </div>
 
       {detail && (
@@ -710,6 +824,20 @@ function AppointmentDetailModal({
   // eingesetzt — er bekommt den Auftrags-Link (Einsatzbericht, Fotos) per E-Mail.
   const [dispatchEmp, setDispatchEmp] = useState(appt.assigned_employee_id ?? '')
   const [dispatchMsg, setDispatchMsg] = useState<string | null>(null)
+  // Phase 1.5: technicians ranked for THIS slot — available first, 'verplant'
+  // flagged — so a clashing technician is obvious (backend also 409s on conflict).
+  const { data: availTechs } = useQuery({
+    queryKey: ['available-technicians', appt.id],
+    queryFn: () => apiFetch<AvailTech[]>(`/api/appointments/${appt.id}/available-technicians`),
+    enabled: appt.source !== 'google_import' && appt.status === 'confirmed',
+    staleTime: 30_000,
+  })
+  const selectedBusy = !!availTechs?.find((t) => t.id === dispatchEmp && !t.available)
+  const techOptions: AvailTech[] =
+    availTechs ??
+    employees
+      .filter((e) => e.is_technician && e.is_active !== false)
+      .map((e) => ({ id: e.id, display_name: e.display_name, available: true, open_tickets: 0 }))
   const dispatch = useMutation({
     mutationFn: () =>
       apiFetch<{ success: boolean; email_status: string }>(
@@ -819,8 +947,11 @@ function AppointmentDetailModal({
                 className="min-w-0 flex-1 rounded-md border border-border bg-alt px-3 py-2 text-sm text-text outline-none focus:border-green-primary"
               >
                 <option value="">Techniker wählen…</option>
-                {employees.filter((e) => e.is_technician && e.is_active !== false).map((e) => (
-                  <option key={e.id} value={e.id}>{e.display_name}</option>
+                {techOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.display_name} — {t.available ? 'verfügbar' : 'verplant'}
+                    {t.open_tickets ? ` · ${t.open_tickets} offen` : ''}
+                  </option>
                 ))}
               </select>
               <button
@@ -831,6 +962,11 @@ function AppointmentDetailModal({
                 {dispatch.isPending ? 'Sendet…' : 'Auftrag senden'}
               </button>
             </div>
+            {selectedBusy && (
+              <p className="mt-1.5 text-xs font-medium text-amber-600">
+                Dieser Techniker ist zu diesem Zeitpunkt bereits verplant — bitte einen verfügbaren wählen.
+              </p>
+            )}
             <p className="mt-1.5 text-xs text-muted">
               Der Techniker erhält per E-Mail einen Link mit allen Einsatzdaten und füllt dort den
               Einsatzbericht aus (Start/Ende, Fragen, Fotos) — ohne Anmeldung. Der Bericht erscheint im Vorgang.
