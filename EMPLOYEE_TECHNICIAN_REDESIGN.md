@@ -121,3 +121,23 @@ New/unknown caller: 1 and 3 don't apply → availability → workload → random
 1. Technician login = new `users.role='technician'` (recommended) vs separate lightweight auth.
 2. Scope-change invoicing depth in the field portal — minimal raise vs full cost-estimate editor.
 3. Vehicle/tool **request** workflow — approval needed or self-claim.
+
+---
+
+## 14. Phase 2 — detailed design (the scheduling brain, backend-only, flag-gated)
+
+**Status:** Phase 0 (ledger reconciled, 0086+) and Phase 1 (migrations 0086–0090 applied to UAT, committed `5224362`) are DONE. Phase 2 below is backend logic only, all behind `agent_configs.scheduling_two_stage_enabled` (default OFF = byte-identical to today). It extends the existing engine — minimal rewrite.
+
+**2A · Technician + department-aware pool.** Today `assignment.build_pool` (`assignment.py:105`) → `dispatch.rank_candidates` (`dispatch.py:82`) ranks employees by `activity_area` token overlap, gated on `auto_assign`. Extend with a `worker_kind`/`department_id` filter; for a visit category the pool = `worker_kind in ('technician','both')` ∩ department members (via `employee_departments`). Fallback: if the org has no departments yet, keep today's `activity_area` token overlap so nothing regresses. (Fold the technician-only query already in `_available_technicians` `appointments.py:1112` into this one shared builder so the auto path and the manual picker agree — closes F5.)
+
+**2B · The assignment ladder.** Replace the sort in `pick_for_slot`/`rank_for_slot` (`assignment.py:139/173`, currently skill→workload→name) with: **hard filter** = competent (department) AND free at the slot → **rank**: (1) continuity — new helper `last_technician_for(client, org, customer_id, department_id)` reading prior confirmed/done jobs; (2) fewest open jobs — extend `open_ticket_counts` to also count open `appointment_jobs`; (3) customer preference — `customers.preferred_technician_id` (deferred additive column, skipped in v1 until added); (4) random tie-break.
+
+**2C · Two-stage `book_appointment`** (`services/appointments.py:574`). When `scheduling_two_stage_enabled` AND the category is a visit: resolve the **department** from intent → set `appointments.coordinator_employee_id` = the department owner (`employee_departments.is_owner`); create an `appointment_jobs` row (`status='suggested'`, `technician_employee_id`=ladder pick, `work_type`, `scheduled_at`, `duration_minutes`). Do NOT pin an office employee to `assigned_employee_id`. Flag OFF → today's exact `_resolve_slot_assignee` path. Category still supplies duration only (`appointments.py:600-609`).
+
+**2D · Suggestion → confirm.** The `appointment_jobs` row stays `suggested` (no notification) until the appointment is **confirmed** (`_confirm` `appointments.py:~432`, and `post_call._fire_level3_confirmations`). On confirm: flip the job `suggested→dispatched`, notify the technician via the existing `_send_technician_job`/`_dispatch_technician` (`appointments.py:1017`), and mirror the technician onto `assigned_employee_id` for calendar read-compat. Re-dispatch = cancel the old job row + new row (drives the existing `_sync_employee_calendar_after_patch` event cleanup + `_maybe_resend_technician_link`).
+
+**2E · Naming policy** (replaces the blunt `suggest_employee_enabled` gate). First-time/unknown caller (no prior appointments) → return "Team" (no person named). Returning customer → name the continuity/suggested technician. Applies to `book_appointment` `employeeName` and the slot tool.
+
+**2F · Category intent-match at SUGGESTION time** (not post-confirm). Enhance `_resolve_category` with description-driven (LLM) matching when the category isn't explicitly passed — using `appointment_categories.description` (already exists). Category → duration + (vs department) the work_type tag on the job.
+
+**2G · Tests.** Extend `test_availability`, `test_technician_availability`, `test_batch5_dispatch`; add ladder + two-stage-book + suggestion-until-confirm + naming cases. Keep the green baseline; assert flag-OFF path is unchanged. Backend has no hot-reload — restart uvicorn + live `/openapi.json` route-check per the UI-done rule (routes change in 2D/2G).

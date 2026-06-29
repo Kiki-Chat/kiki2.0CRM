@@ -68,6 +68,13 @@ def _fire_level3_confirmations(org_id: str, conversation_id: str | None) -> None
             row = cfg[0] if cfg else {}
             if row.get("appointments_enabled") is False:
                 return
+            # Two-stage: the technician is a SUGGESTION until a human/customer
+            # confirms — the agent must NOT auto-confirm a visit (and announce it
+            # to the customer) before anyone is locked in. Leave it 'pending'.
+            from app.services import jobs as _jobs
+
+            if _jobs.two_stage_enabled(client, org_id):
+                return
             level = row.get("appointments_level")
             if level is None:
                 level = row.get("kiki_level")

@@ -427,16 +427,26 @@ def _confirm(org_id: str, appointment_id: str) -> dict | None:
                 f"{appt.get('status')!r}. Nur ausstehende Termine sind bestätigbar."
             ),
         )
-    # A confirmed appointment must have a responsible employee. Enforce here too
+    # A confirmed appointment must have a responsible person. Enforce here too
     # (not just in the UI) so the API can't be used to confirm an unassigned slot.
+    # Two-stage exception: a suggested-technician job counts — the technician is
+    # locked in + notified on confirm (see _confirm_dispatch_two_stage).
     if not appt.get("assigned_employee_id"):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Termin kann nicht bestätigt werden — es ist kein Mitarbeiter "
-                "zugewiesen. Bitte zuerst einen Mitarbeiter zuweisen."
-            ),
-        )
+        from app.services import jobs as _jobs
+
+        _cli = get_service_client()
+        _has_tech = False
+        if _jobs.two_stage_enabled(_cli, org_id):
+            _job = _jobs.suggested_job_for_appointment(_cli, org_id, appointment_id)
+            _has_tech = bool(_job and _job.get("technician_employee_id"))
+        if not _has_tech:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Termin kann nicht bestätigt werden — es ist kein Mitarbeiter "
+                    "zugewiesen. Bitte zuerst einen Mitarbeiter zuweisen."
+                ),
+            )
     # …and a concrete time (tester 2026-06-11): a slot captured on a call without
     # a parseable datetime must not be confirmable — confirming fires the customer
     # call/email, which would announce an appointment with no time.
@@ -558,6 +568,13 @@ async def confirm_appointment(
     # or re-create the case. Just hand back the current row so the UI settles.
     if appt.get("_already_confirmed"):
         return appt
+    # Two-stage: lock in the SUGGESTED technician (assign + flip the job to
+    # 'dispatched') and notify them. Best-effort; never fails the confirm. No-op
+    # for single-stage orgs or when no technician was suggested.
+    disp = await run_in_threadpool(_confirm_dispatch_two_stage, user, appointment_id)
+    if disp and disp.get("technician_id"):
+        appt["assigned_employee_id"] = disp["technician_id"]
+        appt["_technician_dispatch"] = disp
     # Back-office automation: auto-create a case (+ planning-board presence),
     # gated by agent_configs.projects_enabled/level. Best-effort, non-blocking.
     case = await run_in_threadpool(
@@ -1096,6 +1113,39 @@ def _maybe_resend_technician_link(org_id: str, appointment_id: str, employee_id:
         _send_technician_job(client, org_id, appointment_id, emp)
     except Exception as exc:  # noqa: BLE001 — reschedule must never fail on a resend
         log.warning("technician link auto-resend failed (appt=%s): %s", appointment_id, exc)
+
+
+def _confirm_dispatch_two_stage(user: CurrentUser, appointment_id: str) -> dict | None:
+    """On confirm of a two-stage appointment: lock in the suggested technician
+    (jobs.dispatch_job_on_confirm sets assigned_employee_id + flips the job to
+    'dispatched') and notify the technician by email. Best-effort — a missing
+    email or a notify failure never fails the confirmation. No-op for single-stage
+    orgs or when no technician was suggested."""
+    from app.services import jobs
+
+    client = get_service_client()
+    if not jobs.two_stage_enabled(client, user.org_id):
+        return None
+    disp = jobs.dispatch_job_on_confirm(user.org_id, appointment_id)
+    if not disp or not disp.get("technician_id"):
+        return None
+    try:
+        rows = (
+            client.table("employees")
+            .select("id, display_name, email, is_technician, worker_kind")
+            .eq("org_id", user.org_id)
+            .eq("id", disp["technician_id"])
+            .limit(1)
+            .execute()
+            .data
+        )
+        emp = rows[0] if rows else None
+        if emp and (emp.get("email") or "").strip():
+            _send_technician_job(client, user.org_id, appointment_id, emp)
+            disp["notified"] = True
+    except Exception as exc:  # noqa: BLE001 — confirm must never fail on the notify
+        log.warning("two-stage technician notify failed (appt=%s): %s", appointment_id, exc)
+    return disp
 
 
 @router.post("/{appointment_id}/dispatch-technician")
