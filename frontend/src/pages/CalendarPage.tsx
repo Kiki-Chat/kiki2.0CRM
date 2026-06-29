@@ -127,6 +127,10 @@ export function CalendarPage() {
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [mode, setMode] = useState<'appointments' | 'projects'>('appointments')
   const [calView, setCalView] = useState<'kalender' | 'spuren'>('kalender')
+  // Worker-kind view (employee↔technician split): Alle shows everyone, Büro shows
+  // office employees only, Techniker shows field technicians only. Filters the
+  // Spuren lanes and the "Jetzt verfügbar" rail.
+  const [workerView, setWorkerView] = useState<'alle' | 'buero' | 'techniker'>('alle')
   const [spurenDate, setSpurenDate] = useState<Date>(() => new Date())
   // Drag/resize lands here until the user confirms — moving a confirmed
   // appointment fires the real reschedule call+email server-side, so it must
@@ -292,14 +296,25 @@ export function CalendarPage() {
   const calEvents = useMemo(() => [...events, ...absenceEvents], [events, absenceEvents])
 
   // Which employees get a lane in the Spuren view — follows the dropdown filter.
+  const workerViewMatch = (e: { is_technician?: boolean }) =>
+    workerView === 'alle' ? true : workerView === 'techniker' ? !!e.is_technician : !e.is_technician
+
   const spurenEmployees = useMemo(() => {
-    const active = employees.filter((e) => e.is_active !== false)
+    const active = employees.filter((e) => e.is_active !== false && workerViewMatch(e))
     if (filter !== 'all' && filter !== 'mine' && filter !== 'unassigned') {
       return active.filter((e) => e.id === filter)
     }
     if (filter === 'mine' && myEmployeeId) return active.filter((e) => e.id === myEmployeeId)
     return active
-  }, [employees, filter, myEmployeeId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employees, filter, myEmployeeId, workerView])
+
+  // The "Jetzt verfügbar" rail follows the same worker-kind view.
+  const railEmployees = useMemo(
+    () => employees.filter((e) => e.is_active !== false && workerViewMatch(e)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [employees, workerView],
+  )
 
   // Spuren has no FullCalendar to fire datesSet, so drive the fetch range from the
   // chosen day (appointments + absences load for exactly that day).
@@ -440,6 +455,13 @@ export function CalendarPage() {
             <div className="flex gap-1 rounded-md border border-border bg-alt p-1">
               <button onClick={() => setCalView('kalender')} className={cn('rounded px-3 py-1 text-sm', calView === 'kalender' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Kalender</button>
               <button onClick={() => setCalView('spuren')} className={cn('rounded px-3 py-1 text-sm', calView === 'spuren' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Spuren</button>
+            </div>
+          )}
+          {mode === 'appointments' && (
+            <div className="flex gap-1 rounded-md border border-border bg-alt p-1" title="Büro-Mitarbeiter vs. Techniker">
+              <button onClick={() => setWorkerView('alle')} className={cn('rounded px-3 py-1 text-sm', workerView === 'alle' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Alle</button>
+              <button onClick={() => setWorkerView('buero')} className={cn('rounded px-3 py-1 text-sm', workerView === 'buero' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Büro</button>
+              <button onClick={() => setWorkerView('techniker')} className={cn('rounded px-3 py-1 text-sm', workerView === 'techniker' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Techniker</button>
             </div>
           )}
         </div>
@@ -636,7 +658,7 @@ export function CalendarPage() {
         )}
         {mode === 'appointments' && isAdmin && (
           <AvailabilityRail
-            employees={employees}
+            employees={railEmployees}
             appointments={appointments}
             absences={absences}
             colorFor={colorFor}
