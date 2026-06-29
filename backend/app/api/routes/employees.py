@@ -835,6 +835,50 @@ async def list_my_absences(user: CurrentUser = Depends(require_org)) -> list[dic
     return res or []
 
 
+# ─── Per-employee menu locks (Phase 5) — admin hides specific menu items for an ──
+# individual OFFICE employee. A row in employee_menu_access = that nav path is
+# hidden for that employee (fail-open: no rows → sees everything their role allows).
+class MenuAccessPayload(BaseModel):
+    keys: list[str] = []
+
+
+def _get_menu_access(org_id: str, employee_id: str) -> list[str]:
+    client = get_service_client()
+    rows = (
+        client.table("employee_menu_access").select("menu_key")
+        .eq("org_id", org_id).eq("employee_id", employee_id).execute().data
+        or []
+    )
+    return sorted(r["menu_key"] for r in rows if r.get("menu_key"))
+
+
+def _set_menu_access(org_id: str, employee_id: str, keys: list[str]) -> list[str]:
+    client = get_service_client()
+    # FK hardening: only an employee in THIS org can be locked.
+    validate_fk_in_org(client, table="employees", fk_id=employee_id, org_id=org_id, label="Mitarbeiter")
+    clean = sorted({(k or "").strip() for k in keys if (k or "").strip()})
+    client.table("employee_menu_access").delete().eq("org_id", org_id).eq("employee_id", employee_id).execute()
+    if clean:
+        client.table("employee_menu_access").insert(
+            [{"org_id": org_id, "employee_id": employee_id, "menu_key": k} for k in clean]
+        ).execute()
+    return clean
+
+
+@router.get("/{employee_id}/menu-access")
+async def get_menu_access(employee_id: str, user: CurrentUser = Depends(require_org_admin)) -> dict:
+    keys = await run_in_threadpool(_get_menu_access, user.org_id, employee_id)
+    return {"keys": keys}
+
+
+@router.put("/{employee_id}/menu-access")
+async def set_menu_access(
+    employee_id: str, payload: MenuAccessPayload, user: CurrentUser = Depends(require_org_admin)
+) -> dict:
+    keys = await run_in_threadpool(_set_menu_access, user.org_id, employee_id, payload.keys)
+    return {"keys": keys}
+
+
 # ─── Admin: create for any employee (pre-approved) / list one employee's ─────
 def _create_absence(org_id: str, employee_id: str, payload: AbsenceCreate) -> dict:
     client = get_service_client()

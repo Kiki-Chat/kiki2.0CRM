@@ -56,6 +56,33 @@ def _org_entitlements(org_id: str) -> dict:
     return {"plan_title": plan, "features": sorted(effective_features(plan))}
 
 
+def _locked_menu_keys(org_id: str, user_id: str, role: str | None) -> list[str]:
+    """Menu paths the admin has hidden for THIS employee (Phase 5). Admins,
+    super-admins and technicians are never menu-locked → []. Fail-open: no rows
+    (or no employee profile) → []."""
+    if role in ("org_admin", "super_admin", "technician"):
+        return []
+    try:
+        from app.services.employee_calendar import resolve_employee_id
+
+        emp_id = resolve_employee_id(org_id, user_id)
+        if not emp_id:
+            return []
+        rows = (
+            get_service_client()
+            .table("employee_menu_access")
+            .select("menu_key")
+            .eq("org_id", org_id)
+            .eq("employee_id", emp_id)
+            .execute()
+            .data
+            or []
+        )
+        return sorted(r["menu_key"] for r in rows if r.get("menu_key"))
+    except Exception:  # noqa: BLE001 — menu locks are best-effort; never 500 /api/me
+        return []
+
+
 @router.get("/me")
 async def me(user: CurrentUser = Depends(get_current_user)) -> dict:
     # org_* fields let the white-label UI show WHOSE CRM this is — company name +
@@ -63,6 +90,11 @@ async def me(user: CurrentUser = Depends(get_current_user)) -> dict:
     # personal settings. Available to every authenticated user (incl. employees).
     ident = await run_in_threadpool(_org_identity, user.org_id) if user.org_id else {}
     ent = await run_in_threadpool(_org_entitlements, user.org_id) if user.org_id else {}
+    locked = (
+        await run_in_threadpool(_locked_menu_keys, user.org_id, user.id, user.role)
+        if user.org_id
+        else []
+    )
     return {
         "id": user.id,
         "email": user.email,
@@ -78,4 +110,6 @@ async def me(user: CurrentUser = Depends(get_current_user)) -> dict:
         "features": ent.get("features", []),
         # UAT/QA only — drives the dev plan-switcher button (off in prod).
         "dev_plan_switcher": settings.dev_plan_switcher,
+        # Phase 5: nav paths the admin has hidden for this employee (sidebar gating).
+        "locked_menu_keys": locked,
     }

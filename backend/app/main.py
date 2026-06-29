@@ -30,6 +30,7 @@ from app.api.routes import (
     public_jobs,
     public_technician,
     super_admin,
+    technician,
     text_modules,
     tool_assets,
     users,
@@ -150,6 +151,7 @@ app.include_router(employee_calendar_routes.router)
 app.include_router(outbound.router)
 app.include_router(public_jobs.router)
 app.include_router(public_technician.router)
+app.include_router(technician.router)
 app.include_router(pds.router)
 app.include_router(actions.router)
 

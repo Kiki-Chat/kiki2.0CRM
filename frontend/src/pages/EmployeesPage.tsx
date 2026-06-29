@@ -4,6 +4,8 @@ import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin from '@fullcalendar/list'
 import FullCalendar from '@fullcalendar/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+
+import { NAV, isGroup } from '../components/layout/nav'
 import {
   BarChart3,
   CalendarDays,
@@ -453,15 +455,48 @@ function EmployeesTab({ flash }: { flash: (m: string) => void }) {
 // ─── Permissions modal ───────────────────────────────────────────────────────
 function PermissionsModal({ employee, onClose }: { employee: Employee; onClose: () => void }) {
   const isAdmin = employee.access_role === 'admin'
+  const qc = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ['menu-access', employee.id],
+    queryFn: () => apiFetch<{ keys: string[] }>(`/api/employees/${employee.id}/menu-access`),
+    enabled: !isAdmin,
+  })
+  const [draft, setDraft] = useState<string[] | null>(null)
+  const current = draft ?? data?.keys ?? []
+  const save = useMutation({
+    mutationFn: (keys: string[]) =>
+      apiFetch(`/api/employees/${employee.id}/menu-access`, { method: 'PUT', body: JSON.stringify({ keys }) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['menu-access', employee.id] })
+      qc.invalidateQueries({ queryKey: ['me'] })
+      onClose()
+    },
+  })
+  const toggle = (to: string) =>
+    setDraft(current.includes(to) ? current.filter((k) => k !== to) : [...current, to])
+  // Lockable menu items = everything an employee could see (exclude admin-only entries).
+  const leaves = NAV.flatMap((e) => (isGroup(e) ? e.children : [e])).filter((l) => !l.adminOnly)
+
   return (
     <Modal
       open
       onOpenChange={(o) => !o && onClose()}
       title={`Berechtigungen: ${employee.display_name}`}
       footer={
-        <button onClick={onClose} className="w-full rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body">
-          Schließen
-        </button>
+        isAdmin ? (
+          <button onClick={onClose} className="w-full rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body">
+            Schließen
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 rounded-md border border-border bg-alt py-2.5 text-sm font-medium text-body">
+              Abbrechen
+            </button>
+            <button onClick={() => save.mutate(current)} className="flex-1 rounded-md bg-green-deep py-2.5 text-sm font-medium text-white">
+              Speichern
+            </button>
+          </div>
+        )
       }
     >
       {isAdmin ? (
@@ -475,12 +510,32 @@ function PermissionsModal({ employee, onClose }: { employee: Employee; onClose: 
       ) : (
         <div className="space-y-3 text-sm text-body">
           <p>
-            Dieser Mitarbeiter hat Standard-Zugriff. Modul-Berechtigungen pro Mitarbeiter werden in
-            Kürze konfigurierbar.
+            Wähle die Menüpunkte, die für <strong>{employee.display_name}</strong> ausgeblendet werden
+            sollen. Nicht angehakte Punkte bleiben sichtbar.
           </p>
-          <div className="rounded-md border border-border bg-alt px-3 py-2 text-muted">
-            Aktuell sehen Mitarbeiter Anrufe, Kunden, Kalender und ihre eigenen Aufgaben.
+          <div className="space-y-1.5">
+            {leaves.map((l) => {
+              const checked = current.includes(l.to)
+              return (
+                <label
+                  key={l.to}
+                  className="flex cursor-pointer items-center justify-between rounded-md border border-border px-3 py-2 hover:bg-alt"
+                >
+                  <span className={checked ? 'text-muted line-through' : ''}>{l.label}</span>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(l.to)}
+                    className="h-4 w-4 accent-green-deep"
+                  />
+                </label>
+              )
+            })}
           </div>
+          <p className="text-xs text-muted">
+            Gesperrte Menüpunkte werden für diesen Mitarbeiter ausgeblendet. (Der Server verbirgt sie
+            zusätzlich — Sperren gelten nicht für Techniker, die ihr eigenes Portal nutzen.)
+          </p>
         </div>
       )}
     </Modal>

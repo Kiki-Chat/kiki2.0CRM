@@ -125,7 +125,8 @@ export function CalendarPage() {
   const [createAt, setCreateAt] = useState<Date | null>(null)
   const [editAppt, setEditAppt] = useState<Appointment | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
-  const [mode, setMode] = useState<'appointments' | 'projects'>('appointments')
+  // Single unified calendar (the old Termine/Vorgangs-Verlauf split was removed).
+  const [mode] = useState<'appointments' | 'projects'>('appointments')
   const [calView, setCalView] = useState<'kalender' | 'spuren'>('kalender')
   // Worker-kind view (employee↔technician split): Alle shows everyone, Büro shows
   // office employees only, Techniker shows field technicians only. Filters the
@@ -447,10 +448,6 @@ export function CalendarPage() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-text">Kalender</h1>
-          <div className="flex gap-1 rounded-md border border-border bg-alt p-1">
-            <button onClick={() => setMode('appointments')} className={cn('rounded px-3 py-1 text-sm', mode === 'appointments' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Termine</button>
-            <button onClick={() => setMode('projects')} className={cn('rounded px-3 py-1 text-sm', mode === 'projects' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Vorgangs-Verlauf</button>
-          </div>
           {mode === 'appointments' && (
             <div className="flex gap-1 rounded-md border border-border bg-alt p-1">
               <button onClick={() => setCalView('kalender')} className={cn('rounded px-3 py-1 text-sm', calView === 'kalender' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Kalender</button>
