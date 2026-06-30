@@ -105,7 +105,23 @@ export function SpurenView({
   onSelectAppt: (a: Appointment) => void
   onDateChange: (d: Date) => void
 }) {
-  const lanes = employees.filter((e) => e.is_active !== false)
+  // Lane order: busiest first (most appointments that day = highest "weightage"),
+  // then alphabetical. So whoever actually has work on the open day floats to the
+  // front instead of being buried in the name-sorted list.
+  const dayLoad = (empId: string) =>
+    appointments.filter(
+      (a) =>
+        a.assigned_employee_id === empId &&
+        a.scheduled_at &&
+        a.status !== 'cancelled' &&
+        a.status !== 'pending' &&
+        sameLocalDay(a.scheduled_at, date),
+    ).length
+  const lanes = employees
+    .filter((e) => e.is_active !== false)
+    .map((e) => ({ e, load: dayLoad(e.id) }))
+    .sort((a, b) => b.load - a.load || (a.e.display_name || '').localeCompare(b.e.display_name || ''))
+    .map((x) => x.e)
   const shift = (days: number) => {
     const d = new Date(date)
     d.setDate(d.getDate() + days)

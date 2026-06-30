@@ -592,7 +592,7 @@ export function CalendarPage() {
       {/* Calendar + availability rail */}
       <div className="flex min-h-0 flex-1 gap-4">
         {mode === 'appointments' && calView === 'spuren' ? (
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1">
             <SpurenView
               date={spurenDate}
               employees={spurenEmployees}
@@ -604,7 +604,7 @@ export function CalendarPage() {
             />
           </div>
         ) : (
-          <div className="min-h-0 flex-1 rounded-xl border border-border bg-surface p-4">
+          <div className="min-h-0 min-w-0 flex-1 rounded-xl border border-border bg-surface p-4">
             <FullCalendar
               ref={calRef}
               plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
@@ -684,6 +684,8 @@ export function CalendarPage() {
             absences={absences}
             colorFor={colorFor}
             at={new Date()}
+            activeId={filter}
+            onSelect={(id) => setFilter(filter === id ? 'all' : id)}
           />
         )}
       </div>
