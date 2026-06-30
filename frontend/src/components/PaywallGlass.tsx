@@ -1,8 +1,12 @@
-import { Check, Lock } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Check, Lock, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+import { apiFetch } from '../lib/api'
 import { FEATURE_META, shortPlanName } from '../lib/entitlements'
+
+interface FeatureTeaser { count: number; noun: string }
 
 /** Paywall: real page renders underneath (read-only GETs succeed); a scrim blurs/dims
  * only the main content column — sidebar + topbar stay interactive for navigation.
@@ -10,6 +14,15 @@ import { FEATURE_META, shortPlanName } from '../lib/entitlements'
 export function PaywallGlass({ feature, children }: { feature: string; children: ReactNode }) {
   const meta = FEATURE_META[feature]
   const navigate = useNavigate()
+  // Real count from the org's own data (always-process) → "you already have value waiting".
+  const teaserQ = useQuery({
+    queryKey: ['entitlements', 'teaser'],
+    queryFn: () => apiFetch<Record<string, FeatureTeaser>>('/api/entitlements/teaser'),
+    retry: false,
+    staleTime: 60_000,
+  })
+  const teaser = teaserQ.data?.[feature]
+  const hasTeaser = (teaser?.count ?? 0) > 0
   if (!meta) return <>{children}</>
 
   return (
@@ -30,6 +43,13 @@ export function PaywallGlass({ feature, children }: { feature: string; children:
           <p className="mt-1 text-sm text-muted">
             Ab <span className="font-semibold text-text">{shortPlanName(meta.minPlan)}</span> verfügbar.
           </p>
+
+          {hasTeaser && (
+            <p className="mx-auto mt-4 flex max-w-xs items-center justify-center gap-1.5 rounded-lg bg-green-tint-100 px-3 py-2 text-sm font-semibold text-green-deep">
+              <Sparkles size={15} className="shrink-0" />
+              Kiki hat aus deinen Anrufen {teaser!.count} {teaser!.noun} vorbereitet
+            </p>
+          )}
 
           <ul className="mx-auto mt-5 max-w-xs space-y-2 text-left">
             {meta.pitch.map((b) => (
