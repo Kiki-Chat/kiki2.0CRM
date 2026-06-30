@@ -453,8 +453,8 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
           </div>
         </div>
 
-        {/* ANFRAGEN */}
-        <BigCard title="Anfragen" icon={Inbox} count={data.inquiries.length}>
+        {/* ANRUFE */}
+        <BigCard title="Anrufe" icon={Inbox} count={data.inquiries.length}>
           {data.inquiries.length ? (
             <GroupedTable columns={['Status', 'Betreff', 'Anrufprotokoll', '']}>
               {groupByDay(data.inquiries, (i) => i.created_at ?? null).map((g) => (
@@ -476,7 +476,7 @@ export function CaseDetailPane({ caseId, employees, projects, allCases, pendingA
                 </Fragment>
               ))}
             </GroupedTable>
-          ) : <EmptyHint text="Noch keine Anfragen in diesem Vorgang." />}
+          ) : <EmptyHint text="Noch keine Anrufe in diesem Vorgang." />}
         </BigCard>
 
         {/* TERMINE */}

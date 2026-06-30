@@ -695,7 +695,11 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
       qc.invalidateQueries({ queryKey: ['billing'] })
       setShowUpgrade(false)
       setPendingPlan(null)
-      flash(`Tarif geändert: ${next.plan_title ?? 'aktualisiert'}.`)
+      flash(
+        previewQ.data?.scheduled
+          ? `Downgrade zu ${shortPlan(previewQ.data.target_plan_title)} zum Ende der Abrechnungsperiode geplant.`
+          : `Tarif geändert: ${next.plan_title ?? 'aktualisiert'}.`,
+      )
     },
   })
   // Prorated cost of the selected switch — fetched when a target is picked, shown in
@@ -873,7 +877,15 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                   <div className="text-sm font-semibold text-text">{shortPlan(s?.plan_title ?? 'Aktuell')} → {shortPlan(pendingPlan.plan_title)} — Wechsel bestätigen</div>
                   {previewQ.isLoading && <div className="mt-2 text-xs text-muted">Anteilige Kosten werden berechnet…</div>}
                   {previewQ.isError && <div className="mt-2 text-xs text-error">Vorschau konnte nicht geladen werden — der Wechsel ist trotzdem möglich.</div>}
-                  {previewQ.data && (
+                  {previewQ.data && (previewQ.data.scheduled ? (
+                    <div className="mt-2 rounded-lg bg-surface/80 p-3 text-sm">
+                      <div className="font-semibold text-text">Downgrade zum Ende der Abrechnungsperiode</div>
+                      <div className="mt-1 text-xs text-muted">
+                        Wird {previewQ.data.billed_on ? `am ${new Date(previewQ.data.billed_on).toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin' })} ` : ''}wirksam. Bis dahin behältst du{' '}
+                        <strong className="text-text">{shortPlan(previewQ.data.current_plan_title ?? 'deinen Tarif')}</strong> mit allen Funktionen — keine sofortige Abbuchung oder Gutschrift. Danach {fmtCents(previewQ.data.next_recurring_cents)}/{previewQ.data.interval === 'year' ? 'Jahr' : 'Mon.'}.
+                      </div>
+                    </div>
+                  ) : (
                     <div className="mt-2 space-y-1.5 rounded-lg bg-surface/80 p-3 text-sm">
                       <div className="flex items-center justify-between text-muted">
                         <span>Gutschrift für ungenutzte Zeit ({shortPlan(previewQ.data.current_plan_title ?? 'aktuell')})</span>
@@ -895,7 +907,7 @@ function AbrechnungSection({ usage, flash }: { usage: Usage; flash: (m: string) 
                         </span>
                       </div>
                     </div>
-                  )}
+                  ))}
                   <div className="mt-2 text-xs text-muted">Alle Beträge zzgl. 19 % MwSt.; aktive Rabatte werden bei der Abrechnung berücksichtigt.</div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button
