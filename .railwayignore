@@ -4,3 +4,19 @@ exports/
 test_scripts/
 backend/.venv/
 frontend/node_modules/
+# Local secrets + env — NEVER upload to the Railway build context (deploy uses
+# --no-gitignore, so .gitignore does NOT protect these). Railway service variables
+# provide config at runtime; a baked .env.local would break the prod frontend build.
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+# VCS + tooling + caches
+.git
+.claude/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
