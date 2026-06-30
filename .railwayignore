@@ -4,3 +4,16 @@ exports/
 test_scripts/
 backend/.venv/
 frontend/node_modules/
+
+# Secrets + local/build junk — MUST be excluded, especially when deploying with
+# `railway up --no-gitignore` (filesystem upload, used because this is a git
+# worktree and the default git-based upload ships a stale snapshot).
+.env
+.env.*
+.git
+.claude/
+frontend/dist/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
