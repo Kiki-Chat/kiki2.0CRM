@@ -12,33 +12,41 @@ interface Review {
   role: string
 }
 
+// Verbatim customer reviews (their own wording — intentionally not grammar-"corrected").
 const REVIEWS: Review[] = [
   {
     quote:
-      'Was für ein fantastisches Büro-Tool! Wir nutzen Kiki seit etwa drei Monaten, und es macht unsere Arbeit so viel leichter. Man bekommt eine Zusammenfassung, was der Kunde genau wollte und wer er ist – so fällt der Rückruf viel leichter.',
-    name: 'Beata Krenzer',
-    role: 'Geschäftsführerin, Heizlöwe GmbH',
+      'Kiki ist für uns eine Erleichterung. Ich kann mich mehr auf die Arbeit konzentrieren, auf der Baustelle und weiß selbst wenn das Telefon klingelt und ich nicht dran gehen kann, Kiki macht das schon!',
+    name: 'Christian Börenkamp',
+    role: 'Inhaber Tischlerei Börenkamp',
   },
   {
     quote:
-      'Ich bin selbstständiger Malermeister und nutze die KI seit einem Monat – ich bin sehr zufrieden. Auch der Support ist top!',
+      'Ich bin selbständiger Malermeister und nutze die Ki seit 1. Monat bin sehr zufrieden Support ist auch mega!',
     name: 'Andy Pasika',
-    role: 'Inhaber, Malermeister Andy Pasika',
+    role: 'Inhaber von Malermeister Andy Pasika',
   },
   {
-    quote: 'Kiki ist eine echte Entlastung für uns.',
-    name: 'Christian Börenkamp',
-    role: 'Geschäftsführer, Tischlerei Börenkamp',
+    quote:
+      'So eine tolle Bürohilfe! Wir nutzen Kiki bereits seit ca. 3 Monaten und es eine große Arbeitserleichterung. Man sieht eine Zusammenfassung was genau der Kunde wollte und um wen es sich handelt. So kann man viel gezielter zurückrufen.',
+    name: 'Beata Krenzer',
+    role: 'Geschäftsführerin Heizlöwe GmbH',
   },
   {
-    quote: 'Engagiertes Team. Immer offen für Anregungen und stets bemüht, diese umzusetzen.',
-    name: 'Frank Ruschmeier',
-    role: 'Geschäftsführer, TrunCAD GmbH',
-  },
-  {
-    quote: 'Support und Technik sind erstklassig!',
+    quote: 'Support und Technik top!',
     name: 'Tobias Schober',
-    role: 'Geschäftsführer, Schober Wohnwerke GmbH',
+    role: 'Geschäftsführer Schober Wohnwerke GmbH',
+  },
+  {
+    quote: 'Engagiertes Team. Immer ein offenes Ohr für Vorschläge und immer bemüht diese auch umzusetzen.',
+    name: 'Frank Ruschmeier',
+    role: 'Geschäftsführer TrunCAD GmbH',
+  },
+  {
+    quote:
+      'Seit wir mit Hey Kiki zusammenarbeiten, läuft unsere telefonische Erreichbarkeit reibungslos.\n\nKlare Empfehlung für alle, die sich im Tagesgeschäft entlasten und gleichzeitig professionell erreichbar bleiben möchten!',
+    name: 'Norman Hinze',
+    role: 'Inhaber Haustechnik Hinze e.K.',
   },
 ]
 
@@ -62,7 +70,7 @@ function ReviewCarousel() {
   return (
     <div>
       {/* Crossfade stack — all reviews absolutely positioned; active one fades in. */}
-      <div className="relative min-h-[340px]">
+      <div className="relative min-h-[420px]">
         {REVIEWS.map((r, idx) => (
           <div
             key={r.name}
@@ -77,7 +85,7 @@ function ReviewCarousel() {
                 <Star key={s} size={18} className="text-amber-300" fill="currentColor" strokeWidth={0} />
               ))}
             </div>
-            <blockquote className="text-2xl font-semibold leading-snug">“{r.quote}”</blockquote>
+            <blockquote className="whitespace-pre-line text-2xl font-semibold leading-snug">“{r.quote}”</blockquote>
             <div className="mt-8 flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-sm font-bold">
                 {initials(r.name)}
