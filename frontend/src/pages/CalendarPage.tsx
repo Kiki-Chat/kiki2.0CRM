@@ -227,6 +227,11 @@ export function CalendarPage() {
     }
   }, [appointments, searchParams])
 
+  // Technician employee ids — drives the Alle/Büro/Techniker grid filter.
+  const techIds = useMemo(
+    () => new Set(employees.filter((e) => e.is_technician).map((e) => e.id)),
+    [employees],
+  )
   const events = useMemo(
     () =>
       appointments
@@ -236,6 +241,15 @@ export function CalendarPage() {
           // so the team can confirm/adjust them in place, deep-linked to the call.
           // Cancelled and time-less rows still never render.
           if (!a.scheduled_at || a.status === 'cancelled') return false
+          // Alle/Büro/Techniker: keep only appointments assigned to a person of the
+          // selected kind (unassigned rows drop out of the Büro/Techniker views).
+          if (workerView !== 'alle') {
+            const id = a.assigned_employee_id
+            if (!id) return false
+            const isTech = techIds.has(id)
+            if (workerView === 'techniker' && !isTech) return false
+            if (workerView === 'buero' && isTech) return false
+          }
           // Google-imported events are external "blocked time" — always shown,
           // independent of the employee filter (they block everyone).
           if (a.source === 'google_import') return true
@@ -275,14 +289,23 @@ export function CalendarPage() {
             extendedProps: { appt: a, external: isExternal },
           }
         }),
-    [appointments, filter, myEmployeeId, colorFor],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [appointments, filter, myEmployeeId, colorFor, workerView, techIds],
   )
 
   // Approved absences as soft all-day background bars on the week/month calendar.
   const absenceEvents = useMemo(
     () =>
       absences
-        .filter((ab) => !ab.status || ab.status === 'approved')
+        .filter((ab) => {
+          if (ab.status && ab.status !== 'approved') return false
+          if (workerView !== 'alle') {
+            const isTech = techIds.has(ab.employee_id)
+            if (workerView === 'techniker' && !isTech) return false
+            if (workerView === 'buero' && isTech) return false
+          }
+          return true
+        })
         .map((ab) => ({
           id: `ab-${ab.id}`,
           title: `${ab.employee_name ?? 'Abwesend'}${ab.type === 'block' ? ' · Blockiert' : ''}`,
@@ -292,7 +315,8 @@ export function CalendarPage() {
           backgroundColor: 'rgba(120,117,111,0.18)',
           extendedProps: { absence: true },
         })),
-    [absences],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [absences, workerView, techIds],
   )
   const calEvents = useMemo(() => [...events, ...absenceEvents], [events, absenceEvents])
 
