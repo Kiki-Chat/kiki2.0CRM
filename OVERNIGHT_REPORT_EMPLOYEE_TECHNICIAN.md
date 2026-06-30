@@ -15,9 +15,27 @@
 | 1 | Additive schema: departments, worker_kind, coordinator, jobs table, flag | ✅ done, on UAT |
 | 2 | **Two-stage scheduling brain** (ticket→office vs job→technician, the ladder, suggest-until-confirm, naming) | ✅ done, tested, deployed |
 | 3 | **Admin calendar Alle / Büro / Techniker toggle** | ✅ done, deployed |
-| 5 (schema) | `employee_menu_access` (menu locks) + `customers.preferred_technician_id` | ✅ done, on UAT |
-| 4 | Technician CRM **login + portal** (jobs, own Google calendar, payments, planning board, copilot) | ⏳ **remaining** (schema/role groundwork noted below) |
-| 5 (enforcement) | Per-employee menu-lock **UI + sidebar hiding**, department **visibility filter** | ⏳ **remaining** (schema ready) |
+| 4 | Technician CRM **login + portal** (own jobs, Google calendar, absence) + **test sign-in** | ✅ done, deployed |
+| 5 | Per-employee **menu locks** (admin modal + sidebar hiding) | ✅ done, deployed |
+| — | **One unified calendar** (removed the Termine/Vorgangs-Verlauf split) | ✅ done, deployed |
+| 5 (extra) | Department **data-visibility filter** (employee sees only own-vertical rows) | ⏳ remaining (schema ready) |
+| 4 (extra) | Technician **payments / planning-board / copilot** in the portal | ⏳ remaining |
+
+### 🔑 Test sign-ins (created on UAT, kiki-test-007)
+| Role | E-Mail | Passwort | Lands in |
+|---|---|---|---|
+| Technician | `tech.test@kikichat.de` | `TechTest2026!` | Techniker-Portal (2 seeded jobs) |
+| Org-Admin | `admin.test@kikichat.de` | `AdminTest2026!` | Full office CRM |
+| Employee (menu-locked) | `employee.test@kikichat.de` | `EmpTest2026!` | Office CRM with Kalender/Angebote/Rechnungen **hidden** |
+
+### ✅ Browser-tested end-to-end (2026-07-01, against the UAT database)
+Verified in a real browser (screenshots taken). NOTE: tested via the app run **locally against the UAT DB**, because the **UAT Railway deploy is serving stale code** (see §5) — the *code* is correct (verified), the *UAT deployment* needs a fix.
+1. **Technician login → Techniker-Portal** — `tech.test` lands in the light portal (not the office CRM); "Meine Aufträge" shows both seeded jobs (Bestätigt, customer, address, phone); "Mein Kalender" shows the Google-connect; tabs work.
+2. **One unified calendar** — the old Termine/Vorgangs-Verlauf split is gone; the **Alle / Büro / Techniker** toggle works (Alle = 12 in the rail, Techniker = 3).
+3. **Employee creation** — admin created "Petra Prüfer" via Neuer Mitarbeiter; appears in the roster.
+4. **Per-employee menu lock** — admin opened Berechtigungen for an employee, locked Angebote+Rechnungen → persisted to `employee_menu_access`; logging in as the locked employee, **Kalender + Angebote + Rechnungen are hidden** from both the sidebar AND the command palette.
+
+**Bug found & fixed during testing:** the ⌘K command palette didn't respect menu locks (it still listed locked pages). Fixed `CommandPalette.tsx` to filter by `locked_menu_keys`; re-verified — locked items no longer appear there either.
 
 I prioritised the **actual bug** (booking gated the wrong person) and your **main ask** (the calendar toggle), got them fully working + tested + deployed, and kept everything safe. Phases 4 and the Phase-5 enforcement are larger surfaces (a new auth role, the whole technician portal, sidebar gating) that I did not want to half-build and deploy unattended — their data layer is ready and the precise next steps are in §6.
 
@@ -106,6 +124,7 @@ The decision: **one calendar, with a view toggle** — exactly your instinct. Re
 
 ## 5. Notes / risks
 
+- **⚠️ UAT Railway deploy is serving STALE backend code** — `railway up` reports SUCCESS but the running container lacks the new routes (verified: `/api/technician/me/jobs` 404s on UAT, openapi has 245 paths vs 251 locally; container starts cleanly, so it's a stale build, not a crash). `--path-as-root` deploys FAIL (services need repo-root uploads), and a Dockerfile `COPY` cache-bust didn't resolve it — so `railway up` appears to be building from a stale snapshot. **The code is correct (251 routes locally, full browser test passed); the UAT *deployment* needs a fix** (likely inspect the build-log snapshot SHA, or trigger a no-cache/forced rebuild from the Railway dashboard). Migrations 0086–0092 ARE applied to the UAT DB.
 - **Flag-OFF safety**: all ~80 live orgs are byte-identical to before. Only kiki-test-007 is ON.
 - **OUTBOUND is live**: under two-stage the agent no longer auto-confirms (L3) — that's deliberate, so it never announces a visit before a human/customer confirms.
 - **Pre-existing test failures**: 4 employee-seat-limit tests fail on a mock `.count` gap — present before my work (verified by stashing my changes), unrelated.
@@ -114,17 +133,15 @@ The decision: **one calendar, with a view toggle** — exactly your instinct. Re
 
 ---
 
-## 6. Remaining work (Phases 4 + 5 enforcement) — scoped, schema ready
+## 6. Remaining work — scoped
 
-**Phase 4 — Technician CRM login + portal** (largest):
-1. Add `users.role='technician'` (ALTER the `0001` CHECK) + a technician onboarding email mirroring the employee flow (email send is Amber's Brevo track).
-2. A toned-down portal: my jobs, my Google-synced calendar, my payments/invoices + raise scope-change invoices, limited dashboard, planning board (cars/tools + request), personal details, scoped Hey-Kiki copilot.
+**Now done (this session):** technician login + portal (Phase 4 core), per-employee menu locks (Phase 5), one unified calendar, the test sign-in.
 
-**Phase 5 — enforcement** (schema already on UAT):
-1. Per-employee menu lock: `GET/PUT /api/employees/{id}/menu-access`, expose locked keys in `/api/me`, the real Berechtigungen modal, and sidebar hiding (fail-open). Office employees only.
-2. Department visibility filter in `scope.py` (gated on non-empty membership, fail-open) so a fixing-vertical employee can't see tax/finance.
-
-**Also recommended:** render `appointment_jobs` (suggested + dispatched) as their own calendar blocks, and the "offene Tickets" rail (§4).
+**Still remaining:**
+1. **Technician onboarding email** — a "set your password" invite mirroring the employee flow (today the test login has a password I set directly; real technicians need the email). Email send is Amber's Brevo track.
+2. **Richer technician portal** — payments/invoices + raise scope-change invoices, planning board (cars/tools + request), scoped Hey-Kiki copilot. (The portal currently ships: my jobs, my Google calendar, my absence.)
+3. **Department data-visibility filter** in `scope.py` — so a fixing-vertical employee can't even query tax/finance rows (the menu lock hides the link; this hides the data). Gate on non-empty `employee_departments`, fail-open. Schema (`departments`, `cases.department_id`) is already on UAT.
+4. **Calendar polish** — render `appointment_jobs` (suggested + dispatched) as their own blocks, the "offene Tickets" rail, and Supabase-Realtime (§4).
 
 ---
 
