@@ -265,6 +265,8 @@ export function CalendarPage() {
           // "blocked time" — grey, read-only, no customer detail surfaced.
           const isExternal = a.source === 'google_import' || a.source === 'employee_busy'
           const isTentative = a.status === 'pending'
+          // Past appointments are locked — can't be dragged/resized into history.
+          const isPast = start.getTime() < Date.now()
           const color = isExternal ? GOOGLE_BLOCK_COLOR : colorFor(a.assigned_employee_id)
           const base = a.title ?? 'Termin'
           const title = isExternal
@@ -284,7 +286,7 @@ export function CalendarPage() {
             // External blocks AND tentative suggestions are read-only on the grid:
             // a drag must never silently mutate an unconfirmed slot (confirm/adjust
             // happens via the detail modal). Confirmed CRM events stay draggable.
-            editable: !isExternal && !isTentative,
+            editable: !isExternal && !isTentative && !isPast,
             classNames: isTentative ? ['cal-tentative'] : [],
             extendedProps: { appt: a, external: isExternal },
           }
@@ -319,6 +321,10 @@ export function CalendarPage() {
     [absences, workerView, techIds],
   )
   const calEvents = useMemo(() => [...events, ...absenceEvents], [events, absenceEvents])
+
+  // Scroll the week/day grid to ~1h before the current (Berlin) time, like Google
+  // Calendar, so "now" is in view on load. Recomputed each render (cheap).
+  const nowScrollTime = `${String(Math.max(6, new Date().getHours() - 1)).padStart(2, '0')}:00:00`
 
   // Which employees get a lane in the Spuren view — follows the dropdown filter.
   const workerViewMatch = (e: { is_technician?: boolean }) =>
@@ -440,6 +446,13 @@ export function CalendarPage() {
     const start = info.event.start
     if (!appt || !start) {
       info.revert()
+      return
+    }
+    // Never let an appointment land in the past.
+    if (start.getTime() < Date.now()) {
+      info.revert()
+      setImportMsg('Termine können nicht in die Vergangenheit verschoben werden.')
+      setTimeout(() => setImportMsg(null), 4000)
       return
     }
     const end = info.event.end
@@ -620,7 +633,7 @@ export function CalendarPage() {
               buttonText={{ listWeek: 'Terminübersicht' }}
               slotMinTime="06:00:00"
               slotMaxTime="21:00:00"
-              scrollTime="07:30:00"
+              scrollTime={nowScrollTime}
               nowIndicator
               dayMaxEvents={3}
               eventDisplay="block"
@@ -657,6 +670,8 @@ export function CalendarPage() {
               events={mode === 'projects' ? projectEvents : calEvents}
               eventDrop={onEventChange}
               eventResize={onEventChange}
+              // Block the drag/resize visually when the target start is in the past.
+              eventAllow={(dropInfo) => dropInfo.start.getTime() >= Date.now()}
               datesSet={(info) =>
                 setRange({ from: info.start.toISOString(), to: info.end.toISOString() })
               }
@@ -664,6 +679,12 @@ export function CalendarPage() {
                 if (mode === 'projects') return
                 const d = info.date
                 if (info.allDay) d.setHours(9, 0, 0, 0)
+                // No booking in the past.
+                if (d.getTime() < Date.now()) {
+                  setImportMsg('Termine in der Vergangenheit sind nicht möglich.')
+                  setTimeout(() => setImportMsg(null), 4000)
+                  return
+                }
                 setCreateAt(d)
               }}
               eventClick={(info) => {
