@@ -73,15 +73,18 @@ def _slug_suffix() -> str:
 def create_agent(company_name: str, trade: str | None) -> str:
     """Create a fresh ElevenLabs agent and return its agent_id. Minimal config —
     provision_org → configure_agent applies the master German prompt + tools + webhook."""
-    name = re.sub(r"[^A-Za-z0-9_\- ]", "", f"{company_name}_{trade or 'Handwerk'}")[:60]
-    name = f"{name}_{_slug_suffix()}"
+    base = re.sub(r"[^A-Za-z0-9_\- ]", "", f"{company_name}_{trade or 'Handwerk'}")[:40]
+    # 'kiki2.0' marker (verbatim, incl. the dot) tags agents created by the provision
+    # API so they're identifiable in the ElevenLabs workspace — distinct from the legacy
+    # '..._demo_<suffix>' demo-funnel agents. Format: <company>_<trade>_kiki2.0_<alnum>.
+    name = f"{base}_kiki2.0_{_slug_suffix()}"
     first_message = (
         f'Hallo, hier ist Kiki von "{company_name}". Meine Kollegen sind gerade '
         "alle im Gespräch und ich vertrete sie. Wie kann ich Ihnen helfen?"
     )
     body = {
         "name": name,
-        "tags": ["onboarding"],
+        "tags": ["kiki2.0", "onboarding"],
         "conversation_config": {
             "agent": {
                 "first_message": first_message,
