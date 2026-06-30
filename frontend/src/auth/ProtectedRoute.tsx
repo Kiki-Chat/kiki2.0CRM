@@ -1,9 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { ShieldAlert } from 'lucide-react'
+import { lazy } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 
 import { apiFetch } from '../lib/api'
 import { useAuth } from './AuthProvider'
+
+// Field technicians get a dedicated light portal instead of the full office CRM.
+const TechnicianApp = lazy(() =>
+  import('../technician/TechnicianApp').then((m) => ({ default: m.TechnicianApp })),
+)
 
 export function ProtectedRoute() {
   const { session, loading, configured, signOut } = useAuth()
@@ -64,6 +70,9 @@ export function ProtectedRoute() {
     // Other errors (token expired, backend down, etc.) — fall through and let
     // the app surface them naturally.
   }
+
+  // Technicians get the toned-down portal, never the office CRM shell.
+  if (me.data?.role === 'technician') return <TechnicianApp />
 
   // Orphan guard: a session with NO CRM account (e.g. "Mit Google anmelden" for an
   // email we never provisioned) loads /api/me with org_id=null + role=null. Don't drop

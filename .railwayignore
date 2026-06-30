@@ -4,19 +4,29 @@ exports/
 test_scripts/
 backend/.venv/
 frontend/node_modules/
-# Local secrets + env — NEVER upload to the Railway build context (deploy uses
-# --no-gitignore, so .gitignore does NOT protect these). Railway service variables
-# provide config at runtime; a baked .env.local would break the prod frontend build.
+frontend/dist/
+
+# Secrets + local env — MUST be excluded, especially with `railway up --no-gitignore`
+# (filesystem upload, used because this is a git worktree and the git-based upload ships
+# a stale snapshot). .gitignore does NOT protect these here. Railway service variables
+# provide config at runtime; a baked frontend .env.local would break the prod build.
+.env
+.env.*
 backend/.env
 backend/.env.*
 frontend/.env
 frontend/.env.local
 frontend/.env.*.local
-# VCS + tooling + caches
+
+# VCS + tooling + build junk + caches
 .git
 .claude/
 **/__pycache__/
+__pycache__/
 **/*.pyc
+*.pyc
+*.log
+.DS_Store
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

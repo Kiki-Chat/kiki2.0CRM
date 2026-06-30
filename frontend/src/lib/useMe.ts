@@ -22,6 +22,8 @@ export interface Me {
   features?: string[]
   /** UAT/QA only — when true, the Abrechnung page shows a dev plan-switcher (off in prod). */
   dev_plan_switcher?: boolean
+  /** Phase 5: nav paths the admin has hidden for this employee (sidebar gating). */
+  locked_menu_keys?: string[]
 }
 
 export function isAdminRole(role: string | null | undefined): boolean {

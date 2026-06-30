@@ -323,6 +323,27 @@ def _find_customer_by_phone(client, org_id: str, phone: str | None) -> dict | No
     return rows[0] if rows else None
 
 
+def _has_prior_appointments(client, org_id: str, customer_id: str | None) -> bool:
+    """True when this customer already has at least one appointment (a "returning"
+    caller). Drives the naming policy under two-stage scheduling: first-time →
+    "Team", returning → the suggested technician's name. Best-effort → False."""
+    if not customer_id:
+        return False
+    try:
+        rows = (
+            client.table("appointments")
+            .select("id")
+            .eq("org_id", org_id)
+            .eq("customer_id", customer_id)
+            .limit(1)
+            .execute()
+            .data
+        )
+        return bool(rows)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _suggest_employee_enabled(client, org_id: str) -> bool:
     """Per-org "Kiki names the assigned employee out loud on the call" toggle
     (``agent_configs.suggest_employee_enabled``). Default OFF: the availability +
@@ -664,6 +685,38 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
             "dich erneut nach freien Terminen.",
         }
 
+    # ── Two-stage routing (employee↔technician split), gated per org. ──
+    # When ON: the OFFICE coordinator (department owner) owns the ticket, and a
+    # TECHNICIAN is SUGGESTED for the visit (assigned only on confirm). When OFF:
+    # the legacy single-stage assignee (emp, above) is used exactly as before.
+    from app.services import jobs
+
+    two_stage = jobs.two_stage_enabled(client, org_id)
+    coordinator = None
+    suggested_tech = None
+    department = None
+    if two_stage:
+        _cat_name = category["name"] if category else payload.category
+        _sig = payload.description or payload.category
+        department = jobs.resolve_department(client, org_id, category_name=_cat_name, summary=_sig)
+        coordinator = jobs.department_owner(client, org_id, department["id"] if department else None)
+        suggested_tech = jobs.suggest_technician(
+            client, org_id,
+            customer_id=customer["id"],
+            department_id=department["id"] if department else None,
+            category_name=_cat_name, summary=_sig,
+            start=dt, duration_minutes=duration_minutes,
+            buffer_minutes=rules["buffer_minutes"],
+        )
+        # Naming policy: first-time/unknown caller → "Team" (never a name);
+        # returning customer → the suggested technician's name.
+        is_returning = _has_prior_appointments(client, org_id, customer["id"])
+        assignee_name = (
+            suggested_tech.get("display_name") if (suggested_tech and is_returning) else "Team"
+        )
+    else:
+        assignee_name = emp["display_name"] if emp else "Team"
+
     number = gen_inquiry_number(client, org_id)
     notes = payload.description or ""
     for f in payload.additional_fields or []:
@@ -727,7 +780,11 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
                     "org_id": org_id,
                     "inquiry_id": inquiry["id"],
                     "customer_id": customer["id"],
-                    "assigned_employee_id": emp["id"] if emp else None,
+                    # Two-stage: the technician is a SUGGESTION (on appointment_jobs)
+                    # and is pinned to assigned_employee_id only on confirm; the office
+                    # coordinator owns the ticket. Single-stage: legacy assignee.
+                    "assigned_employee_id": None if two_stage else (emp["id"] if emp else None),
+                    "coordinator_employee_id": coordinator["id"] if (two_stage and coordinator) else None,
                     "title": payload.inquiry_title or payload.description or "Termin",
                     "scheduled_at": dt.isoformat(),
                     "duration_minutes": duration_minutes,
@@ -760,11 +817,23 @@ def book_appointment(org_id: str, payload: BookAppointmentRequest) -> dict:
                 "failed — orphaned inquiry %s (org %s)", inquiry["id"], org_id
             )
         raise
+    # Two-stage: record the SUGGESTED technician as an appointment_jobs row
+    # (status='suggested', no notification). It becomes 'dispatched' + notifies
+    # the technician only when the appointment is confirmed. Best-effort.
+    if two_stage:
+        jobs.create_suggested_job(
+            client, org_id, appt["id"],
+            technician_id=suggested_tech["id"] if suggested_tech else None,
+            department_id=department["id"] if department else None,
+            work_type=category["name"] if category else payload.category,
+            scheduled_at=dt.isoformat(),
+            duration_minutes=duration_minutes,
+        )
     # The confirmation call+email is fired AFTER the call ends (services/post_call.py),
     # NOT here — so it never collides with the still-active booking call. The
     # appointment carries source_conversation_id for that post-call linkage.
     return _book_success(
-        appt["id"], customer["id"], inquiry["id"], dt, emp["display_name"] if emp else "Team"
+        appt["id"], customer["id"], inquiry["id"], dt, assignee_name
     )
 
 

@@ -98,8 +98,11 @@ export function Sidebar({
   const companyLogo = me?.org_logo_url
 
   // Drop admin-only leaves for employees, and employee-only (personal) leaves
-  // for admins — plus any group left empty as a result.
-  const hideLeaf = (l: NavLeaf) => (!!l.adminOnly && !isAdmin) || (!!l.employeeOnly && isAdmin)
+  // for admins — plus any group left empty as a result. Phase 5: also drop leaves
+  // the admin has explicitly locked for THIS employee (by nav path).
+  const lockedKeys = me?.locked_menu_keys ?? []
+  const hideLeaf = (l: NavLeaf) =>
+    (!!l.adminOnly && !isAdmin) || (!!l.employeeOnly && isAdmin) || lockedKeys.includes(l.to)
   const visibleNav = NAV.flatMap<NavEntry>((entry) => {
     if (!isGroup(entry)) return hideLeaf(entry) ? [] : [entry]
     const children = entry.children.filter((c) => !hideLeaf(c))

@@ -125,8 +125,13 @@ export function CalendarPage() {
   const [createAt, setCreateAt] = useState<Date | null>(null)
   const [editAppt, setEditAppt] = useState<Appointment | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
-  const [mode, setMode] = useState<'appointments' | 'projects'>('appointments')
+  // Single unified calendar (the old Termine/Vorgangs-Verlauf split was removed).
+  const [mode] = useState<'appointments' | 'projects'>('appointments')
   const [calView, setCalView] = useState<'kalender' | 'spuren'>('kalender')
+  // Worker-kind view (employee↔technician split): Alle shows everyone, Büro shows
+  // office employees only, Techniker shows field technicians only. Filters the
+  // Spuren lanes and the "Jetzt verfügbar" rail.
+  const [workerView, setWorkerView] = useState<'alle' | 'buero' | 'techniker'>('alle')
   const [spurenDate, setSpurenDate] = useState<Date>(() => new Date())
   // Drag/resize lands here until the user confirms — moving a confirmed
   // appointment fires the real reschedule call+email server-side, so it must
@@ -222,6 +227,11 @@ export function CalendarPage() {
     }
   }, [appointments, searchParams])
 
+  // Technician employee ids — drives the Alle/Büro/Techniker grid filter.
+  const techIds = useMemo(
+    () => new Set(employees.filter((e) => e.is_technician).map((e) => e.id)),
+    [employees],
+  )
   const events = useMemo(
     () =>
       appointments
@@ -231,6 +241,15 @@ export function CalendarPage() {
           // so the team can confirm/adjust them in place, deep-linked to the call.
           // Cancelled and time-less rows still never render.
           if (!a.scheduled_at || a.status === 'cancelled') return false
+          // Alle/Büro/Techniker: keep only appointments assigned to a person of the
+          // selected kind (unassigned rows drop out of the Büro/Techniker views).
+          if (workerView !== 'alle') {
+            const id = a.assigned_employee_id
+            if (!id) return false
+            const isTech = techIds.has(id)
+            if (workerView === 'techniker' && !isTech) return false
+            if (workerView === 'buero' && isTech) return false
+          }
           // Google-imported events are external "blocked time" — always shown,
           // independent of the employee filter (they block everyone).
           if (a.source === 'google_import') return true
@@ -246,6 +265,8 @@ export function CalendarPage() {
           // "blocked time" — grey, read-only, no customer detail surfaced.
           const isExternal = a.source === 'google_import' || a.source === 'employee_busy'
           const isTentative = a.status === 'pending'
+          // Past appointments are locked — can't be dragged/resized into history.
+          const isPast = start.getTime() < Date.now()
           const color = isExternal ? GOOGLE_BLOCK_COLOR : colorFor(a.assigned_employee_id)
           const base = a.title ?? 'Termin'
           const title = isExternal
@@ -265,19 +286,28 @@ export function CalendarPage() {
             // External blocks AND tentative suggestions are read-only on the grid:
             // a drag must never silently mutate an unconfirmed slot (confirm/adjust
             // happens via the detail modal). Confirmed CRM events stay draggable.
-            editable: !isExternal && !isTentative,
+            editable: !isExternal && !isTentative && !isPast,
             classNames: isTentative ? ['cal-tentative'] : [],
             extendedProps: { appt: a, external: isExternal },
           }
         }),
-    [appointments, filter, myEmployeeId, colorFor],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [appointments, filter, myEmployeeId, colorFor, workerView, techIds],
   )
 
   // Approved absences as soft all-day background bars on the week/month calendar.
   const absenceEvents = useMemo(
     () =>
       absences
-        .filter((ab) => !ab.status || ab.status === 'approved')
+        .filter((ab) => {
+          if (ab.status && ab.status !== 'approved') return false
+          if (workerView !== 'alle') {
+            const isTech = techIds.has(ab.employee_id)
+            if (workerView === 'techniker' && !isTech) return false
+            if (workerView === 'buero' && isTech) return false
+          }
+          return true
+        })
         .map((ab) => ({
           id: `ab-${ab.id}`,
           title: `${ab.employee_name ?? 'Abwesend'}${ab.type === 'block' ? ' · Blockiert' : ''}`,
@@ -287,19 +317,35 @@ export function CalendarPage() {
           backgroundColor: 'rgba(120,117,111,0.18)',
           extendedProps: { absence: true },
         })),
-    [absences],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [absences, workerView, techIds],
   )
   const calEvents = useMemo(() => [...events, ...absenceEvents], [events, absenceEvents])
 
+  // Scroll the week/day grid to ~1h before the current (Berlin) time, like Google
+  // Calendar, so "now" is in view on load. Recomputed each render (cheap).
+  const nowScrollTime = `${String(Math.max(6, new Date().getHours() - 1)).padStart(2, '0')}:00:00`
+
   // Which employees get a lane in the Spuren view — follows the dropdown filter.
+  const workerViewMatch = (e: { is_technician?: boolean }) =>
+    workerView === 'alle' ? true : workerView === 'techniker' ? !!e.is_technician : !e.is_technician
+
   const spurenEmployees = useMemo(() => {
-    const active = employees.filter((e) => e.is_active !== false)
+    const active = employees.filter((e) => e.is_active !== false && workerViewMatch(e))
     if (filter !== 'all' && filter !== 'mine' && filter !== 'unassigned') {
       return active.filter((e) => e.id === filter)
     }
     if (filter === 'mine' && myEmployeeId) return active.filter((e) => e.id === myEmployeeId)
     return active
-  }, [employees, filter, myEmployeeId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employees, filter, myEmployeeId, workerView])
+
+  // The "Jetzt verfügbar" rail follows the same worker-kind view.
+  const railEmployees = useMemo(
+    () => employees.filter((e) => e.is_active !== false && workerViewMatch(e)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [employees, workerView],
+  )
 
   // Spuren has no FullCalendar to fire datesSet, so drive the fetch range from the
   // chosen day (appointments + absences load for exactly that day).
@@ -402,6 +448,13 @@ export function CalendarPage() {
       info.revert()
       return
     }
+    // Never let an appointment land in the past.
+    if (start.getTime() < Date.now()) {
+      info.revert()
+      setImportMsg('Termine können nicht in die Vergangenheit verschoben werden.')
+      setTimeout(() => setImportMsg(null), 4000)
+      return
+    }
     const end = info.event.end
     const newDuration = end
       ? Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000))
@@ -432,14 +485,17 @@ export function CalendarPage() {
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-text">Kalender</h1>
-          <div className="flex gap-1 rounded-md border border-border bg-alt p-1">
-            <button onClick={() => setMode('appointments')} className={cn('rounded px-3 py-1 text-sm', mode === 'appointments' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Termine</button>
-            <button onClick={() => setMode('projects')} className={cn('rounded px-3 py-1 text-sm', mode === 'projects' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Vorgangs-Verlauf</button>
-          </div>
           {mode === 'appointments' && (
             <div className="flex gap-1 rounded-md border border-border bg-alt p-1">
               <button onClick={() => setCalView('kalender')} className={cn('rounded px-3 py-1 text-sm', calView === 'kalender' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Kalender</button>
               <button onClick={() => setCalView('spuren')} className={cn('rounded px-3 py-1 text-sm', calView === 'spuren' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Spuren</button>
+            </div>
+          )}
+          {mode === 'appointments' && (
+            <div className="flex gap-1 rounded-md border border-border bg-alt p-1" title="Büro-Mitarbeiter vs. Techniker">
+              <button onClick={() => setWorkerView('alle')} className={cn('rounded px-3 py-1 text-sm', workerView === 'alle' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Alle</button>
+              <button onClick={() => setWorkerView('buero')} className={cn('rounded px-3 py-1 text-sm', workerView === 'buero' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Büro</button>
+              <button onClick={() => setWorkerView('techniker')} className={cn('rounded px-3 py-1 text-sm', workerView === 'techniker' ? 'bg-surface font-medium text-text shadow-e1' : 'text-muted')}>Techniker</button>
             </div>
           )}
         </div>
@@ -549,7 +605,7 @@ export function CalendarPage() {
       {/* Calendar + availability rail */}
       <div className="flex min-h-0 flex-1 gap-4">
         {mode === 'appointments' && calView === 'spuren' ? (
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1">
             <SpurenView
               date={spurenDate}
               employees={spurenEmployees}
@@ -561,7 +617,7 @@ export function CalendarPage() {
             />
           </div>
         ) : (
-          <div className="min-h-0 flex-1 rounded-xl border border-border bg-surface p-4">
+          <div className="min-h-0 min-w-0 flex-1 rounded-xl border border-border bg-surface p-4">
             <FullCalendar
               ref={calRef}
               plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
@@ -577,7 +633,7 @@ export function CalendarPage() {
               buttonText={{ listWeek: 'Terminübersicht' }}
               slotMinTime="06:00:00"
               slotMaxTime="21:00:00"
-              scrollTime="07:30:00"
+              scrollTime={nowScrollTime}
               nowIndicator
               dayMaxEvents={3}
               eventDisplay="block"
@@ -614,6 +670,8 @@ export function CalendarPage() {
               events={mode === 'projects' ? projectEvents : calEvents}
               eventDrop={onEventChange}
               eventResize={onEventChange}
+              // Block the drag/resize visually when the target start is in the past.
+              eventAllow={(dropInfo) => dropInfo.start.getTime() >= Date.now()}
               datesSet={(info) =>
                 setRange({ from: info.start.toISOString(), to: info.end.toISOString() })
               }
@@ -621,6 +679,12 @@ export function CalendarPage() {
                 if (mode === 'projects') return
                 const d = info.date
                 if (info.allDay) d.setHours(9, 0, 0, 0)
+                // No booking in the past.
+                if (d.getTime() < Date.now()) {
+                  setImportMsg('Termine in der Vergangenheit sind nicht möglich.')
+                  setTimeout(() => setImportMsg(null), 4000)
+                  return
+                }
                 setCreateAt(d)
               }}
               eventClick={(info) => {
@@ -636,11 +700,13 @@ export function CalendarPage() {
         )}
         {mode === 'appointments' && isAdmin && (
           <AvailabilityRail
-            employees={employees}
+            employees={railEmployees}
             appointments={appointments}
             absences={absences}
             colorFor={colorFor}
             at={new Date()}
+            activeId={filter}
+            onSelect={(id) => setFilter(filter === id ? 'all' : id)}
           />
         )}
       </div>

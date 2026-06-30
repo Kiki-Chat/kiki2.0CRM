@@ -39,7 +39,7 @@ function buildIndex(): Cmd[] {
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate()
-  const { isAdmin } = useMe()
+  const { isAdmin, me } = useMe()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -47,15 +47,18 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const all = useMemo(() => buildIndex(), [])
   const visible = useMemo(() => {
     // Mirror the Sidebar's visibility rules so the palette never offers a page
-    // the role can't open (the backend still enforces regardless).
-    const hide = (c: Cmd) => (!!c.adminOnly && !isAdmin) || (!!c.employeeOnly && isAdmin)
+    // the role can't open (the backend still enforces regardless) — including the
+    // per-employee menu locks (Phase 5).
+    const locked = me?.locked_menu_keys ?? []
+    const hide = (c: Cmd) =>
+      (!!c.adminOnly && !isAdmin) || (!!c.employeeOnly && isAdmin) || locked.includes(c.to)
     const q = query.trim().toLowerCase()
     return all.filter((c) => {
       if (hide(c)) return false
       if (!q) return true
       return `${c.group ?? ''} ${c.label}`.toLowerCase().includes(q)
     })
-  }, [all, query, isAdmin])
+  }, [all, query, isAdmin, me])
 
   useEffect(() => {
     if (!open) return

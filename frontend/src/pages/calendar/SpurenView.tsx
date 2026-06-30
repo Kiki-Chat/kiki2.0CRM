@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 
 import { cn } from '../../lib/utils'
 import {
@@ -105,13 +106,43 @@ export function SpurenView({
   onSelectAppt: (a: Appointment) => void
   onDateChange: (d: Date) => void
 }) {
-  const lanes = employees.filter((e) => e.is_active !== false)
+  // Lane order: busiest first (most appointments that day = highest "weightage"),
+  // then alphabetical. So whoever actually has work on the open day floats to the
+  // front instead of being buried in the name-sorted list.
+  const dayLoad = (empId: string) =>
+    appointments.filter(
+      (a) =>
+        a.assigned_employee_id === empId &&
+        a.scheduled_at &&
+        a.status !== 'cancelled' &&
+        a.status !== 'pending' &&
+        sameLocalDay(a.scheduled_at, date),
+    ).length
+  const lanes = employees
+    .filter((e) => e.is_active !== false)
+    .map((e) => ({ e, load: dayLoad(e.id) }))
+    .sort((a, b) => b.load - a.load || (a.e.display_name || '').localeCompare(b.e.display_name || ''))
+    .map((x) => x.e)
   const shift = (days: number) => {
     const d = new Date(date)
     d.setDate(d.getDate() + days)
     onDateChange(d)
   }
   const hours = Array.from({ length: DAY_END_H - DAY_START_H }, (_, i) => DAY_START_H + i)
+
+  // "Now" line + auto-scroll to the current time (like Google Calendar), but only
+  // when the open day IS today.
+  const now = new Date()
+  const isToday = sameLocalDay(now.toISOString(), date)
+  const nowTop = (now.getHours() + now.getMinutes() / 60 - DAY_START_H) * PX_PER_H
+  const showNow = isToday && nowTop >= 0 && nowTop <= TOTAL_H
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (isToday && scrollRef.current) {
+      scrollRef.current.scrollTop = Math.max(0, nowTop - 120)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date])
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-surface">
@@ -133,7 +164,7 @@ export function SpurenView({
       {lanes.length === 0 ? (
         <p className="px-4 py-8 text-sm text-muted">Keine Mitarbeiter angelegt.</p>
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
           <div className="flex min-w-fit">
             {/* time axis */}
             <div className="sticky left-0 z-10 w-12 shrink-0 bg-surface">
@@ -144,6 +175,9 @@ export function SpurenView({
                     {String(h).padStart(2, '0')}:00
                   </div>
                 ))}
+                {showNow && (
+                  <div className="absolute right-0 z-20 h-2 w-2 -translate-y-1/2 translate-x-1/2 rounded-full bg-error" style={{ top: nowTop }} />
+                )}
               </div>
             </div>
             {/* employee lanes */}
@@ -164,6 +198,9 @@ export function SpurenView({
                     {hours.map((h) => (
                       <div key={h} className="absolute inset-x-0 border-t border-border-faint" style={{ top: (h - DAY_START_H) * PX_PER_H }} />
                     ))}
+                    {showNow && (
+                      <div className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-error" style={{ top: nowTop }} />
+                    )}
                     {blocks.map((b) => {
                       if (b.kind === 'termin') {
                         return (

@@ -34,12 +34,18 @@ export function AvailabilityRail({
   absences,
   colorFor,
   at,
+  onSelect,
+  activeId,
 }: {
   employees: CalEmployee[]
   appointments: Appointment[]
   absences: Absence[]
   colorFor: (id: string | null) => string
   at: Date
+  /** Click a person to filter the calendar to them (toggles off if already active). */
+  onSelect?: (id: string) => void
+  /** The currently-filtered employee id (highlights that row). */
+  activeId?: string
 }) {
   const rows = useMemo(() => {
     return employees
@@ -74,9 +80,15 @@ export function AvailabilityRail({
           rows.map(({ e, reason }) => {
             const t = tone(reason)
             return (
-              <div
+              <button
                 key={e.id}
-                className="flex items-center gap-2.5 border-b border-border-faint px-3 py-2.5 last:border-0"
+                type="button"
+                onClick={() => onSelect?.(e.id)}
+                title={`Kalender auf ${e.display_name} filtern`}
+                className={cn(
+                  'flex w-full items-center gap-2.5 border-b border-border-faint px-3 py-2.5 text-left transition-colors last:border-0 hover:bg-alt',
+                  activeId === e.id && 'bg-green-tint-100',
+                )}
               >
                 <span
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
@@ -96,7 +108,7 @@ export function AvailabilityRail({
                   </span>
                   <span className="text-[11px] text-muted">{e.open_tickets ?? 0} offen</span>
                 </div>
-              </div>
+              </button>
             )
           })
         )}
