@@ -263,6 +263,105 @@ def change_subscription_plan(
     )
 
 
+def is_downgrade(current_title: str | None, target_title: str | None) -> bool:
+    """A downgrade = the target's monthly base fee is LOWER than the current plan's."""
+    from app.services.stripe_catalog import PLANS
+
+    cur = PLANS.get(current_title or "", {}).get("monthly_cents", 0)
+    tgt = PLANS.get(target_title or "", {}).get("monthly_cents", 0)
+    return tgt < cur
+
+
+def schedule_subscription_downgrade(
+    org_id: str, plan_title: str, *, actor_id: str | None = None
+) -> dict:
+    """Schedule a DOWNGRADE for the END of the current billing period — NO mid-period
+    proration/credit. The customer keeps the current (higher) plan + features until
+    renewal, then switches to the cheaper plan. (Upgrades use change_subscription_plan,
+    which applies immediately + prorates.) Implemented as a Stripe SubscriptionSchedule:
+    phase 1 = current items until period end, phase 2 = new items from period end on."""
+    db = get_service_client()
+    org = _org(db, org_id)
+    customer_id = org.get("stripe_customer_id")
+    if not customer_id:
+        raise StripeBillingError(f"org {org_id} has no Stripe customer")
+
+    s = get_stripe()
+    sub = None
+    stored_id = org.get("billing_subscription_id")
+    if stored_id:
+        try:
+            sub = s.Subscription.retrieve(stored_id, expand=["items.data.price"])
+        except stripe.error.StripeError:  # type: ignore[attr-defined]
+            sub = None
+    if sub is None or sub.get("status") in (None, "canceled", "incomplete_expired"):
+        subs = (
+            s.Subscription.list(
+                customer=customer_id, status="active", expand=["data.items.data.price"]
+            ).get("data")
+            or []
+        )
+        sub = subs[0] if subs else None
+    if sub is None:
+        raise StripeBillingError("no active subscription to downgrade")
+
+    base_item = metered_item = None
+    interval = "month"
+    for it in (sub.get("items") or {}).get("data") or []:
+        recurring = (it.get("price") or {}).get("recurring") or {}
+        if recurring.get("usage_type") == "metered":
+            metered_item = it
+        else:
+            base_item = it
+            interval = recurring.get("interval") or "month"
+    if not base_item:
+        raise StripeBillingError("subscription has no base item to change")
+
+    cur_base_price = ((base_item or {}).get("price") or {}).get("id")
+    cur_metered_price = ((metered_item or {}).get("price") or {}).get("id") if metered_item else None
+    p_end = int(sub.get("current_period_end") or 0)
+
+    new = find_plan_prices(plan_title, interval)
+    if not new["base_price"] or not new["metered_price"]:
+        raise StripeBillingError(f"no catalog prices for {plan_title!r}/{interval!r}")
+
+    sub_id = sub["id"]
+
+    def _build(idem, meta):
+        ss = get_stripe()
+        schedule = ss.SubscriptionSchedule.create(from_subscription=sub_id)
+        cur_phase = (schedule.get("phases") or [{}])[0]
+        phase1_items = [{"price": cur_base_price, "quantity": 1}]
+        if cur_metered_price:
+            phase1_items.append({"price": cur_metered_price})
+        phase2_items = [
+            {"price": new["base_price"], "quantity": 1},
+            {"price": new["metered_price"]},
+        ]
+        return ss.SubscriptionSchedule.modify(
+            schedule["id"],
+            end_behavior="release",  # after the downgrade phase, return to a normal sub
+            phases=[
+                {
+                    "items": phase1_items,
+                    "start_date": cur_phase.get("start_date"),
+                    "end_date": cur_phase.get("end_date") or p_end,
+                },
+                {"items": phase2_items, "start_date": cur_phase.get("end_date") or p_end},
+            ],
+        )
+
+    return stripe_call_safely(
+        op="subscription.schedule_downgrade",
+        org_id=org_id,
+        actor_id=actor_id,
+        subscription_id=sub_id,
+        stripe_object=sub_id,
+        request_payload={"plan": plan_title, "interval": interval, "when": "period_end"},
+        builder=_build,
+    )
+
+
 def preview_change_plan(org_id: str, plan_title: str) -> dict:
     """Read-only 'what will this switch cost me' for the confirm step. Computes the
     prorated credit (unused time on the current plan) and charge (new plan over the
@@ -317,8 +416,11 @@ def preview_change_plan(org_id: str, plan_title: str) -> dict:
     span = max(1, p_end - p_start)
     frac = min(1.0, max(0.0, (p_end - now_ts) / span)) if (p_start and p_end) else 0.0
 
-    credit = round(current_base_cents * frac)
-    charge = round(target_base_cents * frac)
+    # Downgrades apply at PERIOD END with no mid-period credit/charge; only upgrades
+    # prorate immediately.
+    downgrade = is_downgrade(org.get("billing_plan_title"), plan_title)
+    credit = 0 if downgrade else round(current_base_cents * frac)
+    charge = 0 if downgrade else round(target_base_cents * frac)
     return {
         "current_plan_title": org.get("billing_plan_title"),
         "target_plan_title": plan_title,
@@ -331,6 +433,7 @@ def preview_change_plan(org_id: str, plan_title: str) -> dict:
         "billed_on": (
             datetime.fromtimestamp(p_end, timezone.utc).isoformat() if p_end else None
         ),
+        "scheduled": downgrade,
     }
 
 
