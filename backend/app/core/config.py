@@ -213,6 +213,18 @@ class Settings(BaseSettings):
     twilio_address_sid: str = Field(default="", validation_alias="TWILIO_ADDRESS_SID")
     twilio_bundle_sid: str = Field(default="", validation_alias="TWILIO_BUNDLE_SID")
 
+    # ── Google Sheets sync (DB is ALWAYS the source of truth) ──────────────────
+    # The database is canonical for the Twilio number pool (twilio_numbers) and the
+    # client roster (organizations / final_client_export view). Google Sheets are a
+    # READ-ONLY MIRROR for non-tech staff + the one-time IMPORT of the legacy pool.
+    # Editing a mirror sheet never affects the DB (past incident: editable sheets broke
+    # the workflows). Inert until a service-account JSON + sheet ids are set.
+    # GOOGLE_SERVICE_ACCOUNT_JSON may be the JSON content itself or a path to the file.
+    sheets_sync_enabled: bool = Field(default=False, validation_alias="SHEETS_SYNC_ENABLED")
+    google_service_account_json: str = Field(default="", validation_alias="GOOGLE_SERVICE_ACCOUNT_JSON")
+    twilio_pool_sheet_id: str = Field(default="", validation_alias="TWILIO_POOL_SHEET_ID")
+    final_client_sheet_id: str = Field(default="", validation_alias="FINAL_CLIENT_SHEET_ID")
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

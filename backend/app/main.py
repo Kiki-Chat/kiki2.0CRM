@@ -199,6 +199,13 @@ if settings.onboarding_enabled:
 
     app.include_router(onboarding.router)
 
+# Google Sheets sync (DB = source of truth; sheet = read-only mirror + legacy import) —
+# mounted ONLY when SHEETS_SYNC_ENABLED=1. Ships OFF/inert by default.
+if settings.sheets_sync_enabled:
+    from app.api.routes import sheets_sync
+
+    app.include_router(sheets_sync.router)
+
 
 @app.get("/")
 async def root() -> dict:

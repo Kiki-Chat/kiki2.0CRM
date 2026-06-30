@@ -27,3 +27,8 @@ stripe==11.6.0
 
 # Error tracking — dormant unless SENTRY_DSN is set (see app/main.py).
 sentry-sdk>=2.0
+
+# Google Sheets sync (DB→sheet mirror + legacy pool import) — lazily imported in
+# app/services/sheets_sync.py; the app runs fine without them when SHEETS_SYNC_ENABLED=0.
+gspread>=6.0
+google-auth>=2.0

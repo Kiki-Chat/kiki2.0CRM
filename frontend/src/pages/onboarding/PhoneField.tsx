@@ -30,9 +30,37 @@ function flagEmoji(code: string): string {
     .replace(/./g, (ch) => String.fromCodePoint(127397 + ch.charCodeAt(0)))
 }
 
+// Map common IANA time zones → ISO country. The browser TIME ZONE reflects the
+// user's physical LOCATION far better than the UI language (e.g. an English-language
+// browser in Germany is still Europe/Berlin), and needs no geolocation permission.
+const TZ_TO_CC: Record<string, string> = {
+  'Europe/Berlin': 'DE',
+  'Europe/Busingen': 'DE',
+  'Europe/Vienna': 'AT',
+  'Europe/Zurich': 'CH',
+  'Europe/Amsterdam': 'NL',
+  'Europe/Brussels': 'BE',
+  'Europe/Paris': 'FR',
+  'Europe/Rome': 'IT',
+  'Europe/Madrid': 'ES',
+  'Europe/Warsaw': 'PL',
+  'Europe/London': 'GB',
+  'Europe/Istanbul': 'TR',
+}
+
 function detectCountry(): Country {
-  const region = (navigator.language?.split('-')[1] || 'DE').toUpperCase()
-  return COUNTRIES.find((c) => c.code === region) || COUNTRIES[0]
+  // Use the browser TIME ZONE (a real location signal), NOT the UI language — an
+  // English-language browser in Germany must still default to 🇩🇪. Unsupported regions
+  // fall back to DE (our core market), never to the locale language.
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const cc = TZ_TO_CC[tz] || (tz?.startsWith('America/') ? 'US' : '')
+    const hit = cc && COUNTRIES.find((c) => c.code === cc)
+    if (hit) return hit
+  } catch {
+    /* ignore */
+  }
+  return COUNTRIES[0] // default 🇩🇪 +49
 }
 
 export function PhoneField({

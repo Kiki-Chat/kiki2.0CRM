@@ -64,9 +64,14 @@ Abrechnung shows the subscription + invoice. Stripe sent the receipt separately.
 
 **In scope (this build):** public funnel UI (3 steps), `onboarding_leads`, no-org checkout endpoint, webhook lead-branch, in-house orchestrator (EL create + Twilio allocate/bind + provision), `twilio_numbers` DB pool, one onboarding email, Stripe↔org linkage, "Sign in with Google".
 
+**Sheets↔DB sync — BUILT 2026-06-30 (inert until creds), DB is canonical:**
+- `migration 0098` = `final_client_export` VIEW (org+agent_configs → the Final-Client columns; `org_id` replaces CD Project ID, static `crm.kikichat.de/login`). Applied UAT.
+- `app/services/sheets_sync.py` + `routes/sheets_sync.py` (master-secret, mounted when `SHEETS_SYNC_ENABLED`): `import_twilio_pool` (Sheets→DB seed of the legacy pool, upsert on phone_number), `mirror_twilio_pool` + `mirror_final_clients` (DB→Sheets read-only mirror for non-tech staff). Google libs (gspread/google-auth) lazy-imported → app runs without them; in `requirements.txt`.
+- Config: `SHEETS_SYNC_ENABLED`, `GOOGLE_SERVICE_ACCOUNT_JSON` (content or path), `TWILIO_POOL_SHEET_ID`, `FINAL_CLIENT_SHEET_ID`.
+- **Still need from Amber:** a Google service account with read+write on both sheets + the live sheet ids (`twilio_pool` = `1RMNYg_…`). Then: `POST /api/sheets/import/twilio-pool` to seed the real pool, and the funnel assigns real numbers — **this is the UAT-ready path** (no throwaway). The sheet is a one-way mirror; editing it never affects the DB.
+
 **Deferred (later phases, acknowledged):**
-- **Sheets→DB mirror** of `twilio_pool` + the Workflow-C "Final Client" routing sheet (DB becomes source of truth now; the human-readable **read-only** mirror back to Sheets is Phase 2 — edits to the sheet must NOT affect the DB). _Sheet formats received 2026-06-30 (see below). Still need from Amber: Google service-account creds with read+write on those two sheets, and the live sheet ids (`twilio_pool` = `1RMNYg_…`)._
-- **Legacy ~80-customer migration** onto `Kiki Legacy` (link, don't re-bill) — per `STRIPE_ONBOARDING_AND_MIGRATION_SPEC.md` §3.
+- **Legacy ~80-customer migration** onto `Kiki Legacy` (link, don't re-bill) — per `STRIPE_ONBOARDING_AND_MIGRATION_SPEC.md` §3. (The `import_final_clients` direction = org-creation-from-sheet is part of this and intentionally not built yet.)
 
 ### 2.1 Deferred-mirror sheet formats (received 2026-06-30)
 
