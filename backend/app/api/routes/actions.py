@@ -931,9 +931,6 @@ def _aggregate(org_id: str, scope=None) -> list[dict[str, Any]]:
     # Employee portal: restrict to the caller's own work before any further work.
     items = _scope_items(items, scope)
 
-    # Employee portal: restrict to the caller's own work before any further work.
-    items = _scope_items(items, scope)
-
     # Stable per-action key so the manual to-do state (claim/done/dismiss) sticks.
     for it in items:
         it["action_key"] = f"{it['kind']}:{it['id']}"
