@@ -94,7 +94,8 @@ class ChangePlanPreview(BaseModel):
     next_recurring_cents: int = 0          # the new plan's full recurring price (per interval)
     interval: str = "month"
     currency: str = "eur"
-    billed_on: str | None = None           # when the proration lands (end of current period)
+    billed_on: str | None = None           # when the proration lands / when a scheduled change takes effect
+    scheduled: bool = False                # True for a DOWNGRADE → applies at period end, no mid-period credit
 
 
 class PlanOption(BaseModel):

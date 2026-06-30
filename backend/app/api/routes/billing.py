@@ -338,7 +338,11 @@ def _change_plan(org_id: str, actor_id: str, body: ChangePlanRequest) -> Billing
     migration, never self-selected. ``_sync`` re-derives plan/quota from the new
     base-item metadata so the UI reflects the change without waiting on a webhook."""
     from app.services.stripe_catalog import PLANS
-    from app.services.stripe_provisioning import change_subscription_plan
+    from app.services.stripe_provisioning import (
+        change_subscription_plan,
+        is_downgrade,
+        schedule_subscription_downgrade,
+    )
 
     client = get_service_client()
     org = _org(client, org_id)
@@ -358,7 +362,12 @@ def _change_plan(org_id: str, actor_id: str, body: ChangePlanRequest) -> Billing
     if target == org.get("billing_plan_title"):
         raise HTTPException(status_code=400, detail="Du bist bereits auf diesem Tarif.")
     try:
-        change_subscription_plan(org_id, target, actor_id=actor_id)
+        if is_downgrade(org.get("billing_plan_title"), target):
+            # Downgrade → schedule for period end (no mid-period refund); org stays on the
+            # current plan until renewal, so _sync below still reflects the current plan.
+            schedule_subscription_downgrade(org_id, target, actor_id=actor_id)
+        else:
+            change_subscription_plan(org_id, target, actor_id=actor_id)
     except StripeBillingError as exc:
         raise HTTPException(status_code=502, detail=f"Tarifwechsel fehlgeschlagen: {exc}") from exc
     return _sync(org_id)

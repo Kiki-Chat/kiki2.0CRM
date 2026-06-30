@@ -98,6 +98,7 @@ export interface ChangePlanPreview {
   interval: string
   currency: string
   billed_on: string | null
+  scheduled: boolean
 }
 export interface ChangePlanPreview {
   current_plan_title: string | null
