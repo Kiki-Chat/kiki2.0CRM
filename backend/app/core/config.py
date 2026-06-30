@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Canonical public base URL of the customer-facing CRM frontend. EVERY link
@@ -221,7 +221,13 @@ class Settings(BaseSettings):
     # the workflows). Inert until a service-account JSON + sheet ids are set.
     # GOOGLE_SERVICE_ACCOUNT_JSON may be the JSON content itself or a path to the file.
     sheets_sync_enabled: bool = Field(default=False, validation_alias="SHEETS_SYNC_ENABLED")
-    google_service_account_json: str = Field(default="", validation_alias="GOOGLE_SERVICE_ACCOUNT_JSON")
+    # The Google SERVICE-ACCOUNT JSON (full key-file content, or a path to it). Read from
+    # either GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SHEETS_API. NOTE: this must be a service
+    # account, not a plain API key — an API key cannot read a private (shared) sheet.
+    google_service_account_json: str = Field(
+        default="",
+        validation_alias=AliasChoices("GOOGLE_SERVICE_ACCOUNT_JSON", "GOOGLE_SHEETS_API"),
+    )
     twilio_pool_sheet_id: str = Field(default="", validation_alias="TWILIO_POOL_SHEET_ID")
     final_client_sheet_id: str = Field(default="", validation_alias="FINAL_CLIENT_SHEET_ID")
 

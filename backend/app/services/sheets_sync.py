@@ -72,10 +72,57 @@ def _gspread_client():
         raise RuntimeError(
             "google sheets libs missing — add gspread + google-auth to requirements"
         ) from exc
-    raw = settings.google_service_account_json.strip()
-    info = json.loads(raw) if raw.startswith("{") else json.load(open(raw))
+    raw = (settings.google_service_account_json or "").strip()
+    if not raw:
+        raise RuntimeError("GOOGLE_SHEETS_API / GOOGLE_SERVICE_ACCOUNT_JSON not set")
+    try:
+        if raw.startswith("{"):
+            info = json.loads(raw)
+        elif raw.endswith(".json"):
+            with open(raw) as fh:
+                info = json.load(fh)
+        else:
+            raise ValueError("not service-account JSON")
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            "GOOGLE_SHEETS_API must contain a Google SERVICE-ACCOUNT JSON (the full key-file "
+            "content), not a plain API key — an API key cannot read a private sheet even when "
+            "shared. Create a service account, share both sheets with its client_email, and "
+            "store its JSON here."
+        ) from exc
     creds = Credentials.from_service_account_info(info, scopes=_SCOPES)
     return gspread.authorize(creds)
+
+
+def _service_account_email() -> str | None:
+    raw = (settings.google_service_account_json or "").strip()
+    try:
+        info = json.loads(raw) if raw.startswith("{") else json.load(open(raw))
+        return info.get("client_email")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def verify_connection() -> dict:
+    """READ-ONLY connection check: authenticate as the service account and open each
+    configured sheet, returning its title + worksheet name. Touches NO business data —
+    used only to confirm the Google connection (creds + sharing + sheet ids) is wired."""
+    _ensure_enabled()
+    out: dict = {"service_account_email": _service_account_email(), "sheets": {}}
+    gc = _gspread_client()
+    for key, sheet_id in (
+        ("twilio_pool", settings.twilio_pool_sheet_id),
+        ("final_client", settings.final_client_sheet_id),
+    ):
+        if not sheet_id:
+            out["sheets"][key] = {"ok": False, "error": "sheet id not configured"}
+            continue
+        try:
+            ss = gc.open_by_key(sheet_id)
+            out["sheets"][key] = {"ok": True, "title": ss.title, "worksheet": ss.sheet1.title}
+        except Exception as exc:  # noqa: BLE001
+            out["sheets"][key] = {"ok": False, "error": str(exc)[:200]}
+    return out
 
 
 def _worksheet(sheet_id: str):

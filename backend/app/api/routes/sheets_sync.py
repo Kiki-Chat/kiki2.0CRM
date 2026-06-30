@@ -17,6 +17,14 @@ router = APIRouter(
 )
 
 
+@router.get("/ping")
+async def sheets_ping_route() -> dict:
+    """Read-only connection check (no data touched) — confirms creds + sheet sharing."""
+    from app.services.sheets_sync import verify_connection
+
+    return await run_in_threadpool(verify_connection)
+
+
 @router.post("/import/twilio-pool")
 async def import_twilio_pool_route() -> dict:
     from app.services.sheets_sync import import_twilio_pool
