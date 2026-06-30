@@ -192,6 +192,27 @@ class Settings(BaseSettings):
     # frontend_public_url + '/settings/abrechnung' when blank.
     billing_portal_return_url: str = Field(default="", validation_alias="BILLING_PORTAL_RETURN_URL")
 
+    # ── Paid-onboarding funnel (public signup → Stripe → in-house provision) ───
+    # The whole public funnel router AND the Stripe-webhook lead-branch that creates
+    # the org after payment are gated by ONBOARDING_ENABLED. Ships OFF/inert: with the
+    # flag off the funnel endpoints 404 and the webhook lead-branch is skipped, so the
+    # app behaves exactly as today. Requires STRIPE_BILLING_ENABLED=1 (the webhook +
+    # catalog live there). See PAID_ONBOARDING_FUNNEL_BUILD.md.
+    onboarding_enabled: bool = Field(default=False, validation_alias="ONBOARDING_ENABLED")
+    # Arms the in-house Twilio number PURCHASE path. OFF by default → the pool only
+    # REUSES an idle twilio_numbers row; with no idle number and purchase off, onboarding
+    # fails loudly (recorded on onboarding_events) instead of silently buying. Flip on
+    # once the Twilio regulatory bundle/address SIDs are set for go-live.
+    twilio_purchase_enabled: bool = Field(default=False, validation_alias="TWILIO_PURCHASE_ENABLED")
+    # DE local area for the Twilio AvailablePhoneNumbers `Contains` filter when buying.
+    # Münster (+49251) matches the legacy n8n flow. Override per env.
+    twilio_number_area: str = Field(default="+49251", validation_alias="TWILIO_NUMBER_AREA")
+    # German regulatory Address + Bundle SIDs required to BUY a DE number (carried from
+    # the legacy n8n Twilio workflow). Empty by default → purchase path raises until set;
+    # the reuse-idle-pool path needs neither.
+    twilio_address_sid: str = Field(default="", validation_alias="TWILIO_ADDRESS_SID")
+    twilio_bundle_sid: str = Field(default="", validation_alias="TWILIO_BUNDLE_SID")
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

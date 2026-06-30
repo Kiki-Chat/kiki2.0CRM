@@ -192,6 +192,13 @@ if settings.stripe_billing_enabled:
     app.include_router(billing_admin.router)
     app.include_router(stripe_webhook.router)
 
+# Public paid-onboarding funnel — mounted ONLY when ONBOARDING_ENABLED=1 (needs the
+# Stripe catalog + webhook from the billing block). Ships OFF/inert by default.
+if settings.onboarding_enabled:
+    from app.api.routes import onboarding
+
+    app.include_router(onboarding.router)
+
 
 @app.get("/")
 async def root() -> dict:

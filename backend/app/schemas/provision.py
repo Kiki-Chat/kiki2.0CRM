@@ -24,6 +24,15 @@ class ProvisionRequest(BaseModel):
     trade: str | None = Field(default=None, alias="trade")
     address: str | None = Field(default=None, alias="address")
 
+    # ── Paid-onboarding Stripe linkage (additive, optional) ───────────────────
+    # Set by the in-house onboarding orchestrator after checkout.session.completed
+    # so the org is billing-linked from the very first /api/billing/summary call and
+    # the right menus open for the plan. stripe_customer_id → organizations
+    # .stripe_customer_id; plan_title → organizations.billing_plan_title (drives
+    # entitlements). Both optional; the super-admin / legacy path omits them.
+    stripe_customer_id: str | None = Field(default=None, alias="stripeCustomerId")
+    plan_title: str | None = Field(default=None, alias="planTitle")
+
     # ── n8n BIND-ONLY seam (additive, opt-in) ─────────────────────────────────
     # When ``agent_externally_managed=True`` the ElevenLabs agent (prompt + tools
     # + webhook + number) is built EXTERNALLY by n8n; provision_org must BIND the

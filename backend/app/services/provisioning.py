@@ -243,6 +243,15 @@ def provision_org(payload: ProvisionRequest) -> ProvisionResponse:
             org_row["phone_number"] = payload.phone_number.strip()
         if payload.elevenlabs_phone_number_id is not None:
             org_row["elevenlabs_phone_number_id"] = payload.elevenlabs_phone_number_id
+        # Paid-onboarding Stripe linkage (additive): link the Stripe customer + plan
+        # at creation so the very first /api/billing/summary is already "configured"
+        # and entitlements open the right menus. Omitted on the super-admin/legacy
+        # path → org stays billing-unlinked exactly as before.
+        if payload.stripe_customer_id and payload.stripe_customer_id.strip():
+            org_row["stripe_customer_id"] = payload.stripe_customer_id.strip()
+            org_row["onboarding_status"] = "active"
+        if payload.plan_title and payload.plan_title.strip():
+            org_row["billing_plan_title"] = payload.plan_title.strip()
         if bind_only:
             # n8n already bound the number + built the agent → stamp provisioned
             # now (the agent is already live; configure_agent is skipped below).

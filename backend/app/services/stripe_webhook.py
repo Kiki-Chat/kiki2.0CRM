@@ -362,6 +362,25 @@ def _try_payupfront_link(db, session: dict) -> str | None:
 
 def _handle_checkout_completed(db, session: dict) -> str:
     """A subscribe Checkout finished → link the new subscription to the org."""
+    # Paid-onboarding funnel branch (ONBOARDING_ENABLED): a session bound to an
+    # onboarding_leads token has NO org yet → create the tenant in-house (EL agent +
+    # Twilio number + provision_org + welcome email). onboard_from_session returns the
+    # org_id when it handled the session, None when it's not a funnel lead (fall through
+    # to the existing org-link path). A failure RAISES → process_event records the event
+    # 'failed' and the onboarding_events ledger captures the stage for /retry.
+    if settings.onboarding_enabled:
+        from app.services.onboarding_provision import onboard_from_session
+
+        onboarded_org = onboard_from_session(session)
+        if onboarded_org:
+            try:
+                db.table("billing_checkout_sessions").update(
+                    {"status": "completed", "completed_at": _now()}
+                ).eq("stripe_session_id", session.get("id")).execute()
+            except Exception:  # noqa: BLE001 — table may predate 0049; never block onboarding
+                pass
+            return f"onboarding provisioned org {onboarded_org}"
+
     sub_id = session.get("subscription")
     note = "no subscription on session"
 

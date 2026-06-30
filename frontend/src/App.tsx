@@ -15,6 +15,10 @@ import { Placeholder } from './pages/Placeholder'
 // default React.lazy expects.)
 const AdminApp = lazy(() => import('./admin/AdminApp').then((m) => ({ default: m.AdminApp })))
 const SetPasswordPage = lazy(() => import('./pages/SetPasswordPage').then((m) => ({ default: m.SetPasswordPage })))
+// Public paid-onboarding funnel (no auth) — form → plan → Stripe → success.
+const OnboardingSignupPage = lazy(() => import('./pages/onboarding/SignupPage').then((m) => ({ default: m.SignupPage })))
+const OnboardingPlanPage = lazy(() => import('./pages/onboarding/PlanPage').then((m) => ({ default: m.PlanPage })))
+const OnboardingSuccessPage = lazy(() => import('./pages/onboarding/SuccessPage').then((m) => ({ default: m.SuccessPage })))
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })))
 const CallLogsPage = lazy(() => import('./pages/CallLogsPage').then((m) => ({ default: m.CallLogsPage })))
 // Rebuilt call log (feature/call-log-redesign) — runs alongside /calls during cutover.
@@ -73,6 +77,11 @@ export default function App() {
           {/* Techniker-Portal — public standing link: lists the technician's own
               jobs (past + current); no login (the token is the credential). */}
           <Route path="/techniker/:token" element={<TechnicianPortalPage />} />
+          {/* Public paid-onboarding funnel — no auth; the org is created by the
+              Stripe webhook after payment. */}
+          <Route path="/onboarding" element={<OnboardingSignupPage />} />
+          <Route path="/onboarding/tarif" element={<OnboardingPlanPage />} />
+          <Route path="/onboarding/success" element={<OnboardingSuccessPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route index element={<DashboardPage />} />

@@ -37,8 +37,13 @@ def record_notification(
     body: str | None = None,
     dedup_key: str | None = None,
     meta: dict | None = None,
+    dispatch_email: bool = True,
 ) -> str | None:
-    """Insert a notification. Returns id, or None on dedup / missing table (no-op)."""
+    """Insert a notification. Returns id, or None on dedup / missing table (no-op).
+
+    ``dispatch_email=False`` records the in-app notification only (the caller already
+    sent its own richer email — e.g. the onboarding welcome — so the generic shell must
+    NOT also go out)."""
     db = get_service_client()
     try:
         res = (
@@ -61,7 +66,8 @@ def record_notification(
         nid = res[0]["id"] if res else None
     except Exception:  # noqa: BLE001 — dedup_key conflict or pre-0049 table → no-op
         return None
-    _maybe_dispatch_email(nid, org_id, ntype, title, body)
+    if dispatch_email:
+        _maybe_dispatch_email(nid, org_id, ntype, title, body)
     return nid
 
 

@@ -19,6 +19,7 @@ interface AuthContextValue {
   configured: boolean
   signInWithPassword: (email: string, password: string) => Promise<void>
   signInWithMagicLink: (email: string) => Promise<void>
+  signInWithGoogle: () => Promise<void>
   resetPassword: (email: string) => Promise<void>
   signOut: () => Promise<void>
 }
@@ -93,6 +94,20 @@ export function useSupabaseAuthBinding(client: SupabaseClient | null): AuthConte
           // links return to prod. The origin must also be in Supabase Auth's
           // "Redirect URLs" allowlist or Supabase silently rejects it.
           options: { emailRedirectTo: env.appUrl || window.location.origin },
+        })
+        if (error) throw error
+      },
+      async signInWithGoogle() {
+        if (!client) throw new Error('Supabase not configured')
+        // Google SSO for EXISTING (provisioned) users. After consent the provider
+        // redirects back to the bare origin (same allowlist entry the magic link
+        // uses); ProtectedRoute then loads /api/me and signs out any Google account
+        // with no CRM org ("orphan guard"). Enable the Google provider in Supabase
+        // Auth + turn on "link same email" so a Google login maps to the existing
+        // email/password user.
+        const { error } = await client.auth.signInWithOAuth({
+          provider: 'google',
+          options: { redirectTo: env.appUrl || window.location.origin },
         })
         if (error) throw error
       },

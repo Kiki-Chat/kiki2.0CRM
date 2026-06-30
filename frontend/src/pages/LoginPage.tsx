@@ -5,7 +5,8 @@ import { useAuth } from '../auth/AuthProvider'
 import { Button } from '../components/ui/Button'
 
 export function LoginPage() {
-  const { session, configured, signInWithPassword, signInWithMagicLink, resetPassword } = useAuth()
+  const { session, configured, signInWithPassword, signInWithMagicLink, signInWithGoogle, resetPassword } =
+    useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -42,6 +43,18 @@ export function LoginPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Link konnte nicht gesendet werden.')
     } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleGoogle() {
+    setError(null)
+    setNotice(null)
+    setBusy(true)
+    try {
+      await signInWithGoogle() // redirects to Google; ProtectedRoute guards orphans on return
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Google-Anmeldung fehlgeschlagen.')
       setBusy(false)
     }
   }
@@ -126,7 +139,32 @@ export function LoginPage() {
           >
             Passwort vergessen?
           </button>
+
+          <div className="relative pt-1">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-surface px-2 text-xs text-muted">oder</span>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy || !configured}
+            className="w-full"
+            onClick={handleGoogle}
+          >
+            Mit Google anmelden
+          </Button>
         </form>
+
+        <p className="mt-5 text-center text-sm text-muted">
+          Noch kein Konto?{' '}
+          <a href="/onboarding" className="text-green-deep underline-offset-2 hover:underline">
+            Jetzt registrieren
+          </a>
+        </p>
       </div>
     </div>
   )

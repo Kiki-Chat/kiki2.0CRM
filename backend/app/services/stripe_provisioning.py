@@ -188,6 +188,101 @@ def create_checkout_session(
     return {"url": session.get("url"), "session_id": session["id"]}
 
 
+def _onboarding_return_base(return_origin: str | None) -> str:
+    """Funnel return base. Prefer the funnel's own origin, else the public app URL.
+    Only a well-formed http(s) origin is accepted (no open-redirect)."""
+    origin = (return_origin or "").strip().rstrip("/")
+    if origin.startswith("https://") or origin.startswith("http://localhost"):
+        return origin
+    return settings.public_app_url.rstrip("/")
+
+
+def create_checkout_session_for_lead(
+    *,
+    token: str,
+    plan_title: str,
+    interval: str,
+    company_name: str,
+    contact_name: str | None,
+    email: str,
+    phone: str | None,
+    return_origin: str | None = None,
+) -> dict:
+    """Public onboarding: create a Stripe Checkout BEFORE any org exists.
+
+    The org is created by the webhook on ``checkout.session.completed`` (see
+    onboarding_provision.onboard_from_session), bound back via ``client_reference_id =
+    token`` (the onboarding lead token). The Stripe customer is prefilled with the
+    COMPANY name (so the invoice carries the org name, no double-entry) + email + phone;
+    billing address + VAT-ID are collected on Stripe and flow to the CRM. Charge is
+    immediate (no trial). Idempotent on ``token`` so a re-submit reuses the customer +
+    session. Returns {url, session_id, customer_id}."""
+    if interval not in ("month", "year"):
+        raise StripeBillingError(f"invalid interval {interval!r}")
+    prices = find_plan_prices(plan_title, interval)
+    if not prices["base_price"] or not prices["metered_price"]:
+        raise StripeBillingError(f"no catalog prices for {plan_title!r}/{interval!r}")
+
+    s = get_stripe()
+    customer = s.Customer.create(
+        idempotency_key=f"onb-cust-{token}",
+        name=company_name,
+        email=email,
+        phone=(phone or None),
+        preferred_locales=["de"],
+        metadata={
+            "onboarding_token": token,
+            "company_name": company_name,
+            "contact_name": contact_name or "",
+        },
+    )
+    customer_id = customer["id"]
+
+    base = _onboarding_return_base(return_origin)
+    success_url = f"{base}/onboarding/success?checkout=success&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{base}/onboarding/tarif?checkout=cancel&token={token}"
+
+    session = s.checkout.Session.create(
+        idempotency_key=f"onb-sess-{token}",
+        mode="subscription",
+        customer=customer_id,
+        line_items=[
+            {"price": prices["base_price"], "quantity": 1},
+            {"price": prices["metered_price"]},  # metered → no quantity
+        ],
+        subscription_data={"metadata": {"onboarding_token": token}},
+        success_url=success_url,
+        cancel_url=cancel_url,
+        client_reference_id=token,  # ← the org doesn't exist yet; token is the bind key
+        phone_number_collection={"enabled": True},
+        automatic_tax={"enabled": True},
+        # Charge immediately (no trial) → a card is always captured for the subscription.
+        payment_method_collection="always",
+        # Sync the collected billing address + name back to the customer (→ CRM). name
+        # must be "auto" when tax_id_collection is on (Stripe rule); the company name is
+        # already prefilled on the customer, so it stays unless the payer edits it.
+        customer_update={"address": "auto", "name": "auto"},
+        billing_address_collection="required",
+        tax_id_collection={"enabled": True},
+        allow_promotion_codes=True,
+    )
+
+    db = get_service_client()
+    try:
+        db.table("onboarding_leads").update(
+            {
+                "stripe_session_id": session["id"],
+                "stripe_customer_id": customer_id,
+                "plan_title": plan_title,
+                "interval": interval,
+                "updated_at": _now(),
+            }
+        ).eq("token", token).execute()
+    except Exception:  # noqa: BLE001 — never lose the checkout over a lead-update hiccup
+        log.warning("onboarding: failed to store session on lead %s", token)
+    return {"url": session.get("url"), "session_id": session["id"], "customer_id": customer_id}
+
+
 def change_subscription_plan(
     org_id: str, plan_title: str, *, actor_id: str | None = None
 ) -> dict:

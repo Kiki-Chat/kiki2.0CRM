@@ -65,5 +65,42 @@ export function ProtectedRoute() {
     // the app surface them naturally.
   }
 
+  // Orphan guard: a session with NO CRM account (e.g. "Mit Google anmelden" for an
+  // email we never provisioned) loads /api/me with org_id=null + role=null. Don't drop
+  // them into a broken app — show a clear message + a path to register, and sign out.
+  if (me.data && !me.data.org_id && me.data.role !== 'super_admin') {
+    return (
+      <div className="flex h-screen items-center justify-center bg-bg p-6">
+        <div className="max-w-md space-y-4 rounded-xl border border-border bg-surface p-6 text-center shadow-e1">
+          <div className="flex justify-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-tint-100">
+              <ShieldAlert size={28} className="text-green-deep" />
+            </div>
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-text">Kein Konto gefunden</h1>
+            <p className="mt-1 text-sm text-muted">
+              Zu dieser Anmeldung gehört noch kein HeyKiki-Konto. Bitte registriere dich zuerst.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <a
+              href="/onboarding"
+              className="rounded-md bg-green-primary px-4 py-2 text-sm font-medium text-white hover:brightness-110"
+            >
+              Jetzt registrieren
+            </a>
+            <button
+              onClick={() => signOut()}
+              className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-body hover:bg-alt"
+            >
+              Abmelden
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return <Outlet />
 }
