@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, Check, Eye, EyeOff, Loader2 } from 'lucide-react'
 
@@ -7,7 +7,14 @@ import { cn } from '../../lib/utils'
 import { checkOnboardingEmail, startOnboarding } from '../../lib/onboardingApi'
 import { OnboardingLayout } from './OnboardingLayout'
 import { PhoneField } from './PhoneField'
-import { ONBOARDING_COMPANY_KEY, ONBOARDING_TOKEN_KEY, TRADES } from './constants'
+import { ONBOARDING_COMPANY_KEY, TRADES } from './constants'
+import {
+  captureAttribution,
+  persistSessionToken,
+  readAttribution,
+  resolveSessionToken,
+  withSession,
+} from './session'
 
 const fieldCls =
   'w-full rounded-md border border-border bg-alt px-3 py-2.5 text-sm text-text outline-none focus:border-green-primary'
@@ -26,6 +33,12 @@ export function SignupPage() {
   const [showPw, setShowPw] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // Capture UTM/referral from the landing url once, so it survives the funnel even
+  // after the query is replaced by ?s=<token>.
+  useEffect(() => {
+    captureAttribution(window.location.search)
+  }, [])
 
   async function handleEmailBlur() {
     const value = email.trim()
@@ -67,6 +80,7 @@ export function SignupPage() {
     setError(null)
     setBusy(true)
     try {
+      const { utm, referral_code } = readAttribution()
       const { token } = await startOnboarding({
         trade,
         contact_name: contactName.trim(),
@@ -74,10 +88,14 @@ export function SignupPage() {
         email: email.trim(),
         phone: phone.e164,
         password,
+        // Reuse the same lead if the visitor is resuming (?s=…) — never a duplicate.
+        token: resolveSessionToken(window.location.search) ?? undefined,
+        utm,
+        referral_code,
       })
-      sessionStorage.setItem(ONBOARDING_TOKEN_KEY, token)
+      persistSessionToken(token)
       sessionStorage.setItem(ONBOARDING_COMPANY_KEY, companyName.trim())
-      navigate('/onboarding/tarif')
+      navigate(withSession('/onboarding/tarif', token))
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Registrierung fehlgeschlagen.'
       setError(msg)

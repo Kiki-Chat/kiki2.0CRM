@@ -24,6 +24,7 @@ from app.schemas.onboarding import (
     CheckEmailResponse,
     OnboardingCheckoutRequest,
     OnboardingCheckoutResponse,
+    OnboardingSessionResponse,
     OnboardingStartRequest,
     OnboardingStartResponse,
 )
@@ -62,22 +63,51 @@ async def onboarding_check_email(body: CheckEmailRequest) -> CheckEmailResponse:
 # ─── POST /api/onboarding/start (create the lead) ─────────────────────────────
 def _start(body: OnboardingStartRequest) -> str:
     db = get_service_client()
-    if _email_taken(db, body.email):
+    email = body.email.strip()
+    if _email_taken(db, email):
         raise HTTPException(status_code=409, detail="Diese E-Mail ist bereits registriert.")
+
+    fields: dict = {
+        "company_name": body.company_name.strip(),
+        "contact_name": body.contact_name.strip(),
+        "email": email,
+        "phone": body.phone.strip(),
+        "trade": body.trade.strip(),
+        # Q6 password — stored Fernet-encrypted, cleared on conversion (see 0097).
+        "password_encrypted": encrypt(body.password),
+    }
+    if body.utm is not None:
+        fields["utm"] = body.utm
+    if body.referral_code:
+        fields["referral_code"] = body.referral_code.strip()
+
+    # Idempotent resume: reuse an existing UN-converted lead so a refresh / back /
+    # aborted session (or a re-submit of the same email) never spawns a duplicate — the
+    # token stays the stable session + payment binding key. Prefer the token the funnel
+    # carried in its URL; else fall back to the newest un-converted lead for this email.
+    existing = None
+    if body.token:
+        rows = (
+            db.table("onboarding_leads").select("token, status")
+            .eq("token", body.token).limit(1).execute().data
+        )
+        existing = rows[0] if rows else None
+    if existing is None:
+        rows = (
+            db.table("onboarding_leads").select("token, status")
+            .eq("email", email).neq("status", "converted")
+            .order("created_at", desc=True).limit(1).execute().data
+        )
+        existing = rows[0] if rows else None
+
+    if existing and existing.get("status") != "converted":
+        db.table("onboarding_leads").update(fields).eq("token", existing["token"]).execute()
+        return existing["token"]
+
     token = secrets.token_urlsafe(24)
-    db.table("onboarding_leads").insert(
-        {
-            "token": token,
-            "company_name": body.company_name.strip(),
-            "contact_name": body.contact_name.strip(),
-            "email": body.email.strip(),
-            "phone": body.phone.strip(),
-            "trade": body.trade.strip(),
-            # Q6 password — stored Fernet-encrypted, cleared on conversion (see 0097).
-            "password_encrypted": encrypt(body.password),
-            "status": "created",
-        }
-    ).execute()
+    fields["token"] = token
+    fields["status"] = "created"
+    db.table("onboarding_leads").insert(fields).execute()
     return token
 
 
@@ -85,6 +115,28 @@ def _start(body: OnboardingStartRequest) -> str:
 async def onboarding_start(body: OnboardingStartRequest) -> OnboardingStartResponse:
     token = await run_in_threadpool(_start, body)
     return OnboardingStartResponse(token=token)
+
+
+# ─── GET /api/onboarding/session/{token} (resume a funnel session) ────────────
+def _session(token: str) -> dict:
+    db = get_service_client()
+    rows = (
+        db.table("onboarding_leads")
+        .select("token, status, company_name, contact_name, email, phone, trade, plan_title, interval")
+        .eq("token", token)
+        .limit(1)
+        .execute()
+        .data
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Onboarding-Sitzung nicht gefunden.")
+    return rows[0]
+
+
+@router.get("/session/{token}", response_model=OnboardingSessionResponse)
+async def onboarding_session(token: str) -> OnboardingSessionResponse:
+    row = await run_in_threadpool(_session, token)
+    return OnboardingSessionResponse(**row)
 
 
 # ─── POST /api/onboarding/checkout (Stripe Checkout for the lead) ──────────────

@@ -41,10 +41,32 @@ class OnboardingStartRequest(BaseModel):
     email: EmailStr                                       # Q4 Email (dup-checked)
     phone: str = Field(..., min_length=3)                 # Q5 Telefonnummer (E.164)
     password: str = Field(..., min_length=8)              # Q6 Passwort (≥8)
+    # Resume the SAME lead (idempotent). The funnel carries this in the URL as
+    # ?s=<token> so a refresh / back / aborted session never spawns a duplicate and the
+    # token stays the single signup→Stripe→org binding key. None on a first submit.
+    token: str | None = None
+    # Marketing attribution captured from the landing URL (utm_source/medium/campaign/
+    # term/content). Free-form dict so new UTM keys need no schema change.
+    utm: dict | None = None
+    referral_code: str | None = None                      # inviter code (?ref=…), future
 
 
 class OnboardingStartResponse(BaseModel):
     token: str
+
+
+class OnboardingSessionResponse(BaseModel):
+    """Resume payload for the funnel — safe lead fields only (never the password)."""
+
+    token: str
+    status: str
+    company_name: str | None = None
+    contact_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    trade: str | None = None
+    plan_title: str | None = None
+    interval: str | None = None
 
 
 class CheckEmailRequest(BaseModel):

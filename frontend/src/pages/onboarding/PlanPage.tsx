@@ -7,12 +7,12 @@ import { createOnboardingCheckout, getOnboardingPlans, type PlanOption } from '.
 import { OnboardingLayout } from './OnboardingLayout'
 import {
   CALENDLY_URL,
-  ONBOARDING_TOKEN_KEY,
   PLAN_FEATURES,
   PLAN_ORDER,
   PLAN_TAGLINE,
   RECOMMENDED_PLAN,
 } from './constants'
+import { resolveSessionToken, withSession } from './session'
 
 function euro(cents: number): string {
   return new Intl.NumberFormat('de-DE', {
@@ -30,16 +30,19 @@ export function PlanPage() {
   const [interval, setInterval] = useState<'month' | 'year'>('month')
   const [busyPlan, setBusyPlan] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Session token from the URL (?s=<token>) — resilient to refresh/back; the funnel
+  // resumes the same lead instead of restarting.
+  const token = useMemo(() => resolveSessionToken(window.location.search), [])
 
   useEffect(() => {
-    if (!sessionStorage.getItem(ONBOARDING_TOKEN_KEY)) {
+    if (!token) {
       navigate('/onboarding', { replace: true })
       return
     }
     getOnboardingPlans()
       .then(setPlans)
       .catch((e) => setLoadError(e instanceof Error ? e.message : 'Tarife konnten nicht geladen werden.'))
-  }, [navigate])
+  }, [navigate, token])
 
   const ordered = useMemo(() => {
     if (!plans) return []
@@ -47,7 +50,6 @@ export function PlanPage() {
   }, [plans])
 
   async function choose(plan: PlanOption) {
-    const token = sessionStorage.getItem(ONBOARDING_TOKEN_KEY)
     if (!token) {
       navigate('/onboarding', { replace: true })
       return
@@ -177,7 +179,7 @@ export function PlanPage() {
         {error && <div className="mt-4 text-sm text-error">{error}</div>}
 
         <button
-          onClick={() => navigate('/onboarding')}
+          onClick={() => navigate(token ? withSession('/onboarding', token) : '/onboarding')}
           className="mt-6 text-sm text-muted underline-offset-2 hover:text-green-deep hover:underline"
         >
           ← Zurück
