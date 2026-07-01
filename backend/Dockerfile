@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Cache-bust the source COPY: Railway's layer cache can otherwise serve a stale
 # `app/` (a SUCCESS build that ships old code). Bump this token to force a fresh
 # copy of the source on the next deploy.
-RUN echo "source-version: 2026-07-01-track-a-phase45"
+RUN echo "source-version: 2026-07-01-onboarding-session-token"
 
 COPY app ./app
 

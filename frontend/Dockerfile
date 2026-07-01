@@ -6,7 +6,7 @@ COPY package.json package-lock.json ./
 RUN npm install --no-audit --no-fund
 # Cache-bust the source COPY: Railway's layer cache can otherwise serve a stale
 # build. Bump this token to force a fresh copy of the source on the next deploy.
-RUN echo "source-version: 2026-07-01-track-a-phase45"
+RUN echo "source-version: 2026-07-01-onboarding-session-token"
 COPY . .
 # Public build-time config — Vite inlines VITE_* at build time. Defaults target prod;
 # Railway can override via service build args. (Anon key is the publishable key.)
